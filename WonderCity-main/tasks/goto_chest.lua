@@ -11,10 +11,13 @@ local CONFIRM_SECONDS = 1
 -- yielding to Alfred is shifted out, C5):
 --  * a chest that is non-interactable before our first click was opened
 --    already (by hand, a companion, or before an Alfred round trip) unless
---    it unlocks: LOCKED_WAIT after an observed boss kill, else LOCKED_WAIT_UNKNOWN;
+--    it unlocks. R14: LOCKED_WAIT after positive evidence of an opening
+--    (our own earlier interaction, a loot burst next to it, or a boss kill
+--    observed after the chest was first seen), else LOCKED_WAIT_UNKNOWN:
+--    a chest whose boss is outside the actor stream may still be locked;
 --  * our interacted chest vanished from stable scans without new loot;
 --  * no approach progress at close range: interact from where we stand.
-local LOCKED_WAIT, LOCKED_WAIT_UNKNOWN = 10, 30
+local LOCKED_WAIT, LOCKED_WAIT_UNKNOWN = 10, 60
 local VANISH_WAIT = 5
 local APPROACH_STALL, APPROACH_FALLBACK_RANGE, APPROACH_PROGRESS = 8, 4, 0.5
 local task = {name = 'goto_chest', status = 'idle'}
@@ -74,25 +77,59 @@ local function clear_confirmation()
     task.confirm_reason, task.confirm_since = nil, nil
 end
 
+-- R14: positive evidence that a never-clicked, non-interactable chest was
+-- opened already rather than still locked. A corpse seen together with the
+-- chest, or a kill before the chest was first seen (possibly another
+-- is_boss() actor), is not evidence.
+local function opened_evidence()
+    if tracker.chest_interacted then return 'we interacted with the reward chest earlier' end
+    if tracker.chest_loot_seen then return 'new loot dropped next to the chest' end
+    local kill, seen = tracker.boss_kill_seen, tracker.chest_first_seen
+    if kill and seen and kill >= seen then return 'boss kill observed after the chest was first seen' end
+    return nil
+end
+
+-- One diagnostic line per wait and evidence state (R14 live check): the
+-- chest key, its interactable state, boss_kill_time and the last boss seen.
+local function locked_log(key, interactable, now, evidence)
+    local state = tostring(key) .. '|' .. tostring(evidence)
+    if task.locked_logged == state then return end
+    task.locked_logged = state
+    local stamp = function(t) return t and string.format('%.1f', t) or 'none' end
+    local boss = tracker.last_boss_name and string.format('%s hp=%s seen %.0fs ago', tracker.last_boss_name,
+        tostring(tracker.last_boss_health), now - (tracker.last_boss_at or now)) or 'none observed'
+    console.print(string.format('[WonderCity:chest] reward chest %s is not interactable before our click '
+        .. '(interactable=%s, boss_kill_time=%s, observed kill=%s, last boss=%s, chest first seen=%s); %s',
+        tostring(key), tostring(interactable), stamp(tracker.boss_kill_time), stamp(tracker.boss_kill_seen), boss,
+        stamp(tracker.chest_first_seen),
+        evidence and string.format('opened evidence: %s; treating it as already opened in %ds unless it unlocks',
+            evidence, LOCKED_WAIT)
+        or string.format('no opened evidence; waiting up to %ds for an unlock', LOCKED_WAIT_UNKNOWN)))
+end
+
 -- Non-interactable before our first click: wait (bounded) for an unlock.
-local function locked_wait(now)
+local function locked_wait(now, key, interactable)
     if tracker.boss_alive then
-        task.locked_since = nil
+        task.locked_since, task.evidence_at = nil, nil
         task.status = 'waiting for reward chest to unlock (boss alive)'
         return
     end
-    local limit = tracker.boss_kill_time and LOCKED_WAIT or LOCKED_WAIT_UNKNOWN
-    if task.locked_since == nil then
-        task.locked_since = now
-        console.print(string.format('[WonderCity:chest] reward chest is not interactable before our click; '
-            .. 'treating it as already opened in %ds unless it unlocks', limit))
-    end
+    local evidence = opened_evidence()
+    task.locked_since = task.locked_since or now
+    if evidence then task.evidence_at = task.evidence_at or now end
+    locked_log(key, interactable, now, evidence)
     local waited = now - task.locked_since
+    local limit = task.evidence_at and math.min(LOCKED_WAIT_UNKNOWN, task.evidence_at - task.locked_since + LOCKED_WAIT)
+        or LOCKED_WAIT_UNKNOWN
     if waited >= limit then
-        complete(string.format('chest not interactable for %.0fs before our click (already opened)', waited))
+        complete(evidence and string.format('chest not interactable for %.0fs before our click; already opened (%s)',
+            waited, evidence)
+            or string.format('chest not interactable for %.0fs before our click and no opened evidence; '
+                .. 'treating it as already opened', waited))
         return
     end
-    task.status = string.format('waiting for reward chest to unlock (%.0fs)', limit - waited)
+    task.status = string.format('waiting for reward chest to unlock (%.0fs%s)', limit - waited,
+        evidence and '' or ', no opened evidence')
 end
 
 -- Approach progress (close-range stall falls back to interacting in place).
@@ -157,7 +194,7 @@ task.Execute = function ()
         end
         utils.stop_movement()
         if interactable then
-            task.locked_since = nil
+            task.locked_since, task.evidence_at = nil, nil
             task.interact_time = task.interact_time or now
             clear_confirmation()
             settings.orb_set_clear(false)
@@ -166,6 +203,7 @@ task.Execute = function ()
                 console.print('[WonderCity:chest] interact_object dist=' .. string.format('%.2f', distance))
                 interact_object(chest)
                 task.last_interact_call = now
+                tracker.chest_interacted = tracker.chest_interacted or now -- R14 evidence (kept per floor)
             end
             task.status = 'interacting with reward chest'
         elseif task.last_interact_call then
@@ -177,7 +215,7 @@ task.Execute = function ()
             -- may still be locked by the boss. Bounded (L9: an already opened
             -- chest stays non-interactable forever).
             settings.orb_set_clear(true)
-            locked_wait(now)
+            locked_wait(now, key, interactable)
         end
     end
 
@@ -195,7 +233,7 @@ end
 -- C5: time spent yielding (e.g. to Alfred) is not waiting/progress time.
 task.on_yield = function (seconds)
     for _, field in ipairs({'interact_time', 'last_interact_call', 'confirm_since', 'locked_since',
-        'missing_since', 'approach_time'}) do
+        'evidence_at', 'missing_since', 'approach_time'}) do
         if task[field] then task[field] = task[field] + seconds end
     end
 end
@@ -203,7 +241,7 @@ end
 task.reset = function ()
     task.interact_time, task.last_interact_call, task.active_key = nil, nil, nil
     task.items_before, task.loot_observed = nil, false
-    task.locked_since, task.missing_since = nil, nil
+    task.locked_since, task.missing_since, task.evidence_at, task.locked_logged = nil, nil, nil, nil
     task.approach_best, task.approach_time = nil, nil
     clear_confirmation()
 end

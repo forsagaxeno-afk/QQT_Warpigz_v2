@@ -26,6 +26,8 @@ end
 -- on need_trigger, retriggering Alfred every ~10s for no-progress cycles
 -- (observed in logzewx 31/42/43/57/58 — five rapid-fire stash cycles with
 -- inventory empty). Mirrors WarPigs orchestrator's alfred_idle escape.
+-- Since R12 advisory-only flags never trigger inside a helltide at all; the
+-- grace still bounds a provider whose only town signal is need_trigger.
 -- Never cleared by a reset or task switch: the grace expires by itself.
 local last_completion_at = nil
 local STUCK_NEED_TRIGGER_GRACE = 30.0
@@ -223,7 +225,7 @@ local function decide()
     if status.paused then return false end
 
     -- Steroid's documented integration (README §create_task) reacts to
-    -- need_trigger directly. We apply two gates on top:
+    -- need_trigger directly. We apply three gates on top:
     --
     -- (1) Activity-scope gate: only react when actually farming
     --     (utils.is_in_helltide() — buff present). Without this, when
@@ -237,30 +239,35 @@ local function decide()
     --     (status.lua:121) when no external script is driving — so
     --     genuine inventory_full / need_repair work isn't lost, it just
     --     stops going through our channel during the off-window.
-    -- (2) Restock-stickiness escape: skip if our last cycle finished
-    --     within STUCK_NEED_TRIGGER_GRACE and only restock/stash-extras
-    --     flags are sticky (no inventory_full, no need_repair) — the
-    --     prior cycle couldn't clear it, re-running won't either.
-    --     Any observed cycle completion (ours or a foreign caller's) and a
-    --     lost callback start the same grace (observe_cycle/waiting_for_request).
-    -- The legacy fork publishes restock work as restock_count instead of
-    -- need_trigger; it is advisory as well (HLT-2), so it takes this path.
+    -- (2) R12/HLT-1: advisory-only work never leaves a live helltide.
+    --     need_trigger next to a published inventory_full/need_repair
+    --     that are both off means restock/stash extras only (the legacy
+    --     fork's restock_count likewise, HLT-2). Those flags can stay
+    --     sticky forever, and every with-teleport trip costs the farm a
+    --     town round trip (4 trips per 150 s at the 30 s grace). Same rule
+    --     as Arkham in_pit and Reaper boss zones. Restock rides along with
+    --     the next hard-need trip (inventory full / repair, immediate) or
+    --     WarPigs' Temis preamble; standalone HR does not restock for
+    --     advisory flags alone while it farms.
+    -- (3) A provider that publishes only need_trigger (no inventory or
+    --     repair view) keeps it as its town signal (hard_need), behind the
+    --     sticky grace: skip if a cycle finished within
+    --     STUCK_NEED_TRIGGER_GRACE, since re-running cannot clear a flag
+    --     the previous cycle left set. Any observed cycle completion (ours
+    --     or a foreign caller's) and a lost callback start the same grace
+    --     (observe_cycle/waiting_for_request).
     -- HLT-3: while the Batmobile give-up recovery leaves the zone, a
     -- with-teleport trip would portal back into the trap — never start one.
     local advisory = status.need_trigger == true
         or (AlfredTheButlerPlugin == nil and type(status.restock_count) == 'number' and status.restock_count > 0)
     if tracker.abandoning_zone then return false end
     if advisory and utils.is_in_helltide() then
-        local now = get_time_since_inject()
-        local cycle_just_completed = last_completion_at
-            and (now - last_completion_at) < STUCK_NEED_TRIGGER_GRACE
-        if cycle_just_completed
-            and not status.inventory_full
-            and not status.need_repair
-        then
-            -- stuck need_trigger — skip
-        else
-            return true
+        if status.inventory_full == true or status.need_repair == true then return true end
+        if hard_need(status) then
+            local now = get_time_since_inject()
+            if not (last_completion_at and (now - last_completion_at) < STUCK_NEED_TRIGGER_GRACE) then
+                return true
+            end
         end
     end
 

@@ -59,7 +59,7 @@ local RETURN_WINDOW = 30
 local HOLD_LOG_AFTER = 60
 local trip = {teleport = false, return_until = nil, live_seen = false,
     paused_since = nil, paused_logged = false, glyph_since = nil,
-    hold = nil, hold_since = nil, hold_logged = -math.huge}
+    hold = nil, hold_since = nil, hold_logged = -math.huge, return_logged = false}
 
 -- C1 canonical live-work predicate (a latched teleport after a finished or
 -- failed trip is not live work).
@@ -75,6 +75,17 @@ local function hard_need(s)
 end
 local function in_pit()
     return type(utils.player_in_pit) == 'function' and utils.player_in_pit() or false
+end
+-- Under an enabled WarPigs, an advisory-only flag (need_trigger without
+-- inventory_full/need_repair) that WarPigs reports idle was just serviced by
+-- WarPigs' own Temis cycle, which this plugin did not observe while it was
+-- off (C1 via WarPigsPlugin.status().alfred_idle, the rule WarPug uses).
+-- Starting another trip for it repeated the cycle (joint suite).
+local function warpigs_advisory_idle()
+    local wp = WarPigsPlugin
+    if type(wp) ~= 'table' or type(wp.status) ~= 'function' then return false end
+    local ok, st = pcall(wp.status)
+    return ok and type(st) == 'table' and st.enabled == true and st.alfred_idle == true
 end
 -- Status text + one rate-limited log line for any hold longer than a minute.
 local function note_hold(reason)
@@ -205,6 +216,7 @@ local reset = function ()
         task.status = status_enum['IDLE']
     end
     trip.return_until = trip.teleport and not in_pit() and get_time_since_inject() + RETURN_WINDOW or nil
+    trip.return_logged = false
     trip.teleport = false
     clear_request()
     retry_after = -math.huge
@@ -267,13 +279,37 @@ local function wants_new_request(status)
         if last_completion_at and (now - last_completion_at) < STUCK_NEED_TRIGGER_GRACE then
             return false -- stuck need_trigger — skip
         end
-        return true
+        return not warpigs_advisory_idle()
     end
     if status.paused then return paused_hold(status) end
     if glyph_pending() then return false end
     -- ARK-4: yield to Looter like upgrade_glyph does, bounded.
     if type(utils.looter_hold) == 'function' and utils.looter_hold(LOOTER_HOLD_MAX, 'Alfred trip') then
         return false
+    end
+    return true
+end
+
+-- R10/ARK-3: a with-teleport callback that lands in town comes before
+-- Alfred's return portal. Until the player is back in the pit (at most
+-- RETURN_WINDOW), no town task may walk to the obelisk, open a new pit,
+-- teleport away (cancelling the return) or reset Batmobile (dropping the
+-- pit map it keeps for the return). Visible and bounded (C6); a failed or
+-- disabled Alfred return ends it at once.
+local function awaiting_return(status)
+    if trip.return_until == nil or in_pit() then return false end
+    local now = get_time_since_inject()
+    if status.teleport_failed == true or now >= trip.return_until then
+        console.print(status.teleport_failed == true
+            and "[alfred] Alfred's return to the pit failed — continuing in town"
+            or string.format('[alfred] Alfred did not return to the pit within %ds — continuing in town', RETURN_WINDOW))
+        trip.return_until = nil
+        return false
+    end
+    if not trip.return_logged then
+        trip.return_logged = true
+        console.print(string.format("[alfred] Alfred cycle done in town — holding up to %.0fs for its return portal to the pit",
+            trip.return_until - now))
     end
     return true
 end
@@ -295,8 +331,9 @@ task.shouldExecute = function ()
         return true
     end
 
-    -- Yield while Alfred is busy under any caller (WarPigs preamble, etc.).
-    if live_work(status) then return true end
+    -- Yield while Alfred is busy under any caller (WarPigs preamble, etc.),
+    -- and while our own with-teleport return is still ahead.
+    if live_work(status) or awaiting_return(status) then return true end
 
     return wants_new_request(status)
 end
@@ -324,6 +361,10 @@ task.Execute = function ()
         if get_time_since_inject() > task.loot_start + task.loot_timeout then
             task.status = status_enum['IDLE']
         end
+        return
+    end
+    if awaiting_return(status) then
+        note_hold('waiting for Alfred to return to the pit')
         return
     end
     if status.paused then
@@ -370,7 +411,7 @@ task.is_busy = function (known_only)
     if not status then return not known_only end
     if not status.enabled then return false end
     return task.status == status_enum.WAITING or task.status == status_enum.LOOTING
-        or live_work(status) or false
+        or live_work(status) or awaiting_return(status)
 end
 
 -- C2 alfred_trip: Arkham's own Alfred round trip is in progress (request in

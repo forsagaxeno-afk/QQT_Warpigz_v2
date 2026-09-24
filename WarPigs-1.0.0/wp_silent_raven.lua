@@ -19,8 +19,31 @@ local OWNER, TEMIS = 'WarPigs', 'Skov_Temis'
 --                      orchestrator offers the slot at least this often.
 --   traffic_looter:    continuous Looter activity holds WarPigs' town
 --                      traffic at most this long (logged once).
+--   run:               active time of one managed request (yield excluded).
+--   run_yield:         R15: Looter bursts before accept pause a running
+--                      request for at most this long in total (SilentRaven
+--                      caps its own pause at 120 s; this is the backstop).
 local LIMIT = {alfred_unreadable = 10, wait_unknown = 20, wait_live = 120, attempts = 3,
-    looter_quiet = 4, unoffered = 60, traffic_looter = 120}
+    looter_quiet = 4, unoffered = 60, traffic_looter = 120, run = 60, run_yield = 130}
+-- R15 continuation-guard contract: (false, 'yield:<reason>') asks SilentRaven
+-- to pause the managed request and keep it (bounded by its own cap), then
+-- resume without restarting the walk. A SilentRaven that does not know the
+-- prefix treats it as any other false: a cancel, retried in the visit.
+local YIELD_PREFIX = 'yield:'
+-- Accept has been sent once SilentRaven is in API_CLAIMING (or reports
+-- claim_sent). Every earlier state (START, TELEPORTING, WALK_NPC,
+-- INTERACT_NPC, WAIT_RETRY, SELECT_VERIFY, or a pause state of a newer build)
+-- is before accept. A queued request (pending, not running) has not started.
+local POST_ACCEPT = {API_CLAIMING = true}
+local function pre_accept(s)
+    if type(s) ~= 'table' or s.claim_sent == true then return false end
+    if s.running ~= true then return s.pending == true end
+    return not POST_ACCEPT[s.state]
+end
+-- Accept sent: SilentRaven only waits (at most 8 s) for the cache to arrive.
+local function post_accept(s)
+    return type(s) == 'table' and (s.claim_sent == true or (s.running == true and POST_ACCEPT[s.state] == true))
+end
 local function call(object, name, ...)
     if type(object) ~= 'table' or type(object[name]) ~= 'function' then return nil end
     local ok, result = pcall(object[name], ...)
@@ -95,8 +118,13 @@ local function alfred_live_work(s)
 end
 
 -- Observable companion work: worth waiting for (wait_live) and, when it
--- cancels a running request, worth a retry within the visit.
+-- cancels a running request, worth a retry within the visit. A 'yield:'
+-- reason reported back by a SilentRaven that cancelled instead of pausing
+-- (older build) names the same companion (R15).
 local function live_reason(reason)
+    if type(reason) == 'string' and reason:find(YIELD_PREFIX, 1, true) == 1 then
+        reason = reason:sub(#YIELD_PREFIX + 1)
+    end
     return reason == 'alfred_busy' or reason == 'alfred_work_pending' or reason == 'war_pug_busy'
         or reason == 'looter_settling' or reason == 'silent_raven_busy'
         or (type(reason) == 'string' and reason:find('looter_busy', 1, true) == 1)
@@ -203,6 +231,47 @@ function M.new(options)
         self.checked, self.wait_spent, self.unknown_spent, self.wait_reason, self.waiting_at = false, 0, 0, nil, nil
         self.attempts, self.wait_logged, self.quiet_since = 0, {}, nil
         self.visit_at, self.offered_at, self.unoffered_logged = now, nil, false
+        self.yield_spent, self.yield_seen, self.yield_expired_logged = 0, nil, false
+    end
+    -- R15: a Looter burst before accept pauses the running managed request
+    -- instead of cancelling it (SilentRaven keeps the request and resumes the
+    -- walk). Returns the 'yield:' reason, or nil for a hard cancel: not a
+    -- Looter burst, or the visit's pause budget (LIMIT.run_yield) spent.
+    -- Both the guard and tick() sample it; time accumulates over consecutive
+    -- samples only.
+    -- After accept SilentRaven neither moves nor clicks: it only verifies the
+    -- cache receipt (bounded). A Looter burst then is no conflict, and a
+    -- cancel reported a reward that was already claimed as 'cancelled' and
+    -- re-requested it twice in the visit (joint suite). The yield answer lets
+    -- SilentRaven finish the verification (it ignores a pause after accept);
+    -- no pause budget is spent.
+    local function looter_yield(reason, now, s)
+        if type(reason) ~= 'string' or reason:find('looter_busy', 1, true) ~= 1 then
+            self.yield_seen = nil
+            return nil
+        end
+        if not self.running or not self.enabled then return nil end
+        s = s or status(self.plugin)
+        if post_accept(s) then return YIELD_PREFIX .. 'looter_busy' end
+        if not pre_accept(s) then return nil end
+        if self.yield_seen and now - self.yield_seen <= 2 then
+            self.yield_spent = (self.yield_spent or 0) + (now - self.yield_seen)
+        end
+        self.yield_seen = now
+        if (self.yield_spent or 0) >= LIMIT.run_yield then
+            if not self.yield_expired_logged then
+                self.yield_expired_logged = true
+                log(string.format('Looter busy for %.0fs during Whisper requests this visit — no longer pausing, cancelling (bounded)',
+                    self.yield_spent))
+            end
+            return nil
+        end
+        if not self.yield_logged then
+            self.yield_logged = true
+            log('Looter busy before accept — pausing the Whisper request (SilentRaven keeps it)')
+        end
+        self.paused_at = now
+        return YIELD_PREFIX .. 'looter_busy'
     end
     -- `detail` is SilentRaven's last_reason for a result it reported itself.
     local function finish(result, detail)
@@ -222,7 +291,8 @@ function M.new(options)
             return
         end
         self.checked, self.unknown_spent, self.wait_reason, self.waiting_at = true, 0, nil, nil
-        note('visit ' .. tostring(self.serial) .. ': ' .. tostring(result))
+        note('visit ' .. tostring(self.serial) .. ': ' .. tostring(result)
+            .. (result == 'cancelled' and detail and (' (' .. tostring(detail) .. ')') or ''))
     end
     function self:cancel(reason)
         if self.running and self.plugin then
@@ -327,16 +397,28 @@ function M.new(options)
     function self:tick(now, safe_to_start)
         if self.running then
             local s = status(self.plugin)
+            -- A request that already ended reports SilentRaven's own result,
+            -- also while a companion is busy: cancelling it then replaced a
+            -- claimed reward's 'success' with the companion reason.
+            if type(s) == 'table' and not active(s) then
+                finish(self.callback_result or s.last_result or 'unconfirmed', s.last_reason)
+                return false
+            end
             local clear, reason = clear_companions()
-            if not self.enabled or not clear or now - self.started >= 60 then
+            if clear then self.yield_seen = nil end
+            -- R15: paused, not cancelled, during a Looter burst (looter_yield
+            -- only answers for a queued or running request).
+            if not clear and looter_yield(reason, now, s) then
+                if s.owner ~= OWNER then finish('ownership_changed') end
+                return true
+            end
+            -- C5: pause time does not age the request.
+            local paused = (self.yield_spent or 0) - (self.request_yield_base or 0)
+            if not self.enabled or not clear or now - self.started - paused >= LIMIT.run then
                 self:cancel(reason or 'timeout')
                 return self.running == true
             end
             if type(s) ~= 'table' then note('SilentRaven status unavailable during owned request'); return true end
-            if not active(s) then
-                finish(self.callback_result or s.last_result or 'unconfirmed', s.last_reason)
-                return false
-            end
             if s.owner ~= OWNER then finish('ownership_changed'); return true end
             return true
         end
@@ -381,9 +463,14 @@ function M.new(options)
         self.advisory_alfred = advisory_alfred
         self.running, self.started, self.callback_result = true, now, nil
         self.attempts = (self.attempts or 0) + 1
+        self.request_yield_base, self.yield_seen, self.yield_logged = self.yield_spent or 0, nil, false
         local function guard()
             if generation ~= self.generation or not self.enabled then return false, 'request_revoked' end
-            return clear_companions()
+            local ok, why = clear_companions()
+            if ok then self.yield_seen = nil; return true end
+            -- R15: 'yield:looter_busy' asks SilentRaven to pause and keep the
+            -- request; every other reason is a cancel, as before.
+            return false, looter_yield(why, get_time_since_inject()) or why
         end
         local function completed(result)
             if generation == self.generation and self.running then self.callback_result = result end
@@ -429,7 +516,14 @@ function M.new(options)
         return true
     end
     function self:status_line()
-        if self.running then return 'WarPigs: SilentRaven reward check' end
+        if self.running then
+            local now = get_time_since_inject()
+            if self.paused_at and self.yield_seen and now - self.paused_at < 2 then
+                return string.format('WarPigs: SilentRaven reward check paused — Looter busy (%.0fs of %ds)',
+                    self.yield_spent or 0, LIMIT.run_yield)
+            end
+            return 'WarPigs: SilentRaven reward check'
+        end
         -- C6: an admission wait is visible while it lasts.
         local now = get_time_since_inject()
         if self.wait_reason and self.waiting_at and now - self.waiting_at < 2 then

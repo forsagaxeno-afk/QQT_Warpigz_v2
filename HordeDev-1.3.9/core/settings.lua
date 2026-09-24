@@ -43,6 +43,10 @@ local settings = {
     use_bloodied = false,
     exit_mode = 0,
     manage_orbwalker = false,
+    -- R8: runtime only (no GUI control, never persisted). True between an
+    -- external enable() (WarPigs) and disable() or the user switching the
+    -- main toggle off; lets 'Use keybind' with no key bound (0x0A) run.
+    external_control = false,
 }
 
 local controls = {
@@ -98,6 +102,7 @@ end
 
 function settings:update_settings()
     settings.enabled = gui.elements.main_toggle:get()
+    if not settings.enabled then settings.external_control = false end
     settings.use_keybind = gui.elements.use_keybind:get()
     settings.salvage = gui.elements.salvage_toggle:get()
     settings.run_pit = gui.elements.run_pit_toggle:get()

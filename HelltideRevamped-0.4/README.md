@@ -50,10 +50,15 @@ outstanding callbacks and pending chest/search state, and stops movement it
 issued. A disabled Looteer with a stale `looting` flag no longer blocks Helltide.
 
 Only a hard Alfred need (`inventory_full` or `need_repair`, or the local item
-count when Alfred publishes no inventory view) sends Helltide to town. A sticky
-advisory flag (`need_trigger` alone, restock) triggers Alfred at most once per
-30-second grace after any finished cycle, and a teleport flag left over from a
-finished or failed trip is not treated as work. An unreadable Alfred status
+count when Alfred publishes no inventory view) sends Helltide to town, and it
+still does so at once. An advisory flag alone (`need_trigger` next to
+`inventory_full`/`need_repair` that are both off, or the legacy fork's
+`restock_count`) never starts an Alfred trip from inside a helltide: restock
+waits for the next inventory-full or repair trip, or for WarPigs' Temis visit,
+so standalone Helltide does not restock for those flags while it farms. A
+provider that publishes only `need_trigger` keeps it as its town signal, at
+most once per 30-second grace after any finished cycle. A teleport flag left
+over from a finished or failed trip is not treated as work. An unreadable Alfred status
 holds for at most about 10 seconds; a pause set by another plugin holds a
 pending town request for at most 60 seconds.
 
@@ -67,8 +72,9 @@ salvage only after arriving. Search teleports wait up to 20 seconds for an
 active Looteer pickup. After an external enable (WarPigs) without the buff,
 search waits up to 15 seconds for the buff before teleporting away. Every HR
 session starts with a Batmobile exploration reset, and disabling Helltide
-releases Batmobile and, with **Manage orbwalker**, turns orbwalker clear back
-on. `HelltideRevampedPlugin.status().hold` names any Looteer/Alfred hold, and
+releases Batmobile and turns orbwalker clear back on and movement unblocked
+when **Manage orbwalker** is on, or when Helltide itself forced them (the
+cinder gate's clear OFF) before the option was switched off. `HelltideRevampedPlugin.status().hold` names any Looteer/Alfred hold, and
 holds longer than a minute are logged once a minute.
 
 **Do Maiden** takes priority over chest selection while its conditions hold.

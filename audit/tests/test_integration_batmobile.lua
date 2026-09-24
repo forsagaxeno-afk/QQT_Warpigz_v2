@@ -1,5 +1,6 @@
 -- Batmobile integration regressions (C3 release, BAT-1..11, HLT-5, ARK-8,
--- WCY-8, live L10).  Loads the real Batmobile navigator / external /
+-- WCY-8, live L10; round 3: R9 paused-route trap sampling, R10 world map
+-- cache for ARK-3, R11 companion-safe ownership).  Loads the real Batmobile navigator / external /
 -- long_path (and main.lua or the real explorer where a case needs them)
 -- with QQT-shaped host mocks.  Runs under Lua 5.4 and LuaJIT.
 local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/Batmobile-1.0.12/'
@@ -259,6 +260,92 @@ case('unpaused navigation still detects a real trap', function()
     eq(trapped, true, 'trap detection is kept for unpaused custom goals (long paths)')
 end)
 
+-- R9 (BAT-1 regression): callers that pause every tick and drive their own
+-- route with move() (Arkham kill_monster/explore_pit/portal/kill_boss, HR
+-- chest recall) keep trap detection and escape; paused holds do not trip.
+local function pocket(i, radius, step) return v(radius * math.cos(i * step), radius * math.sin(i * step)) end
+case('R9 probe: a paused-per-tick long route oscillating in a pocket trips the trap and escapes', function()
+    local climb = gizmo('Traversal_Gizmo_FreeClimb_Up', 9, 0)
+    local h = harness({actors = {climb}})
+    local ext, nav = h.ext, h.nav
+    local trapped, escaped = false, false
+    for i = 1, 300 do            -- fix-auditor probe: 30 s inside a 10 u pocket
+        h.adv(0.1)
+        h.player.pos = pocket(i, 5, 0.05)
+        ext.pause('arkham_asylum')
+        ext.update('arkham_asylum')
+        if i == 1 or not ext.is_long_path_navigating() then ext.navigate_long_path('arkham_asylum', v(200, 0)) end
+        ext.move('arkham_asylum')
+        trapped = trapped or ext.is_trapped()
+        escaped = escaped or nav.last_trav == climb
+    end
+    eq(trapped, true, 'trap detected on the caller-driven paused route (was false on 86340d4)')
+    eq(escaped, true, 'trap escape routes the paused route to the climb')
+    ok(nav.trav_final_target ~= nil and nav.trav_final_target:x() == 200, 'route goal kept for after the crossing')
+    eq(ext.is_long_path_navigating(), true, 'the caller still sees its route in progress')
+    eq(ext.is_paused(), true, 'caller pause kept')
+end)
+
+case('R9 a slow paused route (no displacement signal) is still sampled while its own caller drives it', function()
+    local h = harness()
+    local ext = h.ext
+    local trapped = false
+    for i = 1, 300 do            -- 1 u/s inside an 8 u pocket: only the route criterion applies
+        h.adv(0.1)
+        h.player.pos = pocket(i, 4, 0.025)
+        ext.pause('helltide_revamped')
+        if i == 1 or not ext.is_long_path_navigating() then ext.navigate_long_path('helltide_revamped', v(-150, 40)) end
+        ext.update('helltide_revamped'); ext.move('helltide_revamped')
+        trapped = trapped or ext.is_trapped()
+    end
+    eq(trapped, true, 'HR chest-recall style route keeps trap detection')
+end)
+
+case('R9 a paused set_target drive that keeps moving in a pocket toward a far goal trips the trap', function()
+    local h = harness()
+    local ext = h.ext
+    local trapped = false
+    for i = 1, 300 do            -- HR move_to(far chest): pause + set_target + move, 2.5 u/s
+        h.adv(0.1)
+        h.player.pos = pocket(i, 5, 0.05)
+        ext.pause('helltide_revamped'); ext.set_target('helltide_revamped', v(0, 180))
+        ext.update('helltide_revamped'); ext.move('helltide_revamped')
+        trapped = trapped or ext.is_trapped()
+    end
+    eq(trapped, true, 'displacement toward an out-of-pocket goal is sampled')
+end)
+
+case('R9 controls: a paused boss fight on a long route and a still paused hold never trip', function()
+    local climb = gizmo('Traversal_Gizmo_FreeClimb_Up', 8, 0)
+    local h = harness({actors = {climb}, explorer_target = v(30, 0)})
+    local ext, nav = h.ext, h.nav
+    local trapped, gave_up, hijacked, boss_at = false, false, false, nil
+    for i = 1, 1500 do          -- 150 s Arkham kill_boss with use_long_path, boss within 6 u
+        h.adv(0.1)
+        local boss = v(2 * math.cos(i * 0.01), 2 * math.sin(i * 0.01))
+        h.player.pos = v(boss:x() + 6 * math.cos(i * 0.05), boss:y() + 6 * math.sin(i * 0.05))
+        ext.pause('arkham_asylum'); ext.update('arkham_asylum')
+        if boss_at == nil or boss:dist_to(boss_at) > 5 or not ext.is_long_path_navigating() then
+            ext.navigate_long_path('arkham_asylum', boss); boss_at = boss
+        end
+        ext.move('arkham_asylum')
+        trapped = trapped or ext.is_trapped()
+        gave_up = gave_up or ext.is_giving_up()
+        hijacked = hijacked or nav.last_trav == climb
+    end
+    eq(trapped, false, 'boss fight on a caller route is a hold, not a trap')
+    eq(gave_up, false); eq(hijacked, false, 'no climb during the fight'); eq(h.counts.interacts, 0)
+    -- a paused caller standing still with a far goal (no route, no displacement)
+    local h2 = harness()
+    h2.player.pos = v(3, 3)
+    for _ = 1, 600 do
+        h2.adv(0.1)
+        h2.ext.pause('helltide_revamped'); h2.ext.set_target('helltide_revamped', v(120, 0))
+        h2.ext.move('helltide_revamped')
+    end
+    eq(h2.ext.is_trapped(), false, 'a still paused hold is not sampled')
+end)
+
 -- BAT-2
 case('an inert non-Jump traversal is abandoned after 3 interacts', function()
     local ladder = gizmo('Traversal_Gizmo_FreeClimb_Up', 2, 0)
@@ -435,6 +522,93 @@ case('clear_giving_up drops traversal ping-pong history', function()
     eq(#h.nav.trav_history, 0)
 end)
 
+-- R10 (ARK-3, Batmobile side): pit -> town (Alfred trip) -> same pit keeps
+-- the explorer map; targets, trap and traversal state never come back.
+local function frontiers_where(ex, pred)
+    local n = 0
+    for _, node in pairs(ex.frontier_node) do if pred(node) then n = n + 1 end end
+    return n
+end
+local function pit_trip(opts)
+    opts = opts or {}
+    local h = harness({real_explorer = true, main = true})
+    local ext, nav, ex = h.ext, h.nav, h.explorer
+    local pit = {name = 'PIT_Floor_A', zone = 'Pit_Zone', id = 5}
+    h.world = pit
+    ext.set_priority('arkham_asylum', 'distance'); ext.resume('arkham_asylum')
+    for x = 0, 100, 5 do h.adv(0.1); h.player.pos = v(x, 0); ext.update('arkham_asylum'); h.update() end
+    local mapped = {visited = ex.visited_count, west = frontiers_where(ex, function(n) return n:x() < 40 end)}
+    -- per-visit state that must not survive the trip
+    ext.pause('arkham_asylum'); ext.set_target('arkham_asylum', v(130, 30))
+    nav.last_trav = gizmo('Traversal_Gizmo_FreeClimb_Up', 98, 2); nav.trav_final_target = v(130, 30)
+    nav.trav_history = {{t = h.now - 5, direction = -1}}
+    nav.trapped = true; nav.trapped_since = h.now - 10
+    nav.trap_pos_history = {{pos = v(100, 0), t = h.now - 1}}
+    -- Alfred trip: town portal to Temis; Batmobile's own pulse sees the change
+    h.world = false; h.adv(2); h.update()
+    h.world = {name = 'Sanctuary', zone = 'Skov_Temis', id = 1}; h.player.pos = v(2550, -480)
+    h.adv(1); h.update()
+    for x = 2550, 2580, 5 do h.adv(0.1); h.player.pos = v(x, -480); ext.update('alfred_the_butler'); h.update() end
+    if opts.town then opts.town(h) end
+    h.world = false; h.adv(opts.away or 30); h.update()
+    h.world = opts.back or {name = 'PIT_Floor_A', zone = 'Pit_Zone', id = 5}
+    h.player.pos = opts.back_pos or v(100, 1)       -- the portal returns to the exit point
+    h.adv(1); h.update()
+    return h, mapped
+end
+
+case('R10 pit -> town (Alfred trip) -> same pit restores the explorer map, nothing else', function()
+    local h, mapped = pit_trip()
+    local ext, nav, ex = h.ext, h.nav, h.explorer
+    ok(mapped.visited > 0 and mapped.west > 0, 'pit mapped before the trip')
+    eq(frontiers_where(ex, function(n) return n:x() < 40 end), mapped.west, 'pit frontiers restored (was 0 on 86340d4)')
+    ok(ex.visited_count >= mapped.visited, 'visited cells restored')
+    eq(h.logged('world changed'), 2, 'both transitions reset')
+    eq(h.logged('explorer map restored'), 1, 'map handed back once')
+    eq(frontiers_where(ex, function(n) return n:x() > 1000 end), 0, 'no town frontiers in the pit map')
+    eq(nav.target, nil, 'stale goal not restored'); eq(nav.is_custom_target, false)
+    eq(nav.last_trav, nil, 'no stale traversal'); eq(nav.trav_final_target, nil)
+    eq(#nav.trav_history, 0, 'ping-pong history reset'); eq(nav.trapped, false, 'trap reset')
+    eq(#nav.trap_pos_history, 0); eq(ext.is_long_path_navigating(), false); eq(ext.get_owner(), nil)
+    -- Arkham resumes exploring from the restored map
+    ext.set_priority('arkham_asylum', 'distance'); ext.resume('arkham_asylum')
+    h.adv(0.1); ext.update('arkham_asylum'); ext.move('arkham_asylum')
+    ok(nav.target ~= nil and nav.target:x() < 200, 'next goal comes from the pit map')
+end)
+
+case('R10 an Alfred trip inside one open world (zone teleport there and back) keeps the helltide map', function()
+    local h = harness({real_explorer = true, main = true})
+    local ext, ex = h.ext, h.explorer
+    h.world = {name = 'Sanctuary_Eastern_Continent', zone = 'Kehj_Helltide', id = 1}
+    ext.resume('helltide_revamped')
+    for x = 500, 580, 5 do h.adv(0.1); h.player.pos = v(x, 500); ext.update('helltide_revamped'); h.update() end
+    local mapped = frontiers_where(ex, function(n) return n:x() < 540 and n:y() > 400 end)
+    ok(mapped > 0, 'helltide mapped')
+    h.world = false; h.adv(2); h.update()
+    h.world = {name = 'Sanctuary_Eastern_Continent', zone = 'Frac_Kyovashad', id = 1}; h.player.pos = v(-1500, 800)
+    h.adv(1); h.update()
+    eq(h.logged('zone teleport'), 1, 'town portal inside the same world resets')
+    eq(frontiers_where(ex, function(n) return n:y() > 400 and n:x() > 0 end), 0, 'no helltide frontiers in town')
+    h.world = false; h.adv(40); h.update()
+    h.world = {name = 'Sanctuary_Eastern_Continent', zone = 'Kehj_Helltide', id = 1}; h.player.pos = v(579, 501)
+    h.adv(1); h.update()
+    eq(frontiers_where(ex, function(n) return n:x() < 540 and n:y() > 400 end), mapped, 'helltide map restored')
+    eq(frontiers_where(ex, function(n) return n:x() < -1000 end), 0, 'no town frontiers')
+    eq(h.logged('explorer map restored'), 1)
+end)
+
+case('R10 controls: late, far, other-pit or explicitly reset returns start with a fresh map', function()
+    local west = function(n) return n:x() < 40 end
+    local late = pit_trip({away = 301})
+    eq(late.logged('explorer map restored'), 0, 'older than 300 s'); eq(frontiers_where(late.explorer, west), 0)
+    local far = pit_trip({back_pos = v(400, 0)})
+    eq(far.logged('explorer map restored'), 0, 'not near the exit point'); eq(frontiers_where(far.explorer, west), 0)
+    local other = pit_trip({back = {name = 'PIT_Floor_A', zone = 'Pit_Zone', id = 6}})
+    eq(other.logged('explorer map restored'), 0, 'another pit instance'); eq(frontiers_where(other.explorer, west), 0)
+    local wiped = pit_trip({town = function(h) h.ext.reset('arkham_asylum') end})
+    eq(wiped.logged('explorer map restored'), 0, 'reset() is a full wipe'); eq(frontiers_where(wiped.explorer, west), 0)
+end)
+
 -- BAT-8
 case('resumed custom waypoint that cannot be reached is reported by set_target', function()
     local h = harness({walkable = function() return false end,
@@ -454,28 +628,35 @@ case('resumed custom waypoint that cannot be reached is reported by set_target',
     end
 end)
 
--- BAT-9 / live L10
-case('a stale custom goal or route of a disabled plugin never steers the next caller', function()
+-- BAT-9 / live L10.  R11: only an explicit new goal claim (set_target,
+-- navigate_long_path, try_traversal_route) replaces a foreign goal; move,
+-- update and resume never do (see the R11 case below).
+case('a stale custom goal or route of a disabled plugin is replaced by the next goal claim', function()
     local h = harness()
     local ext, nav = h.ext, h.nav
     -- Arkham, still enabled in Temis, drives a paused custom target
     ext.pause('arkham_asylum'); ext.set_target('arkham_asylum', v(2571.5, -499.5))
     h.player.pos = v(2560, -490); h.adv(0.1); ext.move('arkham_asylum')
     ok(h.counts.find_path > 0, 'arkham pathfinds to its target')
-    -- disabled without release; another consumer drives Batmobile
+    -- disabled without release; another consumer claims a goal of its own
+    eq(ext.set_target('wonder_city', v(2540, -470)), true)
     local before = h.counts.find_path
     for _ = 1, 10 do h.adv(0.1); ext.move('wonder_city') end
+    ok(h.counts.find_path > before, 'the new owner pathfinds')
     local stale = 0
     for i = before + 1, #h.pf_goals do
         local g = h.pf_goals[i]
         if g:x() == 2571.5 and g:y() == -499.5 then stale = stale + 1 end
     end
-    eq(stale, 0, 'no pathfinding to the stale Temis target'); eq(nav.target, nil)
+    eq(stale, 0, 'no pathfinding to the stale Temis target')
+    ok(nav.target ~= nil and nav.target:x() == 2540, 'new goal applied'); eq(ext.get_owner(), 'wonder_city')
     ok(h.logged('dropping movement left by arkham_asylum') == 1, 'one diagnostic line')
-    -- a paused route left by another plugin is not revived by resume()
+    -- a paused route left by another plugin is replaced by the next route claim
     ext.pause('arkham_asylum'); eq(ext.navigate_long_path('arkham_asylum', v(2600, -500)), true)
-    ext.resume('wonder_city')
-    eq(ext.is_long_path_navigating(), false, 'foreign route dropped on resume')
+    eq(ext.navigate_long_path('wonder_city', v(2540, -470)), true)
+    eq(ext.get_owner(), 'wonder_city', 'route claim replaces the foreign route')
+    ok(nav.target ~= nil and nav.target:x() == 2540, 'new route goal')
+    ext.stop_long_path('wonder_city')
     -- a foreign traversal route cannot swallow the next plugin's target
     ext.pause('arkham_asylum'); ext.set_target('arkham_asylum', v(2600, -480))
     nav.last_trav = gizmo('Traversal_Gizmo_FreeClimb_Up', 2562, -490); nav.trav_final_target = v(2600, -480)
@@ -484,6 +665,41 @@ case('a stale custom goal or route of a disabled plugin never steers the next ca
     eq(accepted, true, 'previous owner failed zone does not reject the new owner'); eq(detail, nil, 'applied, not deferred')
     ok(nav.target ~= nil and nav.target:x() == 2590, 'target applied'); eq(nav.last_trav, nil)
     eq(nav.all_trav_blocked_until, 0, 'previous owner traversal block lifted on takeover')
+end)
+
+-- R11 (live safety): a closed-source companion (Alfred, Looteer) calling
+-- BatmobilePlugin under its own name must not ping-pong the owner's goal.
+case('R11 move/resume by another caller keep the owner goal; only a new claim or its release replaces it', function()
+    local h = harness()
+    local ext, nav = h.ext, h.nav
+    local lost = 0
+    for _ = 1, 30 do
+        h.adv(0.1)
+        ext.pause('arkham_asylum'); ext.set_target('arkham_asylum', v(30, 0)); ext.move('arkham_asylum')
+        h.adv(0.05); ext.move('alfred_the_butler')     -- companion under its own label
+        if nav.target == nil or nav.target:x() ~= 30 then lost = lost + 1 end
+    end
+    eq(lost, 0, 'companion move never drops the owner goal')
+    eq(ext.get_owner(), 'arkham_asylum', 'owner unchanged')
+    eq(h.logged('dropping movement'), 0, 'no takeover by move')
+    eq(h.logged('goal of arkham_asylum kept'), 1, 'one rate-limited diagnostic line')
+    -- resume by a companion keeps the owner's paused route (legacy unpause)
+    ext.pause('arkham_asylum'); eq(ext.navigate_long_path('arkham_asylum', v(60, 0)), true)
+    ext.update('alfred_the_butler'); ext.resume('alfred_the_butler')
+    eq(ext.is_long_path_navigating(), true, 'route kept after a foreign resume')
+    eq(ext.get_owner(), 'arkham_asylum')
+    ok(nav.target ~= nil and nav.target:x() == 60, 'route goal kept')
+    -- an explicit goal claim by the companion replaces it
+    eq(ext.set_target('alfred_the_butler', v(-20, 0)), true)
+    eq(ext.is_long_path_navigating(), false, 'claim replaces the route')
+    eq(ext.get_owner(), 'alfred_the_butler')
+    ok(nav.target ~= nil and nav.target:x() == -20, 'claimed goal applied')
+    eq(h.logged('dropping movement left by arkham_asylum'), 1, 'takeover logged once')
+    -- the previous owner's late release leaves the new owner alone; the
+    -- owner's own release clears it
+    ext.release('arkham_asylum')
+    ok(nav.target ~= nil and nav.target:x() == -20, 'foreign release ignored')
+    ext.release('alfred_the_butler'); eq(nav.target, nil); eq(ext.get_owner(), nil)
 end)
 
 case('L10 end-to-end: after Arkham releases in Temis nothing keeps steering', function()

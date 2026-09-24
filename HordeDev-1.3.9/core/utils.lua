@@ -434,6 +434,12 @@ function utils.get_keybind_state()
     if settings.use_keybind and toggle_key ~= 0x0A and toggle_state == 1 then
         return true
     end
+    -- R8 (as Arkham's ARK-7): 'Use keybind' with no key bound (0x0A) can
+    -- never be satisfied; an external controller's enable() still runs. A
+    -- key the user bound keeps working as a pause.
+    if toggle_key == 0x0A and settings.external_control then
+        return true
+    end
     return false
 end
 

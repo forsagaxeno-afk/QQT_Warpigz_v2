@@ -62,7 +62,7 @@ local function session(opts)
         world = opts.world or 'Sanctuary_Eastern_Continent', zone = opts.zone or 'Test_Zone',
         in_helltide = opts.in_helltide ~= false, teleporting = false, cinders = opts.cinders or 311,
         items = 0, actors = {}, loot = {}, logs = {}, teleports = {}, interactions = {}, triggers = {},
-        looting = false, orb = {clear = true, block = false}, task_ticks = {}}
+        looting = false, orb = {clear = true, block = false}, task_ticks = {}, name_ticks = {}}
     local bm = {target = nil, paused = false, resets = 0, releases = {}, clears = 0, sets = {},
         long_paths = {}, long_active = false, giving_up = false, moves = 0}
     s.bm = bm
@@ -185,6 +185,7 @@ local function session(opts)
             local name = s.tm.get_current_task().name or '?'
             local key = name:match('^Explore Helltide') and 'helltide' or name
             s.task_ticks[key] = (s.task_ticks[key] or 0) + 1
+            s.name_ticks[name] = (s.name_ticks[name] or 0) + 1
         end
     end
     function s.load_main()
@@ -318,18 +319,49 @@ local function gaps_ok(triggers, min_gap)
     return true
 end
 
-case('HLT-1 sticky advisory need_trigger never re-triggers inside the 30 s grace after a cycle', function()
+-- R12 (HLT-1 completion): an advisory-only flag (restock / stash extras)
+-- never starts a with-teleport trip from inside a helltide, however long it
+-- stays sticky (was: one trip every 40 s, EXPLORE_HELLTIDE ~71%). A hard
+-- need still leaves at once.
+local EXPLORE = 'Explore Helltide (EXPLORE_HELLTIDE)'
+case('R12/HLT-1 a sticky advisory need_trigger never leaves the helltide: zero trips, EXPLORE_HELLTIDE > 80%', function()
     local s = session({salvage = true})
     alfred(s, function(st)
-        return {enabled = true, need_trigger = true, inventory_full = false, need_repair = false,
+        return {enabled = true, need_trigger = true, inventory_full = st.full == true, need_repair = false,
             trigger_tasks = st.alfred_busy == true, restock_count = 1}
+    end)
+    s.tick(150)
+    eq(#s.triggers, 0, 'advisory-only trips started from inside the helltide')
+    local explore = s.name_ticks[EXPLORE] or 0
+    ok(explore > 0.8 * 1500, 'EXPLORE_HELLTIDE ticks ' .. explore .. ' of 1500')
+    eq(s.tracker.needs_salvage, false, 'advisory need never sets the hard town request')
+    eq(s.tm.get_current_task().hold_reason, nil, 'an advisory flag is not a hold')
+    s.full = true                                -- a hard need on top of the sticky flag
+    s.tick(0.5)
+    eq(#s.triggers, 1, 'a hard need still triggers at once')
+end)
+
+case('R12/HLT-2 legacy restock_count is advisory: no trip from inside a helltide', function()
+    local s = session({salvage = true})
+    alfred(s, function(st)
+        return {enabled = true, inventory_full = false, need_repair = false, restock_count = 1,
+            trigger_tasks = st.alfred_busy == true}
+    end, 'PLUGIN_alfred_the_butler')
+    s.tick(100)
+    eq(#s.triggers, 0, 'legacy restock trips')
+    ok((s.name_ticks[EXPLORE] or 0) > 0.8 * 1000, 'legacy EXPLORE_HELLTIDE ticks ' .. tostring(s.name_ticks[EXPLORE]))
+end)
+
+case('R12 a provider publishing only need_trigger keeps it as its signal, behind the 30 s grace', function()
+    local s = session({salvage = true})
+    alfred(s, function(st)
+        return {enabled = true, need_trigger = true, trigger_tasks = st.alfred_busy == true}
     end)
     s.tick(150)
     ok(#s.triggers >= 1 and #s.triggers <= 4, 'triggers in 150 s: ' .. #s.triggers)
     local fine, gap = gaps_ok(s.triggers, 39.5)          -- 10 s trip + 30 s grace
     ok(fine, 're-triggered after ' .. tostring(gap) .. ' s')
-    ok((s.task_ticks.helltide or 0) >= 0.6 * 1500, 'farm ticks ' .. tostring(s.task_ticks.helltide))
-    eq(s.tracker.needs_salvage, false, 'advisory need never sets the hard town request')
+    eq(s.tracker.needs_salvage, false, 'the need_trigger-only signal goes through alfred.lua, not needs_salvage')
 end)
 
 case('HLT-1 a hard need (inventory_full) still triggers at once, even inside the grace', function()
@@ -367,18 +399,6 @@ case('HLT-2 legacy fork: a latched teleport_done/teleport_failed is neither work
     eq(s.loot_guard.companion_may_own_movement(), true, 'a live teleport still owns movement')
 end)
 
-case('HLT-2 legacy restock_count is advisory: first trip allowed, then the sticky grace', function()
-    local s = session({salvage = true})
-    alfred(s, function(st)
-        return {enabled = true, inventory_full = false, need_repair = false, restock_count = 1,
-            trigger_tasks = st.alfred_busy == true}
-    end, 'PLUGIN_alfred_the_butler')
-    s.tick(100)
-    ok(#s.triggers >= 1 and #s.triggers <= 3, 'legacy restock triggers: ' .. #s.triggers)
-    local fine, gap = gaps_ok(s.triggers, 39.5)
-    ok(fine, 'legacy restock re-triggered after ' .. tostring(gap) .. ' s')
-end)
-
 case('C1 unreadable Alfred status holds HR at most ~10 s, then counts as unavailable (one log line)', function()
     local s = session({salvage = true})
     s.env.AlfredTheButlerPlugin = {get_status = function() error('loading') end,
@@ -411,9 +431,8 @@ end)
 
 case('C1 cancelling HR does not erase the sticky grace', function()
     local s = session({salvage = true})
-    alfred(s, function(st)
-        return {enabled = true, need_trigger = true, inventory_full = false, need_repair = false,
-            trigger_tasks = st.alfred_busy == true}
+    alfred(s, function(st)                       -- need_trigger-only provider (R12)
+        return {enabled = true, need_trigger = true, trigger_tasks = st.alfred_busy == true}
     end)
     s.tick(12)                                   -- trigger + callback at +10
     eq(#s.triggers, 1)
@@ -573,6 +592,45 @@ case('HLT-6 disabling HR restores orbwalker clear (cinder gate) and unblocks mov
     other.load_main(); other.tick(1); other.orb.clear = false
     other.plugin.disable()
     eq(other.orb.clear, false, 'an unmanaged orbwalker is never touched')
+end)
+
+-- R13 (C4/L12b): a state HR forced is handed back even after 'Manage
+-- orbwalker' was switched off mid-run (like WonderCity's orb_forced).
+case('R13/L12b disable after Manage orbwalker is unticked still restores the clear OFF / block ON HR forced', function()
+    local s = session({enabled = true, manage_orbwalker = true, cinders = 200})
+    s.load_main()
+    s.tick(1)
+    eq(s.orb.clear, false, 'cinder gate forced clear OFF above 150')
+    s.settings.orb_set_block(true)
+    eq(s.orb.block, true, 'HR blocked movement')
+    s.controls.manage_orbwalker:set(false)       -- unticked; no HR tick before the exit
+    s.plugin.disable()
+    eq(s.settings.manage_orbwalker, false)
+    eq(s.orb.clear, true, 'forced clear OFF survived the release')
+    eq(s.orb.block, false, 'forced block ON survived the release')
+end)
+
+case('R13/L12b unticked mid-run: the forced clear is handed back, suspend unblocks, then HR leaves the orbwalker alone', function()
+    local t = session({enabled = true, manage_orbwalker = true, cinders = 200})
+    t.load_main()
+    t.tick(1)
+    eq(t.orb.clear, false)
+    t.settings.orb_set_block(true)
+    t.controls.manage_orbwalker:set(false)
+    t.tick(1)
+    eq(t.orb.clear, true, 'the gate left its forced clear OFF after management was switched off')
+    eq(t.orb.block, true, 'block is released on exit, not mid-run')
+    t.in_helltide = false                        -- task switch to search: suspend
+    t.tick(0.5)
+    eq(t.orb.block, false, 'suspend left a forced block ON behind')
+
+    -- Once handed back, an unmanaged orbwalker is never touched again.
+    t.orb.clear, t.orb.block = false, true       -- the user's own choice
+    t.in_helltide = true
+    t.tick(1)
+    t.plugin.disable()
+    eq(t.orb.clear, false, 'unmanaged clear overwritten after the hand-back')
+    eq(t.orb.block, true, 'unmanaged block overwritten after the hand-back')
 end)
 
 -- ── HLT-9: traversal routing ──────────────────────────────────────────────

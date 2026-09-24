@@ -22,6 +22,21 @@ local tracker = {
     chest_last_pos = nil,
     chest_gone_since = nil,
     chest_gone_checked = nil,
+    -- R14 evidence that a never-clicked, non-interactable reward chest was
+    -- opened already (kept on a resume): when the chest was first seen, our
+    -- own interaction, a burst of new loot next to it, a boss kill observed
+    -- as an alive -> dead transition, and the last boss seen (diagnostics).
+    chest_first_seen = nil,
+    chest_interacted = nil,
+    chest_loot_seen = nil,
+    chest_loot_checked = nil,
+    chest_items_base = nil,
+    chest_loot_recent = nil,
+    boss_kill_seen = nil,
+    boss_alive_at = nil,
+    last_boss_name = nil,
+    last_boss_health = nil,
+    last_boss_at = nil,
     world_key = nil,
     in_undercity = false,
     floor_generation = 0,
@@ -52,6 +67,14 @@ tracker.reset_floor_state = function ()
     tracker.chest_last_pos = nil
     tracker.chest_gone_since = nil
     tracker.chest_gone_checked = nil
+    tracker.chest_first_seen = nil
+    tracker.chest_interacted = nil
+    tracker.chest_loot_seen = nil
+    tracker.chest_loot_checked = nil
+    tracker.chest_items_base = nil
+    tracker.chest_loot_recent = nil
+    tracker.boss_kill_seen, tracker.boss_alive_at = nil, nil
+    tracker.last_boss_name, tracker.last_boss_health, tracker.last_boss_at = nil, nil, nil
 end
 
 tracker.forget_resume = function ()

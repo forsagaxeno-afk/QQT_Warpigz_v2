@@ -4,7 +4,9 @@
 -- return window (HRD-5), use_alfred and bounded unknown Alfred status (HRD-6),
 -- keybind-aware enabled (HRD-7), teleport re-fire debounces (HRD-8/HRD-10),
 -- the Pit fallback (HRD-9), the C1 teleport latch (WPT-1), captured modules
--- instead of undefined globals, and C5 yield accounting. The real HordeDev
+-- instead of undefined globals, C5 yield accounting, and round 3: C2
+-- exit_pending (R7), external control with an unbound keybind and re-enable
+-- without a reset (R8), and the bounded paused-Alfred holds (C1). The real HordeDev
 -- plugin is loaded in an isolated environment with QQT-shaped host mocks;
 -- the joint cases also load the real WarPigs orchestrator.
 local ROOT = assert(SUITE_ROOT) .. '/HordeDev-1.3.9/'
@@ -636,6 +638,218 @@ case('CRT-2 joint: an idle, persisted-on HordeDev in town is released for the Pi
     truthy(f.until_true(function() return f.arkham.enables >= 1 end, 120),
         'Pit started (horde enabled=' .. tostring(s.P.status().enabled) .. ', task=' .. s:task_name() .. ')')
     eq(s.P.status().enabled, false, 'HordeDev released')
+end)
+
+-- ── Round 3 ────────────────────────────────────────────────────────────────
+local function busy_looter(get_s)
+    return {get_enabled = function() return true end,
+        is_actively_looting = function() return get_s().looting == true end}
+end
+local function leave_after(s, delay)
+    s.on_leave = function() s.outside_at = s.now + (delay or 2) end
+    return function() if s.outside_at and s.now >= s.outside_at then s.outside_at = nil; s:outside() end end
+end
+
+-- R7 (C2): status().exit_pending covers the exit's Looter hold and Leave/RESET.
+case('R7 exit_pending covers the Looter hold and the Leave/RESET after a chest fault', function()
+    local s
+    s = horde({aether = 30, globals = {LooteerPlugin = busy_looter(function() return s end)}})
+    s.P.enable()
+    chest_room(s, false, false)
+    eq(s.P.status().exit_pending, false, 'no exit while the chest phase runs')
+    local fault_at
+    s:run(60, 0.2, function()
+        if not fault_at and s.P.status().fault then fault_at = s.now; s.looting = true end
+    end)
+    truthy(fault_at, 'chest fault published')
+    local st = s.P.status()
+    eq(s.leaves, 0, 'the Looter still holds the exit')
+    eq(st.exit_pending, true, 'an exit held by the Looter is in progress')
+    truthy(st.hold and st.hold:find('Looter', 1, true), 'Looter hold visible: ' .. tostring(st.hold))
+    s.gui.elements.main_toggle:set(false)
+    eq(s.P.status().exit_pending, false, 'a stopped HordeDev has no exit in progress')
+    s.gui.elements.main_toggle:set(true)
+    s.looting = false
+    local step, during = leave_after(s), true
+    s:run(30, 0.2, function()
+        step()
+        if s.loaded['core.tracker'].reset_exit_pending and s.P.status().exit_pending ~= true then during = false end
+    end)
+    eq(s.leaves, 1); eq(s.resets, 1, 'RESET sent outside')
+    truthy(during, 'exit_pending stays true through Leave Dungeon, the outside wait and the RESET settle')
+    eq(s.P.status().exit_pending, false, 'exit finished')
+end)
+
+case('R7 exit_pending: Teleport exit in flight; a latched exit FAULT is not progress', function()
+    local s = horde({aether = 0})
+    s.P.enable(); s.P.setSettings('exit_mode', 1)
+    s.actors = {actor('Stash', 1.5, 0)}
+    s.loaded['core.tracker'].finished_chest_looting = true
+    s:run(1)
+    truthy(#s.teleports >= 1, 'teleport exit fired')
+    eq(s.P.status().exit_pending, true, 'teleport channel still in the Horde')
+    s:outside(); s:run(0.4)
+    eq(s.P.status().exit_pending, false, 'landed outside the Horde')
+    local r = horde({aether = 0})
+    r.P.enable()
+    r.actors = {actor('Stash', 1.5, 0)}
+    r.loaded['core.tracker'].finished_chest_looting = true
+    r:run(45) -- Leave Dungeon never leaves BSK: latched FAULT
+    truthy(r.P.status().fault and r.P.status().fault:find('exit:', 1, true), 'exit fault latched')
+    eq(r.P.status().exit_pending, false, 'a latched FAULT is not an exit in progress')
+end)
+
+-- R8: 'Use keybind' on with no key bound (as Arkham's ARK-7).
+case('R8 external enable runs with an unbound keybind; a bound key still pauses; manual gate unchanged', function()
+    local s = horde({aether = 0})
+    s.gui.elements.use_keybind:set(true); s:tick() -- ticked, never bound (0x0A)
+    s.P.enable()
+    eq(s.P.status().enabled, true, 'enable() results in enabled status')
+    s.actors = {actor('Monster', 5, 0, {enemy = true, health = 100})}
+    s:run(5)
+    eq(s:task_name(), 'Infernal Horde', 'HordeDev runs under external control')
+    eq(s:logged('no key is bound'), 1, 'misconfiguration logged')
+    s.P.enable() -- re-asserted while running
+    eq(s:logged('no key is bound'), 1, 'logged once')
+    eq(s:logged('fresh_run_reset'), 1, 'a re-enable while running does not reset the run')
+    s.P.disable()
+    eq(s.P.status().enabled, false, 'disable() sticks')
+    s.gui.elements.main_toggle:set(true); s:run(1) -- the user, not an external controller
+    eq(s.P.status().enabled, false, 'manual keybind gate unchanged')
+    s.gui.elements.main_toggle:set(false); s:run(0.4)
+    s.gui.elements.keybind_toggle.key = 0x70 -- the user binds a key
+    s.P.enable(); s:run(1)
+    eq(s.P.status().enabled, true)
+    s.gui.elements.keybind_toggle.state = 0; s:run(1)
+    eq(s.P.status().enabled, false, 'a bound key still pauses HordeDev')
+    eq(s:task_name(), 'Idle')
+end)
+
+case('R8 enable() during a healthy run keeps it; a latched fault is still restarted', function()
+    local s = horde({aether = 0})
+    s.P.enable()
+    s.actors = {actor('Stash', 1.5, 0)}
+    local tr, exit = s.loaded['core.tracker'], s.loaded['tasks.exit_horde']
+    tr.finished_chest_looting = true
+    s:run(1)
+    eq(tr.reset_exit_pending, true, 'RESET committed')
+    local phase = exit.reset_phase
+    s.P.enable() -- WarPigs re-asserting ownership mid-run
+    eq(tr.reset_exit_pending, true, 'pending RESET kept')
+    eq(exit.reset_phase, phase, 'exit phase kept')
+    eq(s:logged('keeping the current run'), 1)
+    local step = leave_after(s)
+    s:run(25, 0.2, step)
+    eq(exit.reset_phase, 'DONE'); eq(s.resets, 1, 'the kept RESET completes')
+    -- after a hotkey pause mid-run, a re-enable resumes the same run
+    local p = horde({aether = 0})
+    p.gui.elements.use_keybind:set(true); p.gui.elements.keybind_toggle.key = 0x70
+    p.P.enable()
+    p.actors = {actor('Stash', 1.5, 0)}
+    p.loaded['core.tracker'].finished_chest_looting = true
+    p:run(1)
+    eq(p.loaded['core.tracker'].reset_exit_pending, true)
+    p.gui.elements.keybind_toggle.state = 0; p:run(1)
+    p.P.enable()
+    eq(p.loaded['core.tracker'].reset_exit_pending, true, 're-enable after a pause keeps the RESET')
+    eq(p.P.status().enabled, true)
+    -- a latched exit FAULT: enable() is the restart
+    local r = horde({aether = 0})
+    r.P.enable()
+    r.actors = {actor('Stash', 1.5, 0)}
+    r.loaded['core.tracker'].finished_chest_looting = true
+    r:run(45)
+    truthy(r.P.status().fault, 'exit fault latched')
+    r.P.enable()
+    eq(r.P.status().fault, nil, 'enable() clears a latched fault')
+    eq(r.loaded['core.tracker'].reset_exit_pending, false)
+end)
+
+-- C1: HordeDev's own WAITING request and needs_salvage hold on a foreign
+-- Alfred pause are bounded (60 s, logged), as in the other plugins.
+local function paused_chest_trip(st, pause_on_trigger)
+    local calls = 0
+    local alfred = {get_status = function() return st end,
+        trigger_tasks_with_teleport = function() calls = calls + 1; if pause_on_trigger then st.paused = true end; return true end}
+    local s = horde({aether = 40, globals = {AlfredTheButlerPlugin = alfred}})
+    s.P.enable()
+    chest_room(s, true, true)
+    return s, function() return calls end
+end
+
+case('C1 own Alfred request waiting on a paused Alfred is retired after 60 s; chests continue', function()
+    local st = {enabled = true, need_trigger = true}
+    local s, calls = paused_chest_trip(st, true)
+    s:run(20)
+    eq(calls(), 1, 'salvage trip requested'); eq(st.paused, true)
+    eq(s:task_name(), 'alfred_running')
+    local hold = s.P.status().hold
+    s:run(30)
+    eq(s:task_name(), 'alfred_running', 'short pauses still hold')
+    local interactions = #s.interactions
+    s:run(45)
+    truthy(s:task_name() ~= 'alfred_running', 'no unbounded hold: ' .. s:task_name())
+    truthy(#s.interactions > interactions, 'the chests continue')
+    eq(s:logged("paused for 60s with HordeDev's request pending"), 1, 'retirement logged once')
+    eq(hold, 'waiting for a paused Alfred', 'visible hold')
+    eq(#s.teleports, 0, 'no built-in Cerrigar trip while Alfred is enabled')
+    eq(calls(), 1, 'a paused Alfred is never re-triggered')
+    eq(s.P.status().alfred_trip, false)
+end)
+
+case('C1 needs_salvage hold on a paused Alfred is bounded and does not re-pause the chests', function()
+    local st = {enabled = true, need_trigger = true, paused = true}
+    local s, calls = paused_chest_trip(st, false)
+    s:run(20)
+    eq(s.loaded['tasks.open_chests'].current_state, 'PAUSED_FOR_SALVAGE')
+    eq(s:task_name(), 'alfred_running'); eq(s.P.status().hold, 'waiting for a paused Alfred')
+    local repaused = 0
+    s:run(75, 0.2, function()
+        if s.loaded['core.tracker'].alfred_pause_expired
+            and s.loaded['tasks.open_chests'].current_state == 'PAUSED_FOR_SALVAGE' then repaused = repaused + 1 end
+    end)
+    eq(s:logged('with salvage pending; continuing without it'), 1, 'logged once')
+    eq(s:logged('No salvage owner available (Alfred paused'), 1, 'chests resumed once')
+    truthy(repaused <= 1, 'no re-pause loop while Alfred stays paused: ' .. repaused)
+    eq(calls(), 0, 'a paused Alfred is never triggered')
+    eq(#s.teleports, 0, 'no built-in Cerrigar trip')
+    truthy(#s.interactions >= 1, 'a chest was opened')
+    st.paused = false; s:run(0.4)
+    eq(s.loaded['core.tracker'].alfred_pause_expired, false, 'the bound re-arms once Alfred resumes')
+end)
+
+-- R7 joint: the real WarPigs orchestrator does not cut HordeDev's own exit.
+case('R7 joint: WarPigs keeps a faulted HordeDev while its exit (Looter hold + RESET) is in progress', function()
+    local f
+    f = joint({aether = 30, globals = {LooteerPlugin = busy_looter(function() return f.s end)}})
+    local s = f.s
+    f.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+    f.run(3)
+    eq(s.P.status().enabled, true, 'WarPigs enabled HordeDev in BSK')
+    f.quests = {}
+    chest_room(s, false, false)
+    local step = leave_after(s)
+    local fault_at, resets_at_release
+    f.run(240, function()
+        step()
+        if not fault_at and s.P.status().fault then fault_at = s.now; s.looting = true end
+        if fault_at and s.looting and s.now - fault_at >= 90 then s.looting = false end
+        if resets_at_release == nil and not s.gui.elements.main_toggle:get() then resets_at_release = s.resets end
+    end)
+    truthy(fault_at, 'chest fault published')
+    eq(resets_at_release, 1, 'HordeDev released only after its own Leave/RESET (90 s Looter hold)')
+end)
+
+-- R8 joint: an unbound keybind no longer makes WarPigs re-enable (and reset) HordeDev.
+case('R8 joint: with Use keybind on and no key bound WarPigs enables HordeDev once', function()
+    local f = joint({aether = 0})
+    local s = f.s
+    s.gui.elements.use_keybind:set(true); s:tick()
+    f.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+    f.run(75)
+    eq(s.P.status().enabled, true, 'enable() took effect')
+    eq(s:logged('HORDE ACTIVATING'), 1, 'enabled once')
+    eq(s:logged('fresh_run_reset'), 1, 'run state reset once')
 end)
 
 for _, failure in ipairs(failures) do print('FAIL ' .. failure) end

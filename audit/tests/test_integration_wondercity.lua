@@ -224,17 +224,22 @@ end
 
 -- ── CRT-1 / L9: bounded reward-chest completion ─────────────────────────────
 
-case('L9: already opened (non-interactable) chest after a boss kill completes and exits', function()
+case('L9: already opened (non-interactable) chest after an observed boss kill completes and exits', function()
+    -- Live L9 with the R14 evidence rule: the boss fight was observed while
+    -- the reward chest was in the actor stream; after the kill the chest
+    -- stays non-interactable (already opened) -> bounded 10 s, then exit.
     local s = session()
-    local chest = reward_chest(1, false)
-    s.actors = {s.player, dead_boss(), chest}
-    s:enable()
+    local boss = actor('X1_Undercity_Lacuni_Boss', 30, 0, {boss = true, health = 100})
+    s.actors = {s.player, boss, reward_chest(1, false)}
+    s:enable(); s:run(2)
+    boss.health = 0
     s:run(3)
     eq(s:task().name, 'goto_chest')
     ok(s:task().status:find('waiting for reward chest to unlock', 1, true), 'status names the unlock wait')
-    ok(s:logged('not interactable before our click'), 'the ambiguous chest state is logged once')
+    ok(s:logged('not interactable before our click'), 'the ambiguous chest state is logged')
+    ok(s:logged('boss kill observed after the chest was first seen'), 'the evidence is named in the log')
     local t = s:until_true(function() return s.tracker.done end, 12)
-    ok(t ~= nil and t <= 8.5, 'reward phase completes within the 10 s unlock wait (was: forever)')
+    ok(t ~= nil and t <= 7.5, 'reward phase completes within the 10 s unlock wait (was: forever)')
     eq(#s.interactions, 0, 'an opened chest is never clicked')
     ok(s.tracker.completion_reason:find('already opened', 1, true))
     -- 3 s loot quiet + 10 s default exit delay, then the configured reset.
@@ -314,12 +319,15 @@ case('CRT-1: a locked chest waits while the boss lives, then the bounded unlock 
     ok(t ~= nil and t <= 10.5, 'after the kill the 10 s unlock wait completes')
 end)
 
-case('CRT-1: without an observed boss kill the unlock wait is 30 s', function()
+case('R14: without opened evidence the unlock wait is 60 s (was 30 s)', function()
     local s = session()
     s.actors = {s.player, reward_chest(1, false)}
-    s:enable(); s:run(28.5)
-    ok(not s.tracker.done)
-    ok(s:until_true(function() return s.tracker.done end, 3) ~= nil)
+    s:enable(); s:run(58.5)
+    ok(not s.tracker.done, 'no early completion without evidence')
+    ok(s:task().status:find('no opened evidence', 1, true), 'status says why it waits')
+    ok(s:until_true(function() return s.tracker.done end, 3) ~= nil, 'still bounded')
+    ok(s.tracker.completion_reason:find('no opened evidence', 1, true), s.tracker.completion_reason)
+    eq(#s.interactions, 0)
 end)
 
 case('CRT-1: close-range approach stall interacts from where the player stands', function()
@@ -328,6 +336,153 @@ case('CRT-1: close-range approach stall interacts from where the player stands',
     s:enable(); s:run(7)
     eq(#s.interactions, 0, 'still walking inside the stall window')
     ok(s:until_true(function() return #s.interactions > 0 end, 3) ~= nil, 'stalled approach falls back to interacting')
+end)
+
+-- ── R14: a never-clicked locked chest completes early only with evidence ──
+
+local function chest_log_lines(s)
+    local n, last = 0, nil
+    for _, line in ipairs(s.logs) do
+        if line:find('[WonderCity:chest] reward chest', 1, true) and line:find('not interactable before our click', 1, true) then
+            n, last = n + 1, line
+        end
+    end
+    return n, last
+end
+local function item(x, y, obols)
+    local a = actor('Item', x, y); a.obols = obols
+    return a
+end
+
+case('R14: a boss corpse seen together with the locked chest is not evidence; one diagnostic line', function()
+    local s = session()
+    local chest = reward_chest(1, false)
+    s.actors = {s.player, dead_boss(), chest}
+    s:enable(); s:run(30)
+    ok(not s.tracker.done, 'not recorded as opened after 30 s (was: 10 s after the corpse)')
+    eq(#s.interactions, 0)
+    local n, line = chest_log_lines(s)
+    eq(n, 1, 'one diagnostic line per wait')
+    ok(line:find(tostring(chest.id), 1, true), 'names the chest key: ' .. line)
+    ok(line:find('interactable=false', 1, true), 'names the interactable state')
+    ok(line:find('boss_kill_time=100.1', 1, true), 'names boss_kill_time: ' .. line)
+    ok(line:find('last boss=X1_Undercity_Lacuni_Boss hp=0', 1, true), 'names the last boss seen: ' .. line)
+    ok(line:find('no opened evidence', 1, true))
+    ok(s:until_true(function() return s.tracker.done end, 32) ~= nil, 'bounded by the 60 s fallback')
+    eq(select(1, chest_log_lines(s)), 1, 'still one line for the whole wait')
+end)
+
+case('R14: a chest still locked by a boss outside the actor stream is opened when it unlocks after 30 s', function()
+    local s = session()
+    local chest = reward_chest(1, false)
+    s.actors = {s.player, chest}
+    s:enable(); s:run(45)
+    ok(not s.tracker.done, 'the reward chest is not skipped at 30 s (critic R14)')
+    chest.interactable = true -- the boss died out of stream; the chest unlocks
+    ok(s:until_true(function() return #s.interactions > 0 end, 2) ~= nil, 'the unlocked chest is clicked')
+    chest.interactable = false
+    ok(s:until_true(function() return s.tracker.done end, 3) ~= nil)
+    eq(s.tracker.completion_reason, 'interacted chest no longer interactable')
+end)
+
+case('R14: a kill observed before the chest was first seen (another boss) is not evidence', function()
+    local s = session()
+    local mini = actor('X1_Undercity_Snake_Brute_Miniboss', 20, 0, {boss = true, health = 100})
+    s.actors = {s.player, mini}
+    s:enable(); s:run(1)
+    mini.health = 0
+    s:run(2)
+    ok(s.tracker.boss_kill_time ~= nil, 'the miniboss kill is observed')
+    s.actors = {s.player, mini, reward_chest(1, false)}
+    s:run(30)
+    ok(not s.tracker.done, 'not recorded as opened 10 s after an earlier kill')
+    local _, line = chest_log_lines(s)
+    ok(line and line:find('last boss=X1_Undercity_Snake_Brute_Miniboss', 1, true), tostring(line))
+    ok(s:until_true(function() return s.tracker.done end, 31) ~= nil, 'bounded by the 60 s fallback')
+end)
+
+case('R14: a kill seen across a brief gap is observed; a corpse returning long after is not', function()
+    local s = session()
+    local chest = reward_chest(1, false)
+    local boss = actor('X1_Undercity_Lacuni_Boss', 30, 0, {boss = true, health = 100})
+    s.actors = {s.player, boss, chest}
+    s:enable(); s:run(2)
+    s.actors = {s.player, chest}          -- the dying boss leaves the list for 1 s
+    s:run(1)
+    boss.health = 0
+    s.actors = {s.player, boss, chest}
+    local t = s:until_true(function() return s.tracker.done end, 12)
+    ok(t ~= nil and t <= 11, 'observed kill -> bounded 10 s wait: ' .. tostring(t))
+    ok(s.tracker.completion_reason:find('boss kill observed', 1, true))
+    local s2 = session()
+    local boss2 = actor('X1_Undercity_Lacuni_Boss', 30, 0, {boss = true, health = 100})
+    s2.actors = {s2.player, boss2, reward_chest(1, false)}
+    s2:enable(); s2:run(2)
+    s2.actors = {s2.player, s2.actors[3]}  -- boss leaves the stream alive
+    s2:run(10)
+    boss2.health = 0
+    s2.actors[#s2.actors + 1] = boss2     -- its corpse shows up much later
+    s2:run(20)
+    ok(not s2.tracker.done, 'a corpse long after the last live sighting is not an observed kill')
+end)
+
+case('R14: a loot burst next to the locked chest is evidence; a single drop, obols or far loot are not', function()
+    local s = session()
+    s.actors = {s.player, reward_chest(1, false)}
+    s:enable(); s:run(5)
+    s.items = {item(1, 1)}                                   -- one mob drop next to the chest
+    s:run(5)
+    s.items[#s.items + 1] = item(2, 0, true); s.items[#s.items + 1] = item(1, 2, true) -- obols
+    s:run(5)
+    s.items[#s.items + 1] = item(25, 0); s.items[#s.items + 1] = item(25, 1)         -- far away
+    s:run(20)
+    ok(not s.tracker.done and not s.tracker.chest_loot_seen, 'no opened evidence yet at 35 s')
+    s.items[#s.items + 1] = item(1, -1); s.items[#s.items + 1] = item(0, 1)          -- the chest's drop
+    s:run(1)
+    ok(s.tracker.chest_loot_seen ~= nil, 'the loot burst is seen')
+    ok(s:logged('new items dropped within'), 'and logged')
+    local t = s:until_true(function() return s.tracker.done end, 12)
+    ok(t ~= nil and t <= 10, 'completes within 10 s of the evidence (was: 30 s blind, now 60 s blind)')
+    ok(s.tracker.completion_reason:find('new loot dropped next to the chest', 1, true))
+    eq(#s.interactions, 0)
+end)
+
+case('R14: our click before an Alfred round trip is evidence for the non-interactable chest on return', function()
+    local s = session()
+    alfred(s, {enabled = true})
+    s.actors = {s.player, reward_chest(1, true)}
+    s:enable(); s:run(0.3)
+    eq(#s.interactions, 1)
+    ok(not s.tracker.done)
+    s.alfred = {enabled = true, trigger_tasks = true, teleport = true}
+    s:tick()
+    s.world, s.world_id, s.zone = 'Sanctuary', 1, 'Naha_Kurast'
+    s.actors = {s.player}
+    s:run(20)
+    s.world, s.world_id, s.zone = UC_WORLD, UC_ID, UC_ZONE
+    s.actors = {s.player, reward_chest(1, false)}
+    s:tick()
+    s.alfred = {enabled = true, teleport = true, teleport_done = true}
+    s:tick()
+    ok(s:logged('resuming the run'))
+    local t = s:until_true(function() return s.tracker.done end, 15)
+    ok(t ~= nil and t <= 10.5, 'our earlier interaction bounds the wait at 10 s: ' .. tostring(t))
+    ok(s.tracker.completion_reason:find('we interacted with the reward chest earlier', 1, true))
+    eq(#s.interactions, 1)
+end)
+
+case('R14/C5: an Alfred yield does not count toward the 60 s evidence-free wait', function()
+    local s = session()
+    alfred(s, {enabled = true})
+    s.actors = {s.player, reward_chest(1, false)}
+    s:enable(); s:run(20)
+    s.alfred = {enabled = true, trigger_tasks = true}   -- foreign cycle in place
+    s:run(50)
+    eq(s:task().name, 'alfred_running')
+    s.alfred = {enabled = true}
+    s:run(35)
+    ok(not s.tracker.done, 'only 55 s of our own wait so far')
+    ok(s:until_true(function() return s.tracker.done end, 8) ~= nil)
 end)
 
 case('CRT-1: a foreign Alfred trip after opening resumes the same run with the chest done', function()

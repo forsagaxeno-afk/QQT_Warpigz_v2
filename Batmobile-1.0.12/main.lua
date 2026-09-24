@@ -57,6 +57,7 @@ local function main_pulse()
         debounce_time = get_time_since_inject()
         long_path.stop_navigation()
         navigator.reset()
+        navigator.world_cache = nil   -- manual full reset: no cached world map
     end
     -- Host world/actor data is incomplete while loading. Keep settings/reset
     -- responsive, but never pathfind, cast, or request movement in this state.

@@ -32,6 +32,9 @@ local tracker = {
     -- C1: time of the last completed HordeDev Alfred cycle. Advisory flags
     -- cannot re-trigger within the sticky grace; never cleared by cancel/reset.
     alfred_completed_at = nil,
+    -- C1/C6: set by tasks/alfred.lua once HordeDev has waited 60 s on a paused
+    -- Alfred; cleared when Alfred's pause ends. The chests then continue.
+    alfred_pause_expired = false,
     -- Timestamp of the last InfernalHordesPlugin.enable(). Used by horde.lua's
     -- shouldExecute as a settle gate so the wave-clearing task doesn't fire
     -- the same tick an external orchestrator (WarPigs) flipped the toggle —

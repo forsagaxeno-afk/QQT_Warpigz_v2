@@ -1,5 +1,5 @@
 -- SilentRaven integration regressions (CRT-3/L6, SRV-3, SRV-4/WPT-7, SRV-5,
--- SRV-6, SRV-8, L10, C1/C5/C6). Loads the real SilentRaven modules (and, in
+-- SRV-6, SRV-8, L10, R15/L7, C1/C5/C6). Loads the real SilentRaven modules (and, in
 -- one joint case, the real WarPug planner) with QQT-shaped host mocks.
 -- SR_ROOT may point at another copy of SilentRaven (used to confirm that
 -- each case fails on the pre-fix sources).
@@ -414,6 +414,195 @@ case('Guard revocation keeps the visit eligible for the owner', function()
     eq(c.result, 'cancelled')
     eq(c.start(), true); c.tick()
     ok(c.result ~= 'skipped_latched', 'a revoked request can be asked again during the visit')
+end)
+
+-- R15 (live L7): the owner's continuation guard may answer
+-- (false, 'yield:<reason>'): pause the request (no moves, clicks or accept,
+-- companion path kept, attempts and timeouts frozen) and resume the current
+-- step; 120 s of continuous pause cancels it as 'yield_timeout'.
+local function owner_guard(c)
+    c.answer = true
+    return function()
+        if c.answer == true then return true end
+        return false, c.answer
+    end
+end
+case('R15 guard yields 10 s mid-walk: paused, then the same request completes', function()
+    local c = harness({ at = ARRIVAL, walk = true })
+    local attempts = 0
+    c.after_update = function() attempts = math.max(attempts, c.tracker.attempts) end
+    eq(c.start(owner_guard(c)), true)
+    c.run(1)
+    eq(c.status().state, 'WALK_NPC'); ok(dist(c.target, VIA) <= 3, 'heading for the intermediate')
+    local via = c.tracker.walk_intermediate
+    c.answer = 'yield:looter_busy'; c.frozen = true       -- the Looter drives the player
+    c.tick()
+    local moves, clears, escapes = c.moves, c.clears, c.escapes
+    c.run(10)
+    local st = c.status()
+    eq(st.running, true, 'request kept'); eq(st.owner, 'WarPigs'); eq(st.state, 'WALK_NPC')
+    eq(st.attempts, 1, 'no attempt consumed'); eq(st.hold_reason, 'looter_busy', 'pause visible in the status')
+    eq(c.moves, moves, 'no movement request while paused'); eq(c.clears, clears, 'companion path untouched')
+    eq(c.escapes, escapes); eq(c.accepts, 0); eq(c.tracker.movement_owned, false, 'movement ownership dropped')
+    eq(c.callbacks, nil, 'no completion while paused')
+    c.answer = true; c.frozen = false
+    c.tick()
+    eq(c.moves, moves + 1, 'walk re-requested on resume'); eq(c.status().hold_reason, nil)
+    eq(c.tracker.walk_intermediate, via, 'same waypoint kept')
+    ok(dist(c.targets[#c.targets], VIA) <= 3, 'walk continues toward the same waypoint')
+    c.run(10)
+    eq(c.result, 'success', 'the same request completes'); eq(c.callbacks, 1); eq(c.accepts, 1)
+    eq(attempts, 1, 'attempts unchanged'); eq(c.count('npc_walk_timeout'), 0)
+end)
+case('R15 a 100 s pause consumes no walk or run timeout (C5)', function()
+    local c = harness({ at = ARRIVAL, walk = true })
+    local attempts = 0
+    c.after_update = function() attempts = math.max(attempts, c.tracker.attempts) end
+    eq(c.start(owner_guard(c)), true)
+    c.run(1)
+    c.answer = 'yield:looter_busy'; c.frozen = true
+    c.run(100)
+    eq(c.status().running, true, 'still paused'); eq(c.count('waiting 60s for looter_busy'), 1, 'logged once')
+    c.answer = true; c.frozen = false
+    c.run(10)
+    eq(c.result, 'success'); eq(attempts, 1); eq(c.count('resuming after'), 1)
+    eq(c.count('npc_walk_timeout'), 0); eq(c.count('run_timeout'), 0)
+end)
+case('R15 guard yielding 130 s cancels as yield_timeout (bounded, visit kept)', function()
+    local c = harness({ at = ARRIVAL, walk = true })
+    eq(c.start(owner_guard(c)), true)
+    c.run(1)
+    c.answer = 'yield:looter_busy'; c.frozen = true
+    local clears, escapes = c.clears, c.escapes
+    c.run(119)
+    eq(c.status().running, true, 'still paused before the 120 s bound'); eq(c.callbacks, nil)
+    c.run(11)
+    eq(c.result, 'cancelled'); eq(c.callbacks, 1, 'callback exactly once')
+    eq(c.status().last_reason, 'yield_timeout'); eq(c.status().owner, nil)
+    eq(c.clears, clears, 'companion path untouched'); eq(c.escapes, escapes); eq(c.accepts, 0)
+    eq(c.count('waiting 60s for looter_busy'), 1, 'logged once (C6)')
+    eq(c.status().last_zone_handled, nil, 'visit not consumed')
+    eq(c.start(owner_guard(c)), true, 'the owner may ask again in this visit')
+    c.frozen = false; c.run(10)
+    eq(c.result, 'success')
+end)
+case('R15 a pause right before accept never accepts, then re-verifies and claims', function()
+    local c = harness()           -- at the Raven: interact, open the panel, select
+    local guard, paused_once = owner_guard(c), false
+    c.start(function()
+        -- The Looter starts the moment our card is selected.
+        if c.selects > 0 and not paused_once then c.answer, paused_once = 'yield:looter_busy', true end
+        return guard()
+    end)
+    c.run(1)
+    eq(c.selects, 1, 'card selected'); eq(c.accepts, 0, 'no accept while paused')
+    eq(c.status().running, true); eq(c.status().state, 'SELECT_VERIFY')
+    c.run(5)
+    eq(c.accepts, 0, 'still no accept while paused'); eq(c.selects, 1)
+    c.answer = true
+    c.run(2)
+    eq(c.accepts, 1, 'accepted once after the pause'); eq(c.selects, 1, 'selection kept')
+    eq(c.result, 'success'); eq(c.callbacks, 1)
+end)
+case('R15 a queued request stays queued while paused, then starts; the pause is bounded', function()
+    local c = harness({ at = ARRIVAL, walk = true })
+    local guard = owner_guard(c)
+    c.answer = 'yield:looter_busy'
+    eq(c.start(guard), true)
+    c.run(5)
+    local st = c.status()
+    eq(st.pending, true, 'still queued'); eq(st.running, false); eq(st.owner, 'WarPigs')
+    eq(st.hold_reason, 'looter_busy', 'pause visible while queued'); eq(c.moves, 0); eq(c.callbacks, nil)
+    c.answer = true
+    c.run(10)
+    eq(c.result, 'success'); eq(c.callbacks, 1)
+    local d = harness({ at = ARRIVAL })
+    d.start(owner_guard(d)); d.answer = 'yield:looter_busy'
+    d.run(121)
+    eq(d.result, 'cancelled'); eq(d.status().last_reason, 'yield_timeout'); eq(d.moves, 0)
+end)
+case('R15 auto-fire never starts over a paused queued request (callback kept)', function()
+    local c = harness({ at = ARRIVAL, walk = true })     -- auto-fire off until queued
+    local results = {}
+    local guard = owner_guard(c)
+    c.answer = 'yield:looter_busy'
+    eq(c.api.trigger_tasks('Other', function(r) results[#results + 1] = r end, guard), true, 'unmanaged caller queued')
+    c.gui.elements.auto_fire_toggle:set(true)
+    c.run(5)
+    local st = c.status()
+    eq(st.running, false, 'auto-fire did not start'); eq(st.pending, true); eq(st.owner, 'Other')
+    c.answer = true
+    c.run(10)
+    eq(#results, 1, 'the queued caller is completed exactly once'); eq(results[1], 'success')
+end)
+case('R15 other false answers still revoke, also during a pause', function()
+    for _, answer in ipairs({ 'alfred_busy', 'yield', 'looter_busy:yield:x' }) do
+        local c = harness({ at = ARRIVAL, walk = true })
+        eq(c.start(owner_guard(c)), true); c.run(1)
+        c.answer = 'yield:looter_busy'; c.run(3)
+        eq(c.status().running, true, answer .. ': paused first')
+        local clears = c.clears
+        c.answer = answer; c.tick()
+        eq(c.result, 'cancelled', answer); eq(c.status().last_reason, answer)
+        eq(c.clears, clears, answer .. ': path preserved'); eq(c.status().last_zone_handled, nil)
+    end
+    local c = harness({ at = ARRIVAL })
+    c.start(function() return nil, 'yield:looter_busy' end); c.tick()
+    eq(c.result, 'cancelled', 'only an explicit false pauses'); eq(c.status().last_reason, 'yield:looter_busy')
+    c = harness({ at = ARRIVAL })
+    c.start(function() error('guard broke') end); c.tick()
+    eq(c.result, 'cancelled'); eq(c.status().last_reason, 'guard_error')
+end)
+case('R15 disabling SilentRaven aborts a paused request without clearing any path', function()
+    local c = harness({ at = ARRIVAL, walk = true })
+    eq(c.start(owner_guard(c)), true); c.run(1)
+    c.answer = 'yield:looter_busy'; c.run(2)
+    eq(c.status().running, true)
+    local clears = c.clears
+    c.enabled = false; c.tick()
+    eq(c.result, 'disabled'); eq(c.callbacks, 1); eq(c.clears, clears, 'companion path untouched')
+    eq(c.status().running, false)
+end)
+case('R15 panel closed and player moved away while paused: back to the NPC in the same attempt', function()
+    local c = harness({ walk = true })   -- at the Raven
+    local attempts = 0
+    c.after_update = function() attempts = math.max(attempts, c.tracker.attempts) end
+    local guard = owner_guard(c)
+    c.start(function()
+        if c.panel and c.selects == 0 and not c.moved then c.answer = 'yield:looter_busy' end
+        return guard()
+    end)
+    c.run(1)
+    eq(c.status().state, 'INTERACT_NPC'); eq(c.selects, 0, 'no selection while paused')
+    -- The Looter walks the player away and the panel closes.
+    c.moved, c.panel, c.px, c.py = true, false, ARRIVAL[1], ARRIVAL[2]
+    c.run(3)
+    eq(c.status().running, true)
+    c.answer = true
+    c.tick()
+    eq(c.status().state, 'WALK_NPC', 'walks back to the NPC')
+    c.run(15)
+    eq(c.result, 'success'); eq(attempts, 1, 'same attempt'); eq(c.count('panel_timeout'), 0)
+end)
+case('R15 a definite departure from Temis ends a paused request', function()
+    local c = harness({ at = ARRIVAL, walk = true })
+    eq(c.start(owner_guard(c)), true); c.run(1)
+    c.answer = 'yield:looter_busy'; c.run(2)
+    local clears = c.clears
+    c.zone = nil; c.run(1)
+    eq(c.status().running, true, 'a loading sample is not a departure')
+    c.zone = 'Kehj_Caldeum'; c.tick()
+    eq(c.result, 'cancelled'); eq(c.status().last_reason, 'left_temis'); eq(c.clears, clears)
+end)
+case('R15 a yield answer after accept does not cancel the receipt', function()
+    local c = harness()
+    local guard = owner_guard(c)
+    c.start(function()
+        if c.accepts > 0 then c.answer = 'yield:looter_busy' end
+        return guard()
+    end)
+    c.run(3)
+    eq(c.accepts, 1); eq(c.result, 'success'); eq(c.callbacks, 1)
 end)
 
 -- L10: robust walk to the Raven.

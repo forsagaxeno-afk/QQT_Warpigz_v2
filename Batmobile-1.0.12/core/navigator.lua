@@ -113,12 +113,24 @@ local navigator = {
     world_zone                = nil,
     world_pos                 = nil,
     world_seen_at             = -1,    -- time of the last valid observation
+    world_generation          = 0,     -- bumped on every world/teleport reset
     target_set_at             = -1,    -- time set_target last assigned a goal
     -- While walkability streams in (load, world change) explorer scans do
     -- not cache "non-walkable" permanently.
     scan_grace_until          = -1,
-    -- Set by core.long_path: returns true while a long route owns the goal.
+    -- Explorer map of the world last left ({key, zone, pos, at, explorer}),
+    -- handed back when that world is re-entered near the exit point within
+    -- WORLD_CACHE_SECS (a pit left for an Alfred trip).  Dropped by an
+    -- explicit BatmobilePlugin.reset() (full wipe).
+    world_cache               = nil,
+    -- Set by core.long_path: returns (navigating, owner) of the long route.
     long_path_active          = nil,
+    -- Normalized caller of the last pause/resume/release (core.external).
+    pause_owner               = nil,
+    -- Paused trap sampling (paused_trap_active): displacement probe.
+    trap_probe_pos            = nil,
+    trap_probe_time           = -1,
+    trap_probe_moved          = false,
 }
 
 -- Tunables (kept as locals so they're visible in code but not part of the
@@ -138,6 +150,8 @@ local INERT_TRAV_BL_DURATION = 60   -- seconds an inert traversal stays blacklis
 local MOVE_GAP_GRACE        = 0.75  -- move() gap treated as a caller yield
 local WORLD_JUMP_DIST       = 100   -- zone change + jump beyond this = teleport
 local SCAN_GRACE_SECS       = 3     -- no negative walkability cache after load/world change
+local WORLD_CACHE_SECS      = 300   -- explorer map of the world just left is kept this long
+local TRAP_PAUSED_MOVE_MIN  = 2     -- paused: displacement per sample interval that counts as driving
 
 -- Wire up failed-direction sharing once at module load.  The explorer reads this
 -- list during frontier scoring; navigator.record_failed_direction reassigns the
@@ -843,8 +857,14 @@ navigator.observe_world = function ()
     local pos = player and player:get_position() or nil
     local prev_key, prev_zone, prev_pos = navigator.world_key, navigator.world_zone, navigator.world_pos
     local prev_seen = navigator.world_seen_at
+    local now = get_time_since_inject()
     navigator.world_key, navigator.world_zone, navigator.world_pos = key, zone, pos
-    navigator.world_seen_at = get_time_since_inject()
+    navigator.world_seen_at = now
+    local cache = navigator.world_cache
+    if cache ~= nil and now - cache.at > WORLD_CACHE_SECS then
+        cache = nil
+        navigator.world_cache = nil   -- expired: free the map
+    end
     if prev_key == nil then return false end
     local teleported = zone ~= prev_zone and pos ~= nil and prev_pos ~= nil
         and utils.distance(pos, prev_pos) > WORLD_JUMP_DIST
@@ -858,13 +878,33 @@ navigator.observe_world = function ()
     if navigator.is_custom_target and navigator.target ~= nil and navigator.target_set_at > prev_seen then
         keep_target, keep_spell = navigator.target, navigator.disable_spell
     end
+    -- Keep the map of the world being left (by reference: reset() installs
+    -- fresh tables, nothing mutates these).  Only the explorer map is kept;
+    -- targets, trap and traversal state are always reset below.
+    local can_cache = explorer.snapshot ~= nil and explorer.restore ~= nil
+    navigator.world_cache = can_cache and {key = prev_key, zone = prev_zone, pos = prev_pos, at = prev_seen,
+        explorer = explorer.snapshot()} or nil
     navigator.reset()
+    -- Back in the world left shortly before, near where it was left (pit ->
+    -- town for an Alfred trip -> same pit through the portal): hand its
+    -- explorer map back instead of re-exploring a floor already mapped.
+    if cache ~= nil and can_cache and cache.key == key and pos ~= nil and cache.pos ~= nil
+        and utils.distance(pos, cache.pos) <= WORLD_JUMP_DIST
+    then
+        explorer.restore(cache.explorer)
+        console.print(string.format(
+            '[nav] back in %s after %ds — explorer map restored (%d frontiers, %d visited); targets, trap and traversal state reset',
+            key, math.floor(now - cache.at), explorer.frontier_count or 0, explorer.visited_count or 0))
+    end
     if keep_target ~= nil then
         navigator.target = keep_target
         navigator.is_custom_target = true
         navigator.disable_spell = keep_spell
+    else
+        tracker.movement_owner = nil
     end
     explorer.priority = explorer.default_priority or 'direction'
+    navigator.world_generation = navigator.world_generation + 1
     navigator.note_loading()
     return true
 end
@@ -1095,17 +1135,16 @@ navigator.move = function ()
     end
     -- Trap detection runs every move() tick; sampling and bbox check are
     -- internally rate-limited.  attempt_escape only fires while trapped.
-    -- Not while paused: a paused caller holds position by design (Maiden
-    -- lock, pyre, boss fight), which read as a trap, flipped giving_up (HR
-    -- abandoned the zone) and let attempt_escape retarget the caller to a
-    -- climb gizmo.  Unpaused custom goals (long paths, patrol) keep it.
-    if not navigator.paused then
+    -- Paused callers only while they drive a route (paused_trap_active): a
+    -- paused hold (Maiden lock, pyre, boss fight) read as a trap, flipped
+    -- giving_up and let attempt_escape retarget the caller to a climb gizmo.
+    if not navigator.paused or navigator.paused_trap_active(local_player) then
         navigator.update_trap_state(local_player)
         if navigator.trapped then
             navigator.attempt_escape(local_player)
         end
     elseif navigator.trapped then
-        -- No new samples while paused, but an existing trap still ages out
+        -- No new samples while holding, but an existing trap still ages out
         -- of the window instead of freezing (a stale `trapped` blocks
         -- try_traversal_route for paused callers such as cross_traversal).
         navigator.update_trap_state(local_player, true)
@@ -2140,6 +2179,33 @@ navigator.try_traversal_route = try_traversal_route
 -- teleport away and pick a new zone.
 -- ────────────────────────────────────────────────────────────────────────────
 
+-- Paused trap sampling.  A paused caller that holds position (Maiden lock,
+-- pyre, boss or monster fight) is not trapped; one that pauses every tick
+-- and drives its own route with move() (Arkham portal/anchor/orb/boss
+-- routes, HR chest recall) still needs trap escape.  Sample while paused
+-- only when the caller's goal lies beyond a trap-sized box around the player
+-- (a goal inside it is a hold or a fight, not a trap) AND either the pausing
+-- caller's own long route is active or the player moved at least
+-- TRAP_PAUSED_MOVE_MIN during the last sample interval.  Never keyed on a
+-- non-empty path: a stationary hold can keep a stale one.
+navigator.paused_trap_active = function(local_player)
+    local now = get_time_since_inject()
+    local pos = local_player:get_position()
+    if now - navigator.trap_probe_time >= TRAP_SAMPLE_INTERVAL then
+        local prev = navigator.trap_probe_pos
+        navigator.trap_probe_moved = prev ~= nil and utils.distance(pos, prev) >= TRAP_PAUSED_MOVE_MIN
+        navigator.trap_probe_pos, navigator.trap_probe_time = pos, now
+    end
+    local goal = navigator.trav_final_target
+    if goal == nil and navigator.post_trav_target ~= nil then goal = navigator.post_trav_target.pos end
+    if goal == nil then goal = navigator.target end
+    if goal == nil or utils.distance(pos, goal) <= TRAP_BBOX_THRESHOLD then return false end
+    if navigator.trap_probe_moved then return true end
+    if not navigator.long_path_active then return false end
+    local navigating, owner = navigator.long_path_active()
+    return navigating == true and owner ~= nil and owner == navigator.pause_owner
+end
+
 navigator.update_trap_state = function(local_player, no_sample)
     local now = get_time_since_inject()
     local pos = local_player:get_position()
@@ -2604,6 +2670,9 @@ navigator.clear_trap_state = function()
     navigator.giving_up            = false
     navigator.trap_pos_history     = {}  -- fresh start so we don't re-fire instantly
     navigator.trap_pos_sample_time = -1
+    navigator.trap_probe_pos       = nil
+    navigator.trap_probe_time      = -1
+    navigator.trap_probe_moved     = false
     navigator.trap_post_escape_grace_until = -1
     -- Long-term trap-traversal blacklist is per-zone; teleporting away
     -- invalidates it (those gizmos may not even exist in the new zone).

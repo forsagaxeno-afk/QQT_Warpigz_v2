@@ -34,15 +34,28 @@ local function current_fault(latched_only)
     return nil
 end
 
+-- Transaction pending across worlds (RESET, sigil activation, portal entry).
+local function transaction_pending()
+    return tracker.reset_exit_pending or tracker.sigil_activation_pending or tracker.horde_entry_pending
+end
+
 -- C2 / CRT-2: committed to a horde (entry, run, chests, exit/RESET or an
 -- Alfred trip HordeDev started). Idle, walking or town is not a run.
 local function run_in_progress()
-    if tracker.reset_exit_pending or tracker.sigil_activation_pending or tracker.horde_entry_pending then return true end
+    if transaction_pending() then return true end
     if tracker.horde_opened or tracker.sigil_used then return true end
     if alfred_task.trip_in_progress and alfred_task.trip_in_progress() then return true end
     local chest_state = open_chests_task.current_state
     if chest_state ~= nil and chest_state ~= "INIT" and not tracker.finished_chest_looting then return true end
     return utils.player_in_zone(HORDE_ZONE)
+end
+
+-- R8: an enable() while main_toggle is already on and a healthy run is in
+-- progress (WarPigs re-asserting ownership, a re-enable after a hotkey pause)
+-- keeps that run. A latched fault still gets the full restart, as in stop_run.
+local function keep_run_on_enable()
+    if not (gui.elements.main_toggle:get() and run_in_progress()) then return false end
+    return current_fault(transaction_pending()) == nil
 end
 
 -- Same wipe as a fresh enable(): every transaction, fault and chest flag.
@@ -59,8 +72,7 @@ end
 -- survives a pause and resumes when re-activated; a chest fault is restarted
 -- too unless its exit transaction is already running.
 local function stop_run()
-    local pending = tracker.reset_exit_pending or tracker.sigil_activation_pending or tracker.horde_entry_pending
-    local fault = current_fault(pending)
+    local fault = current_fault(transaction_pending())
     if task_manager.stop then task_manager.stop() end
     if fault then
         console.print("[HordeDev] Clearing latched fault on stop: " .. fault)
@@ -99,7 +111,7 @@ local function main_pulse()
     end
     was_active = true
     if not local_player then return end
-    local pending = tracker.reset_exit_pending or tracker.sigil_activation_pending or tracker.horde_entry_pending
+    local pending = transaction_pending()
     if not pending then
         dead_since = nil
         local world = get_current_world()
@@ -178,28 +190,43 @@ end
 InfernalHordesPlugin = {
     enable = function ()
         console.print('HORDE ACTIVATING')
-        if task_manager.stop then task_manager.stop() end
-        -- Wipe leftover run state before activating. WarPigs re-enables the
-        -- plugin mid-BSK after a prior wave; without this, finished_chest_looting
-        -- and the per-chest opened flags survive and the next run skips
-        -- open_chests entirely (exit_horde fires the moment the player is back
-        -- in BSK). fresh_run_reset() also covers the normal Library->sigil flow
-        -- as a no-op because start_dungeon's reset_chest_flags() runs anyway.
-        -- open_chests has its own internal state machine (current_state etc.)
-        -- that finishes at chest_state.FINISHED on the prior run; reset it so
-        -- the SM re-enters at INIT.
-        reset_run_state()
-        -- Stamp the enable time so the horde task's settle gate (in horde.lua's
-        -- shouldExecute) can wait for world/zone to stabilize before firing
-        -- the wave loop. Read by horde.shouldExecute alongside a world-name
-        -- check ('BSK' substring) — both must hold before the bomber pulses.
-        tracker.enable_time = get_time_since_inject()
+        if keep_run_on_enable() then
+            -- R8: already on and inside a healthy run: re-assert, never reset.
+            console.print('[HordeDev] enable() during a run in progress; keeping the current run')
+        else
+            if task_manager.stop then task_manager.stop() end
+            -- Wipe leftover run state before activating. WarPigs re-enables the
+            -- plugin mid-BSK after a prior wave; without this, finished_chest_looting
+            -- and the per-chest opened flags survive and the next run skips
+            -- open_chests entirely (exit_horde fires the moment the player is back
+            -- in BSK). fresh_run_reset() also covers the normal Library->sigil flow
+            -- as a no-op because start_dungeon's reset_chest_flags() runs anyway.
+            -- open_chests has its own internal state machine (current_state etc.)
+            -- that finishes at chest_state.FINISHED on the prior run; reset it so
+            -- the SM re-enters at INIT.
+            reset_run_state()
+            -- Stamp the enable time so the horde task's settle gate (in horde.lua's
+            -- shouldExecute) can wait for world/zone to stabilize before firing
+            -- the wave loop. Read by horde.shouldExecute alongside a world-name
+            -- check ('BSK' substring) — both must hold before the bomber pulses.
+            tracker.enable_time = get_time_since_inject()
+        end
         gui.elements.main_toggle:set(true)
+        -- R8 (as Arkham's ARK-7): 'Use keybind' with no key bound could never
+        -- pass the gate, so WarPigs re-enabled (and reset) HordeDev every tick.
+        local key = gui.elements.keybind_toggle
+        if not settings.external_control and settings.use_keybind
+            and type(key.get_key) == 'function' and key:get_key() == 0x0A
+        then
+            console.print("[HordeDev] 'Use keybind' is on but no key is bound; running under external control")
+        end
+        settings.external_control = true
         gui.elements.keybind_toggle:set(true)
         settings:update_settings()
     end,
     disable = function ()
         console.print('HORDE DEACTIVATING')
+        settings.external_control = false
         gui.elements.main_toggle:set(false)
         gui.elements.keybind_toggle:set(false)
         settings:update_settings()
@@ -208,16 +235,20 @@ InfernalHordesPlugin = {
     end,
     -- C2 additive fields: in_run (committed to a horde), fault (latched fault
     -- message or nil), alfred_trip (HordeDev's own Alfred round trip), hold
-    -- (companion hold reason or nil).
+    -- (companion hold reason or nil), exit_pending (R7: the Leave/RESET or
+    -- Teleport exit is actively in progress, including its Looter hold).
     status = function ()
+        -- HRD-7: execution is gated on the keybind too (like Arkham/WonderCity).
+        local enabled = gui.elements.main_toggle:get() and utils.get_keybind_state()
         return {
-            -- HRD-7: execution is gated on the keybind too (like Arkham/WonderCity).
-            ['enabled'] = gui.elements.main_toggle:get() and utils.get_keybind_state(),
+            ['enabled'] = enabled,
             ['task'] = task_manager.get_current_task(),
             ['in_run'] = run_in_progress(),
             ['fault'] = current_fault(),
             ['alfred_trip'] = alfred_task.trip_in_progress ~= nil and alfred_task.trip_in_progress() or false,
             ['hold'] = alfred_task.hold_reason or loot_guard.hold_reason(),
+            ['exit_pending'] = enabled == true and exit_horde_task.exit_pending ~= nil
+                and exit_horde_task:exit_pending() == true,
         }
     end,
     getState = function ()

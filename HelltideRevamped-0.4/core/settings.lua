@@ -105,12 +105,26 @@ local function force_active()
     return get_time_since_inject() <= force_clear_until
 end
 
+-- C4/L12b: orbwalker states HR itself forced (clear OFF, block ON). Like
+-- WonderCity's orb_forced, they are handed back even when 'Manage orbwalker'
+-- was switched off after HR forced them; HR never touches an orbwalker it
+-- did not force while management is off.
+local orb_forced = {clear = false, block = false}
+
+local function set_clear(v)
+    orbwalker.set_clear_toggle(v)
+    orb_forced.clear = not v
+end
+
 settings.orb_set_clear = function (v)
-    if not settings.manage_orbwalker then return end
+    if not settings.manage_orbwalker then
+        if v and orb_forced.clear then set_clear(true) end
+        return
+    end
     if v and cinder_gate_active() and not force_active() then
         v = false
     end
-    orbwalker.set_clear_toggle(v)
+    set_clear(v)
 end
 
 -- Tick driver: call from the main task pulse so the gate is asserted every
@@ -118,14 +132,19 @@ end
 -- forced OFF above threshold, which left orbwalker stuck OFF after cinders
 -- dropped back below 150 (e.g. we just opened a chest) until the next state
 -- that explicitly called orb_set_clear(true). Now it's symmetric.
+-- With management switched off mid-run, a clear OFF the gate forced is
+-- handed back once and the gate then leaves the orbwalker alone.
 settings.apply_cinder_orb_gate = function ()
-    if not settings.manage_orbwalker then return end
+    if not settings.manage_orbwalker then
+        if orb_forced.clear then set_clear(true) end
+        return
+    end
     if force_active() then
-        orbwalker.set_clear_toggle(true)
+        set_clear(true)
     elseif cinder_gate_active() then
-        orbwalker.set_clear_toggle(false)
+        set_clear(false)
     else
-        orbwalker.set_clear_toggle(true)
+        set_clear(true)
     end
 end
 
@@ -135,25 +154,30 @@ end
 settings.force_orb_clear_for = function (seconds)
     if not settings.manage_orbwalker then return end
     force_clear_until = get_time_since_inject() + (seconds or 5)
-    orbwalker.set_clear_toggle(true)
+    set_clear(true)
 end
 
 settings.orb_set_block = function (v)
-    if settings.manage_orbwalker then
+    if settings.manage_orbwalker or (not v and orb_forced.block) then
         orbwalker.set_block_movement(v)
+        orb_forced.block = v and true or false
     end
 end
 
 -- C4/HLT-6: leaving HR (disable, task switch, loading) hands the orbwalker
 -- back in its neutral state: movement unblocked and clear ON, which the
 -- cinder gate may have forced OFF. A pending chest-combat force window is
--- dropped so it cannot outlive the session.
+-- dropped so it cannot outlive the session. A state HR forced is restored
+-- even if 'Manage orbwalker' was switched off since (L12b).
 settings.orb_release = function ()
     force_clear_until = -math.huge
-    if settings.manage_orbwalker then
+    if settings.manage_orbwalker or orb_forced.block then
         orbwalker.set_block_movement(false)
+    end
+    if settings.manage_orbwalker or orb_forced.clear then
         orbwalker.set_clear_toggle(true)
     end
+    orb_forced.clear, orb_forced.block = false, false
 end
 
 return settings

@@ -73,7 +73,9 @@ end
 
 local function maybe_consume_external_trigger(now)
     if not tracker.external_trigger then return end
-    if not fsm.check_guard() then return end
+    -- A revoked request finishes here; a paused one (R15 'yield:') stays
+    -- queued, bounded by the same pause limit, and starts when allowed.
+    if not fsm.check_guard(now) then return end
     if tracker.paused then return end
     if tracker.running then return end
     -- Honor the per-zone latch only when no TP was requested -- if a
@@ -109,7 +111,8 @@ end
 
 local function maybe_autofire(now, cur_zone)
     if not settings.auto_fire or tracker.managed_by then return end
-    if tracker.running or tracker.paused then return end
+    -- A queued external request (possibly paused by its guard) owns the slot.
+    if tracker.running or tracker.paused or tracker.external_trigger then return end
     if not whispers.player_ready() then return end
     if not coordination.can_start(nil) then return end
     if not whispers.in_whisper_town() then return end
@@ -329,7 +332,11 @@ local function main_pulse()
         -- where it is instead of drifting to its last requested goal.
         if tracker.running or tracker.external_trigger then
             log.info('disabled -- aborting own request')
-            if not fsm.check_guard() then return end
+            -- A revoked request finishes inside check_guard. A paused one
+            -- (R15) is aborted here; its companion owns movement, and the
+            -- pause already dropped our movement ownership.
+            local allowed, paused = fsm.check_guard(now)
+            if not allowed and not paused then return end
             if tracker.movement_owned then whispers.stop_movement() end
             tracker.finish('disabled')
         end

@@ -15,10 +15,14 @@ local SELECT_SETTLE = 0.5
 -- STALL_SECONDS is stalled (request_move ignored behind a stale stored
 -- path, or the player walking someone else's route).
 local STALL_SECONDS, STALL_PROGRESS = 3, 1
--- Own-run companion yield: one log line at YIELD_LOG_S, give up (without
--- latching the visit) at YIELD_LIMIT_S.
+-- Pauses (own-run companion yield, or an owner's 'yield:' guard answer):
+-- one log line at YIELD_LOG_S, give up (without latching the visit) at
+-- YIELD_LIMIT_S of continuous pause.
 local YIELD_LOG_S, YIELD_LIMIT_S = 60, 120
 local YIELD_STATES = { START = true, WAIT_RETRY = true, WALK_NPC = true, INTERACT_NPC = true }
+-- R15: a continuation guard answering (false, 'yield:<reason>') pauses the
+-- request instead of revoking it.
+local YIELD_PREFIX = 'yield:'
 -- Automatic reward dumps: one per run, a few per session.
 local AUTO_DUMP_LIMIT = 5
 local session = { dumps = 0 }
@@ -49,10 +53,80 @@ local function finish(result, preserve_path, keep_visit)
     log.info('run finished: ' .. result .. ' (' .. tostring(tracker.last_reason) .. ')')
     tracker.finish(result)
 end
-M.check_guard = function()
+-- Pause bookkeeping shared by own-run companion yields and an owner's
+-- 'yield:' guard answer. The companion owns movement: no more moves from
+-- us and its path is never cleared (movement_owned is dropped). Paused time
+-- does not consume the walk, panel, settle or run timeouts (C5). Logged once
+-- at YIELD_LOG_S; cancelled with `expired` at YIELD_LIMIT_S without latching
+-- the visit (C6). Returns true while paused, false once cancelled.
+local function hold(now, reason, expired)
+    local dt = tracker.yield_t and math.max(0, now - tracker.yield_t) or 0
+    tracker.yield_t, tracker.yield_reason = now, reason
+    if not tracker.yield_since then
+        tracker.yield_since = now
+        tracker.movement_owned = false
+    end
+    if tracker.state_t then tracker.state_t = tracker.state_t + dt end
+    if tracker.run_started_t then tracker.run_started_t = tracker.run_started_t + dt end
+    if tracker.walk_progress_t then tracker.walk_progress_t = tracker.walk_progress_t + dt end
+    local held = now - tracker.yield_since
+    if held >= YIELD_LOG_S and not tracker.yield_logged then
+        tracker.yield_logged = true
+        log.info(string.format('waiting %.0fs for %s before continuing the Whisper claim (gives up at %ds)',
+            held, reason, YIELD_LIMIT_S))
+    end
+    if held < YIELD_LIMIT_S then return true end
+    tracker.last_reason = expired
+    finish('cancelled', true, not tracker.claim_sent)
+    return false
+end
+-- End of a pause: the current step resumes (a walk heads for the same
+-- waypoint, in the same attempt). The companion may have moved the player,
+-- so stall tracking is re-baselined, and a panel step whose panel closed
+-- meanwhile goes back to the NPC: interact again in range, else walk back.
+local function unhold(now)
+    if tracker.yield_since then
+        if tracker.yield_logged then
+            log.info(string.format('resuming after %.0fs waiting for %s', now - tracker.yield_since, tostring(tracker.yield_reason)))
+        end
+        tracker.walk_kind = nil
+        local state = tracker.state
+        if (state == 'INTERACT_NPC' or state == 'SELECT_VERIFY') and whispers.reward_panel_open() ~= true then
+            local npc = whispers.find_tree_npc()
+            tracker.claim_pick = nil
+            if not (npc and whispers.player_dist_sq(npc) <= 8 * 8) then
+                tracker.walk_via_done = false
+                transition('WALK_NPC', now)
+            elseif state == 'SELECT_VERIFY' then
+                transition('INTERACT_NPC', now)
+            end
+        end
+    end
+    tracker.yield_reason, tracker.yield_since, tracker.yield_t = nil, nil, nil
+end
+-- Continuation guard of an external owner. true: continue. (false,
+-- 'yield:<reason>') (R15): pause the request -- no moves, interactions,
+-- selection or accept, timeouts frozen -- and resume the current step once
+-- it answers true again; cancelled as 'yield_timeout' after YIELD_LIMIT_S.
+-- After accept there is nothing left to pause, so a yield there only lets
+-- the receipt be observed. Any other answer, or an error, revokes the
+-- request as before, never clearing the other owner's path or UI.
+-- Returns true to continue; false, 'yield' while paused; false once finished.
+M.check_guard = function(now)
     if not tracker.continuation_guard then return true end
+    now = now or clock()
     local ok, allowed, reason = pcall(tracker.continuation_guard)
-    if ok and allowed == true then return true end
+    if ok and allowed == true then
+        -- An own run's companion pause is ended by yielding() only.
+        if not tracker.companion_yield then unhold(now) end
+        return true
+    end
+    if ok and allowed == false and type(reason) == 'string' and reason:sub(1, #YIELD_PREFIX) == YIELD_PREFIX then
+        if tracker.claim_sent then return true end
+        local why = reason:sub(#YIELD_PREFIX + 1)
+        if hold(now, why ~= '' and why or 'owner', 'yield_timeout') then return false, 'yield' end
+        return false
+    end
     tracker.last_reason = ok and (reason or 'guard_rejected') or 'guard_error'
     -- The other owner may already have moved. Never clear its path or UI.
     finish('cancelled', true, not tracker.claim_sent)
@@ -142,46 +216,18 @@ local function watch_walk(target, kind, now)
     return whispers.force_move(target)
 end
 -- Own runs (auto-fire/manual) stop moving and interacting while Alfred has
--- live work or the Looter is collecting. That companion owns movement, so
--- its path is never cleared. Waiting does not consume the walk, panel or
--- run timeouts; an open reward panel is claimed without waiting.
+-- live work or the Looter is collecting (see hold/unhold). An open reward
+-- panel is claimed without waiting.
 local function yielding(now)
-    if not tracker.companion_yield or not YIELD_STATES[tracker.state]
+    if not tracker.companion_yield then return false end
+    if not YIELD_STATES[tracker.state]
         or (tracker.state == 'INTERACT_NPC' and whispers.reward_panel_open() == true) then
-        tracker.yield_reason, tracker.yield_since, tracker.yield_t = nil, nil, nil
+        unhold(now)
         return false
     end
     local clear, reason = coordination.companions('run', now)
-    if clear then
-        if tracker.yield_since then
-            if tracker.yield_logged then
-                log.info(string.format('resuming after %.0fs waiting for %s', now - tracker.yield_since, tostring(tracker.yield_reason)))
-            end
-            -- The companion may have moved the player: re-baseline stall tracking.
-            tracker.walk_kind = nil
-        end
-        tracker.yield_reason, tracker.yield_since, tracker.yield_t = nil, nil, nil
-        return false
-    end
-    local dt = tracker.yield_t and math.max(0, now - tracker.yield_t) or 0
-    tracker.yield_t, tracker.yield_reason = now, reason
-    if not tracker.yield_since then
-        tracker.yield_since = now
-        tracker.movement_owned = false
-    end
-    if tracker.state_t then tracker.state_t = tracker.state_t + dt end
-    if tracker.run_started_t then tracker.run_started_t = tracker.run_started_t + dt end
-    if tracker.walk_progress_t then tracker.walk_progress_t = tracker.walk_progress_t + dt end
-    local held = now - tracker.yield_since
-    if held >= YIELD_LOG_S and not tracker.yield_logged then
-        tracker.yield_logged = true
-        log.info(string.format('waiting %.0fs for %s before continuing the Whisper claim (gives up at %ds)',
-            held, reason, YIELD_LIMIT_S))
-    end
-    if held >= YIELD_LIMIT_S then
-        tracker.last_reason = 'yield_timeout:' .. reason
-        finish('cancelled', true, true)
-    end
+    if clear then unhold(now); return false end
+    hold(now, reason, 'yield_timeout:' .. reason)
     return true
 end
 local function interact(npc, now)
@@ -209,7 +255,9 @@ local function verify_selection(now)
             tostring(raw), type(raw), pick.host_index, pick.index))
         retry('selection_verification_failed', now); return
     end
-    if not M.check_guard() then return end
+    -- Never accept while the owner revoked or paused the request (R15): a
+    -- paused request stays here and re-verifies before accepting.
+    if not M.check_guard(now) then return end
     -- Once accept is sent its result is ambiguous even if the binding throws.
     -- Never send another accept for this request; wait for actual receipt.
     local entry = pick.entry
@@ -266,10 +314,19 @@ function M.start(settings, reason, with_tp, callback)
 end
 function M.tick(settings)
     if not tracker.running then return end
-    if not M.check_guard() then return end
-    local now, zone = clock(), whispers.current_zone()
+    local now = clock()
+    local go = M.check_guard(now)
+    if not tracker.running then return end
+    local zone = whispers.current_zone()
     tracker.observe_zone(zone)
-    if yielding(now) then return end
+    if not go or yielding(now) then
+        -- A paused request still ends on a definite departure from Temis.
+        if tracker.running and tracker.state ~= 'TELEPORTING' and zone and zone ~= '' and zone ~= 'Skov_Temis'
+            and whispers.player_ready() then
+            tracker.last_reason = 'left_temis'; finish('cancelled', true)
+        end
+        return
+    end
     if now - (tracker.run_started_t or now) >= RUN_TIMEOUT then
         tracker.last_reason = 'run_timeout'; finish(tracker.claim_sent and 'unconfirmed' or 'failed'); return
     end

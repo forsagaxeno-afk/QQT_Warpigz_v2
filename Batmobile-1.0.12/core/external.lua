@@ -28,13 +28,19 @@ local function set_goal_owner(who)
     own.target = who
     tracker.movement_owner = who
 end
+-- The navigator samples trap positions for a paused caller only while that
+-- caller drives its own long route (navigator.paused_trap_active).
+local function set_pause_owner(who)
+    own.pause = who
+    navigator.pause_owner = who
+end
 local KEEP_PAUSE_WINDOW = 0.25  -- pause() then navigate_long_path() in one tick
 local LOG_INTERVAL = 5          -- release/takeover diagnostics, per caller
 local loading_logged = false
 local last_log = {}
-local function log_limited(key, message)
+local function log_limited(key, message, interval)
     local now = get_time_since_inject()
-    if last_log[key] ~= nil and now - last_log[key] < LOG_INTERVAL then return end
+    if last_log[key] ~= nil and now - last_log[key] < (interval or LOG_INTERVAL) then return end
     last_log[key] = now
     console.print(message)
 end
@@ -51,8 +57,10 @@ local function holds_caller_goal()
         or (navigator.post_trav_target ~= nil and navigator.post_trav_target.is_custom == true)
         or long_path.navigating
 end
--- A goal or route left by another plugin never steers this caller: drop
--- it (and its traversal routing / failed-target zone) before acting.
+-- An explicit new goal claim (set_target, navigate_long_path,
+-- try_traversal_route) by another caller replaces the previous owner's goal
+-- or route: drop it (and its traversal routing / failed-target zone) before
+-- acting.  move/update/resume never drop it (note_foreign).
 local function drop_foreign(who, action)
     local route_owner = long_path.navigating and long_path.owner or nil
     local foreign_route = route_owner ~= nil and route_owner ~= who
@@ -65,13 +73,37 @@ local function drop_foreign(who, action)
     set_goal_owner(nil)
     return true
 end
+-- move/resume by a different caller never drop the owner's goal or route: a
+-- closed-source companion (Alfred, Looteer) driving Batmobile under its own
+-- name would otherwise ping-pong the activity's goal every tick.  Only an
+-- explicit claim (set_target, navigate_long_path, try_traversal_route)
+-- replaces it, and the owner's release() clears it.  Logged (rate-limited)
+-- so a live log shows the companion conflict.
+local FOREIGN_LOG_INTERVAL = 30
+local function note_foreign(who, action)
+    local owner = long_path.navigating and long_path.owner or nil
+    if owner == nil and holds_caller_goal() then owner = own.target end
+    if owner == nil or owner == who then return end
+    log_limited('foreign:' .. who, string.format(
+        '[batmobile] %s by %s: goal of %s kept (replaced only by a new goal claim or its release)',
+        action, who, owner), FOREIGN_LOG_INTERVAL)
+end
 -- World change / teleport resets explorer, trap and traversal state
 -- (navigator.observe_world) and drops routes planned for the old world.
+-- main.lua's pulse usually sees the change first; the navigator's world
+-- generation lets goal/priority ownership follow that reset too (a stale
+-- owner showed up in get_owner() and the [NAV STATE] owner= field).  A goal
+-- set during the loading screen survives the reset and keeps its owner.
+local world_generation = 0
+local function sync_world()
+    if navigator.world_generation == world_generation then return end
+    world_generation = navigator.world_generation
+    if not navigator.is_custom_target then set_goal_owner(nil) end
+    own.priority = nil
+end
 local function observe_world()
-    if long_path.observe_world() then
-        set_goal_owner(nil)
-        own.priority = nil
-    end
+    long_path.observe_world()
+    sync_world()
 end
 -- Host world/actor data is incomplete while loading: external update/move
 -- follow main.lua's guard instead of scanning/pathing on it.  One log line
@@ -102,7 +134,7 @@ external.pause = function (caller)
     end
     tracker.external_caller = caller
     utils.log(2, 'pause called by ' .. tostring(caller))
-    own.pause = norm(caller)
+    set_pause_owner(norm(caller))
     own.pause_time = get_time_since_inject()
     navigator.pause()
 end
@@ -115,9 +147,10 @@ external.resume = function (caller)
     utils.log(2, 'resume called by ' .. tostring(caller))
     local who = norm(caller)
     observe_world()
-    -- Resume never revives another plugin's leftover route or custom goal.
-    drop_foreign(who, 'resume')
-    own.pause = who
+    -- Another caller's goal is kept (see note_foreign); the owner's release()
+    -- or a new claim replaces it.
+    note_foreign(who, 'resume')
+    set_pause_owner(who)
     navigator.unpause()
 end
 external.reset = function (caller)
@@ -129,6 +162,8 @@ external.reset = function (caller)
     utils.log(2, 'reset called by ' .. tostring(caller))
     long_path.stop_navigation()
     navigator.reset()
+    -- Full wipe: no explorer map of a previously left world comes back.
+    navigator.world_cache = nil
     explorer.priority = default_priority()
     set_goal_owner(nil)
     own.priority = nil
@@ -155,7 +190,7 @@ external.move = function (caller)
     utils.log(2, 'move called by ' .. tostring(caller))
     if loading_skip('move', caller) then return end
     observe_world()
-    drop_foreign(norm(caller), 'move')
+    note_foreign(norm(caller), 'move')
     tracker.bench_start("total_move")
     local start_move = os.clock()
     navigator.move()
@@ -421,6 +456,7 @@ external.release = function (caller)
         return false
     end
     tracker.external_caller = caller
+    sync_world()
     local who = norm(caller)
     local route_owner = long_path.navigating and long_path.owner or nil
     local foreign_route = route_owner ~= nil and route_owner ~= who
@@ -433,7 +469,7 @@ external.release = function (caller)
         navigator.release_movement(false)
         set_goal_owner(nil)
         if not foreign_resume then
-            own.pause = who
+            set_pause_owner(who)
             navigator.pause()
         end
     end
@@ -455,6 +491,7 @@ end
 -- Current movement owner (normalized caller of the active long route or of
 -- the last accepted goal), or nil.
 external.get_owner = function ()
+    sync_world()
     if long_path.navigating and long_path.owner ~= nil then return long_path.owner end
     return own.target
 end

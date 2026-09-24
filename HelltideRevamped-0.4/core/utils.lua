@@ -78,8 +78,8 @@ function utils.alfred_live_work(s)
 end
 
 -- Only these send HR to town. need_trigger alone, restock_count and
--- need_stash_* are advisory; tasks/alfred.lua handles them with the sticky
--- grace after a completed cycle (HLT-1/HLT-2).
+-- need_stash_* are advisory; tasks/alfred.lua never starts a trip for them
+-- inside a helltide (HLT-1/HLT-2/R12).
 function utils.alfred_hard_need(s)
     return s.inventory_full == true or s.need_repair == true
 end

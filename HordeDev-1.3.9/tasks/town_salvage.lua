@@ -175,10 +175,15 @@ local town_salvage_task = {
     
         -- If we're not in Cerrigar, we need both high item count and a gold chest to start
         -- (cheap flags first: the inventory check may read Alfred's status)
-        return settings.salvage and
-               tracker.needs_salvage and
-               gold_chest_exists and
-               utils.is_inventory_full()
+        if not (settings.salvage and tracker.needs_salvage and gold_chest_exists) then return false end
+        -- C1/C6: salvage delegated to an enabled Alfred never falls back to the
+        -- built-in Cerrigar trip (e.g. once a paused Alfred's bound expires,
+        -- the chests continue instead); unreadable status is bounded (C1).
+        if settings.use_alfred and utils.get_alfred() then
+            local status = utils.read_alfred_status()
+            if not status or status.enabled then return false end
+        end
+        return utils.is_inventory_full()
     end,
 
     Execute = function(self)

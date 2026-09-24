@@ -329,9 +329,10 @@ test('noninteractable chest before our own click waits a bounded unlock window, 
     local s=session();s.actors={actor('X1_Undercity_Chest_Attunement',0,{interactable=false})}
     local task=s.load('tasks.goto_chest');task:Execute();s.now=102;task:Execute()
     assert(not s.load('core.tracker').done and #s.interactions==0)
-    -- CRT-1/L9: without an observed kill the wait ends after 30 s (opened).
-    s.now=129;task:Execute();assert(not s.load('core.tracker').done)
-    s.now=130.1;task:Execute()
+    -- R14: without opened evidence the wait ends after 60 s (was 30 s).
+    s.now=130.1;task:Execute();assert(not s.load('core.tracker').done)
+    s.now=159;task:Execute();assert(not s.load('core.tracker').done)
+    s.now=160.1;task:Execute()
     assert(s.load('core.tracker').done and #s.interactions==0)
 end)
 
@@ -459,9 +460,12 @@ test('new floor resets reward evidence and stale chest interaction state', funct
     local s=session();local manager=s.load('core.task_manager')
     s.all_actors={actor('X1_Undercity_Chest_Attunement',0)};manager.execute_tasks()
     local task=s.load('tasks.goto_chest');assert(task.last_interact_call)
-    s.now=101;s.world_id=2;s.all_actors={};manager.execute_tasks()
     local tr=s.load('core.tracker')
+    assert(tr.chest_interacted==100 and tr.chest_first_seen==100,'R14 evidence recorded')
+    s.now=101;s.world_id=2;s.all_actors={};manager.execute_tasks()
     assert(not tr.reward_seen and not tr.done and not tr.reward_opened_time and not task.last_interact_call)
+    -- R14: our click on the previous floor's chest is no evidence for the next one.
+    assert(not tr.chest_interacted and not tr.chest_first_seen and not tr.boss_kill_seen and not tr.chest_loot_seen)
 end)
 
 test('enticement timer belongs to the actor currently being handled', function()

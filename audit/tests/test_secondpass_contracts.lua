@@ -172,6 +172,8 @@ end
 
 -- Another owner's arrival revokes the guard and preserves its replacement
 -- movement and UI; root cancellation is still an exactly-once completion.
+-- R15: a Looter burst before accept pauses the request instead (the walk
+-- resumes); live Alfred work stays a cancel.
 for _, companion in ipairs({'looter', 'alfred'}) do
     local c = fixture(); c:walk()
     if companion == 'looter' then
@@ -180,11 +182,19 @@ for _, companion in ipairs({'looter', 'alfred'}) do
         c.env.AlfredTheButlerPlugin = {get_status = function() return {enabled = true, trigger_tasks = true} end}
     end
     local clears, escapes = c.clears, c.escapes
-    eq(c.bridge:tick(c.now, false), false, companion .. ' preempts our request')
+    if companion == 'looter' then
+        eq(c.bridge:tick(c.now, false), true, 'a Looter burst pauses our request (R15)')
+        c.update()
+        eq(c.api.get_status().running, true, 'the paused request is kept')
+    else
+        eq(c.bridge:tick(c.now, false), false, companion .. ' preempts our request')
+    end
     eq(c.clears, clears, companion .. ' path is preserved')
     eq(c.escapes, escapes, companion .. ' UI is preserved')
-    eq(c.api.get_status().running, false)
-    eq(c.api.cancel('WarPigs'), false)
+    if companion == 'alfred' then
+        eq(c.api.get_status().running, false)
+        eq(c.api.cancel('WarPigs'), false)
+    end
 end
 
 -- Alfred's completed-cycle grace grants admission, not a shorter deadline

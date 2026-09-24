@@ -636,6 +636,30 @@ explorer.reset = function ()
     _last_scan_pos = nil
     _evict_counter = 0
 end
+-- World cache (navigator.observe_world).  The map of the world being left is
+-- kept by reference: reset() installs fresh tables, so nothing mutates it.
+-- restore() hands it back when that world is re-entered (pit -> town for an
+-- Alfred trip -> same pit); selection state (cur_pos, backtracking,
+-- last_dir, scan throttle) always starts fresh.
+explorer.snapshot = function ()
+    return {visited = explorer.visited, visited_count = explorer.visited_count,
+        frontier = explorer.frontier, frontier_order = explorer.frontier_order,
+        frontier_node = explorer.frontier_node, frontier_index = explorer.frontier_index,
+        frontier_count = explorer.frontier_count, retry = explorer.retry, retry_count = explorer.retry_count,
+        backtrack = explorer.backtrack, backtrack_secondary = explorer.backtrack_secondary,
+        scanned = explorer.scanned, chunks = frontier_chunks}
+end
+explorer.restore = function (map)
+    explorer.reset()
+    explorer.visited, explorer.visited_count = map.visited, map.visited_count
+    explorer.frontier, explorer.frontier_order = map.frontier, map.frontier_order
+    explorer.frontier_node, explorer.frontier_index = map.frontier_node, map.frontier_index
+    explorer.frontier_count = map.frontier_count
+    explorer.retry, explorer.retry_count = map.retry, map.retry_count
+    explorer.backtrack, explorer.backtrack_secondary = map.backtrack, map.backtrack_secondary
+    explorer.scanned = map.scanned
+    frontier_chunks = map.chunks
+end
 explorer.set_priority = function (priority)
     local allowed = {
         ['direction'] = true,

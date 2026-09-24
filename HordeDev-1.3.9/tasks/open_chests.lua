@@ -88,6 +88,12 @@ local function aether_count()
     return ok and type(count) == "number" and count or nil
 end
 
+-- C1/C6: tasks/alfred.lua holds a salvage pause on a paused Alfred for at
+-- most 60 s; past that the chests continue until Alfred's pause ends.
+local function alfred_pause_expired(status)
+    return status.paused == true and tracker.alfred_pause_expired == true
+end
+
 local function clear_chest_timers()
     for _, key in ipairs({"request_move_to_chest", "chest_opening_time", "chest_vfx_wait", "chest_loot_wait",
         "wait_for_talisman_loot_delay", "wait_for_ga_loot_delay", "wait_for_normal_loot_delay", "gold_chest_timer"}) do
@@ -181,13 +187,20 @@ open_chests_task = {
         tracker.needs_salvage = true
         -- C1/C6: an Alfred that became unavailable (disabled, or unreadable
         -- past its bounded grace) and a bag the built-in salvage would not
-        -- empty leave nobody to service this pause; resume the chests.
-        if settings.use_alfred and utils.get_alfred() then
-            local status = utils.read_alfred_status()
-            if status == nil or status.enabled == true then return end
+        -- empty leave nobody to service this pause; resume the chests. So does
+        -- an Alfred paused past its bound (the built-in salvage never runs
+        -- while Alfred is enabled and used).
+        local why = "Alfred unavailable, bag not full"
+        local delegated = settings.use_alfred and utils.get_alfred()
+        local status = delegated and utils.read_alfred_status()
+        if delegated and status == nil then return end
+        if delegated and status.enabled == true then
+            if not alfred_pause_expired(status) then return end
+            why = "Alfred paused past its 60 s bound"
+        elseif settings.salvage and utils.is_inventory_full() ~= false then
+            return
         end
-        if settings.salvage and utils.is_inventory_full() ~= false then return end
-        console.print("[open_chests] No salvage owner available (Alfred unavailable, bag not full); resuming chests.")
+        console.print("[open_chests] No salvage owner available (" .. why .. "); resuming chests.")
         tracker.needs_salvage = false
         self.current_state = self.state_before_pause or chest_state.OPENING_CHEST
         return
@@ -346,7 +359,10 @@ open_chests_task = {
                     if status.enabled and type(status.need_trigger) ~= 'boolean' then return end
                     -- C1: need_trigger alone cannot re-pause within the sticky
                     -- grace after HordeDev's own completed cycle.
-                    if utils.alfred_trip_wanted(status, tracker.alfred_completed_at) then
+                    -- C1/C6: no re-pause for an Alfred paused past its bound.
+                    if utils.alfred_trip_wanted(status, tracker.alfred_completed_at)
+                        and not alfred_pause_expired(status)
+                    then
                         self.state_before_pause = self.current_state
                         self.current_state = chest_state.PAUSED_FOR_SALVAGE
                         return

@@ -241,6 +241,8 @@ case('WPD-1 a later companion hold gets its own full bound', function()
     f.quests = {'WarPlans_QST_Helltide_TorturedGifts'}; f.tick()
     f.looter(true)
     f.on_waypoint = function() f.set_zone('Sanctuary', 'Skov_Temis', true) end
+    -- R6: the first activity after the turn-in gets the native transition.
+    f.on_warplan = function() f.set_zone('Sanctuary', 'Hawe_Verge', false) end
     f.quests = {'WarPlans_QST_TurnIn_Rewards'}
     truthy(f.until_true(function() return f.waypoints >= 1 end, 40), 'first hold bounded')
     f.looting = false
@@ -568,6 +570,194 @@ case('C6 a gate held for minutes is logged (rate-limited) and shown', function()
     f.run(470)
     truthy(f.logged('watchdog') <= 5, 'watchdog rate-limited: ' .. f.logged('watchdog'))
     eq(horde.disables, 0, 'the watchdog reports; it does not force a loot-unsafe handoff')
+end)
+
+-- ── Round 3 ─────────────────────────────────────────────────────────────────
+-- R1 (critic probe_p1): the TELEPORTING retry consults the companion gate only
+-- every TELEPORT_CHECK_INTERVAL (6 s). The old 2 s episode reset restarted the
+-- bound on every consult, so a latched Looter or Alfred flag blocked the retry
+-- forever (1 warplan call in 300 s / 600 s).
+case('R1 TELEPORTING retry hold is bounded under a latched busy Looter (~30 s)', function()
+    local f = fixture({teleport = true, world = 'Sanctuary', zone = 'Hawe_Verge', town = false})
+    f.e.teleport_to_waypoint = nil   -- no via-Temis detour: warplan directly
+    local wc = f.plugin('WonderCityPlugin')
+    f.quests = {'WarPlans_QST_Undercity'}
+    truthy(f.until_true(function() return f.teleports == 1 end, 10), 'first warplan call')
+    f.looter(true)                   -- approach_stall retries: Looter reports busy throughout
+    local dt = f.until_true(function() return f.teleports >= 2 end, 120)
+    truthy(dt and dt >= 25 and dt <= 45, 'retry after the ~30 s Looter bound, got ' .. tostring(dt))
+    truthy(f.logged('Looter busy for') >= 1, 'bound expiry logged')
+    truthy(f.until_true(function() return wc.enables >= 1 end, 120), 'gate released after the retry cap')
+end)
+
+case('R1 TELEPORTING retry hold is bounded under a latched Alfred running flag (~180 s) and shown', function()
+    local f = fixture({teleport = true, world = 'Sanctuary', zone = 'Hawe_Verge', town = false})
+    f.e.teleport_to_waypoint = nil
+    local wc = f.plugin('WonderCityPlugin')
+    f.quests = {'WarPlans_QST_Undercity'}
+    truthy(f.until_true(function() return f.teleports == 1 end, 10), 'first warplan call')
+    local t0 = f.now
+    f.alfred({enabled = true, running = true})
+    f.run(100)
+    eq(f.teleports, 1, 'no retry over live Alfred work')
+    local line = f.o.get_status_line()
+    truthy(line:find('held', 1, true) and line:find('TELEPORTING', 1, true)
+        and line:find('Alfred cycle in progress', 1, true), 'hold reason in the status line: ' .. line)
+    truthy(f.until_true(function() return f.teleports >= 2 end, 120), 'retry after the Alfred bound')
+    local waited = f.now - t0
+    truthy(waited >= 170 and waited <= 200, 'retry after ~180 s, got ' .. waited)
+    local watchdog = 0
+    for _, m in ipairs(f.logs) do
+        if m:find('watchdog', 1, true) and m:find('Alfred cycle in progress', 1, true) then watchdog = watchdog + 1 end
+    end
+    truthy(watchdog >= 1, 'watchdog log names the companion hold')
+    truthy(f.until_true(function() return wc.enables >= 1 end, 120), 'WonderCity starts')
+end)
+
+-- R2 (critic probe_p4): only a denial after a warplan TELEPORTING confirmed or
+-- released counts toward MAX_GATE_DENIALS.
+case('R2 WPD-3 counts only enable_gate denials that follow a warplan teleport', function()
+    -- Exactly probe_p4: a new Horde plan after the turn-in.
+    local f = fixture({teleport = true})
+    local horde = horde_plugin(f)
+    f.on_waypoint = function() f.set_zone('Sanctuary', 'Skov_Temis', true) end
+    f.on_warplan = function() f.set_zone('Sanctuary_Eastern_Continent', 'Kehj_Caldeum', false) end
+    f.quests = {'WarPlans_QST_TurnIn_Rewards'}
+    f.run(30)
+    f.quests = {}
+    f.run(10)
+    local t0 = f.teleports
+    f.logs = {}
+    f.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+    truthy(f.until_true(function() return horde.enables >= 1 end, 300), 'HordeDev enabled to self-navigate')
+    eq(f.teleports - t0, 2, 'two warplan deliveries before the bypass')
+    for _, m in ipairs(f.logs) do
+        if m:find('enable_gate for', 1, true) then
+            truthy(not m:find('Skov_Temis', 1, true), 'no denial counted in Temis: ' .. m)
+            truthy(m:find('warplan teleport', 1, true), 'wording names the warplan teleport: ' .. m)
+        end
+    end
+    -- 'Use teleport' switched on in Temis with the Horde quest already up:
+    -- the first denial has no teleport before it.
+    local g = fixture()                                    -- 'Use teleport' off
+    local h2 = horde_plugin(g)
+    g.on_waypoint = function() g.set_zone('Sanctuary', 'Skov_Temis', true) end
+    g.on_warplan = function() g.set_zone('Sanctuary_Eastern_Continent', 'Kehj_Caldeum', false) end
+    g.quests = {'WarPlans_QST_TurnIn_Rewards'}; g.run(5)   -- session under way
+    g.quests = {}; g.run(5)
+    g.settings.use_teleport_transition = true              -- the user switches it on
+    g.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+    truthy(g.until_true(function() return h2.enables >= 1 end, 300), 'HordeDev enabled to self-navigate')
+    eq(g.teleports, 2, 'two warplan deliveries, the teleport-less denial not counted')
+end)
+
+-- R3 (critic probe_p2 P3): C2 in_run decides for a Reaper WarPigs did not start.
+case('R3 an adopted Reaper run that reports in_run is held when its quest vanishes (bounded)', function()
+    local f = fixture()
+    local reaper = f.plugin('ReaperPlugin', {in_run = true, external_run = true}); reaper.enabled = true
+    reaper.run_once = function() return false, 'busy' end
+    f.quests = {'WarPlans_QST_BossLair_Zir'}; f.tick()
+    eq(f.logged('adopted active ReaperPlugin'), 1)
+    f.quests = {}   -- boss dead, Reaper still opening the chest
+    f.run(60)
+    eq(reaper.disables, 0, 'an adopted run still in its chest phase is not cut')
+    reaper.st.in_run = false
+    f.tick(); eq(reaper.disables, 1, 'released once Reaper reports in_run == false')
+    local g = fixture()
+    local stuck = g.plugin('ReaperPlugin', {in_run = true, external_run = true}); stuck.enabled = true
+    g.quests = {'WarPlans_QST_BossLair_Zir'}; g.tick()
+    g.quests = {}
+    g.run(290); eq(stuck.disables, 0)
+    truthy(g.until_true(function() return stuck.disables == 1 end, 20), 'hold bounded (300 s)')
+    eq(g.logged('releasing it (bounded hold)'), 1)
+    -- A legacy Reaper without in_run keeps the old rule (not started: release).
+    local h = fixture()
+    local legacy = h.plugin('ReaperPlugin'); legacy.enabled = true
+    h.quests = {'WarPlans_QST_BossLair_Zir'}; h.tick()
+    h.quests = {}; h.tick()
+    eq(legacy.disables, 1, 'legacy Reaper released at once')
+end)
+
+-- R4 (critic probe_p2 P2): a refusal that repeats forever is visible (C6).
+case('R4 a Reaper run_once refused forever is shown with boss and reason', function()
+    local f = fixture()
+    local reaper = f.plugin('ReaperPlugin')
+    local calls = 0
+    reaper.run_once = function() calls = calls + 1; return false, 'belial_chest_disabled' end
+    f.quests = {'WarPlans_QST_BossLair_Belial'}
+    f.run(5)
+    local line = f.o.get_status_line()
+    truthy(line:find('Reaper refused belial: belial_chest_disabled', 1, true), 'status line: ' .. line)
+    f.run(300)
+    truthy(calls >= 9 and calls <= 12, 'retried on its 30 s cooldown: ' .. calls)
+    line = f.o.get_status_line()
+    truthy(line:find('held', 1, true) and line:find('Reaper refused belial: belial_chest_disabled', 1, true),
+        'watchdog status: ' .. line)
+    local logged = 0
+    for _, m in ipairs(f.logs) do
+        if m:find('watchdog', 1, true) and m:find('Reaper refused belial', 1, true) then logged = logged + 1 end
+    end
+    truthy(logged >= 1 and logged <= 3, 'watchdog log (rate-limited): ' .. logged)
+    f.quests = {}; f.tick()
+    truthy(not f.o.get_status_line():find('refused', 1, true), 'cleared with the quest: ' .. f.o.get_status_line())
+end)
+
+-- R7: HordeDev's own exit (C2 exit_pending) is not cut by the 60 s fault grace.
+case('R7 a faulted HordeDev whose exit is in progress keeps the longer, bounded grace', function()
+    local function start(fields)
+        local f = fixture({world = 'S05_BSK_Prototype02', zone = 'S05_BSK_Prototype02', town = false})
+        local horde = horde_plugin(f, {in_run = true}); horde.enabled = true
+        f.plugin('ArkhamAsylumPlugin')
+        f.quests = {'WarPlans_QST_InfernalHordes_BSK'}; f.tick()
+        horde.st.fault = 'chests: Gold chest could not be opened'
+        for k, v in pairs(fields) do horde.st[k] = v end
+        f.quests = {'WarPlans_QST_ThePit'}
+        return f, horde
+    end
+    local f, horde = start({exit_pending = true})
+    f.run(150)
+    eq(horde.disables, 0, 'HordeDev exit (Looter hold + Leave/Reset) not cut at 60 s')
+    eq(f.logged('extending the fault grace'), 1)
+    truthy(f.until_true(function() return horde.disables == 1 end, 40), 'still bounded (~180 s)')
+    eq(f.logged('fault grace expired'), 1)
+    -- The exit finishes on its own inside the grace: released as soon as in_run clears.
+    local g, h2 = start({exit_pending = true})
+    g.run(100); eq(h2.disables, 0)
+    h2.st.exit_pending, h2.st.in_run = false, false
+    g.tick(); eq(h2.disables, 1)
+    -- Missing field (older HordeDev) and exit_pending == false keep the 60 s grace.
+    for _, fields in ipairs({{}, {exit_pending = false}}) do
+        local k, h3 = start(fields)
+        k.run(50); eq(h3.disables, 0)
+        truthy(k.until_true(function() return h3.disables == 1 end, 15), 'released after ~60 s')
+    end
+end)
+
+-- R8: an enable() that never reports enabled (HordeDev, 'Use keybind' on and
+-- no key bound) is retried every ~30 s, logged once and shown.
+case('R8 an unconfirmed enable is rate-limited, logged once and shown', function()
+    local f = fixture()
+    local horde = horde_plugin(f)
+    horde.enable = function() horde.enables = horde.enables + 1 end   -- status stays enabled=false
+    f.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+    f.run(120)
+    truthy(horde.enables >= 4 and horde.enables <= 5, 'enable() calls in 120 s: ' .. horde.enables)
+    eq(f.logged('did not result in enabled status'), 1, 'logged once')
+    local line = f.o.get_status_line()
+    truthy(line:find('InfernalHordesPlugin enable not confirmed', 1, true), 'status line: ' .. line)
+    -- The user binds the key: the next retry takes ownership.
+    horde.enable = function() horde.enabled = true; horde.enables = horde.enables + 1 end
+    truthy(f.until_true(function() return horde.enabled end, 35), 'enabled on the next retry')
+    f.tick()
+    truthy(not f.o.get_status_line():find('not confirmed', 1, true), f.o.get_status_line())
+    -- Orbwalker handoff is not re-forced every tick in between (manage_orbwalker on).
+    local g = fixture({orb = true})
+    local h2 = horde_plugin(g)
+    h2.enable = function() h2.enables = h2.enables + 1 end
+    g.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+    g.run(20)
+    eq(h2.enables, 1, 'one enable() in 20 s')
+    truthy(#g.orb <= 2, 'orbwalker touched ' .. #g.orb .. ' times in 20 s')
 end)
 
 if #failures > 0 then error(#failures .. ' WarPigs dispatch regressions failed:\n' .. table.concat(failures, '\n')) end

@@ -260,6 +260,43 @@ test('ARK-3 same pit after an Alfred round trip keeps deadline, boss state and e
     assert(s.tracker.pit_start_time > t0 and s.tracker.boss_dead == false, 'plain re-entry must be a new run')
 end)
 
+-- R10: a floor reached through a portal has the portal up to the previous
+-- floor next to its arrival point. Resuming that floor after an Alfred trip
+-- must keep it blacklisted instead of walking back up a floor.
+test('R10 resuming a floor reached via portal keeps its back portal blacklisted', function()
+    local s = session()
+    s.api.enable(); s.frames(3)
+    local descend = actor('Prefab_Portal_Dungeon_Generic', 2)
+    s.actors = {descend}
+    s.frames(3)
+    assert(#s.interactions >= 1 and s.interactions[#s.interactions].actor == descend, 'descend portal used')
+    local FLOOR2 = {'PIT_Test_Floor2', 'PIT_Subzone', 2}
+    local back = actor('Prefab_Portal_Dungeon_Generic', -5)
+    s.go(FLOOR2); s.actors = {back}; s.interactions = {}
+    s.frames(5)
+    assert(s.logged('back-portal blacklisted'), 'arrival back portal blacklisted')
+    assert(s.task() ~= 'portal', 'back portal taken on arrival')
+    -- Alfred with-teleport trip from this floor and back to the same floor
+    s.floor_loot = true; s.alfred.need_trigger = true; s.alfred.inventory_full = true
+    s.frames(2)
+    assert(#s.alfred.triggers == 1 and s.alfred.triggers[1].teleport, 'with-teleport trip from floor 2')
+    s.go(TOWN); s.actors = {}; s.alfred_pickup(); s.frames(10, 0.2)
+    s.floor_loot = false; s.alfred.inventory_full = false; s.alfred.need_trigger = false
+    s.go(FLOOR2); s.actors = {back}; s.alfred_complete()
+    local took_back = false
+    for _ = 1, 40 do
+        s.frame()
+        if s.task() == 'portal' then took_back = true end
+    end
+    assert(s.logged('resuming the run'), 'same floor resumed')
+    assert(not took_back and #s.interactions == 0, 'resumed floor walked back into the portal it arrived through')
+    assert(s.logged('back-portal blacklist near'), 'kept blacklist is logged')
+    -- A different pit world afterwards starts without that blacklist.
+    s.go(TOWN); s.frames(3); s.go({'PIT_Other', 'PIT_Subzone', 9}); s.actors = {actor('Prefab_Portal_Dungeon_Generic', -5)}
+    s.frames(3)
+    assert(s.task() == 'portal', 'a new run does not inherit the old floor\'s blacklist')
+end)
+
 test('ARK-3 opening a new pit discards the pending resume', function()
     local s = session()
     s.api.enable(); s.frames(3)

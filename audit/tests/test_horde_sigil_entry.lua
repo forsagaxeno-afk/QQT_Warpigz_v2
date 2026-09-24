@@ -181,8 +181,11 @@ do
 end
 
 -- Main plugin lifecycle and handoff include both activation and entry ownership.
+-- The toggles are stateful (off until an external enable) so that enable() is
+-- a fresh activation here; R8: an enable() while already on and inside a
+-- healthy run keeps it, and disable()+enable() is the restart.
 do
-    local s=fresh();local function toggle()return{set=function()end,get=function()return true end}end
+    local s=fresh();local function toggle()local t={v=false};function t:set(v)self.v=v end;function t:get()return self.v end;return t end
     package.loaded.gui={elements={main_toggle=toggle(),keybind_toggle=toggle()},render=function()end}
     package.loaded.Meteor={initialize=function()end}
     on_update=function()end;on_render=function()end;on_render_menu=function()end
@@ -191,5 +194,9 @@ do
     s:tick(103);s:tick(108);s:tick(111);s:tick(112);eq(InfernalHordesPlugin.chests_done(),false)
     InfernalHordesPlugin.enable();eq(s.tracker.sigil_activation_pending,false);eq(s.tracker.horde_entry_pending,false)
     eq(s.explorer.is_task_running,false);eq(s.start.activation_phase,nil);eq(s.entry.entry_phase,nil)
+    s.tracker.horde_entry_pending=true -- a healthy entry of the next run
+    InfernalHordesPlugin.enable();eq(s.tracker.horde_entry_pending,true,'R8: re-enable while on keeps the pending entry')
+    InfernalHordesPlugin.disable();InfernalHordesPlugin.enable()
+    eq(s.tracker.horde_entry_pending,false,'disable()+enable() restarts');eq(s.entry.entry_phase,nil)
 end
 print('PASS: '..n..' assertions (sigil confirmation, portal entry, loading and complete reset/start cycle)')

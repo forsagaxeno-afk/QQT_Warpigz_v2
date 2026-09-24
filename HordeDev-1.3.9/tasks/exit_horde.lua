@@ -62,6 +62,26 @@ local function teleport_casting()
     return ok and id == TELEPORT_SPELL_ID
 end
 
+-- The exit's own preconditions, without the Looter gate: in the Horde at the
+-- boss-room stash with the chest phase finished and no spendable aether.
+-- HRD-1: after a terminal chest fault the remaining aether is unspendable, so
+-- the aether hold is skipped and the Horde is left.
+local function exit_due(log_hold)
+    local s = snapshot()
+    if not s or not s.horde then return false end
+    local aether_ok = true
+    if type(get_aether_count) == 'function' and not tracker.chest_fault then
+        local ok, count = pcall(get_aether_count)
+        if ok and type(count) == 'number' and count > 0 then
+            if log_hold then console.print(string.format("[exit_horde] holding — player still has %d aether", count)) end
+            aether_ok = false
+        end
+    end
+    return utils.get_stash() ~= nil
+        and tracker.finished_chest_looting
+        and aether_ok
+end
+
 local exit_horde_task = {
     name = "Exit Horde",
     delay_start_time = nil,
@@ -169,24 +189,24 @@ local exit_horde_task = {
         end
     end,
 
+    -- C2 / R7 (status().exit_pending): true while HordeDev's exit is actively
+    -- in progress: the Leave/RESET transaction (a latched FAULT is not
+    -- progress), a Teleport exit whose channel has not left the Horde yet, or
+    -- an exit that is due but held by the Looter (bounded by loot_guard).
+    exit_pending = function(self)
+        if self.reset_phase == "FAULT" then return false end
+        if tracker.reset_exit_pending then return true end
+        if self.teleport_exit_started and not self:has_completed_teleport() then
+            local s = snapshot()
+            if not s or s.horde then return true end
+        end
+        return exit_due(false)
+    end,
+
     shouldExecute = function()
         if tracker.reset_exit_pending then return true end
         if not teleport_fired_time and not loot_guard.ready() then return false end
-        local s = snapshot()
-        if not s or not s.horde then return false end
-        local aether_ok = true
-        -- HRD-1: after a terminal chest fault the remaining aether is
-        -- unspendable; leave instead of holding the chest room forever.
-        if type(get_aether_count) == 'function' and not tracker.chest_fault then
-            local ok, count = pcall(get_aether_count)
-            if ok and type(count) == 'number' and count > 0 then
-                console.print(string.format("[exit_horde] holding — player still has %d aether", count))
-                aether_ok = false
-            end
-        end
-        return utils.get_stash() ~= nil
-            and tracker.finished_chest_looting
-            and aether_ok
+        return exit_due(true)
     end,
 
     Execute = function(self)

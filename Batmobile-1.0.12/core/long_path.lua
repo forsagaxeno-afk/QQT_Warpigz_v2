@@ -15,8 +15,9 @@ local long_path = {
 }
 
 -- The navigator must know when a long route owns its goal (no explorer
--- selection on arrival).  A function avoids a second, desyncable flag.
-navigator.long_path_active = function () return long_path.navigating end
+-- selection on arrival) and who owns it (paused trap sampling).  A function
+-- avoids a second, desyncable flag.  Returns navigating, owner.
+navigator.long_path_active = function () return long_path.navigating, long_path.owner end
 
 -- Runtime caps for navigate_to / find_long_path — keeps a single failed pursuit
 -- from freezing the game for 1-2 seconds when the target is across a cliff or

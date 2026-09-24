@@ -1737,8 +1737,8 @@ local helltide_task = {
 
         -- HLT-1: only a hard need (inventory_full/need_repair, or the local
         -- item count when Alfred publishes no inventory view) sends HR to
-        -- town here; advisory need_trigger/restock is tasks/alfred.lua's job,
-        -- behind its sticky grace. Unreadable status holds at most ~10 s (C1)
+        -- town here; advisory need_trigger/restock never starts a trip from
+        -- inside a helltide (tasks/alfred.lua, R12). Unreadable status holds at most ~10 s (C1)
         -- and a foreign Alfred pause at most PAUSED_HOLD_MAX (alfred_paused_skip).
         local needs_salvage = false
         if settings.salvage and not tracker.has_salvaged and not tracker.alfred_paused_skip then

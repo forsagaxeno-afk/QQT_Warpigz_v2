@@ -25,9 +25,12 @@ local UNKNOWN_GRACE = 10
 -- Horde, give Alfred's return portal this long before other tasks may leave.
 local RETURN_WINDOW = 20
 local HOLD_LOG_AFTER = 60 -- C6: log (rate-limited) a hold that lasts this long
+-- C1/C6: HordeDev's own request, or its needs_salvage hold, waits on a paused
+-- Alfred at most this long (the bound Arkham/WonderCity/HR use).
+local PAUSED_HOLD_MAX = 60
 local unknown = {since = nil, logged = false}
 local trip = {from_bsk = false, returning_since = nil, logged = false}
-local held = {reason = nil, since = nil, logged_at = nil}
+local held = {reason = nil, since = nil, logged_at = nil, paused_since = nil, paused_logged = false}
 
 local function get_alfred()
     return AlfredTheButlerPlugin or PLUGIN_alfred_the_butler
@@ -65,6 +68,27 @@ end
 local function clear_request()
     request_plugin, request_started, quiet_since = nil, nil, nil
 end
+-- C1/C6: true once HordeDev has waited PAUSED_HOLD_MAX on a paused Alfred.
+-- The window starts only while HordeDev wants Alfred (its own request or
+-- needs_salvage) and lasts until a readable sample is not paused, so a request
+-- retired for the pause does not open a second window. An unreadable sample
+-- changes nothing (bounded separately). tracker.alfred_pause_expired lets the
+-- chest task continue instead of re-pausing for an Alfred that cannot run.
+local function paused_too_long(status)
+    if status == nil then return tracker.alfred_pause_expired == true end
+    if status.enabled ~= true or status.paused ~= true then
+        held.paused_since, held.paused_logged = nil, false
+        tracker.alfred_pause_expired = false
+        return false
+    end
+    local now = get_time_since_inject()
+    if not held.paused_since then
+        if task.status ~= status_enum.WAITING and tracker.needs_salvage ~= true then return false end
+        held.paused_since = now
+    end
+    tracker.alfred_pause_expired = now - held.paused_since >= PAUSED_HOLD_MAX
+    return tracker.alfred_pause_expired
+end
 local function retire_request()
     generation = generation + 1
     clear_request()
@@ -75,8 +99,18 @@ end
 local function waiting_for_request(status)
     if task.status ~= status_enum.WAITING then return false end
     if get_alfred() ~= request_plugin then retire_request(); return true end
-    if not status or live_work(status) or status.paused then
+    if not status or live_work(status) then
         quiet_since = nil
+        return true
+    end
+    if status.paused then
+        -- A paused sample is not stable idle; the wait is bounded (C1/C6).
+        quiet_since = nil
+        if paused_too_long(status) then
+            console.print(string.format("[alfred] Alfred paused for %ds with HordeDev's request pending; retiring it",
+                PAUSED_HOLD_MAX))
+            retire_request()
+        end
         return true
     end
     -- Legacy trigger calls return nil and do not expose their queued flag.
@@ -165,11 +199,13 @@ end
 
 local function decide()
     local status = get_alfred_status()
+    paused_too_long(status) -- C1/C6: track (or end) a paused-Alfred window
     -- Our own request in flight is reconciled regardless of use_alfred.
     if task.status == status_enum.WAITING then
         if status and not status.enabled then retire_request(); return false end
         waiting_for_request(status)
-        return true, 'HordeDev Alfred trip in progress'
+        return true, status and status.paused == true and 'waiting for a paused Alfred'
+            or 'HordeDev Alfred trip in progress'
     end
     if awaiting_return(status) then return true, 'waiting for the Alfred return portal' end
 
@@ -192,8 +228,18 @@ local function decide()
     -- script wants Alfred to run anyway). tracker.needs_salvage is set
     -- explicitly by horde-exit logic and is always safe to honour.
     if tracker.needs_salvage ~= true then return false end
-    -- A paused Alfred is not triggered (Execute); report the wait (C6).
-    return true, status.paused and 'waiting for a paused Alfred' or nil
+    -- A paused Alfred is not triggered (Execute); the wait is visible (C6) and
+    -- bounded (C1): past PAUSED_HOLD_MAX HordeDev continues without it.
+    if status.paused then
+        if not paused_too_long(status) then return true, 'waiting for a paused Alfred' end
+        if not held.paused_logged then
+            held.paused_logged = true
+            console.print(string.format("[alfred] Alfred paused for %ds with salvage pending; continuing without it",
+                PAUSED_HOLD_MAX))
+        end
+        return false
+    end
+    return true
 end
 
 function task.shouldExecute()
@@ -242,6 +288,8 @@ function task.reset()
     task.status = status_enum['IDLE']
     task.hold_reason = nil
     trip.from_bsk, trip.returning_since = false, nil
+    held.paused_since, held.paused_logged = nil, false
+    tracker.alfred_pause_expired = false
     -- tracker.alfred_completed_at is kept: cancel/preempt never erases the grace.
     tracker.has_salvaged, tracker.needs_salvage = false, false
 end

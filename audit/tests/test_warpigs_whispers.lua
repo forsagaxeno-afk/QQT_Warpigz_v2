@@ -120,12 +120,20 @@ do
     LooteerPlugin={is_actively_looting=function() return true end}
     f:steps(20); eq(f.teleport,0); eq(f.waypoint,0); eq(f.triggers,0)
 end
--- Newly competing navigation cancels only our Raven request, preserving path.
+-- R15: a Looter burst before accept pauses our Raven request (the guard asks
+-- SilentRaven to yield and keep it). Newly competing Alfred work still
+-- cancels only our request, preserving the other owner's path.
 do
     local f=fixture(); f:steps(4)
     LooteerPlugin={is_actively_looting=function() return true end}
-    eq(f.guard(),false); f:tick(); eq(f.cancels,1); eq(f.preserve,true)
+    local ok, why=f.guard(); eq(ok,false); eq(why,'yield:looter_busy')
+    f:tick(); eq(f.cancels,0,'paused, not cancelled'); eq(f.o.is_busy(),true)
+    LooteerPlugin=nil
+    AlfredTheButlerPlugin={get_status=function() return {enabled=true,trigger_tasks=true} end}
+    local ok2, why2=f.guard(); eq(ok2,false); eq(why2,'alfred_busy','hard cancel reason unchanged')
+    f:tick(); eq(f.cancels,1); eq(f.preserve,true)
     eq(f.triggers,1)
+    AlfredTheButlerPlugin=nil
 end
 -- Unknown Looter data never authorizes the new NPC task. Unreadable Alfred
 -- data holds it for at most ~10 s, then Alfred counts as unavailable (C1).

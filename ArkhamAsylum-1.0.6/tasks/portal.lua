@@ -41,6 +41,9 @@ local PATH_RETRY_INTERVAL = 2  -- seconds; if long-path stops navigating, retry 
 -- any portal within BACK_PORTAL_RADIUS of it for the duration of the new world.
 local current_world_name = nil
 local back_portal_pos = nil
+-- ARK-3/R10: {key, pos} of the floor left for an Alfred trip; its back-portal
+-- blacklist is handed back when that same floor is resumed.
+local kept_back_portal = nil
 local portal_just_used = false
 local portal_used_time = -math.huge
 local PORTAL_TRANSITION_WINDOW = 5  -- seconds to accept world-change as portal-induced
@@ -566,12 +569,33 @@ task.Execute = function ()
 end
 
 task.reset = function (transition)
+    -- ARK-3/R10: leaving a floor for an Alfred trip keeps its back-portal
+    -- blacklist; resuming that same floor restores it (the portal next to
+    -- the arrival point still leads back up). Any other transition drops it.
+    if transition == 'outside' then
+        if current_world_name ~= nil then
+            kept_back_portal = tracker.resume_key ~= nil and tracker.resume_key == current_world_name
+                and {key = current_world_name, pos = back_portal_pos} or nil
+        end
+    elseif transition ~= 'resume' then
+        kept_back_portal = nil
+    end
     -- Keep the just-used marker through a real floor change so the arriving
     -- back portal can be excluded; clear it on a new run or town transition.
     if transition ~= 'floor' then
         current_world_name = nil
         back_portal_pos = nil
         portal_just_used = false
+    end
+    if transition == 'resume' and kept_back_portal ~= nil then
+        if kept_back_portal.key == tracker.world_key then
+            current_world_name, back_portal_pos = kept_back_portal.key, kept_back_portal.pos
+            if back_portal_pos ~= nil then
+                console.print(string.format('[portal] resumed %s — back-portal blacklist near (%.1f,%.1f) kept',
+                    current_world_name, back_portal_pos:x(), back_portal_pos:y()))
+            end
+        end
+        kept_back_portal = nil
     end
     update_back_portal_tracking()
     task.portal_found = false

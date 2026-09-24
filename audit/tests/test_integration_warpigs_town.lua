@@ -100,10 +100,14 @@ local function fixture(opts)
             resume = function() return true end,
         }
     end
-    -- SilentRaven v2 contract mock (managed request, guard, cancel).
-    function f.sr(enabled)
+    -- SilentRaven v2 contract mock (managed request, guard, cancel). With
+    -- `yield_aware` it implements the R15 contract: a guard answer
+    -- (false, 'yield:<reason>') pauses the request and keeps it; the walk
+    -- (walked seconds) resumes where it stopped. Without it, any false is a
+    -- cancel (an older SilentRaven).
+    function f.sr(enabled, yield_aware)
         local s = {api_version = 2, enabled = enabled ~= false, running = false, pending = false}
-        f.sr_status = s
+        f.sr_status, f.sr_yield_aware, f.sr_pauses, f.sr_walked = s, yield_aware == true, 0, 0
         e.SilentRavenPlugin = {
             get_status = function() return s end,
             set_managed = function(caller, value) s.managed_by = value and caller or nil; return true end,
@@ -125,6 +129,7 @@ local function fixture(opts)
     function f.sr_finish(result, reason)
         local s = f.sr_status
         s.pending, s.running, s.owner, s.last_result, s.last_reason = false, false, nil, result, reason
+        s.state, s.yield = nil, nil
         if f.sr_callback then local cb = f.sr_callback; f.sr_callback = nil; cb(result) end
     end
     function f.looter(busy)
@@ -156,9 +161,19 @@ local function fixture(opts)
             if f.alfred_cb then local cb = f.alfred_cb; f.alfred_cb = nil; cb('success') end
         end
         -- SilentRaven consults the continuation guard on every pulse.
-        if f.sr_status and f.sr_status.pending and f.sr_guard then
+        local s = f.sr_status
+        if s and (s.pending or s.running) and f.sr_guard then
             local ok, why = f.sr_guard()
-            if not ok then f.sr_finish('cancelled', why) end
+            if not ok and f.sr_yield_aware and type(why) == 'string' and why:find('yield:', 1, true) == 1 then
+                if not s.yield then f.sr_pauses = f.sr_pauses + 1 end
+                s.yield = why
+            elseif not ok then
+                f.sr_finish('cancelled', why)
+            elseif f.sr_yield_aware then
+                s.yield = nil
+                if s.pending then s.pending, s.running, s.state = false, true, 'WALK_NPC' end
+                if s.state == 'WALK_NPC' then f.sr_walked = f.sr_walked + 0.5 end
+            end
         end
         f.o.tick()
         if f.each then f.each() end
@@ -441,7 +456,10 @@ case('SRV-2 a request cancelled by a companion is retried in the visit (bounded)
     end
     f.looting = true; f.run(3); f.looting = false; f.run(30)
     eq(f.sr_triggers, 3, 'at most 3 requests per visit')
-    truthy(f.logged('visit 1: looter_busy') >= 1, 'the last cancellation finishes the visit')
+    -- The bridge reports SilentRaven's own result of the cancelled request,
+    -- with the companion cause (joint suite: a finished request's result wins).
+    truthy(f.logged('visit 1: cancelled (yield:looter_busy)') + f.logged('visit 1: looter_busy') >= 1,
+        'the last cancellation finishes the visit')
     -- A real outcome is never retried.
     local g = fixture({whispers = true})
     g.sr()
@@ -494,6 +512,142 @@ case('C6 the Looter town-traffic hold is bounded and keeps is_busy current', fun
     f.quests = {'WarPlans_QST_TurnIn_Rewards'}
     truthy(f.until_true(function() return f.interacts > 0 end, 125), 'hold released after its bound')
     eq(f.logged('no longer holding WarPigs town movement'), 1, 'release logged once')
+end)
+
+-- ── Round 3 ─────────────────────────────────────────────────────────────────
+-- R5: with 'Use teleport' off no teleport is ever pending, so the IDLE Whisper
+-- slot stayed open with an activity incoming and the admission wait (up to
+-- 120 s) returned from tick() before the ENABLE PHASE.
+case('R5 an incoming activity is not held behind the Whisper admission wait', function()
+    local f = fixture({whispers = true})
+    f.sr()
+    local ark = f.plugin('ArkhamAsylumPlugin')
+    f.alfred({enabled = true, running = true})   -- a long foreign Alfred cycle in Temis
+    f.run(10)
+    truthy(tostring(f.o.get_status_line()):find('Whisper check waiting for alfred_busy', 1, true),
+        'admission is waiting: ' .. tostring(f.o.get_status_line()))
+    f.quests = {'WarPlans_QST_ThePit'}
+    local dt = f.until_true(function() return ark.enables > 0 end, 30)
+    truthy(dt and dt <= 2, 'Pit enabled at once, got ' .. tostring(dt))
+    eq(f.sr_triggers, 0, 'no Whisper walk into the activity start')
+    -- Same with 'Use teleport' on and nothing pending (the turn-in consumed it).
+    local g = fixture({whispers = true})
+    g.sr()
+    g.alfred({enabled = true, running = true})
+    local reaper = g.plugin('ReaperPlugin')
+    reaper.run_once = function() reaper.enabled = true; return true end
+    g.run(10)
+    g.quests = {'WarPlans_QST_BossLair_Zir'}
+    truthy(g.until_true(function() return reaper.enabled end, 5), 'Reaper started at once')
+end)
+
+-- R6 / WPG-7: the turn-in consumed teleport_pending (task-only skip), so the
+-- first activity of the next plan started without the native transition.
+case('R6 the first activity after the turn-in gets the native warplan transition', function()
+    local f = fixture({teleport = true})
+    local ark = f.plugin('ArkhamAsylumPlugin')
+    f.on_warplan = function() f.world = 'PIT_Test_World' end
+    f.quests = {'WarPlans_QST_TurnIn_Rewards'}
+    truthy(f.until_true(function() return f.interacts > 0 end, 20), 'turn-in reached Tyrael')
+    eq(f.teleports, 0, 'the turn-in itself needs no warplan teleport')
+    f.quests = {}                                   -- reward claimed
+    f.run(5)
+    eq(f.logged('teleport queued — turn-in finished'), 1)
+    eq(f.o.is_busy(), false, 'a pending teleport with nothing incoming does not hold WarPug')
+    f.quests = {'WarPlans_QST_ThePit'}              -- WarPug created the next plan
+    truthy(f.until_true(function() return ark.enables > 0 end, 30), 'Pit enabled')
+    eq(f.teleports, 1, 'warplan transition before the first activity of the next plan')
+    truthy(f.logged('teleport confirmed') >= 1, 'enabled after the confirmed transition')
+    -- 'Use teleport' off: nothing is queued.
+    local g = fixture()
+    g.quests = {'WarPlans_QST_TurnIn_Rewards'}
+    truthy(g.until_true(function() return g.interacts > 0 end, 20))
+    g.quests = {}; g.run(3)
+    eq(g.logged('teleport queued'), 0)
+end)
+
+-- R15 (live L7): a short Looter burst before accept pauses the managed
+-- Whisper request instead of cancelling it; the walk resumes.
+case('R15 a Looter burst before accept pauses the managed Whisper request', function()
+    local f = fixture({whispers = true})
+    f.sr(true, true); f.looter(false)
+    truthy(f.until_true(function() return f.sr_status.running end, 12), 'walk started')
+    -- approach_stall retries: short bursts with gaps (live L7 pattern).
+    for _ = 1, 3 do
+        f.looting = true; f.run(1.5)
+        truthy(f.sr_status.yield == 'yield:looter_busy', 'SilentRaven asked to pause')
+        f.looting = false; f.run(4)
+    end
+    eq(f.sr_triggers, 1, 'one request: the walk was not restarted')
+    eq(f.sr_pauses, 3, 'paused once per burst')
+    eq(f.sr_status.running, true, 'request kept')
+    eq(f.logged('Looter busy before accept — pausing the Whisper request'), 1, 'pause logged once')
+    -- C5: a long pause does not age the 60 s request budget.
+    local walked = f.sr_walked
+    f.looting = true; f.run(50)
+    truthy(tostring(f.o.get_status_line()):find('paused — Looter busy', 1, true),
+        'pause visible: ' .. tostring(f.o.get_status_line()))
+    f.looting = false; f.run(20)
+    eq(f.sr_status.running, true, 'not timed out by the pause')
+    truthy(f.sr_walked > walked, 'the walk continued after the pause')
+    f.sr_finish('success')
+    truthy(f.until_true(function() return f.logged('visit 1: success') > 0 end, 3), 'visit completes')
+    eq(f.sr_triggers, 1)
+end)
+
+case('R15 the Looter pause is bounded; hard cancels are unchanged; a post-accept burst never cancels', function()
+    -- A latched Looter: the bridge stops pausing after its bound (backstop
+    -- for SilentRaven's own 120 s cap).
+    local f = fixture({whispers = true})
+    f.sr(true, true); f.looter(false)
+    truthy(f.until_true(function() return f.sr_status.running end, 12))
+    local t0 = f.now
+    f.looting = true
+    truthy(f.until_true(function() return not f.sr_status.running end, 160), 'pause bounded')
+    local held = f.now - t0
+    truthy(held >= 125 and held <= 140, 'paused ~130 s, got ' .. held)
+    eq(f.sr_status.last_reason, 'looter_busy:is_actively_looting', 'then a hard cancel')
+    eq(f.logged('no longer pausing'), 1)
+    -- Hard cancels: live Alfred work, leaving Temis, WarPigs disabled.
+    local function started()
+        local g = fixture({whispers = true})
+        g.sr(true, true); g.looter(false)
+        truthy(g.until_true(function() return g.sr_status.running end, 12))
+        return g
+    end
+    local g = started()
+    g.alfred({enabled = true, trigger_tasks = true}); g.tick()
+    eq(g.sr_status.running, false); eq(g.sr_status.last_reason, 'alfred_busy')
+    local h = started()
+    h.zone = 'Kehj_Kurast'; h.town = true; h.run(3)
+    eq(h.sr_status.running, false, 'leaving Temis cancels')
+    eq(h.sr_pauses, 0)
+    local k = started()
+    k.settings.manage_whispers = false; k.tick()
+    eq(k.sr_status.running, false, 'WarPigs Whispers disabled cancels')
+    eq(k.sr_pauses, 0)
+    -- After accept (API_CLAIMING) SilentRaven only verifies the cache
+    -- receipt: a Looter burst neither cancels nor pauses the request, and
+    -- its result is reported (joint suite: a claimed reward was reported
+    -- 'cancelled' and re-requested twice).
+    local m = started()
+    m.sr_status.state = 'API_CLAIMING'
+    m.looting = true; m.tick(); m.tick()
+    eq(m.sr_status.running, true, 'verification continues during a post-accept burst')
+    eq(m.logged('pausing the Whisper request'), 0, 'no pause budget spent after accept')
+    m.sr_finish('success'); m.tick()
+    eq(m.logged('visit 1: success'), 1, 'the claim is reported as a success')
+end)
+
+case('R15 an older SilentRaven treats the yield as a cancel: safe, retried in the visit', function()
+    local f = fixture({whispers = true})
+    f.sr(); f.looter(false)                        -- any false answer cancels
+    truthy(f.until_true(function() return f.sr_triggers == 1 end, 10), 'first request')
+    f.looting = true; f.tick()
+    eq(f.sr_status.pending, false, 'older SilentRaven cancelled the request')
+    eq(f.sr_status.last_reason, 'yield:looter_busy', 'it saw the yield answer')
+    f.run(2); f.looting = false
+    truthy(f.until_true(function() return f.sr_triggers == 2 end, 10), 'retried in the same visit')
 end)
 
 if #failures > 0 then
