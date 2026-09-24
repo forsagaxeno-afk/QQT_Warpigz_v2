@@ -1068,7 +1068,45 @@ local function check_reaper_altar_watchdog()
     end
 end
 
+-- QQT runs LuaJIT (Lua 5.1 rules): a function may capture at most 60
+-- upvalues, otherwise this whole file fails to compile and WarPigs never
+-- loads. tick() reads its read-only constants through this one table so it
+-- keeps a safe margin below that limit.
+local TICK_CONSTANTS = {
+    TRANSITION_GAP_SECONDS      = TRANSITION_GAP_SECONDS,
+    MAX_DISABLE_DEFER_SECONDS   = MAX_DISABLE_DEFER_SECONDS,
+    SAME_ACTIVITY_SECS          = SAME_ACTIVITY_SECS,
+    POST_ALFRED_SETTLE_SECONDS  = POST_ALFRED_SETTLE_SECONDS,
+    TELEPORT_CHECK_INTERVAL     = TELEPORT_CHECK_INTERVAL,
+    TELEPORT_INCOMING_SETTLE    = TELEPORT_INCOMING_SETTLE,
+    TEMIS_TELEPORT_DEBOUNCE     = TEMIS_TELEPORT_DEBOUNCE,
+    TEMIS_WP                    = TEMIS_WP,
+    TEMIS_LINGER_RETRY_INTERVAL = TEMIS_LINGER_RETRY_INTERVAL,
+    TEMIS_TELEPORT_TIMEOUT      = TEMIS_TELEPORT_TIMEOUT,
+    ALFRED_MIN_DWELL            = ALFRED_MIN_DWELL,
+    ALFRED_PICKUP_TIMEOUT       = ALFRED_PICKUP_TIMEOUT,
+    ALFRED_MAX_SECONDS          = ALFRED_MAX_SECONDS,
+    TURN_IN_PATTERN             = TURN_IN_PATTERN,
+    PLUGIN_PRIORITY             = PLUGIN_PRIORITY,
+}
+
 function orchestrator.tick()
+    local C = TICK_CONSTANTS
+    local TRANSITION_GAP_SECONDS      = C.TRANSITION_GAP_SECONDS
+    local MAX_DISABLE_DEFER_SECONDS   = C.MAX_DISABLE_DEFER_SECONDS
+    local SAME_ACTIVITY_SECS          = C.SAME_ACTIVITY_SECS
+    local POST_ALFRED_SETTLE_SECONDS  = C.POST_ALFRED_SETTLE_SECONDS
+    local TELEPORT_CHECK_INTERVAL     = C.TELEPORT_CHECK_INTERVAL
+    local TELEPORT_INCOMING_SETTLE    = C.TELEPORT_INCOMING_SETTLE
+    local TEMIS_TELEPORT_DEBOUNCE     = C.TEMIS_TELEPORT_DEBOUNCE
+    local TEMIS_WP                    = C.TEMIS_WP
+    local TEMIS_LINGER_RETRY_INTERVAL = C.TEMIS_LINGER_RETRY_INTERVAL
+    local TEMIS_TELEPORT_TIMEOUT      = C.TEMIS_TELEPORT_TIMEOUT
+    local ALFRED_MIN_DWELL            = C.ALFRED_MIN_DWELL
+    local ALFRED_PICKUP_TIMEOUT       = C.ALFRED_PICKUP_TIMEOUT
+    local ALFRED_MAX_SECONDS          = C.ALFRED_MAX_SECONDS
+    local TURN_IN_PATTERN             = C.TURN_IN_PATTERN
+    local PLUGIN_PRIORITY             = C.PLUGIN_PRIORITY
     local bridge_now = get_time_since_inject()
     if not raven_bridge:observe(bridge_now, settings.manage_whispers == true) then return end
     if raven_bridge:is_busy() and raven_bridge:tick(bridge_now, false) then return end

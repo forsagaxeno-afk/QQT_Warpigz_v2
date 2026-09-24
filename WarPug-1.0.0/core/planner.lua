@@ -1,5 +1,7 @@
 local settings = require 'core.settings'
 local planner = {}
+-- QQT runs LuaJIT (Lua 5.1 library): table.unpack does not exist there.
+local unpack = table.unpack or unpack
 
 -- Existing sampled activity identifier. No Season 15 identifiers are guessed.
 local BLOCKED = { ['Warplans_NightmareDungeons'] = true }
@@ -180,7 +182,7 @@ local function clear_owned_path()
         if not ok or accepted ~= true then break end
         local valid, path = pcall(selected_path)
         if not valid or #path ~= before - 1 then break end
-        local expected = { table.unpack(owned_path, 1, before - 1) }
+        local expected = { unpack(owned_path, 1, before - 1) }
         if not same_path(path, expected) then break end
         owned_path = path
     end
@@ -214,12 +216,12 @@ local function find_path(required)
             local name = warplan.node_name(id)
             assert(type(name) == 'string' and name ~= '', 'activity name unavailable')
             if not BLOCKED[name] then
-                local before = { table.unpack(owned_path) }
+                local before = { unpack(owned_path) }
                 vlog('Trying node ' .. tostring(id) .. ': ' .. name)
                 local accepted = warplan.select_node(id)
                 local current = selected_path()
                 if accepted == true then
-                    local expected = { table.unpack(before) }
+                    local expected = { unpack(before) }
                     expected[#expected + 1] = id
                     assert(same_path(current, expected), 'select_node made inconsistent progress')
                     owned_path = current

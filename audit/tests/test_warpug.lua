@@ -35,7 +35,7 @@ local function fixture()
         is_ready = function() return f.ready end,
         required_picks = function() return f.required end,
         selected_count = function() return #f.path end,
-        selected_path = function() return { table.unpack(f.path) } end,
+        selected_path = function() return { (table.unpack or unpack)(f.path) } end,
         is_complete = function() return #f.path == f.required end,
         get_selectable_now = function() return f.edges[f.path[#f.path] or 'root'] or {} end,
         node_name = function(id) return f.names[id] end,

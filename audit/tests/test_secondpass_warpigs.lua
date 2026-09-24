@@ -130,7 +130,7 @@ local function add_creator(f)
     e.get_screen_height=function() return 1080 end
     e.warplan.is_ready=function() return true end
     e.warplan.selected_count=function() return #f.selected end
-    e.warplan.selected_path=function() return {table.unpack(f.selected)} end
+    e.warplan.selected_path=function() return {(table.unpack or unpack)(f.selected)} end
     e.warplan.required_picks=function() return 1 end
     e.warplan.get_selectable_now=function() return #f.selected==0 and {7} or {} end
     e.warplan.node_name=function() return 'Warplans_Helltide' end

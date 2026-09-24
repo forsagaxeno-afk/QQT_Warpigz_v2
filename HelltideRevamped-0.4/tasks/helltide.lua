@@ -3468,7 +3468,12 @@ local helltide_task = {
         self:reset(true)
     end,
 
-    reset = function(self, preserve_external)
+    -- reset() clears most of this file's run state. It is split into two
+    -- ordered halves because QQT's LuaJIT runtime rejects any function that
+    -- captures more than 60 upvalues (and this chunk is already at the
+    -- 200-local limit, so the halves live in this table). The order of
+    -- every assignment and call is unchanged.
+    reset_run_state_first = function(self)
         ni = 1
         last_target_ni = nil
         patrol_free_explore = false
@@ -3497,6 +3502,9 @@ local helltide_task = {
         remembered_chest_long_path_started = false
         remembered_chest_long_path_ok = false
         recall_state_reset()
+    end,
+
+    reset_run_state_second = function(self)
         returning_to_helltide = false
         last_in_zone_pos      = nil
         experimental_armed    = false
@@ -3537,6 +3545,11 @@ local helltide_task = {
         maiden_reset_cycle()
         helltide_explorer.reset()
         clear_movement()
+    end,
+
+    reset = function(self, preserve_external)
+        self:reset_run_state_first()
+        self:reset_run_state_second()
         if BatmobilePlugin and not preserve_external then
             BatmobilePlugin.reset(plugin_label)
         end
