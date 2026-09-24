@@ -19,6 +19,9 @@ function external.get_status()
         last_zone_handled = tracker.last_zone_handled,
         last_observed_zone = tracker.last_observed_zone,
         paused = tracker.paused, paused_by = tracker.paused_by,
+        -- Companion SilentRaven is waiting for (own-run yield or auto-fire
+        -- admission), or nil. Informational; additive.
+        hold_reason = tracker.current_hold((get_time_since_inject and get_time_since_inject()) or 0),
     }
 end
 function external.is_available() return settings.enabled == true end
@@ -91,9 +94,13 @@ function external.cancel(caller, preserve_navigation)
         local ok, allowed = pcall(tracker.continuation_guard)
         if not ok or allowed ~= true then preserve_navigation = true end
     end
-    -- Pending requests never owned movement or an NPC panel.
+    -- Pending requests never owned movement or an NPC panel. ESC only closes
+    -- a panel that is observably open: with nothing open (panel timeout, or
+    -- after accept closed it) D4 would open the game menu for every plugin.
     if tracker.running and preserve_navigation ~= true then
-        if tracker.interacts_fired > 0 or tracker.claim_sent then whispers.send_escape() end
+        if (tracker.interacts_fired > 0 or tracker.claim_sent) and whispers.reward_panel_open() == true then
+            whispers.send_escape()
+        end
         if tracker.movement_owned then whispers.stop_movement() end
     end
     tracker.finish('cancelled')

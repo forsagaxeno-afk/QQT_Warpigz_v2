@@ -61,7 +61,7 @@ local function harness()
         in_helltide=true,active=true,teleports={},interactions={},logs={},moves=0,stops=0,pauses=0,resets=0}
     local settings = {enabled=true,helltide_chest=true,kill_monsters=false,kill_monsters_rarity=0,farm_cinder_threshold=0,salvage=false,
         town_zone='HOME',town_waypoint=999,apply_cinder_orb_gate=function() end,orb_set_clear=function() end,
-        orb_set_block=function() end,force_orb_clear_for=function() end}
+        orb_set_block=function() end,force_orb_clear_for=function() end,orb_release=function() end}
     local modules = {['core.settings']=settings,['core.perf']=setmetatable({}, {__index=function() return function() end end}),
         ['core.helltide_explorer']=setmetatable({}, {__index=function() return function() end end})}
     local player = {get_position=function() return state.pos end,get_current_speed=function() return 0 end,

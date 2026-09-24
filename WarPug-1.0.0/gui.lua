@@ -44,6 +44,15 @@ end
 function gui.valid_position(rx, ry)
     return valid_fraction(rx) and valid_fraction(ry)
 end
+-- Earlier releases shipped the author's own capture with *_set=true, so a
+-- fresh install fired native clicks at another layout's buttons. Those exact
+-- values count as "not captured"; the user must capture their own positions.
+local SHIPPED_CAPTURE = { reroll_rx = 0.179541, reroll_ry = 0.971173, confirm_rx = 0.713987, confirm_ry = 0.728628 }
+local function shipped_capture(loaded, field_x, field_y)
+    local x, y = loaded[field_x], loaded[field_y]
+    return type(x) == 'number' and type(y) == 'number' and
+        math.abs(x - SHIPPED_CAPTURE[field_x]) < 5e-7 and math.abs(y - SHIPPED_CAPTURE[field_y]) < 5e-7
+end
 
 local function save_positions()
     local file, err = io.open(POS_FILE, 'w')
@@ -86,10 +95,16 @@ local function load_positions()
     for key in pairs(coordinate_fields) do
         if loaded[key] ~= nil then gui.positions[key] = loaded[key] end
     end
-    gui.positions.reroll_set = loaded.reroll_set == true and
+    local shipped_reroll = shipped_capture(loaded, 'reroll_rx', 'reroll_ry')
+    local shipped_confirm = shipped_capture(loaded, 'confirm_rx', 'confirm_ry')
+    gui.positions.reroll_set = loaded.reroll_set == true and not shipped_reroll and
         gui.valid_position(loaded.reroll_rx, loaded.reroll_ry)
-    gui.positions.confirm_set = loaded.confirm_set == true and
+    gui.positions.confirm_set = loaded.confirm_set == true and not shipped_confirm and
         gui.valid_position(loaded.confirm_rx, loaded.confirm_ry)
+    if (shipped_reroll and loaded.reroll_set == true) or (shipped_confirm and loaded.confirm_set == true) then
+        console.print('[WarPug] positions.txt holds the calibration shipped with older releases; ' ..
+            'capture your own Reroll and Confirm positions before WarPug can reroll')
+    end
 end
 
 load_positions()
@@ -120,17 +135,43 @@ local function fmt_pos(rx, ry, set)
                          rx, ry, px, py, sw, sh)
 end
 
+-- One-shot keybinds follow the suite convention (Batmobile, SilentRaven): act
+-- once on get_state()==1, then reset the toggle latch with :set(false) so the
+-- next press registers again. A latch that is still set after our reset needs
+-- an observed release first, so a host that ignores :set(false) keeps the old
+-- edge behaviour instead of repeating. A latch already set at the first poll
+-- was restored by the host, not pressed: it is cleared without acting.
+local PRESS_DEBOUNCE = 0.5
+local press_state = {}
+function gui.consume_press(kb, id)
+    local ok, down = pcall(function() return kb:get_state() == 1 and kb:get_key() ~= 0x0A end)
+    down = ok and down == true
+    local rec = press_state[id]
+    if not rec then
+        press_state[id] = { armed = not down, t = -math.huge }
+        if down then
+            pcall(function() kb:set(false) end)
+            console.print('[WarPug] cleared a restored ' .. id .. ' key state; press it again to use it')
+        end
+        return false
+    end
+    if not down then rec.armed = true; return false end
+    if not rec.armed then return false end
+    rec.armed = false
+    pcall(function() kb:set(false) end)
+    local t = get_time_since_inject()
+    if t - rec.t < PRESS_DEBOUNCE then return false end
+    rec.t = t
+    return true
+end
+
 -- Polls the capture keybinds. Called every on_update tick (not gated by the
 -- planner's TICK_INTERVAL) so a key press is never missed.
 --
--- Edge-trigger capture: holding a key never repeatedly rewrites calibration.
-local capture_down = {}
+-- One capture per press: holding a key never repeatedly rewrites calibration.
 function gui.poll_keybinds()
     local function capture(kb, field_x, field_y, field_set, label)
-        local down = kb:get_state() == 1 and kb:get_key() ~= 0x0A
-        local pressed = down and not capture_down[field_set]
-        capture_down[field_set] = down
-        if not pressed then return end
+        if not gui.consume_press(kb, field_set) then return end
         local ok, cx, cy = pcall(function() return utility.get_cursor_screen_position() end)
         local sw, sh = get_screen_width(), get_screen_height()
         if not ok or type(cx) ~= 'number' or type(cy) ~= 'number' or

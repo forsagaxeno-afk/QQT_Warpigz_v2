@@ -21,6 +21,10 @@ local tracker = {
     -- the glyphstone once it spawns). explore_pit / kill_monster are gated by
     -- this so the bot can't wander away to chase trash.
     glyph_anchor_pos = nil,
+    -- ARK-3: world key of the pit we left during an Alfred trip. Coming back
+    -- to that same world is a 'resume' (run deadline, boss/glyph state and
+    -- the explorer map are kept); any other pit world is a new 'run'.
+    resume_key = nil,
 }
 
 tracker.reset_floor_state = function ()
@@ -41,7 +45,10 @@ end
 
 -- Observe transitions before priority selection. Lower-priority task predicates
 -- never run while town/reward tasks win, so they cannot own lifecycle cleanup.
-tracker.observe_world = function ()
+-- alfred_trip: an Alfred trip is in flight (own request, or Alfred busy).
+-- Leaving a pit for it (without exit_pit having started) keeps the run so
+-- the return through the same world resumes it instead of restarting.
+tracker.observe_world = function (alfred_trip)
     local world = get_current_world()
     if not world then return nil end
     local name = world:get_name()
@@ -55,10 +62,29 @@ tracker.observe_world = function ()
     if key == tracker.world_key then return nil end
     local in_pit = name:match('^PIT_') ~= nil
     local kind = in_pit and (tracker.in_pit and 'floor' or 'run') or 'outside'
+    if kind == 'run' and tracker.resume_key ~= nil and tracker.resume_key == key then kind = 'resume' end
+    local left_pit = tracker.in_pit and not in_pit and tracker.world_key or nil
     tracker.world_key = key
     tracker.in_pit = in_pit
     tracker.generation = tracker.generation + 1
-    if kind == 'run' then tracker.reset_pit_state()
+    if kind == 'outside' then
+        if left_pit and alfred_trip and tracker.exit_trigger_time == nil then
+            tracker.resume_key = left_pit
+            console.print('[tracker] left ' .. left_pit .. ' for an Alfred trip — the run resumes on return')
+        end
+        -- Floor state belongs to the pit we may still come back to.
+        if tracker.resume_key == nil then tracker.reset_floor_state() end
+        tracker.glyph_trigger_time = nil
+        return kind
+    end
+    tracker.resume_key = nil
+    if kind == 'resume' then
+        -- Same pit world: keep pit_start_time and boss/glyph state; only the
+        -- per-visit interaction stamps start over.
+        tracker.exit_trigger_time = nil
+        tracker.glyph_trigger_time = nil
+        console.print('[tracker] back in ' .. key .. ' — resuming the run')
+    elseif kind == 'run' then tracker.reset_pit_state()
     else tracker.reset_floor_state() end
     return kind
 end

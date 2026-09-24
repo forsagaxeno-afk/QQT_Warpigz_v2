@@ -103,10 +103,15 @@ M.CACHE_CATALOG    = CACHE_CATALOG
 M.CATALOG_SOURCE   = CATALOG_SOURCE
 M.CATALOG_LOAD_ERR = CATALOG_LOAD_ERR
 
+-- Last-sync read cache (see last_sync_epoch). Reload Catalog invalidates it.
+local LAST_SYNC_TTL = 30
+local last_sync = { read_t = nil, value = nil }
+
 -- Allow the GUI/Reload-Catalog button to swap in a freshly-fetched
 -- catalog without restarting the script.  package.loaded["data.caches"]
 -- is cleared so the next require() reads the new file from disk.
 M.reload_catalog = function ()
+    last_sync.read_t = nil
     package.loaded['silent_raven.data.caches'] = nil
     local ok, mod = pcall(require, 'silent_raven.data.caches')
     if ok and type(mod) == 'table' and next(mod) ~= nil then
@@ -124,13 +129,22 @@ M.reload_catalog = function ()
 end
 
 -- Last-sync epoch from data/last_sync.lua (written by Updater.bat).
--- Returns nil if never synced.  Always reads from disk fresh -- never
--- caches in package.loaded so the GUI shows the live freshness.
+-- Returns nil if never synced.  The file is git-ignored and usually absent,
+-- and this runs from the menu renderer (every frame) and the 1 Hz D4Remote
+-- payload, so the disk read (a failing package search when absent) happens
+-- at most once per LAST_SYNC_TTL seconds or after Reload Catalog.  Never
+-- kept in package.loaded, so a later Updater run is still picked up.
 M.last_sync_epoch = function ()
+    local now = (get_time_since_inject and get_time_since_inject()) or os.time()
+    if last_sync.read_t and now >= last_sync.read_t and now - last_sync.read_t < LAST_SYNC_TTL then
+        return last_sync.value
+    end
+    last_sync.read_t = now
     package.loaded['silent_raven.data.last_sync'] = nil
     local ok, ret = pcall(require, 'silent_raven.data.last_sync')
-    if ok and type(ret) == 'number' then return ret end
-    return nil
+    package.loaded['silent_raven.data.last_sync'] = nil
+    last_sync.value = (ok and type(ret) == 'number') and ret or nil
+    return last_sync.value
 end
 
 -- Human-readable freshness string for the GUI header.
@@ -282,13 +296,38 @@ local function slot_from_internal_name(internal_name)
     return 'other'
 end
 
+-- ---------------------------------------------------------------------------
+-- Entry usability (one rule for picking, claiming and verification)
+--
+-- The host's `valid` field convention is not verified: a live panel with
+-- four ordinary caches was rejected as `no_valid_reward` when only
+-- `valid == true` was accepted.  Only an explicit refusal (false, or a
+-- numeric 0 from a C-style binding) marks a card unusable.  The SNO may
+-- arrive as a number or a numeric string; it is normalized here because
+-- receipt verification counts that SNO in the bags.
+-- ---------------------------------------------------------------------------
+M.entry_sno = function (entry)
+    if type(entry) ~= 'table' then return nil end
+    local sno = tonumber(entry.sno)
+    if not sno or sno <= 0 or sno % 1 ~= 0 then return nil end
+    return sno
+end
+M.entry_invalid = function (entry)
+    if type(entry) ~= 'table' then return true end
+    return entry.valid == false or entry.valid == 0
+end
+M.entry_usable = function (entry)
+    return not M.entry_invalid(entry) and M.entry_sno(entry) ~= nil
+end
+
 -- Extract a normalized slot id from the live entry.  Tries the SNO
 -- catalog first (authoritative), falls back to internal_name parsing,
 -- and ultimately returns 'other' if neither path succeeds.
 M.extract_slot = function (entry)
     if type(entry) ~= 'table' then return 'other' end
-    if type(entry.sno) == 'number' and CACHE_CATALOG[entry.sno] then
-        return CACHE_CATALOG[entry.sno].slot
+    local sno = M.entry_sno(entry)
+    if sno and CACHE_CATALOG[sno] then
+        return CACHE_CATALOG[sno].slot
     end
     return slot_from_internal_name(entry.internal_name)
 end
@@ -297,8 +336,9 @@ end
 -- Used for human-readable log lines in the dump and the FSM debug.
 M.display_name = function (entry)
     if type(entry) ~= 'table' then return '?' end
-    if type(entry.sno) == 'number' and CACHE_CATALOG[entry.sno] then
-        return CACHE_CATALOG[entry.sno].name
+    local sno = M.entry_sno(entry)
+    if sno and CACHE_CATALOG[sno] then
+        return CACHE_CATALOG[sno].name
     end
     if entry.internal_name and entry.internal_name ~= '' then
         return tostring(entry.internal_name)
@@ -324,8 +364,9 @@ M.is_legendary = function (entry)
     if type(entry) ~= 'table' then return false, 'no-entry' end
 
     -- 1. SNO catalog -- authoritative, ships hard-coded legendary flag.
-    if type(entry.sno) == 'number' and CACHE_CATALOG[entry.sno] then
-        local meta = CACHE_CATALOG[entry.sno]
+    local sno = M.entry_sno(entry)
+    if sno and CACHE_CATALOG[sno] then
+        local meta = CACHE_CATALOG[sno]
         if meta.legendary == true  then return true,  'catalog:legendary=true'  end
         if meta.legendary == false then return false, 'catalog:legendary=false' end
     end
@@ -398,7 +439,7 @@ M.score_entry = function (entry, settings)
     local slot = M.extract_slot(entry)
     local legendary, evidence = M.is_legendary(entry)
 
-    if entry.valid == false then
+    if M.entry_invalid(entry) then
         return 0, slot, legendary, evidence
     end
 
@@ -428,10 +469,10 @@ M.pick_best_index = function (entries, settings)
     local breakdown = {}
     local best_idx, best_score = nil, 0
 
+    -- Same usability rule as the claim and its verification (entry_usable).
     local keys = {}
     for k, entry in pairs(entries) do
-        if type(k) == 'number' and k >= 0 and k % 1 == 0
-            and type(entry) == 'table' and entry.valid == true then
+        if type(k) == 'number' and k >= 0 and k % 1 == 0 and M.entry_usable(entry) then
             keys[#keys + 1] = k
         end
     end
@@ -464,7 +505,7 @@ M.pick_best_index = function (entries, settings)
     if best_score == 0 then
         for i, k in ipairs(keys) do
             local e = entries[k]
-            if e and e.valid ~= false then
+            if M.entry_usable(e) then
                 if breakdown[i] then breakdown[i].fallback = true end
                 return k, 0, breakdown
             end

@@ -34,6 +34,8 @@ local function main_pulse()
     if loading then
         -- extend last_update so that it doesnt trigger unstuck straight after loading
         navigator.last_update = get_time_since_inject() + 5
+        -- walkability streams in after a load: do not cache non-walkable cells yet
+        navigator.note_loading()
     end
     settings:update_settings()
     local freeroam = gui.elements.freeroam_keybind_toggle:get_state() == 1
@@ -59,6 +61,9 @@ local function main_pulse()
     -- Host world/actor data is incomplete while loading. Keep settings/reset
     -- responsive, but never pathfind, cast, or request movement in this state.
     if loading then return end
+    -- Explorer/trap/traversal state and long routes never cross a world
+    -- change or teleport, even when no consumer calls reset().
+    long_path.observe_world()
     if local_player and local_player:is_dead() then
         long_path.stop_navigation()
         local now = get_time_since_inject()
@@ -89,6 +94,19 @@ local function main_pulse()
         gui.elements.long_path_test:set(false)
         long_path.test_path()
     end
+    -- A route started under its caller's pause is driven by that caller's
+    -- move(). If nobody drives it within 1 s, fall back to the historical
+    -- autonomous drive instead of leaving it stalled.
+    if long_path.navigating and long_path.kept_pause_at ~= nil then
+        local last_move = navigator.last_move_call
+        if last_move ~= nil and last_move >= long_path.kept_pause_at then
+            long_path.kept_pause_at = nil
+        elseif get_time_since_inject() - long_path.kept_pause_at > 1 then
+            console.print('[LONG PATH] paused route not driven by its caller for 1s — resuming autonomous drive')
+            long_path.kept_pause_at = nil
+            navigator.unpause()
+        end
+    end
     -- Keep GUI state in sync
     gui.long_path_navigating = long_path.navigating
     -- Long path navigation: drive navigator independently of freeroam toggle
@@ -103,12 +121,14 @@ local function main_pulse()
                 console.print("[LONG PATH] Reached target!")
                 long_path.navigating  = false
                 long_path.active_path = nil
+                long_path.owner       = nil
                 navigator.clear_target()
             elseif not long_path.is_traversal_pending()
                 and navigator.target == nil and #navigator.path == 0 then
                 console.print("[LONG PATH] Navigation complete")
                 long_path.navigating  = false
                 long_path.active_path = nil
+                long_path.owner       = nil
             else
                 local start_update = os.clock()
                 navigator.update()

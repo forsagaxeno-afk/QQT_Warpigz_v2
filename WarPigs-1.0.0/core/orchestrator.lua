@@ -46,6 +46,92 @@ local last_alfred_completion_plugin = nil
 local alfred_callback_generation = 0
 local STUCK_NEED_TRIGGER_GRACE  = 20.0
 
+-- C1: one Alfred reading for every WarPigs gate (alfred_idle, the kick,
+-- alfred_trigger_now, the turn-in task and the Whisper bridge copy it).
+-- Grouped in one table so orchestrator.tick() captures no extra upvalue.
+--   * live work: trigger_tasks/external_trigger/pending/running, or a
+--     teleport still in flight. A `teleport` latched after a finished or
+--     failed trip (teleport_done/teleport_failed) is NOT live work (WPT-1).
+--   * enabled == false: never busy. Unreadable status: busy for at most
+--     UNREADABLE_HOLD, then "Alfred unavailable" (not busy), logged once.
+--   * paused without hard need (inventory_full/need_repair) and without live
+--     work: idle — WarPigs never owns an Alfred pause. Paused WITH hard work:
+--     a bounded hold (PAUSED_WORK_HOLD), logged (WPT-5 / WPD-5).
+--   * advisory need_trigger alone: idle within the completed-cycle grace, and
+--     for the rest of the Temis visit once a WarPigs trigger (or a joined
+--     cycle) had its chance (ADVISORY_SETTLE without live work). The kick
+--     fires an advisory-only flag at most once per Temis visit (WPT-3).
+local alfred_gate = {
+    UNREADABLE_HOLD  = 10.0,
+    PAUSED_WORK_HOLD = 180.0,  -- same cap as ALFRED_MAX_SECONDS
+    ADVISORY_SETTLE  = 8.0,    -- same as ALFRED_PICKUP_TIMEOUT
+    unreadable_since = nil, unreadable_logged = false,
+    paused_since = nil, paused_logged = false,
+    visit_trigger_at = nil, visit_alfred = nil,  -- WarPigs trigger in this Temis visit
+    kick_deferred_logged = false,
+}
+
+-- C1 canonical live-work predicate (copied verbatim across the suite).
+function alfred_gate.live(s)
+    return s.trigger_tasks == true or s.external_trigger == true or s.pending == true or s.running == true
+        or (s.teleport == true and s.teleport_done ~= true and s.teleport_failed ~= true)
+end
+
+-- Returns alfred, status. status is nil when Alfred is not loaded or its
+-- status is unreadable (throws, non-table, non-boolean enabled); the third
+-- result then says whether that still counts as busy.
+function alfred_gate.read()
+    local alfred = _G.AlfredTheButlerPlugin or _G.PLUGIN_alfred_the_butler
+    if not alfred then return nil, nil, false end
+    local G, now = alfred_gate, get_time_since_inject()
+    local ok, s = false, nil
+    if type(alfred) == 'table' and type(alfred.get_status) == 'function' then ok, s = pcall(alfred.get_status) end
+    if ok and type(s) == 'table' and type(s.enabled) == 'boolean' then
+        G.unreadable_since, G.unreadable_logged = nil, false
+        return alfred, s, false
+    end
+    G.unreadable_since = G.unreadable_since or now
+    if now - G.unreadable_since < G.UNREADABLE_HOLD then return alfred, nil, true end
+    if not G.unreadable_logged then
+        G.unreadable_logged = true
+        log(string.format('Alfred unavailable — status unreadable for %.0fs; no longer holding for it',
+            now - G.unreadable_since))
+    end
+    return alfred, nil, false
+end
+
+-- WPT-5: paused with hard work. True while the bounded hold still applies.
+function alfred_gate.paused_work_hold(s)
+    local G, now = alfred_gate, get_time_since_inject()
+    if not G.paused_since then
+        G.paused_since = now
+        log(string.format('Alfred is paused by %s with pending work — holding for it up to %.0fs',
+            tostring(s.paused_by or '?'), G.PAUSED_WORK_HOLD))
+    end
+    if now - G.paused_since < G.PAUSED_WORK_HOLD then return true end
+    if not G.paused_logged then
+        G.paused_logged = true
+        log(string.format('Alfred still paused by %s with pending work after %.0fs — no longer holding for it (bounded hold)',
+            tostring(s.paused_by or '?'), now - G.paused_since))
+    end
+    return false
+end
+
+-- A WarPigs trigger (kick, preamble or a joined live cycle) in this visit.
+function alfred_gate.note_trigger(alfred)
+    alfred_gate.visit_trigger_at, alfred_gate.visit_alfred = get_time_since_inject(), alfred
+end
+
+-- WPT-3 / WPG-4: WarPug is walking to the table, selecting, rerolling or
+-- confirming. Unknown/unreadable status keeps the previous behavior.
+function alfred_gate.plan_creator_active()
+    local creator = _G.WarPugPlugin
+    if type(creator) ~= 'table' or type(creator.status) ~= 'function' then return false end
+    local ok, st = pcall(creator.status)
+    if not ok or type(st) ~= 'table' or st.enabled ~= true or type(st.state) ~= 'string' then return false end
+    return st.state ~= 'IDLE' and st.state ~= 'HALTED' and st.state ~= 'DONE_WAIT'
+end
+
 local function new_alfred_completion_callback(plugin)
     alfred_callback_generation = alfred_callback_generation + 1
     local generation = alfred_callback_generation
@@ -59,60 +145,54 @@ local function new_alfred_completion_callback(plugin)
 end
 
 local function alfred_idle()
-    local alfred = (_G.AlfredTheButlerPlugin or _G.PLUGIN_alfred_the_butler)
-    if not alfred then return true end
-    if type(alfred.get_status) ~= 'function' then return false end
-    local ok, s = pcall(alfred.get_status)
-    if not ok or type(s) ~= 'table' then return false end
+    local alfred, s, unreadable_busy = alfred_gate.read()
+    -- Not loaded = nothing to wait on; unreadable = bounded busy (C1).
+    if not s then return not unreadable_busy end
     -- Not enabled = nothing to wait on.
-    if s.trigger_tasks or s.external_trigger or s.pending or s.teleport or s.running then return false end
     if s.enabled == false then return true end
-    if s.enabled ~= true then return false end
-    -- Live work always wins over the recent-completion restock grace.
-    if s.trigger_tasks or s.external_trigger then return false end
-    -- Paused: only safe to skip if Alfred has nothing pending. If need_trigger
-    -- or inventory_full is set Alfred wants to salvage/stash but can't self-start
-    -- while paused — alfred_kick_if_needed() will resume it; we hold the gate
-    -- here so the teleport doesn't fire before Alfred finishes.
-    if s.paused then
-        if s.need_trigger or s.inventory_full or s.need_repair then return false end
-        return true
+    -- Live work (queued external_trigger/pending included: external
+    -- trigger_tasks() flips external_trigger synchronously, tracker
+    -- trigger_tasks only 1+ ticks later) always wins over any grace. A
+    -- teleport latched after a finished/failed trip is not live (WPT-1).
+    -- Don't use all_task_done here: it is false on a cold start until
+    -- Alfred ran one full cycle, so it would gate a fresh launch forever.
+    local live = alfred_gate.live(s)
+    local hard = s.inventory_full == true or s.need_repair == true
+    -- A new paused-with-work episode gets its own full bound.
+    if live or not hard or s.paused ~= true then alfred_gate.paused_since, alfred_gate.paused_logged = nil, false end
+    if live then return false end
+    -- Paused: Alfred cannot self-start. Without hard work (need_trigger
+    -- alone is advisory) there is nothing to wait for; with hard work the
+    -- kick resumes a WarPigs-owned pause, and any other pause is a bounded,
+    -- logged hold instead of a gate that never opens (WPT-5 / WPD-5).
+    if s.paused == true then
+        if not hard then return true end
+        return not alfred_gate.paused_work_hold(s)
     end
-    -- Queued-but-not-yet-picked-up: external.trigger_tasks() flips
-    -- external_trigger=true synchronously, but tracker.trigger_tasks doesn't
-    -- flip until Alfred's status task Execute runs (1+ ticks later). Treat
-    -- the queued state as busy so the TEMIS_ALFRED gate doesn't slip through
-    -- the window between trigger and pickup. (AlfredTheButler-main only —
-    -- Steroid omits external_trigger from get_status(), so this is nil there.)
-    if s.external_trigger then return false end
-    -- need_trigger means Alfred itself thinks it has work to do (inventory
-    -- full, need repair, restock pending, socketables/keys full, etc.). Hold
-    -- so the next teleport doesn't fire before Alfred finishes — EXCEPT
-    -- when the last cycle completed within STUCK_NEED_TRIGGER_GRACE and
-    -- neither inventory_full nor need_repair is set. In that case the
-    -- sticky flag is restock_count / need_stash_* / talisman_inventory_full
-    -- and the cycle that just ran couldn't clear it (restock can't pull
-    -- from an empty stash). Re-triggering immediately won't help; pretend
-    -- to be idle so the orchestrator can proceed to the warplan teleport.
-    if s.need_trigger or s.inventory_full or s.need_repair then
+    -- inventory_full / need_repair: Alfred must finish before we teleport.
+    if hard then return false end
+    -- need_trigger alone: Alfred wants work (restock, socketables/keys,
+    -- talismans). Steroid recomputes it every 0.5 s, so an unfillable
+    -- restock keeps it true after every cycle. Idle within
+    -- STUCK_NEED_TRIGGER_GRACE of a WarPigs-triggered completion by the same
+    -- Alfred, and for the rest of this Temis visit once a WarPigs trigger had
+    -- ADVISORY_SETTLE seconds to start (success, failure or no-op): another
+    -- trip would make no progress and would interrupt WarPug (WPT-3).
+    if s.need_trigger == true then
         local now = get_time_since_inject()
         if last_alfred_completion_at
             and last_alfred_completion_plugin == alfred
             and (now - last_alfred_completion_at) < STUCK_NEED_TRIGGER_GRACE
-            and not s.inventory_full
-            and not s.need_repair
+        then
+            return true
+        end
+        if alfred_gate.visit_trigger_at and alfred_gate.visit_alfred == alfred
+            and now - alfred_gate.visit_trigger_at >= alfred_gate.ADVISORY_SETTLE
         then
             return true
         end
         return false
     end
-    -- trigger_tasks is the live "Alfred is processing its queue" flag —
-    -- Alfred's status task sets it true when there's work pending and
-    -- clears it when the queue completes. Don't use all_task_done here:
-    -- that flag is initially false on cold start (only flips true AFTER
-    -- Alfred runs at least one full cycle), so on a fresh launch with
-    -- nothing for Alfred to do it gates us forever.
-    if s.trigger_tasks then return false end
     return true
 end
 local raven_bridge = RavenBridge.new({alfred_idle = alfred_idle})
@@ -145,27 +225,41 @@ local function alfred_kick_if_needed()
         end)
         if not (_ok and _val == true) then return end
     end
-    local alfred = (_G.AlfredTheButlerPlugin or _G.PLUGIN_alfred_the_butler)
-    if not alfred or type(alfred.get_status) ~= 'function' then return end
-    local ok, s = pcall(alfred.get_status)
-    if not ok or type(s) ~= 'table' then return end
-    if not s.enabled then return end
+    local alfred, s = alfred_gate.read()
+    if not s or s.enabled ~= true then return end
     -- Already actively processing — don't re-fire trigger_tasks (would
     -- overwrite external_caller and disrupt the in-flight cycle, see
-    -- feedback_alfred_yield_rule).
-    if s.trigger_tasks or s.external_trigger or s.pending or s.teleport or s.running then return end
-    if not (s.need_trigger or s.inventory_full or s.need_repair) then return end
-    if alfred_idle() then return end -- completed-cycle grace for advisory restock flags
+    -- feedback_alfred_yield_rule). C1: a latched finished teleport is not.
+    if alfred_gate.live(s) then return end
+    local hard = s.inventory_full == true or s.need_repair == true
+    if not (hard or s.need_trigger == true) then return end
+    -- Completed-cycle grace / advisory already handled this visit / a
+    -- foreign pause past its bounded hold.
+    if alfred_idle() then return end
+    -- WPT-3: an advisory-only flag gets one WarPigs trigger per Temis visit.
+    if not hard and alfred_gate.visit_trigger_at and alfred_gate.visit_alfred == alfred then return end
+    -- WPT-3 / WPG-4: never start Alfred's stash walk under an active WarPug
+    -- session (it pauses for companion work itself and then shows IDLE).
+    if alfred_gate.plan_creator_active() then
+        if not alfred_gate.kick_deferred_logged then
+            alfred_gate.kick_deferred_logged = true
+            log('Alfred has work pending — not triggering it while WarPug is planning')
+        end
+        return
+    end
+    alfred_gate.kick_deferred_logged = false
     local now = get_time_since_inject()
     if (now - last_alfred_kick_at) < ALFRED_KICK_COOLDOWN then return end
     last_alfred_kick_at = now
-    if s.paused then
+    if s.paused == true then
         if s.paused_by ~= 'WarPigs' and s.external_caller ~= 'WarPigs' then return end
         if type(alfred.resume) ~= 'function' then return end
         local resumed, result = pcall(alfred.resume, 'WarPigs')
         if not resumed or result == false then return end
     end
     if type(alfred.trigger_tasks) == 'function' then
+        -- Recorded even if the call fails: the advisory flag had its chance.
+        alfred_gate.note_trigger(alfred)
         pcall(alfred.trigger_tasks, 'WarPigs', new_alfred_completion_callback(alfred))
     end
     log('Alfred had work pending but was not processing — task requested in town')
@@ -244,8 +338,22 @@ end
 --   false            — no block
 -- The in_bsk_world() call lives here (not in tick()) to avoid consuming an
 -- extra upvalue slot in tick() for in_bsk_world itself.
-local function horde_teleport_block_reason()
+--
+-- WPD-2 / HRD-1: only a running (or WarPigs-owned) HordeDev can spend the
+-- aether or finish its chests, and a HordeDev that reports a latched fault
+-- (C2 `fault`) never will. Holding the preamble for either would deadlock the
+-- suite, so both holds apply only while HordeDev is on/owned and not faulted.
+-- A HordeDev without a status() export keeps the original holds.
+local function horde_teleport_block_reason(owned_by_warpigs)
     local p = _G.InfernalHordesPlugin
+    if type(p) ~= 'table' then return false end
+    if type(p.status) == 'function' then
+        local ok, st = pcall(p.status)
+        if ok and type(st) == 'table' then
+            if type(st.fault) == 'string' and st.fault ~= '' then return false end
+            if st.enabled ~= true and not owned_by_warpigs then return false end
+        end
+    end
     if p and type(p.chests_done) == 'function' then
         local ok, done = pcall(p.chests_done)
         if ok and done then return false end
@@ -274,20 +382,23 @@ end
 -- documented create_task pattern (README §create_task) which also passes
 -- a done-callback through trigger_tasks_with_teleport.
 local function alfred_trigger_now()
-    local alfred = (_G.AlfredTheButlerPlugin or _G.PLUGIN_alfred_the_butler)
+    local alfred, s = alfred_gate.read()
     if not alfred or type(alfred.trigger_tasks) ~= 'function' then return false end
-    if type(alfred.get_status) ~= 'function' then return false end
-    local ok_status, s = pcall(alfred.get_status)
-    if not (ok_status and type(s) == 'table') then return false end
-    -- Join an existing cycle without replacing its caller/callback or pause.
-    if s.trigger_tasks or s.external_trigger or s.pending or s.teleport or s.running then return true end
-    if s.enabled ~= true then return false end
-    if s.paused then
+    if not s or s.enabled ~= true then return false end
+    -- Join a LIVE cycle without replacing its caller/callback or pause. A
+    -- teleport latched after a finished trip is not one: joining it waited
+    -- for a cycle that did not exist and never triggered Alfred (WPT-1).
+    if alfred_gate.live(s) then
+        alfred_gate.note_trigger(alfred)
+        return true
+    end
+    if s.paused == true then
         if s.paused_by ~= 'WarPigs' and s.external_caller ~= 'WarPigs' then return false end
         if type(alfred.resume) ~= 'function' then return false end
         local resumed, result = pcall(alfred.resume, 'WarPigs')
         if not resumed or result == false then return false end
     end
+    alfred_gate.note_trigger(alfred)
     local ok, accepted = pcall(alfred.trigger_tasks, 'WarPigs', new_alfred_completion_callback(alfred))
     return ok and accepted ~= false
 end
@@ -310,6 +421,8 @@ local teleport_transition = {
     alfred_picked_up  = false, -- saw external_trigger flip false (status task ran)
     settle_started_at = nil,  -- entry time into POST_ALFRED_SETTLE
     helltide_hold_logged = false, -- dedup for "holding for helltide off-window" log
+    retries           = 0,    -- WPT-6: unchanged-world warplan retries this TELEPORTING
+    chest_hold_logged = nil,  -- dedup for "TO_TEMIS hold — HordeDev opening chests" per hold window
 }
 -- True when the teleport sequence still needs to start. Two trigger sources:
 --   * plugin_disable() — fires AFTER the previous activity's disable_when
@@ -330,8 +443,6 @@ local teleport_pending = false
 local teleport_incoming_first_seen = nil
 -- Suppresses repeat "teleport holding — …" logs while waiting for predicates.
 local teleport_holding_logged = false
--- Suppresses repeat "TO_TEMIS hold — HordeDev opening chests" log per hold window.
-local temis_hold_for_chest_logged = nil
 -- Tracks whether ANY plugin/task has been active under this WarPigs session.
 -- False until the first activity starts; switched true on first activation
 -- so cold-start fires exactly once. Reset by release_all().
@@ -363,6 +474,181 @@ local function in_town_disable_when()
         return lp:get_attribute(attributes.PLAYER_IN_TOWN_LEVEL_AREA) == 1
     end)
     return ok and val == true
+end
+
+-- ── dispatch helpers ────────────────────────────────────────────────────────
+-- Companion gates, provider completion signals and gate bookkeeping for the
+-- dispatcher live in this one table so orchestrator.tick() captures a single
+-- upvalue for all of them (LuaJIT: 60 upvalues per function; keep tick <= 50).
+local dispatch = {
+    LOOTER_HOLD_MAX        = 30.0,   -- bounded Looter hold before an outgoing teleport
+    PROVIDER_HOLD_MAX      = 180.0,  -- plugin Alfred round trip / live Alfred work in town
+    ENTRY_HOLD_MAX         = 60.0,   -- plugin-reported committed entry (tribute/portal)
+    HORDE_FAULT_GRACE      = 60.0,   -- let a faulted HordeDev leave BSK on its own first
+    MAX_GATE_DENIALS       = 2,      -- WPD-3: enable_gate denials after a delivered teleport
+    REAPER_FAILURE_BACKOFF = 300.0,  -- WPD-6: first cooldown after a failed boss run
+    REAPER_BACKOFF_MAX     = 1800.0,
+    GATE_STATUS_SECS       = 60.0,   -- C6: show a held gate in the status line after this
+    GATE_LOG_SECS          = 120.0,  -- C6: log a held gate (rate-limited) after this
+    hold           = {},  -- companion hold bookkeeping
+    notes          = {},  -- key -> last logged message (dedup)
+    gate_denials   = {},  -- plugin -> enable_gate denials after delivered teleports
+    disable_reason = {},  -- plugin -> why its disable is deferred
+    watchdog       = {},  -- currently held gate {reason, since, logged_at}
+    reaper_backoff = {},  -- boss_id -> {count, until_t, reason}
+    unmapped       = {},  -- WarPlans quests matching no map key (this tick)
+    unmapped_logged = {}, -- quest name -> true (logged once)
+}
+
+-- Log `message` once per change for `key`.
+function dispatch.note(key, message)
+    if dispatch.notes[key] == message then return end
+    dispatch.notes[key] = message
+    if message then log(message) end
+end
+
+-- Returns `reason`; logs `prefix .. reason` once per hold episode for `key`.
+function dispatch.held(key, reason, prefix)
+    if not reason then
+        dispatch.notes[key] = nil
+        return nil
+    end
+    dispatch.note(key, prefix .. reason)
+    return reason
+end
+
+-- pcall'd status()/get_status() of a plugin export, or nil when unreadable.
+function dispatch.status_of(p)
+    if type(p) ~= 'table' then return nil end
+    local fn = (type(p.status) == 'function' and p.status)
+        or (type(p.get_status) == 'function' and p.get_status) or nil
+    if not fn then return nil end
+    local ok, s = pcall(fn)
+    if ok and type(s) == 'table' then return s end
+    return nil
+end
+
+-- C1 canonical Alfred reading (the same predicate is copied into every
+-- plugin of the suite). A latched `teleport` after a finished/failed trip is
+-- not live work.
+dispatch.alfred_live = alfred_gate.live
+
+-- WPT-3: the advisory-once-per-visit latch belongs to one Temis visit. Called
+-- every tick with a loaded world; leaving Temis ends the visit.
+function dispatch.observe_alfred_visit()
+    if alfred_gate.visit_trigger_at and not in_temis() then
+        alfred_gate.visit_trigger_at, alfred_gate.visit_alfred = nil, nil
+    end
+end
+
+-- busy, reason. enabled == false is never busy. An unreadable status counts
+-- as busy for at most alfred_gate.UNREADABLE_HOLD, then as "Alfred
+-- unavailable" (not busy) with one log line.
+function dispatch.alfred_busy(now)
+    -- One shared C1 reading (and one unreadable timer/log line) for every
+    -- WarPigs Alfred gate; see alfred_gate.read().
+    local alfred, s, unreadable_busy = alfred_gate.read()
+    if not alfred then return false end
+    if not s then
+        if unreadable_busy then return true, 'Alfred status unreadable' end
+        return false
+    end
+    if s.enabled == false then return false end
+    if dispatch.alfred_live(s) then return true, 'Alfred cycle in progress' end
+    return false
+end
+
+-- WPD-1 / C1: companion gate for every outgoing teleport_to_waypoint /
+-- warplan call, in ANY zone: live Alfred work (bounded by ALFRED_MAX_SECONDS)
+-- and an active Looter pickup (bounded by LOOTER_HOLD_MAX). Returns a reason
+-- or nil. The bounds keep a latched companion flag from stalling the suite;
+-- each expiry is logged once (C6).
+function dispatch.companion_hold(now)
+    local H = dispatch.hold
+    -- A hold episode ends when nobody consults the gate for a while; a later
+    -- hold must get its own full bound, not inherit an old start time.
+    if H.checked_at and now - H.checked_at > 2.0 then
+        H.alfred_since, H.alfred_expired, H.looter_since, H.looter_expired = nil, false, nil, false
+    end
+    H.checked_at = now
+    local busy, why = dispatch.alfred_busy(now)
+    if busy then
+        H.alfred_since = H.alfred_since or now
+        if now - H.alfred_since < ALFRED_MAX_SECONDS then return why end
+        if not H.alfred_expired then
+            H.alfred_expired = true
+            log(string.format('%s for %.0fs — proceeding with the teleport anyway (bounded hold)',
+                tostring(why), now - H.alfred_since))
+        end
+    else
+        H.alfred_since, H.alfred_expired = nil, false
+    end
+    if RavenBridge.looter_state() == true then
+        H.looter_since = H.looter_since or now
+        if now - H.looter_since < dispatch.LOOTER_HOLD_MAX then return 'Looter collecting loot' end
+        if not H.looter_expired then
+            H.looter_expired = true
+            log(string.format('Looter busy for %.0fs — proceeding with the teleport anyway (bounded hold)',
+                now - H.looter_since))
+        end
+    else
+        H.looter_since, H.looter_expired = nil, false
+    end
+    return nil
+end
+
+-- True only when the town attribute is readable and says "not in a town".
+function dispatch.outside_town()
+    local lp = get_local_player()
+    if not lp or not _G.attributes or _G.attributes.PLAYER_IN_TOWN_LEVEL_AREA == nil then return false end
+    local ok, val = pcall(function() return lp:get_attribute(attributes.PLAYER_IN_TOWN_LEVEL_AREA) end)
+    return ok and val ~= nil and val ~= 1
+end
+
+-- Mirrors ArkhamAsylum's utils.player_in_pit (world name PIT_*).
+function dispatch.in_pit_world()
+    local ok, name = pcall(function()
+        local w = get_current_world()
+        return w and w:get_name()
+    end)
+    return ok and type(name) == 'string' and name:match('^PIT_') ~= nil
+end
+
+-- WPD-4 / ARK-2 / WCY-3 / WCY-7: Pit and Undercity release on "back in
+-- town", but the town leg of the plugin's own Alfred round trip (C2
+-- alfred_trip), an entry already under way (C2 committed_entry) or live
+-- Alfred work (C1) is not the end of the run. Missing C2 fields keep the town
+-- check plus the Alfred check. Every hold is bounded and logged (C6).
+function dispatch.town_release_when(plugin_name)
+    local since, held_for
+    return function()
+        if not in_town_disable_when() then
+            since, held_for = nil, nil
+            return false, 'not back in town yet'
+        end
+        local now = get_time_since_inject()
+        local st = dispatch.status_of(_G[plugin_name])
+        local reason, cap
+        if st and st.alfred_trip == true then
+            reason, cap = plugin_name .. ' Alfred round trip in progress', dispatch.PROVIDER_HOLD_MAX
+        elseif st and st.committed_entry == true then
+            reason, cap = plugin_name .. ' entry under way', dispatch.ENTRY_HOLD_MAX
+        else
+            local busy, why = dispatch.alfred_busy(now)
+            if busy then reason, cap = why, dispatch.PROVIDER_HOLD_MAX end
+        end
+        if not reason then
+            since, held_for = nil, nil
+            return true
+        end
+        if held_for ~= reason then since, held_for = now, reason end
+        if now - since >= cap then
+            log(string.format('%s for %.0fs in town — releasing %s anyway (bounded hold)',
+                reason, now - since, plugin_name))
+            return true
+        end
+        return false, reason
+    end
 end
 
 -- Predicate: does the player currently have the Helltide buff (= we're inside
@@ -460,7 +746,15 @@ end
 -- before the orchestrator processes the change, the captured rid in the
 -- old closure still wouldn't match the new run_id — so even a stray
 -- invocation is a no-op.
-local reaper_run_once = { complete = false, run_id = 0 }
+--
+-- C2 / WPD-6: on_complete(result) is called once per run with 'success',
+-- 'failed' or 'cancelled' (Reaper <= 1.9.1 calls it without arguments and only
+-- on success). `started` marks a run WarPigs itself started through run_once;
+-- `accounted` makes the failure bookkeeping run once per run. A busy refusal
+-- (`run_once` returning false) is retried on REAPER_REFUSE_RETRY, not every tick.
+local REAPER_REFUSE_RETRY = 30.0
+local reaper_run_once = { complete = false, run_id = 0, started = false, accounted = false,
+    result = nil, boss = nil, refused_boss = nil, refused_at = -math.huge, refuse_reason = nil }
 
 -- Diagnostic only: an altar task taking a long time does not establish
 -- that the boss, chest, loot collection or return-to-town phase completed.
@@ -473,32 +767,79 @@ local reaper_altar_watchdog = {
 local function reset_reaper_run_once()
     reaper_run_once.complete = false
     reaper_run_once.run_id   = (reaper_run_once.run_id or 0) + 1
+    reaper_run_once.started   = false
+    reaper_run_once.accounted = false
+    reaper_run_once.result    = nil
     reaper_altar_watchdog.first_seen_at = nil
     reaper_altar_watchdog.triggered     = false
 end
 
 local function make_reaper_callback()
     local rid = reaper_run_once.run_id
-    return function()
-        if rid ~= reaper_run_once.run_id then return end
+    return function(result)
+        if rid ~= reaper_run_once.run_id or reaper_run_once.complete then return end
         reaper_run_once.complete = true
+        if result == nil or result == true then result = 'success' elseif result == false then result = 'failed' end
+        reaper_run_once.result = tostring(result)
     end
 end
 
 local function reaper_run_boss(p, boss_id)
+    local R = reaper_run_once
+    local now = get_time_since_inject()
+    -- WPD-6: a busy/unknown-boss refusal keeps the current run id and is
+    -- retried on a cooldown instead of on every 0.5 s tick.
+    if R.refused_boss == boss_id and now - R.refused_at < REAPER_REFUSE_RETRY then return false end
     reset_reaper_run_once()
+    R.boss = boss_id
     if type(p.run_once) == 'function' then
-        return p.run_once(boss_id, nil, make_reaper_callback())
+        local accepted, why = p.run_once(boss_id, nil, make_reaper_callback())
+        if accepted == false then
+            local reason = tostring(why or 'busy or unknown boss')
+            if R.refused_boss ~= boss_id or R.refuse_reason ~= reason then
+                console.print(string.format('[WarPigs] ReaperPlugin.run_once(%s) refused (%s) — retrying every %.0fs',
+                    tostring(boss_id), reason, REAPER_REFUSE_RETRY))
+            end
+            R.refused_boss, R.refused_at, R.refuse_reason = boss_id, now, reason
+            return false
+        end
+        R.refused_boss, R.refuse_reason = nil, nil
+        R.started = true
+        return accepted
     else
         -- Reaper < v1.9: no completion signal. Falling back to run_boss leaves
         -- disable_when waiting until Reaper self-disables or the user stops it.
         console.print('[WarPigs] WARNING: ReaperPlugin.run_once unavailable (need Reaper v1.9+) — falling back to run_boss')
-        return p.run_boss(boss_id)
+        local accepted = p.run_boss(boss_id)
+        R.started = accepted ~= false
+        return accepted
     end
 end
 
+-- RPR-2: only a run WarPigs started through run_once ever calls back. A
+-- Reaper that reports it is not a run_once run (C2 external_run == false) or
+-- not in a run (C2 in_run == false), or that WarPigs never started (manual
+-- toggle, persisted main_toggle, adopted), is released as soon as it is
+-- unwanted instead of blocking every other handoff forever.
 local function reaper_run_once_disable_when()
-    return reaper_run_once.complete == true
+    local R = reaper_run_once
+    if R.complete == true then return true end
+    local st = dispatch.status_of(_G.ReaperPlugin)
+    if st and (st.external_run == false or st.in_run == false) then return true end
+    if not R.started then return true end
+    return false, 'waiting for the Reaper run_once completion'
+end
+
+-- One Reaper boss-lair entry. `boss_id` also keys the failure backoff so
+-- aliases of the same boss share it.
+local function reaper_entry(boss_id)
+    return {
+        plugin = 'ReaperPlugin',
+        boss_id = boss_id,
+        enable = function(p) return reaper_run_boss(p, boss_id) end,
+        disable_when = reaper_run_once_disable_when,
+        max_disable_defer_seconds = 300,
+    }
 end
 
 -- Map keys are matched as PLAIN SUBSTRINGS against the names of active
@@ -558,14 +899,18 @@ orchestrator.quest_plugin_map = {
         plugin = 'ArkhamAsylumPlugin',
         -- Pit quest can vanish while still inside the pit (post-quest reward
         -- phase). Wait for the player to fully return to town before letting
-        -- the next plugin take over.
-        disable_when = in_town_disable_when,
+        -- the next plugin take over — but not on the town leg of Arkham's own
+        -- Alfred round trip (return_for_loot) or while Alfred works (WPD-4).
+        disable_when = dispatch.town_release_when('ArkhamAsylumPlugin'),
         -- Pit tower lives in Temis. If we're already in Temis when the teleport
         -- sequence fires, world/zone won't change and the confirmation loop
         -- would retry forever. arrived_when lets the orchestrator skip or
         -- confirm the teleport when the pit tower actor is already visible.
+        -- Inside a PIT_* world the run is already under way (WCY-4 class:
+        -- never teleport out of it to come back).
         arrived_when = function()
             return actor_present('TWN_Kehj_IronWolves_PitKey_Crafter')
+                or dispatch.in_pit_world()
         end,
     },
 
@@ -589,7 +934,10 @@ orchestrator.quest_plugin_map = {
 
     WarPlans_QST_Undercity = {
         plugin       = 'WonderCityPlugin',
-        disable_when = in_town_disable_when,  -- wait for the Kurast/Temis return
+        -- Wait for the Kurast/Temis return; not during WonderCity's own Alfred
+        -- with-teleport trip, live Alfred work or an entry already under way
+        -- (tribute used / portal accepted) — WPD-4, WCY-3, WCY-7.
+        disable_when = dispatch.town_release_when('WonderCityPlugin'),
         -- Two-layer arrived check:
         --   1. Brazier visible (Aubrie_Test_Undercity_Crafter) — we're at the
         --      Undercity town crafter, ready to start a run. Same loop-prevention
@@ -651,14 +999,39 @@ orchestrator.quest_plugin_map = {
         -- SAME_ACTIVITY_SECS (30s) would short-circuit the preamble and
         -- HordeDev would re-enable in place, doing nothing.
         same_activity_continuation = false,
+        -- C2 (when HordeDev publishes it): in_run == false means HordeDev is
+        -- not committed to a horde (idle, walking, persisted toggle, manual
+        -- enable), so there is no chest/RESET work to protect (CRT-2). A
+        -- latched `fault` can never finish its chest phase; HordeDev gets
+        -- HORDE_FAULT_GRACE to leave BSK through its own exit, then it is
+        -- released (HRD-1; the aether hold ignores a faulted HordeDev).
         disable_when = (function()
             local exit_defer_start
+            local fault_since
             return function()
                 local p = _G.InfernalHordesPlugin
+                local st = dispatch.status_of(p)
+                local fault = st and type(st.fault) == 'string' and st.fault ~= '' and st.fault or nil
+                if fault then
+                    local now = get_time_since_inject()
+                    if not fault_since then
+                        fault_since = now
+                        log('HordeDev reports a fault (' .. fault .. ') — allowing '
+                            .. dispatch.HORDE_FAULT_GRACE .. 's for its own exit before releasing it')
+                    end
+                    if now - fault_since >= dispatch.HORDE_FAULT_GRACE then return true end
+                else
+                    fault_since = nil
+                end
+                if st and st.in_run == false then
+                    exit_defer_start = nil
+                    return true
+                end
                 local done = p and type(p.chests_done) == 'function' and p.chests_done()
                 if not done then
                     exit_defer_start = nil
-                    return false
+                    if fault then return false, 'HordeDev fault, waiting for its exit' end
+                    return false, 'HordeDev chests/exit/RESET in progress'
                 end
                 local world = get_current_world()
                 local name
@@ -677,7 +1050,7 @@ orchestrator.quest_plugin_map = {
                     exit_defer_start = nil
                     return true
                 end
-                return false
+                return false, 'HordeDev chests done, waiting to leave BSK'
             end
         end)(),
     },
@@ -692,99 +1065,30 @@ orchestrator.quest_plugin_map = {
     -- grigoire, zir, beast, harbinger, urivar, butcher, belial).
     --
     -- Quest-name suffixes are confirmed where marked; the rest are best
-    -- guesses based on the "Andariel" and "Harby" precedents. Wrong guesses
-    -- are harmless (substring just won't match anything) — verify via the
-    -- "Log ALL quests" mode and rename as needed.
-    WarPlans_QST_BossLair_Andariel = {  -- CONFIRMED
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'andariel') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_Harby = {     -- CONFIRMED (harbinger)
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'harbinger') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_Duriel = {    -- guess
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'duriel') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_Varshan = {   -- guess
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'varshan') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_PenitentKnight = {  -- CONFIRMED (grigoire)
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'grigoire') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_Zir = {  -- CONFIRMED (log 2026-05-03: id=2317384)
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'zir') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
+    -- guesses based on the "Andariel" and "Harby" precedents. A wrong guess
+    -- matches nothing; a WarPlans quest that matches no key is logged once and
+    -- shown in the status line (CRT-5) — verify via the "Log ALL quests" mode
+    -- and rename as needed.
+    WarPlans_QST_BossLair_Andariel = reaper_entry('andariel'),  -- CONFIRMED
+    WarPlans_QST_BossLair_Harby = reaper_entry('harbinger'),     -- CONFIRMED (harbinger)
+    WarPlans_QST_BossLair_Duriel = reaper_entry('duriel'),    -- guess
+    WarPlans_QST_BossLair_Varshan = reaper_entry('varshan'),   -- guess
+    WarPlans_QST_BossLair_PenitentKnight = reaper_entry('grigoire'),  -- CONFIRMED (grigoire)
+    WarPlans_QST_BossLair_Zir = reaper_entry('zir'),  -- CONFIRMED (log 2026-05-03: id=2317384)
     -- Beast in Ice: asset name is Boss_WT4_MegaDemon, but quests typically use
     -- the display name (per Harby/PenitentKnight precedent). Listing multiple
     -- aliases so we match whatever Blizzard chose. Multiple keys → same plugin
     -- is supported (kept enabled while ANY matches). Confirm the real name by
     -- enabling settings.log_all_quests and watching for "NEW QUEST: ..."
     -- containing WarPlans_QST_BossLair_*; trim the misses afterward.
-    WarPlans_QST_BossLair_MegaDemon = {      -- asset-name guess
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'beast') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_Beast = {          -- display-name guess (also matches BeastInIce via substring)
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'beast') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_BeastInIce = {     -- display-name (full) guess
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'beast') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_IceBeast = {       -- guess (alternate word order)
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'beast') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_Wendigo = {        -- guess (lore name for Beast in Ice)
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'beast') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_Urivar = {    -- guess
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'urivar') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_Butcher = {   -- guess
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'butcher') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
-    WarPlans_QST_BossLair_Belial = {    -- guess
-        plugin = 'ReaperPlugin',
-        enable = function(p) return reaper_run_boss(p,'belial') end,
-        disable_when = reaper_run_once_disable_when,
-        max_disable_defer_seconds = 300,
-    },
+    WarPlans_QST_BossLair_MegaDemon = reaper_entry('beast'),      -- asset-name guess
+    WarPlans_QST_BossLair_Beast = reaper_entry('beast'),          -- display-name guess (also matches BeastInIce via substring)
+    WarPlans_QST_BossLair_BeastInIce = reaper_entry('beast'),     -- display-name (full) guess
+    WarPlans_QST_BossLair_IceBeast = reaper_entry('beast'),       -- guess (alternate word order)
+    WarPlans_QST_BossLair_Wendigo = reaper_entry('beast'),        -- guess (lore name for Beast in Ice)
+    WarPlans_QST_BossLair_Urivar = reaper_entry('urivar'),    -- guess
+    WarPlans_QST_BossLair_Butcher = reaper_entry('butcher'),   -- guess
+    WarPlans_QST_BossLair_Belial = reaper_entry('belial'),    -- guess
 }
 
 local function normalize(entry)
@@ -876,24 +1180,36 @@ local function helltide_lingering_post_quest(wants_)
     return true
 end
 
+-- Force orbwalker clear ON at a handoff. Some plugins (HR cinder gate, Reaper
+-- boss approach / reset, manual toggles) leave clear OFF; the next plugin
+-- often assumes it starts ON and never re-asserts it, so trash gets ignored
+-- for the entire run. Gated by settings.manage_orbwalker so users who hand
+-- orbwalker control to their rotation aren't disturbed. WPD-7 / RPR-10 /
+-- HLT-6: applied consistently before and after each enable (a synchronous
+-- reset inside enable/run_once cannot undo it) and after each disable.
+function dispatch.restore_orbwalker(context)
+    if settings.manage_orbwalker and orbwalker and orbwalker.set_clear_toggle then
+        local ok = pcall(orbwalker.set_clear_toggle, true)
+        if not ok then
+            log('orbwalker.set_clear_toggle(true) threw ' .. context)
+        end
+    end
+end
+
 local function plugin_enable(entry, reason)
     local p = _G[entry.plugin]
     if not p then
         log('cannot enable ' .. entry.plugin .. ' — plugin not loaded')
         return
     end
-    -- Force orbwalker clear ON before handing off to the next plugin. Some
-    -- plugins (HR cinder gate, Reaper boss approach, manual toggles) leave
-    -- clear OFF; the next plugin often assumes it starts ON and never
-    -- re-asserts it, so trash gets ignored for the entire run. Gated by
-    -- settings.manage_orbwalker so users who hand orbwalker control to their
-    -- rotation aren't disturbed.
-    if settings.manage_orbwalker and orbwalker and orbwalker.set_clear_toggle then
-        local ok = pcall(orbwalker.set_clear_toggle, true)
-        if not ok then
-            log('orbwalker.set_clear_toggle(true) threw before enabling ' .. entry.plugin)
-        end
+    -- WPD-6: a refused Reaper run_once (busy) is retried on its cooldown only;
+    -- do not re-force the orbwalker on every tick in between.
+    if entry.boss_id and reaper_run_once.refused_boss == entry.boss_id
+        and get_time_since_inject() - reaper_run_once.refused_at < REAPER_REFUSE_RETRY
+    then
+        return
     end
+    dispatch.restore_orbwalker('before enabling ' .. entry.plugin)
     -- Wrap enable() in pcall: a misbehaving plugin (e.g. HR.enable referencing
     -- a missing GUI element) used to crash the orchestrator and trigger an
     -- infinite enable loop because owned[] never got set, so the edge check
@@ -910,6 +1226,7 @@ local function plugin_enable(entry, reason)
     if not ok then
         log('enable() of ' .. entry.plugin .. ' threw: ' .. tostring(err))
     end
+    dispatch.restore_orbwalker('after enabling ' .. entry.plugin)
     -- Trust the plugin's status() over enable()'s exit path — partial enables
     -- (HR sets main_toggle, then crashes on missing keybind_toggle, but the
     -- plugin IS active because main_toggle is what status() reports) should
@@ -918,10 +1235,14 @@ local function plugin_enable(entry, reason)
     if err ~= false and (is_plugin_on(entry.plugin) or (ok and not has_status)) then
         owned[entry.plugin] = true
         enable_blocked[entry.plugin] = nil
+        dispatch.gate_denials[entry.plugin] = nil
         last_enabled_reason[entry.plugin] = reason
         log('enabled ' .. entry.plugin .. ' (' .. (reason or '?') .. ')')
-    else
-        log('enable of ' .. entry.plugin .. ' did not result in enabled status — will retry next tick')
+    elseif enable_blocked[entry.plugin] ~= 'enable not confirmed' then
+        -- Logged once per episode: a refused Reaper run_once is retried on a
+        -- cooldown and would otherwise print every tick.
+        enable_blocked[entry.plugin] = 'enable not confirmed'
+        log('enable of ' .. entry.plugin .. ' did not result in enabled status — will retry')
     end
 end
 
@@ -946,7 +1267,10 @@ local function plugin_disable(entry)
             return false
         end
         log('disabled ' .. entry.plugin)
+        dispatch.restore_orbwalker('after disabling ' .. entry.plugin)
     end
+    if entry.plugin == 'ReaperPlugin' then dispatch.reaper_run_ended(get_time_since_inject(), true) end
+    dispatch.disable_reason[entry.plugin] = nil
     owned[entry.plugin] = nil
     last_disabled_reason = last_enabled_reason[entry.plugin]
     last_enabled_reason[entry.plugin] = nil
@@ -1068,6 +1392,192 @@ local function check_reaper_altar_watchdog()
     end
 end
 
+-- ── dispatch helpers used by tick() (table declared above) ──────────────────
+dispatch.WARPLAN_MAX_RETRIES = 5  -- WPT-6: unchanged-world retries before releasing the gate
+
+-- WPD-8: no helltide exists in minutes 55-59.
+function dispatch.helltide_off_window(wants_)
+    return incoming_is_helltide(wants_) and not helltide_active()
+end
+
+-- Hold for every warplan.teleport_to_activity() call (first call and retries):
+-- helltide off-window (WPD-8) and the companion gate (WPD-1).
+function dispatch.warplan_hold(wants_, now)
+    if dispatch.helltide_off_window(wants_) then
+        return 'incoming is helltide, helltide is in off-window (minute 55-59)'
+    end
+    return dispatch.companion_hold(now)
+end
+
+-- WPD-2 / WCY-4: is the player already inside an incoming activity? A quest
+-- actor seen in a town (Pit tower, Undercity brazier) does not count, so a
+-- town handoff keeps its via-Temis Alfred step. HordeDev's BSK counts only on
+-- a cold start (back-to-back hordes need the full exit/re-entry sequence).
+-- Returns the plugin name or nil.
+function dispatch.incoming_in_place(wants_, cold)
+    if cold and wants_.InfernalHordesPlugin and in_bsk_world() then return 'InfernalHordesPlugin' end
+    if not dispatch.outside_town() then return nil end
+    for plugin_name, entry in pairs(wants_) do
+        if plugin_name ~= 'InfernalHordesPlugin' and type(entry.arrived_when) == 'function' then
+            local ok, arrived = pcall(entry.arrived_when)
+            if ok and arrived == true then return plugin_name end
+        end
+    end
+    return nil
+end
+
+-- WPD-3 (needs a live check of the Horde warplan landing): an enable_gate
+-- that still denies after a delivered teleport re-arms the whole detour.
+-- Log the landing each time and, after MAX_GATE_DENIALS deliveries, let the
+-- plugin start and navigate itself instead of looping Temis→Alfred→warplan.
+function dispatch.gate_bypass(plugin_name, why, delivered)
+    if not delivered then return false end
+    local count = (dispatch.gate_denials[plugin_name] or 0) + 1
+    dispatch.gate_denials[plugin_name] = count
+    local ok, w, z = pcall(function()
+        local world = get_current_world()
+        return world:get_name(), world:get_current_zone_name()
+    end)
+    local where = string.format('world=%s zone=%s', tostring(ok and w or '?'), tostring(ok and z or '?'))
+    if count < dispatch.MAX_GATE_DENIALS then
+        log(string.format('enable_gate for %s denied after teleport delivery %d (%s): %s',
+            plugin_name, count, where, tostring(why)))
+        return false
+    end
+    log(string.format('enable_gate for %s still denied after %d teleport deliveries (%s) — enabling it to navigate itself',
+        plugin_name, count, where))
+    return true
+end
+
+-- WPD-6 / RPR-7: account for a finished Reaper run once. A run that failed
+-- (on_complete('failed'), status last_result/failed, or a self-stop without
+-- any completion callback from Reaper <= 1.9.1) puts its boss on a growing
+-- cooldown so the same failing boss is not re-dispatched forever and other
+-- WarPlans can run. `by_warpigs` marks a stop WarPigs requested itself.
+function dispatch.reaper_run_ended(now, by_warpigs)
+    local R = reaper_run_once
+    if not R.started or R.accounted or not R.boss then return end
+    R.accounted = true
+    local result, reason = R.result, nil
+    if by_warpigs and not R.complete then return end
+    local st = dispatch.status_of(_G.ReaperPlugin)
+    if st then
+        if result == nil and type(st.last_result) == 'string' then result = st.last_result end
+        if result == nil and st.failed == true then result = 'failed' end
+        reason = (type(st.last_error) == 'string' and st.last_error)
+            or (type(st.failure_reason) == 'string' and st.failure_reason) or nil
+    end
+    if result == nil then result, reason = 'failed', reason or 'stopped without a completion callback' end
+    if result == 'success' then
+        dispatch.reaper_backoff[R.boss] = nil
+        return
+    end
+    if result ~= 'failed' then return end
+    local b = dispatch.reaper_backoff[R.boss] or {count = 0}
+    b.count = b.count + 1
+    local delay = math.min(dispatch.REAPER_FAILURE_BACKOFF * 2 ^ (b.count - 1), dispatch.REAPER_BACKOFF_MAX)
+    b.until_t, b.reason = now + delay, reason or 'failed'
+    dispatch.reaper_backoff[R.boss] = b
+    log(string.format('ReaperPlugin run for %s failed (%s) — backing off %.0fs before dispatching it again (failure %d)',
+        R.boss, b.reason, delay, b.count))
+end
+
+function dispatch.reaper_backed_off(entry, now)
+    local b = entry.boss_id and dispatch.reaper_backoff[entry.boss_id]
+    return b ~= nil and now < b.until_t
+end
+
+-- CRT-5: a WarPlans quest that matches no map key would stall silently
+-- (WarPug waits for it to finish). Log each one once and keep the current
+-- list for the status line.
+function dispatch.note_unmapped(names, patterns)
+    local current = {}
+    for _, name in ipairs(names) do
+        local mapped = false
+        for _, pattern in ipairs(patterns) do
+            if name:find(pattern, 1, true) then mapped = true; break end
+        end
+        if not mapped then
+            current[#current + 1] = name
+            if not dispatch.unmapped_logged[name] then
+                dispatch.unmapped_logged[name] = true
+                log('unmapped WarPlans quest "' .. name .. '" — no WarPigs map key matches it, so no plugin '
+                    .. 'will run it (check the quest name and the quest_plugin_map key)')
+            end
+        end
+    end
+    dispatch.unmapped = current
+end
+
+-- CRT-6 / L4: nothing WarPigs manages is on, pending disable or inside its
+-- post-disable gap, so no exit plugin can still be steering the player.
+function dispatch.activity_quiet(owned_, pending_, managed_, disabled_at_, now, gap)
+    if next(owned_) ~= nil or next(pending_) ~= nil then return false end
+    for plugin_name in pairs(managed_) do
+        if is_plugin_on(plugin_name) then return false end
+    end
+    for _, stopped_at in pairs(disabled_at_) do
+        if now - stopped_at < gap then return false end
+    end
+    return true
+end
+
+-- C6 watchdog: track the gate that currently holds a wanted activity, show it
+-- in the status line after GATE_STATUS_SECS and log it (rate-limited) after
+-- GATE_LOG_SECS. Reporting only: loot-safety gates are not forced here.
+function dispatch.watch_gate(now, gate_reason, wants_, pending_, task_matches_, pending_teleport, holding)
+    local reason = gate_reason
+    local has_work = next(wants_) ~= nil or next(pending_) ~= nil
+    for _, matched in pairs(task_matches_) do
+        if matched then has_work = true; break end
+    end
+    if not has_work then reason = nil end
+    if reason then
+        local pd = next(pending_)
+        if pd and dispatch.disable_reason[pd] then
+            reason = reason .. ' (' .. dispatch.disable_reason[pd] .. ')'
+        elseif pending_teleport and type(holding) == 'string' then
+            reason = 'teleport pending: ' .. holding
+        end
+    end
+    local W = dispatch.watchdog
+    if reason ~= W.reason then W.reason, W.since, W.logged_at = reason, now, nil end
+    if not reason then return end
+    local held = now - W.since
+    if held >= dispatch.GATE_LOG_SECS and (not W.logged_at or now - W.logged_at >= dispatch.GATE_LOG_SECS) then
+        W.logged_at = now
+        log(string.format('watchdog: handoff gate held for %.0fs — %s', held, reason))
+    end
+end
+
+-- Status-line decorations: long-held gate (C6), Reaper cooldowns (WPD-6).
+function dispatch.status_suffix(now)
+    local parts = {}
+    local W = dispatch.watchdog
+    if W.reason and W.since and now - W.since >= dispatch.GATE_STATUS_SECS then
+        parts[#parts + 1] = string.format('held %.0fs: %s', now - W.since, W.reason)
+    end
+    for boss, b in pairs(dispatch.reaper_backoff) do
+        if now < b.until_t then
+            parts[#parts + 1] = string.format('Reaper %s backed off %.0fs', boss, b.until_t - now)
+        end
+    end
+    if #parts == 0 then return '' end
+    return ' | ' .. table.concat(parts, ' | ')
+end
+
+-- Master stop: forget every hold, counter and cooldown.
+function dispatch.reset()
+    dispatch.hold, dispatch.notes, dispatch.gate_denials = {}, {}, {}
+    dispatch.disable_reason, dispatch.watchdog, dispatch.reaper_backoff = {}, {}, {}
+    dispatch.unmapped = {}
+    -- C1 / WPT-3: the next session starts without Alfred holds or latches.
+    alfred_gate.visit_trigger_at, alfred_gate.visit_alfred = nil, nil
+    alfred_gate.paused_since, alfred_gate.paused_logged = nil, false
+    alfred_gate.unreadable_since, alfred_gate.unreadable_logged = nil, false
+    alfred_gate.kick_deferred_logged = false
+end
+
 -- QQT runs LuaJIT (Lua 5.1 rules): a function may capture at most 60
 -- upvalues, otherwise this whole file fails to compile and WarPigs never
 -- loads. tick() reads its read-only constants through this one table so it
@@ -1171,6 +1681,7 @@ function orchestrator.tick()
             and type(zone) == 'string' and zone ~= '' and zone ~= '[sno none]'
     end)
     if not loaded_ok or not loaded then return end
+    dispatch.observe_alfred_visit()
 
     check_reaper_altar_watchdog()
 
@@ -1200,13 +1711,14 @@ function orchestrator.tick()
         if matched then matches[pattern] = true end
         if entry.task then
             task_matches[pattern] = matched
-        elseif matched and entry.plugin then
+        elseif matched and entry.plugin and not dispatch.reaper_backed_off(entry, now) then
             if not wants[entry.plugin] or last_enabled_reason[entry.plugin] == pattern then
                 wants[entry.plugin] = entry
                 matched_reason[entry.plugin] = pattern
             end
         end
     end
+    dispatch.note_unmapped(active_names, patterns)
     -- Reward turn-in owns the same movement/teleport channel as activities.
     -- Finish it before starting a simultaneously visible next activity.
     if matches[TURN_IN_PATTERN] then
@@ -1351,8 +1863,17 @@ function orchestrator.tick()
             end
         end
         if has_any_plugin_want or has_any_task_match then
-            log('teleport queued — cold start (first activity of session)')
-            teleport_pending = true
+            -- WPD-2 / WCY-4: evaluate arrival BEFORE the trip. Already inside
+            -- the incoming activity (BSK for a horde, an X1_Undercity_* or
+            -- PIT_* run, a helltide) means WarPigs was (re)started mid-run:
+            -- enable the owner in place instead of teleporting out of it.
+            local in_place = dispatch.incoming_in_place(wants, true)
+            if in_place then
+                log('cold start: already inside the ' .. in_place .. ' activity — enabling it in place (teleport sequence skipped)')
+            else
+                log('teleport queued — cold start (first activity of session)')
+                teleport_pending = true
+            end
             had_active_session = true
         end
     elseif not had_active_session
@@ -1386,23 +1907,31 @@ function orchestrator.tick()
             pending_disable_since[plugin_name] = nil
             if settings.use_teleport_transition then teleport_pending = true end
             log('detected self-disable of ' .. plugin_name .. ' — sequencing handoff')
+            -- WPD-6: a Reaper run that ended by itself may have failed.
+            if plugin_name == 'ReaperPlugin' then dispatch.reaper_run_ended(now, false) end
         end
         if not wants[plugin_name] or changed or pending_disable[plugin_name] then
             if not running then
                 pending_disable[plugin_name] = nil
                 pending_disable_since[plugin_name] = nil
+                dispatch.disable_reason[plugin_name] = nil
                 was_off[plugin_name] = true
             else
                 local ready = true
+                local why
                 if entry.disable_when then
-                    local ok, result = pcall(entry.disable_when)
+                    local ok, result, detail = pcall(entry.disable_when)
                     ready = ok and result == true
+                    why = ok and detail or (not ok and ('disable_when error: ' .. tostring(result))) or nil
                 end
                 if not ready then
-                    if not pending_disable[plugin_name] then
-                        log('deferring disable of ' .. plugin_name .. ' — cleanup not yet complete')
+                    -- C6: say why the handoff waits; re-log when the reason changes.
+                    why = type(why) == 'string' and why or 'cleanup not yet complete'
+                    if not pending_disable[plugin_name] or dispatch.disable_reason[plugin_name] ~= why then
+                        log('deferring disable of ' .. plugin_name .. ' — ' .. why)
                         pending_disable[plugin_name] = true
-                        pending_disable_since[plugin_name] = now
+                        pending_disable_since[plugin_name] = pending_disable_since[plugin_name] or now
+                        dispatch.disable_reason[plugin_name] = why
                     end
                     -- A timeout cannot prove that chests, loot or a RESET are
                     -- complete. Keep waiting; disabling WarPigs remains the
@@ -1448,11 +1977,36 @@ function orchestrator.tick()
                 log('town movement held — ' .. traffic_reason)
                 teleport_holding_logged = traffic_reason
             end
+            dispatch.watch_gate(now, 'town movement held — ' .. traffic_reason, wants, pending_disable,
+                task_matches, false, nil)
+            -- L5: resetting a task whose quest vanished issues no movement,
+            -- so the hold must not keep it in a stale state.
+            for pattern, matched in pairs(task_matches) do
+                if not matched then
+                    local ok, err = pcall(normalize(orchestrator.quest_plugin_map[pattern]).task.tick, false)
+                    if not ok then log('task error (' .. pattern .. '): ' .. tostring(err)) end
+                end
+            end
+            -- is_busy() must see this tick's quests, not a stale snapshot.
+            last_matches = matches
             return
         end
     end
+    -- Anything for the teleport sequence to deliver: a wanted plugin or a
+    -- matched task quest.
+    local has_incoming = next(wants) ~= nil
+    if not has_incoming then
+        for _, matched in pairs(task_matches) do
+            if matched then has_incoming = true; break end
+        end
+    end
+    -- WPT-2 / WPG-3 / SRV-1: a pending teleport with nothing incoming is only
+    -- an idle intention (see is_busy). The Whisper slot stays open then:
+    -- closing it while blocks_plan_creator() holds WarPug was a circular wait
+    -- (the incoming quest can only come from the plan WarPug is not allowed
+    -- to create).
     local whisper_slot = whisper_safe and (
-        (teleport_transition.state == 'IDLE' and not teleport_pending)
+        (teleport_transition.state == 'IDLE' and (not teleport_pending or not has_incoming))
         or teleport_transition.state == 'POST_ALFRED_SETTLE')
     if whisper_slot and in_temis() then alfred_kick_if_needed() end
     if raven_bridge:tick(now, whisper_slot) then return end
@@ -1531,14 +2085,30 @@ function orchestrator.tick()
         elseif already_arrived then
             log('teleport skipped — quest actor present, already at destination')
             teleport_transition.state = 'IDLE'
+        elseif dispatch.warplan_hold(wants_, now_) then
+            -- WPD-8 / WPD-1: helltide off-window or a companion still working.
+            -- Park in POST_ALFRED_SETTLE (re-checked every tick) on every
+            -- path, not only after an Alfred cycle.
+            teleport_transition.state = 'POST_ALFRED_SETTLE'
+            teleport_transition.settle_started_at = now_ - POST_ALFRED_SETTLE_SECONDS
         else
             teleport_transition.state      = 'TELEPORTING'
             teleport_transition.started_at = now_
+            teleport_transition.retries    = 0
             if _G.warplan and type(warplan.teleport_to_activity) == 'function' then
                 local snap_w = get_current_world()
                 teleport_transition.snap_world = snap_w and snap_w:get_name()
                 teleport_transition.snap_zone  = snap_w and snap_w:get_current_zone_name()
-                warplan.teleport_to_activity()
+                -- WPT-6: a throwing host binding must not escape tick().
+                local fired, err = pcall(warplan.teleport_to_activity)
+                if not fired then
+                    log('warplan.teleport_to_activity() failed: ' .. tostring(err)
+                        .. ' — releasing the gate; the activity navigates itself')
+                    teleport_transition.state      = 'IDLE'
+                    teleport_transition.snap_world = nil
+                    teleport_transition.snap_zone  = nil
+                    return
+                end
                 log(string.format(
                     'warplan.teleport_to_activity() called — world=%s zone=%s check_in=%.1fs',
                     tostring(teleport_transition.snap_world),
@@ -1555,15 +2125,7 @@ function orchestrator.tick()
         and teleport_pending
         and teleport_transition.state == 'IDLE'
     then
-        local has_incoming = next(wants) ~= nil
-        if not has_incoming then
-            for pattern, raw_entry in pairs(orchestrator.quest_plugin_map) do
-                if matches[pattern] then
-                    local entry = normalize(raw_entry)
-                    if entry.task then has_incoming = true; break end
-                end
-            end
-        end
+        -- has_incoming was computed before the Whisper slot above.
         if not has_incoming then
             teleport_incoming_first_seen = nil
         elseif teleport_incoming_first_seen == nil then
@@ -1573,14 +2135,21 @@ function orchestrator.tick()
         end
         local incoming_settled = teleport_incoming_first_seen
             and (now - teleport_incoming_first_seen) >= TELEPORT_INCOMING_SETTLE
-        alfred_kick_if_needed()
-        -- Only block on Alfred when we're already in Temis (where it can
-        -- actually progress). Outside town, "Alfred busy" means Alfred wants
-        -- work — which is exactly what the via-Temis preamble is about to
-        -- enable. Gating on it here would deadlock us in the activity zone
-        -- (e.g. helltide ends with inventory_full set → Alfred can't run
-        -- outside town → gate never clears → no TP to town → forever).
+        -- WPD-1: WarPigs starts Alfred only in Temis while a teleport is
+        -- pending. Kicking it in another town and then teleporting away 5 s
+        -- later cancelled the very cycle WarPigs had started.
+        if in_temis() then alfred_kick_if_needed() end
+        -- Pending Alfred WORK (need_trigger / inventory_full) only blocks in
+        -- Temis (where it can actually progress). Outside town, "Alfred wants
+        -- work" is exactly what the via-Temis preamble is about to enable.
+        -- Gating on it here would deadlock us in the activity zone (e.g.
+        -- helltide ends with inventory_full set → Alfred can't run outside
+        -- town → gate never clears → no TP to town → forever).
         local alfred_done = (not in_temis()) or alfred_idle()
+        -- WPD-1 / C1: live Alfred work (a cycle that is running, queued or
+        -- teleporting) and an active Looter pickup hold the outgoing teleport
+        -- in ANY zone; both holds are bounded (companion_hold).
+        local companion_hold = dispatch.companion_hold(now)
 
         -- Helltide combat hold: when teleporting out of a helltide zone, the
         -- channel is interrupted by any incoming damage. Wait for the rotation
@@ -1598,10 +2167,11 @@ function orchestrator.tick()
         for _, disabled_at in pairs(last_disable_time) do
             if now - disabled_at < TRANSITION_GAP_SECONDS then disable_gap = true; break end
         end
-        local horde_block    = horde_teleport_block_reason()
+        local horde_block    = horde_teleport_block_reason(owned.InfernalHordesPlugin == true)
         local horde_chesting = horde_block == 'opening_chests'
         local horde_aether   = horde_block == 'has_aether'
         local ready = has_incoming and incoming_settled and alfred_done
+            and not companion_hold
             and not has_pending and not in_helltide_combat
             and not horde_block and not disable_gap
         if not ready then
@@ -1619,6 +2189,8 @@ function orchestrator.tick()
                 reason = 'waiting for the outgoing activity transition gap'
             elseif not alfred_done then
                 reason = 'Alfred busy (loot/salvage in progress)'
+            elseif companion_hold then
+                reason = companion_hold .. ' — holding the outgoing teleport'
             elseif in_helltide_combat then
                 reason = 'in helltide combat — waiting for area to clear before teleport'
             else
@@ -1645,6 +2217,13 @@ function orchestrator.tick()
                 and (is_plugin_on('HelltideRevampedPlugin') or has_helltide_buff())
             then
                 log('teleport skipped — incoming is helltide and HR is already running / in helltide zone')
+                teleport_transition.state = 'IDLE'
+            elseif dispatch.incoming_in_place(wants, false) then
+                -- WPD-2 / WCY-4: evaluate arrived_when BEFORE the via-Temis
+                -- trip — never teleport out of an Undercity/Pit run only to
+                -- warplan-teleport back into a fresh one.
+                log('teleport skipped — already inside the incoming activity ('
+                    .. tostring(dispatch.incoming_in_place(wants, false)) .. ')')
                 teleport_transition.state = 'IDLE'
             else
                 -- Decide whether to begin the via-Temis-Alfred preamble. We always
@@ -1698,7 +2277,7 @@ function orchestrator.tick()
                 log('via-Temis preamble: arrived in Temis, Alfred not loaded/enabled — proceeding to warplan teleport')
                 start_warplan_teleport(wants, now)
             end
-        elseif horde_teleport_block_reason() == 'opening_chests' then
+        elseif horde_teleport_block_reason(owned.InfernalHordesPlugin == true) == 'opening_chests' then
             -- The Temis channel was broken (combat in BSK / chest interact
             -- yanked us back) and HordeDev is now mid-chest. Re-firing
             -- teleport_to_waypoint(Temis) here would cancel the chest interact
@@ -1707,10 +2286,15 @@ function orchestrator.tick()
             -- until HordeDev leaves the chest cycle. started_at is also bumped
             -- so the timeout doesn't accumulate while we're holding — once
             -- chests_done, the normal timeout cadence resumes from now.
-            if temis_hold_for_chest_logged ~= teleport_transition.started_at then
+            if teleport_transition.chest_hold_logged ~= teleport_transition.started_at then
                 log('via-Temis preamble: TO_TEMIS hold — HordeDev is opening chests, refusing to retry waypoint')
-                temis_hold_for_chest_logged = teleport_transition.started_at
+                teleport_transition.chest_hold_logged = teleport_transition.started_at
             end
+            teleport_transition.started_at = now
+        elseif dispatch.held('to_temis', dispatch.companion_hold(now), 'via-Temis preamble: TO_TEMIS hold — ') then
+            -- WPD-1 / C5: never re-fire the waypoint over a live Alfred cycle
+            -- or a Looter pickup (bounded), and do not count the wait toward
+            -- the retry timeout.
             teleport_transition.started_at = now
         elseif helltide_lingering_post_quest(wants)
             and (now - teleport_transition.last_temis_tp) >= TEMIS_LINGER_RETRY_INTERVAL
@@ -1805,7 +2389,7 @@ function orchestrator.tick()
             teleport_transition.alfred_picked_up  = false
             teleport_transition.settle_started_at = nil
         elseif settled >= POST_ALFRED_SETTLE_SECONDS
-            and incoming_is_helltide(wants) and not helltide_active()
+            and dispatch.helltide_off_window(wants)
         then
             -- Helltide off-window (minute 55-59): no helltide exists for the
             -- warplan teleport to land in. Stay parked in Temis with Alfred
@@ -1817,6 +2401,11 @@ function orchestrator.tick()
                 log('via-Temis preamble: holding warplan teleport — incoming is helltide, helltide is in off-window (minute 55-59)')
                 teleport_transition.helltide_hold_logged = true
             end
+        elseif settled >= POST_ALFRED_SETTLE_SECONDS
+            and dispatch.held('settle', dispatch.companion_hold(now), 'via-Temis preamble: holding warplan teleport — ')
+        then
+            -- WPD-1: a companion (bounded) is still working; re-check next tick.
+            -- (Alfred work in Temis already bounced to TEMIS_ALFRED above.)
         elseif settled >= POST_ALFRED_SETTLE_SECONDS then
             if teleport_transition.helltide_hold_logged then
                 log('via-Temis preamble: helltide window active again — proceeding to warplan teleport')
@@ -1889,11 +2478,36 @@ function orchestrator.tick()
                     tostring(cur_world), tostring(cur_zone)))
             else
                 teleport_transition.started_at = now
-                if _G.warplan and type(warplan.teleport_to_activity) == 'function' then
-                    warplan.teleport_to_activity()
-                    log(string.format(
-                        'teleport retry — world/zone unchanged (world=%s zone=%s), retrying in %.1fs',
-                        tostring(cur_world), tostring(cur_zone), TELEPORT_CHECK_INTERVAL))
+                if dispatch.held('teleporting', dispatch.warplan_hold(wants, now), 'teleport retry held — ') then
+                    -- WPD-1 / WPD-8: no retry over a companion's live work or
+                    -- into a helltide off-window; the wait is not a retry.
+                elseif _G.warplan and type(warplan.teleport_to_activity) == 'function' then
+                    -- WPT-6: bounded, protected retries. A binding that throws
+                    -- or never moves the player releases the gate so the
+                    -- activity can navigate itself.
+                    teleport_transition.retries = (teleport_transition.retries or 0) + 1
+                    local fired, err = false, nil
+                    if teleport_transition.retries <= dispatch.WARPLAN_MAX_RETRIES then
+                        fired, err = pcall(warplan.teleport_to_activity)
+                    end
+                    if fired then
+                        log(string.format(
+                            'teleport retry %d/%d — world/zone unchanged (world=%s zone=%s), retrying in %.1fs',
+                            teleport_transition.retries, dispatch.WARPLAN_MAX_RETRIES,
+                            tostring(cur_world), tostring(cur_zone), TELEPORT_CHECK_INTERVAL))
+                    else
+                        teleport_transition.state      = 'IDLE'
+                        teleport_transition.snap_world = nil
+                        teleport_transition.snap_zone  = nil
+                        if err ~= nil then
+                            log('teleport retry failed: ' .. tostring(err)
+                                .. ' — releasing the gate; the activity navigates itself')
+                        else
+                            log(string.format(
+                                'teleport: world/zone unchanged after %d retries (world=%s zone=%s) — releasing the gate; the activity navigates itself',
+                                dispatch.WARPLAN_MAX_RETRIES, tostring(cur_world), tostring(cur_zone)))
+                        end
+                    end
                 else
                     teleport_transition.state    = 'IDLE'
                     teleport_transition.snap_world = nil
@@ -1938,10 +2552,26 @@ function orchestrator.tick()
         end
     end
 
+    -- C6: surface a gate that keeps holding a wanted activity.
+    dispatch.watch_gate(now, gate_reason, wants, pending_disable, task_matches,
+        teleport_pending, teleport_holding_logged)
+
+    -- Task context (CRT-6 / L4 / WPD-1): `activity_quiet` tells the turn-in
+    -- that no managed plugin is on, pending disable or inside its post-disable
+    -- gap (a short settle is enough); `hold` is the bounded companion gate for
+    -- its own teleports.
+    local task_ctx
     for pattern, matched in pairs(task_matches) do
         local task = normalize(orchestrator.quest_plugin_map[pattern]).task
         local active = matched and not gate_reason and next(wants) == nil
-        local ok, err = pcall(task.tick, active)
+        if active and not task_ctx then
+            task_ctx = {
+                activity_quiet = dispatch.activity_quiet(owned, pending_disable, managed,
+                    last_disable_time, now, TRANSITION_GAP_SECONDS),
+                hold = dispatch.companion_hold(now),
+            }
+        end
+        local ok, err = pcall(task.tick, active, active and task_ctx or nil)
         if not ok then log('task error (' .. pattern .. '): ' .. tostring(err)) end
     end
 
@@ -1977,6 +2607,11 @@ function orchestrator.tick()
                     log('deferring enable of ' .. plugin_name .. ' — ' .. gate_reason)
                     enable_blocked[plugin_name] = gate_reason
                 end
+            elseif entry_gate_reason and dispatch.gate_bypass(plugin_name, entry_gate_reason,
+                settings.use_teleport_transition and not teleport_pending and teleport_transition.state == 'IDLE')
+            then
+                -- WPD-3: capped re-arms — the plugin navigates itself now.
+                plugin_enable(entry, reason)
             elseif entry_gate_reason then
                 if enable_blocked[plugin_name] ~= entry_gate_reason then
                     log('BLOCKING enable of ' .. plugin_name .. ' — ' .. entry_gate_reason)
@@ -2016,6 +2651,10 @@ function orchestrator.tick()
     for plugin_name in pairs(wants) do
         if owned[plugin_name] then last_wanted[plugin_name] = true end
     end
+    -- WPD-3: the capped re-arm count belongs to the current want only.
+    for plugin_name in pairs(dispatch.gate_denials) do
+        if not wants[plugin_name] then dispatch.gate_denials[plugin_name] = nil end
+    end
     last_matches = matches
 end
 
@@ -2044,7 +2683,8 @@ function orchestrator.release_all()
     teleport_pending             = false
     teleport_incoming_first_seen = nil
     teleport_holding_logged      = false
-    temis_hold_for_chest_logged  = nil
+    teleport_transition.chest_hold_logged = nil
+    teleport_transition.retries           = 0
     teleport_transition.state             = 'IDLE'
     teleport_transition.started_at        = -math.huge
     teleport_transition.snap_world        = nil
@@ -2069,6 +2709,10 @@ function orchestrator.release_all()
     last_disabled_reason     = nil
     -- Drop any pending Reaper run_once callback by bumping run_id; clear flag.
     reset_reaper_run_once()
+    reaper_run_once.refused_boss, reaper_run_once.refuse_reason = nil, nil
+    -- Companion holds, capped re-arms, Reaper cooldowns and the gate watchdog
+    -- start over with the next session (toggling WarPigs retries a boss).
+    dispatch.reset()
     return next(owned) == nil and raven_released
 end
 
@@ -2091,9 +2735,7 @@ function orchestrator.is_busy()
     return false
 end
 
-function orchestrator.get_status_line()
-    local raven_status = raven_bridge:status_line()
-    if raven_status then return raven_status end
+local function base_status_line()
     local names = {}
     for n in pairs(owned) do names[#names+1] = n end
     if #names > 0 then return 'WarPigs: managing ' .. table.concat(names, ', ') end
@@ -2110,7 +2752,18 @@ function orchestrator.get_status_line()
             end
         end
     end
+    -- CRT-5: an unmapped WarPlans quest is visible instead of "watching".
+    if dispatch.unmapped[1] and next(last_matches) == nil then
+        return 'WarPigs: no handler for quest ' .. dispatch.unmapped[1]
+    end
     return 'WarPigs: watching quests'
+end
+
+function orchestrator.get_status_line()
+    local raven_status = raven_bridge:status_line()
+    if raven_status then return raven_status end
+    -- C6: a gate held for minutes and Reaper cooldowns are appended.
+    return base_status_line() .. dispatch.status_suffix(get_time_since_inject())
 end
 
 return orchestrator

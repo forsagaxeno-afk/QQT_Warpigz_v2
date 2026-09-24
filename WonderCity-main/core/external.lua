@@ -12,6 +12,12 @@ local external = {
         else
             msg = "Current Task: " .. current_task.name
         end
+        if current_task.note then msg = msg .. ' - ' .. current_task.note end
+        -- C2 (additive): alfred_trip = WonderCity's own Alfred round trip in
+        -- progress; in_run = inside/committed to an Undercity run;
+        -- committed_entry = tribute used / portal opened or being entered but
+        -- not inside yet (WCY-7).
+        local run = task_manager.get_run_status()
         return {
             name            = settings.plugin_label,
             version         = settings.plugin_version,
@@ -22,6 +28,9 @@ local external = {
             reward_opened = tracker.done,
             reward_failed = tracker.chest_failed,
             completion_reason = tracker.completion_reason,
+            alfred_trip     = run.alfred_trip,
+            in_run          = run.in_run,
+            committed_entry = run.committed_entry,
         }
     end,
     enable = function ()

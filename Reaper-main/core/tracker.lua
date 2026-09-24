@@ -19,6 +19,10 @@ local tracker = {
     -- session stats
     total_kills        = 0,
     current_boss_kills = 0,
+
+    -- C5: seconds spent yielding to Alfred (monotonic, never reset). Chest
+    -- timeouts subtract it so a companion yield cannot count as no progress.
+    companion_yield    = 0,
 }
 
 function tracker.reset_run()

@@ -33,6 +33,16 @@ local INTERACT_THRESHOLD_DEFAULT   = 2.0
 local INTERACT_THRESHOLD_STEP      = 0.4
 local INTERACT_THRESHOLD_FLOOR     = 0.6
 
+-- WCY-2: no selected tribute available (shipped defaults select none, or the
+-- configured ones ran out) or no valid slot for it: after this grace the
+-- Undercity is opened without a tribute (like 'Skip tribute'); an unselected
+-- tribute is never consumed.
+local NO_TRIBUTE_GRACE = 2.0
+-- WCY-7/C2 committed_entry: a tribute was used or Open Portal/Accept was
+-- clicked or the entrance portal interacted with, and we are not inside yet.
+-- Bounded so a lost entry cannot hold WarPigs' handoff forever.
+local ENTRY_COMMIT_MAX = 60
+
 -- Steps shared by both flows. Bargain flow inserts extra steps between TRIBUTE_WAIT and OPEN_PORTAL.
 local STEP = {
     TRIBUTE             = 1,
@@ -191,6 +201,17 @@ local pick_tribute = function ()
     return picked, lp
 end
 
+-- WCY-2: open without a tribute (bounded fallback, one log line per entry).
+local function continue_without_tribute(now, reason)
+    console.print('[WonderCity:tribute] ' .. reason .. ' for ' .. string.format('%.0f', now - task.no_tribute_since)
+        .. 's — opening the Undercity without a tribute (select tribute priorities or enable Skip tribute)')
+    task.no_tribute_since = nil
+    task.tribute_click_pos = nil
+    task.step = STEP.TRIBUTE_WAIT
+    task.step_time = now
+    task.status = status_enum['WAITING'] .. 'tribute (none available; continuing without)'
+end
+
 -- ── Step machine ─────────────────────────────────────────────────────────────
 local run_steps = function ()
     local now = get_time_since_inject()
@@ -232,6 +253,10 @@ local run_steps = function ()
             local slot = lp:get_item_slot_index(item, INV_CATEGORY_DUNGEON_KEYS)
             if type(slot) ~= 'number' or slot < 0 or slot >= INVENTORY_COLS * INVENTORY_ROWS or slot % 1 ~= 0 then
                 task.status = 'waiting for a valid tribute inventory slot'
+                task.no_tribute_since = task.no_tribute_since or now
+                if now - task.no_tribute_since >= NO_TRIBUTE_GRACE then
+                    continue_without_tribute(now, 'selected tribute has no valid inventory slot (' .. tostring(slot) .. ')')
+                end
                 return
             end
             local sx, sy = slot_screen_pos(slot)
@@ -243,8 +268,13 @@ local run_steps = function ()
             task.step = STEP.TRIBUTE_HOVER
             task.step_time = now
             task.status = status_enum['WAITING'] .. 'hover tribute'
+            task.no_tribute_since = nil
         else
             task.status = status_enum['WAITING'] .. 'tribute (no item available)'
+            task.no_tribute_since = task.no_tribute_since or now
+            if now - task.no_tribute_since >= NO_TRIBUTE_GRACE then
+                continue_without_tribute(now, 'no selected tribute available')
+            end
         end
         return
     end
@@ -270,6 +300,7 @@ local run_steps = function ()
             pick_log(string.format('right-click tribute screen=(%d,%d)', p.x, p.y))
             utility.send_mouse_right_click(p.x, p.y)
             record_click('TRIBUTE', p.x, p.y, 'right')
+            task.committed_at = task.committed_at or now
         end
         task.step = STEP.TRIBUTE_WAIT
         task.step_time = now
@@ -355,6 +386,9 @@ local run_steps = function ()
             settings.portal_button_x, settings.portal_button_y))
         utility.send_mouse_click(settings.portal_button_x, settings.portal_button_y)
         record_click('OPEN_PORTAL', settings.portal_button_x, settings.portal_button_y, 'left')
+        -- A new instance: never resume the Undercity left for an Alfred trip.
+        tracker.forget_resume()
+        task.committed_at = task.committed_at or now
         task.step = STEP.OPEN_PORTAL_WAIT
         task.actor_guard_until = now + POST_OPEN_PORTAL_GUARD
         task.step_time = now
@@ -374,6 +408,7 @@ local run_steps = function ()
             settings.accept_button_x, settings.accept_button_y))
         utility.send_mouse_click(settings.accept_button_x, settings.accept_button_y)
         record_click('ACCEPT', settings.accept_button_x, settings.accept_button_y, 'left')
+        task.committed_at = task.committed_at or now
         task.step = STEP.ACCEPT_WAIT
         task.actor_guard_until = now + POST_ACCEPT_GUARD
         task.step_time = now
@@ -467,6 +502,7 @@ local open_portal = function (delay)
             task.step_time     = -1
             task.bargain_idx   = 0
             task.interacted    = false
+            task.committed_at  = nil -- a new entry attempt starts its own window
         end
     elseif delay and task.debounce_time + settings.confirm_delay > get_time_since_inject() then
         task.status = status_enum['WAITING'] .. 'for confirmation'
@@ -483,6 +519,7 @@ local enter_portal = function (portal)
     utils.stop_movement()
     interact_object(portal)
     task.portal_interact_time = now
+    task.committed_at = task.committed_at or now
     task.actor_guard_until = now + 1
     -- Run state and explorer reset only after an observed world transition.
     task.status = status_enum.ENTERING
@@ -620,6 +657,8 @@ end
 
 task.reset = function ()
     reset_state()
+    task.no_tribute_since = nil
+    task.committed_at = nil
     task.interacted = false
     task.bargain_walk_away = false
     task.bargain_walk_started = nil
@@ -631,6 +670,12 @@ task.reset = function ()
     task.brazier_missing_logged = false
 end
 task.on_cancel = task.reset
+
+-- C2 committed_entry (WCY-7): entry under way and not inside yet. Bounded
+-- per entry attempt (re-clicks never extend it; reset/restart clears it).
+task.committed = function ()
+    return task.committed_at ~= nil and get_time_since_inject() - task.committed_at < ENTRY_COMMIT_MAX
+end
 
 task.get_grid_dims     = get_grid_dims
 task.get_slot_pos      = get_slot_pos

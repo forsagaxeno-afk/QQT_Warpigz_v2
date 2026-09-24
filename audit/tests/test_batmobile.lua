@@ -78,7 +78,11 @@ test('custom targets honor disable_spell, drift reuse, pause, and movement reset
     f.settings.use_movement=true;f.settings.use_teleport=true
     n.move();eq(f.counts.casts,0,'normal move cannot cast disabled spells')
     eq(f.counts.moves>0,true,'pause still allows explicit movement')
+    -- keep the caller active (a >0.75 s move gap is a yield and would
+    -- discount the stuck window)
+    f.time(12.9);n.move()
     f.time(13);n.last_update=10;n.last_pos=v(0,0);n.move()
+    eq(n.unstuck_count,1,'stuck detection ran for the active caller')
     eq(f.counts.casts,0,'unstuck evade must honor disable_spell')
     local history=f.explorer.visited;n.reset_movement()
     eq(f.explorer.visited,history,'movement reset preserves explorer history')
@@ -202,10 +206,10 @@ test('main tolerates absent player, avoids duplicate drive, and preserves crossi
     f.loaded.gui={elements=elements,render=function() end}
     f.loaded['core.drawing']={};f.loaded['core.movement_helpers']={observe_buffs=function() end}
     f.loaded['core.external']={}
-    local n={target=v(10,0),path={v(10,0)},unpause=function() end,update=function() updates=updates+1 end,move=function() moves=moves+1 end,clear_target=function() end,reset=function() end}
+    local n={target=v(10,0),path={v(10,0)},unpause=function() end,update=function() updates=updates+1 end,move=function() moves=moves+1 end,clear_target=function() end,reset=function() end,note_loading=function() end}
     f.loaded['core.navigator']=n
     local pending=false
-    local lp={navigating=false,is_traversal_pending=function() return pending end}
+    local lp={navigating=false,is_traversal_pending=function() return pending end,observe_world=function() return false end}
     -- Bind after declaration so the function captures the local table.
     lp.stop_navigation=function() stopped=stopped+1;lp.navigating=false end
     f.loaded['core.long_path']=lp

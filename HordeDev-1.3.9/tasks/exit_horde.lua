@@ -48,9 +48,19 @@ local exit_started = false
 -- that gets CANCELLED if fired again before completion. shouldExecute keeps
 -- returning true for the whole channel (still in BSK zone), so without this
 -- guard Execute spams teleport every pulse and the channel never finishes.
--- 5s window covers the channel + brief settle on arrival.
-local TELEPORT_DEBOUNCE_S = 5.0
+-- HRD-10: 6s window matches the suite's waypoint debounce (WarPigs, turn-in:
+-- channel ~5s + settle); a re-fire is also skipped while the channel casts.
+local TELEPORT_DEBOUNCE_S = 6.0
+local TELEPORT_SPELL_ID, TELEPORT_CAST_CAP_S = 186139, 15.0 -- cap: never trust a stuck cast id forever
 local teleport_fired_time = nil
+
+local function teleport_casting()
+    local ok, id = pcall(function()
+        local player = get_local_player()
+        return player and player:get_active_spell_id()
+    end)
+    return ok and id == TELEPORT_SPELL_ID
+end
 
 local exit_horde_task = {
     name = "Exit Horde",
@@ -165,7 +175,9 @@ local exit_horde_task = {
         local s = snapshot()
         if not s or not s.horde then return false end
         local aether_ok = true
-        if type(get_aether_count) == 'function' then
+        -- HRD-1: after a terminal chest fault the remaining aether is
+        -- unspendable; leave instead of holding the chest room forever.
+        if type(get_aether_count) == 'function' and not tracker.chest_fault then
             local ok, count = pcall(get_aether_count)
             if ok and type(count) == 'number' and count > 0 then
                 console.print(string.format("[exit_horde] holding — player still has %d aether", count))
@@ -216,7 +228,8 @@ local exit_horde_task = {
             -- re-fired every 50ms. Once the player lands in the Library,
             -- shouldExecute returns false (zone changed) and we stop.
             if teleport_fired_time
-                and current_time - teleport_fired_time < TELEPORT_DEBOUNCE_S
+                and (current_time - teleport_fired_time < TELEPORT_DEBOUNCE_S
+                    or (current_time - teleport_fired_time < TELEPORT_CAST_CAP_S and teleport_casting()))
             then
                 return
             end

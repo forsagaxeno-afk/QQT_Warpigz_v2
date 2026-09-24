@@ -23,6 +23,9 @@ local STATE = {
 
 local state       = STATE.IDLE
 local state_start = 0
+-- RPR-11: the baseline is per session. run_once/enable/stop all call
+-- reset_all(), so re-arming it there meant WarPigs one-shots never reached
+-- the interval. main.lua runs a due reset in town before a run finishes.
 local runs_at_last_reset = 0
 
 local function now() return get_time_since_inject() end
@@ -32,7 +35,6 @@ local task = { name = "Dungeon Reset" }
 function task.reset()
     state = STATE.IDLE
     state_start = 0
-    runs_at_last_reset = tracker.total_kills
 end
 
 function task.shouldExecute()
@@ -54,6 +56,7 @@ function task.Execute()
 
     if state == STATE.IDLE then
         if enums.is_boss_zone(utils.get_zone()) then
+            if not utils.loot_ready() then return end -- RPR-6: Looter first (bounded)
             teleport_to_waypoint(settings.town_waypoint)
             state = "LEAVING"
             state_start = t

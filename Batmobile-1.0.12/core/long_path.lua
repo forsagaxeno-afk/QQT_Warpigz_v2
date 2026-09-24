@@ -10,7 +10,13 @@ local long_path = {
     pinned_target = nil,   -- vec3 saved by set_target()
     active_path   = nil,   -- full computed path (for drawing the full route)
     navigating    = false, -- true while moving to target
+    owner         = nil,   -- normalized external caller that started the route
+    kept_pause_at = nil,   -- start time of a route whose caller kept Batmobile paused
 }
+
+-- The navigator must know when a long route owns its goal (no explorer
+-- selection on arrival).  A function avoids a second, desyncable flag.
+navigator.long_path_active = function () return long_path.navigating end
 
 -- Runtime caps for navigate_to / find_long_path — keeps a single failed pursuit
 -- from freezing the game for 1-2 seconds when the target is across a cliff or
@@ -46,7 +52,7 @@ function long_path.set_target_cursor()
         snapped:x(), snapped:y(), snapped:z()))
 end
 
-local function start_navigation(path, goal)
+local function start_navigation(path, goal, keep_pause)
     long_path.active_path = {}
     for i, node in ipairs(path) do long_path.active_path[i] = node end
     long_path.navigating  = true
@@ -75,10 +81,20 @@ local function start_navigation(path, goal)
     navigator.disable_spell         = nil
     navigator.last_pos              = nil
     navigator.last_update           = nil
+    navigator.trav_interact_key      = nil
+    navigator.trav_interact_count    = 0
     navigator.target           = utils.normalize_node(goal)
     navigator.is_custom_target = true
     navigator.path             = path
-    navigator.unpause()
+    -- A caller that paused Batmobile right before starting its route drives
+    -- it itself (update/move each tick): keep that pause instead of silently
+    -- unpausing.  Everyone else keeps the historical autonomous drive.
+    if keep_pause then
+        long_path.kept_pause_at = get_time_since_inject()
+    else
+        long_path.kept_pause_at = nil
+        navigator.unpause()
+    end
     console.print(string.format("[LONG PATH] Navigation started | nodes=%d | target=(%.1f, %.1f)",
         #path, navigator.target:x(), navigator.target:y()))
 end
@@ -89,7 +105,26 @@ function long_path.is_traversal_pending()
     return navigator.last_trav ~= nil or navigator.trav_escape_pos ~= nil
 end
 
+-- True when the route's goal is reached, paused or not.  main.lua detects
+-- arrival only while it drives the route itself; a paused caller drives it
+-- with move(), so is_long_path_navigating() uses this as well.
+function long_path.reached_goal(player_pos)
+    if not long_path.navigating or long_path.is_traversal_pending() then return false end
+    local target = navigator.target
+    return target ~= nil and player_pos ~= nil
+        and utils.distance(utils.normalize_node(player_pos), target) <= 1
+end
+
+-- World/teleport boundary: a route computed for another world is dropped.
+function long_path.observe_world()
+    if not navigator.observe_world() then return false end
+    long_path.stop_navigation()
+    return true
+end
+
 function long_path.stop_navigation()
+    long_path.owner = nil
+    long_path.kept_pause_at = nil
     if not long_path.navigating then return end
     long_path.navigating  = false
     long_path.active_path = nil
@@ -174,7 +209,7 @@ end
 -- Navigate to a goal using uncapped A*.  Finds the path then immediately starts
 -- walking it via the navigator.  Returns true if a path was found and navigation
 -- was started, false if A* failed to find a path.
-function long_path.navigate_to(goal)
+function long_path.navigate_to(goal, keep_pause)
     if goal == nil then return false end
     if goal.get_position then goal = goal:get_position() end
     local player = get_local_player()
@@ -192,7 +227,7 @@ function long_path.navigate_to(goal)
     if status == "found" or (is_partial and path ~= nil and #path > 0) then
         console.print(string.format("[LONG PATH] navigate_to: %s  nodes=%d  iters=%d  time=%.1fms",
             status, #path, iters, ms))
-        start_navigation(path, goal)
+        start_navigation(path, goal, keep_pause)
         -- Mark partial so the navigator's stall-escape can engage traversal
         -- routing if the player can't make progress (e.g. portal across a
         -- climb gizmo). Without this, long_path's partial paths look like

@@ -651,6 +651,9 @@ local function world_is_bsk()
 end
 
 local horde_settle_logged = false
+-- C5: time the wave task did not run (preempted by Alfred or another task)
+-- must not count toward the Bartuc pylon give-up window.
+local horde_last_execute = nil
 local task = {
     name = "Infernal Horde",
     shouldExecute = function()
@@ -690,6 +693,11 @@ local task = {
     end,
 
     Execute = function()
+        local now = get_time_since_inject()
+        if horde_last_execute and bartuc_pylon_attempt_start and now - horde_last_execute > 1.0 then
+            bartuc_pylon_attempt_start = bartuc_pylon_attempt_start + (now - horde_last_execute)
+        end
+        horde_last_execute = now
         -- When using Batmobile, prevent explorer's on_update from interfering
         explorer.is_task_running = holding_wave_objective or (not settings.aggresive_movement and BatmobilePlugin ~= nil)
         if not has_printed_execution_message then

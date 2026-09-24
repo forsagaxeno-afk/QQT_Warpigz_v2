@@ -168,7 +168,8 @@ local function bridge_session()
     c.planner=e.require('core.planner');e.WarPugPlugin=e.require('core.external')
     c.bridge=assert(loadfile(SUITE_ROOT..'/WarPigs-1.0.0/wp_silent_raven.lua','t',e))().new()
     e.WarPigsPlugin={status=function()return {enabled=true,busy=c.bridge:is_busy() or c.bridge:blocks_plan_creator()}end}
-    c.bridge:observe(10,true);c.bridge:observe(11.1,true);c.now=11.1;c.env=e
+    -- The idle Looter has been observed for the bridge's L7 quiet window (4 s).
+    for t=6,10 do c.bridge:observe(t,true) end;c.bridge:observe(11.1,true);c.now=11.1;c.env=e
     return c
 end
 -- Actual Raven queue + actual WarPug planner; either callback order yields one owner.

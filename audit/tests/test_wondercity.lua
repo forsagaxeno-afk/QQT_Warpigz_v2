@@ -267,10 +267,15 @@ test('exploration exhaustion is not Undercity completion', function()
     s.now=103;assert(s.load('tasks.exit_undercity').shouldExecute())
 end)
 
-test('chest failure does not mark the run successful', function()
+test('chest that stays interactable after our interaction completes the reward phase (bounded)', function()
+    -- CRT-1: the host can keep an opened chest flagged interactable; waiting
+    -- for the 600 s run reset held the WarPigs handoff (upstream: 8 s -> done).
     local s=session();s.actors={actor('X1_Undercity_Chest_Attunement',0)}
-    local task=s.load('tasks.goto_chest');task:Execute();s.now=109;task:Execute()
-    local tr=s.load('core.tracker');assert(tr.chest_failed and not tr.done and not task.shouldExecute())
+    local task=s.load('tasks.goto_chest');task:Execute();s.now=107.9;task:Execute()
+    local tr=s.load('core.tracker');assert(not tr.done)
+    s.now=109;task:Execute()
+    assert(tr.done and not tr.chest_failed and not task.shouldExecute())
+    assert(tr.completion_reason:find('stays interactable',1,true))
 end)
 
 test('chest disappearance requires stable observation and new loot after our click', function()
@@ -320,10 +325,14 @@ test('live boss suppresses corpse and chest completion signals', function()
     local tr=s.load('core.tracker');assert(tr.boss_alive and not tr.boss_kill_time and not tr.reward_seen)
 end)
 
-test('noninteractable chest before our own click is never successful', function()
+test('noninteractable chest before our own click waits a bounded unlock window, never clicks', function()
     local s=session();s.actors={actor('X1_Undercity_Chest_Attunement',0,{interactable=false})}
     local task=s.load('tasks.goto_chest');task:Execute();s.now=102;task:Execute()
     assert(not s.load('core.tracker').done and #s.interactions==0)
+    -- CRT-1/L9: without an observed kill the wait ends after 30 s (opened).
+    s.now=129;task:Execute();assert(not s.load('core.tracker').done)
+    s.now=130.1;task:Execute()
+    assert(s.load('core.tracker').done and #s.interactions==0)
 end)
 
 test('noninteractable confirmation resets when the actor snapshot fails', function()
@@ -427,8 +436,9 @@ test('replacement chest cannot inherit the previous chest interaction', function
 end)
 
 test('reward phase near run deadline receives one bounded cleanup grace', function()
+    -- The chest stays out of reach (never interacted), so only the grace ends it.
     local s=session();local tr=s.load('core.tracker');tr.observe_world()
-    s.now=701;s.all_actors={actor('X1_Undercity_Chest_Attunement',0)}
+    s.now=701;s.all_actors={actor('X1_Undercity_Chest_Attunement',30)}
     local manager=s.load('core.task_manager');manager.execute_tasks()
     assert(manager.get_current_task().name=='goto_chest' and s.teleports==0)
     assert(tr.reward_grace_until==746)

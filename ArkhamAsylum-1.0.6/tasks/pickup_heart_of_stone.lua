@@ -196,4 +196,12 @@ task.reset = function ()
     task.status = status_enum.IDLE
 end
 
+-- C5: time spent yielding to Alfred never counts toward the walk/click
+-- timeouts that blacklist the heart.
+task.on_yield = function (seconds)
+    if walk_started then walk_started = walk_started + seconds end
+    if clicked_time then clicked_time = clicked_time + seconds end
+    if arrived_time then arrived_time = arrived_time + seconds end
+end
+
 return task

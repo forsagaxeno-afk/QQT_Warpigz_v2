@@ -10,6 +10,85 @@ local pathfinder = require 'core.pathfinder'
 local external = {
     name          = plugin_label
 }
+
+-- Ownership.  Batmobile is one shared navigator; every plugin used to write
+-- tracker.external_caller and nothing read it, so a disabled plugin's goal,
+-- long route or traversal routing steered the next plugin (live L10: Temis
+-- `paused=true custom=true` pathfinding to a stale Arkham target).  Callers
+-- are compared case-insensitively ('Reaper' and 'reaper' are one plugin).
+local own = {
+    target     = nil,          -- caller that last claimed the navigator goal
+    pause      = nil,          -- caller of the last pause/resume/release
+    pause_time = -math.huge,   -- time of the last explicit pause()
+    priority   = nil,          -- caller that set a non-default explorer priority
+}
+-- Goal owner is mirrored into the tracker so the periodic [NAV STATE] perf
+-- line shows who is steering (diagnoses stale-owner reports from live logs).
+local function set_goal_owner(who)
+    own.target = who
+    tracker.movement_owner = who
+end
+local KEEP_PAUSE_WINDOW = 0.25  -- pause() then navigate_long_path() in one tick
+local LOG_INTERVAL = 5          -- release/takeover diagnostics, per caller
+local loading_logged = false
+local last_log = {}
+local function log_limited(key, message)
+    local now = get_time_since_inject()
+    if last_log[key] ~= nil and now - last_log[key] < LOG_INTERVAL then return end
+    last_log[key] = now
+    console.print(message)
+end
+local function default_priority()
+    return explorer.default_priority or 'direction'
+end
+local function norm(caller)
+    return string.lower(tostring(caller))
+end
+-- True while the navigator still works toward a caller's goal: a custom
+-- target, a traversal route or escape that will restore one, or a long route.
+local function holds_caller_goal()
+    return navigator.is_custom_target == true or navigator.trav_final_target ~= nil
+        or (navigator.post_trav_target ~= nil and navigator.post_trav_target.is_custom == true)
+        or long_path.navigating
+end
+-- A goal or route left by another plugin never steers this caller: drop
+-- it (and its traversal routing / failed-target zone) before acting.
+local function drop_foreign(who, action)
+    local route_owner = long_path.navigating and long_path.owner or nil
+    local foreign_route = route_owner ~= nil and route_owner ~= who
+    local foreign_goal = own.target ~= nil and own.target ~= who and holds_caller_goal()
+    if not foreign_route and not foreign_goal then return false end
+    log_limited('drop:' .. who, string.format('[batmobile] %s by %s: dropping movement left by %s',
+        action, who, tostring(route_owner or own.target)))
+    if long_path.navigating and route_owner ~= who then long_path.stop_navigation() end
+    navigator.release_movement(true)
+    set_goal_owner(nil)
+    return true
+end
+-- World change / teleport resets explorer, trap and traversal state
+-- (navigator.observe_world) and drops routes planned for the old world.
+local function observe_world()
+    if long_path.observe_world() then
+        set_goal_owner(nil)
+        own.priority = nil
+    end
+end
+-- Host world/actor data is incomplete while loading: external update/move
+-- follow main.lua's guard instead of scanning/pathing on it.  One log line
+-- per loading episode.
+local function loading_skip(what, caller)
+    if not utils.player_loading() then
+        loading_logged = false
+        return false
+    end
+    navigator.note_loading()
+    if not loading_logged then
+        loading_logged = true
+        console.print('[batmobile] ' .. what .. ' by ' .. tostring(caller) ..
+            ' skipped while the world is loading; explorer scans resume after the load')
+    end
+    return true
+end
 external.is_done = function ()
     return navigator.is_done()
 end
@@ -23,6 +102,8 @@ external.pause = function (caller)
     end
     tracker.external_caller = caller
     utils.log(2, 'pause called by ' .. tostring(caller))
+    own.pause = norm(caller)
+    own.pause_time = get_time_since_inject()
     navigator.pause()
 end
 external.resume = function (caller)
@@ -32,6 +113,11 @@ external.resume = function (caller)
     end
     tracker.external_caller = caller
     utils.log(2, 'resume called by ' .. tostring(caller))
+    local who = norm(caller)
+    observe_world()
+    -- Resume never revives another plugin's leftover route or custom goal.
+    drop_foreign(who, 'resume')
+    own.pause = who
     navigator.unpause()
 end
 external.reset = function (caller)
@@ -43,6 +129,9 @@ external.reset = function (caller)
     utils.log(2, 'reset called by ' .. tostring(caller))
     long_path.stop_navigation()
     navigator.reset()
+    explorer.priority = default_priority()
+    set_goal_owner(nil)
+    own.priority = nil
 end
 -- reset_movement: clears movement/pathfinding state only; exploration history
 -- (visited, backtrack, frontier) is preserved.  Use for mid-session interruptions.
@@ -55,6 +144,7 @@ external.reset_movement = function (caller)
     utils.log(2, 'reset_movement called by ' .. tostring(caller))
     long_path.stop_navigation()
     navigator.reset_movement()
+    set_goal_owner(nil)
 end
 external.move = function (caller)
     if caller == nil then
@@ -63,6 +153,9 @@ external.move = function (caller)
     end
     tracker.external_caller = caller
     utils.log(2, 'move called by ' .. tostring(caller))
+    if loading_skip('move', caller) then return end
+    observe_world()
+    drop_foreign(norm(caller), 'move')
     tracker.bench_start("total_move")
     local start_move = os.clock()
     navigator.move()
@@ -77,6 +170,8 @@ external.update = function (caller)
     end
     tracker.external_caller = caller
     utils.log(2, 'update called by ' .. tostring(caller))
+    if loading_skip('update', caller) then return end
+    observe_world()
     tracker.bench_start("total_update")
     local start_update = os.clock()
     navigator.update()
@@ -90,7 +185,12 @@ external.set_target = function(caller, target, disable_spell)
     end
     tracker.external_caller = caller
     utils.log(2, 'set_target called by ' .. tostring(caller))
-    return navigator.set_target(target, disable_spell)
+    local who = norm(caller)
+    observe_world()
+    drop_foreign(who, 'set_target')
+    local accepted, detail = navigator.set_target(target, disable_spell)
+    if accepted then set_goal_owner(who) end
+    return accepted, detail
 end
 external.clear_target = function (caller)
     if caller == nil then
@@ -118,6 +218,7 @@ external.set_priority = function(caller, priority)
     tracker.external_caller = caller
     utils.log(2, 'set_priority called by ' .. tostring(caller) .. ' to priortize ' .. tostring(priority))
     explorer.set_priority(priority)
+    own.priority = explorer.priority ~= default_priority() and norm(caller) or nil
 end
 
 -- Find a path without normal distance-scaled caps.
@@ -145,16 +246,37 @@ external.navigate_long_path = function(caller, target)
     end
     tracker.external_caller = caller
     utils.log(2, 'navigate_long_path called by ' .. tostring(caller))
-    return long_path.navigate_to(target)
+    local who = norm(caller)
+    observe_world()
+    drop_foreign(who, 'navigate_long_path')
+    -- pause() immediately followed by navigate_long_path() (HR recall,
+    -- Arkham portal/anchor/orb/kill tasks) means the caller drives the route
+    -- with move(): keep its pause.  Other callers (Reaper LONG_PATHING) rely
+    -- on the historical unpause + autonomous drive in main.lua.
+    local keep_pause = navigator.paused and own.pause == who
+        and (get_time_since_inject() - own.pause_time) <= KEEP_PAUSE_WINDOW
+    local started = long_path.navigate_to(target, keep_pause)
+    if started then
+        long_path.owner = who
+        set_goal_owner(who)
+    end
+    return started
 end
 
 -- True while long path navigation is actively driving the navigator.
--- Auto-stops (returns false) when the navigator's target was cleared
+-- Auto-stops (returns false) at the goal — also for paused callers, whose
+-- route main.lua never finishes — and when the navigator's target was cleared
 -- externally (e.g. post-traversal-cross in attempt_escape) while navigating
 -- was still true — this leaves navigator.target=nil every frame and the
 -- caller stalls because it trusts this flag as "still in progress". Clearing
 -- the flag lets callers retry navigate_long_path immediately.
 external.is_long_path_navigating = function()
+    local player = long_path.navigating and get_local_player() or nil
+    if player ~= nil and long_path.reached_goal(player:get_position()) then
+        console.print('[LONG PATH] Reached target (query) — stopping so the caller sees completion')
+        long_path.stop_navigation()
+        return false
+    end
     if long_path.navigating and navigator.target == nil
         and not long_path.is_traversal_pending() then
         console.print('[LONG PATH] target cleared externally while navigating — auto-stopping so caller can repath')
@@ -190,7 +312,11 @@ external.try_traversal_route = function(caller)
     tracker.external_caller = caller
     local local_player = get_local_player()
     if local_player == nil then return false end
+    local who = norm(caller)
+    observe_world()
+    drop_foreign(who, 'try_traversal_route')
     local routed = navigator.try_traversal_route(local_player, local_player:get_position())
+    if routed then set_goal_owner(who) end
     return routed and true or false
 end
 
@@ -245,6 +371,10 @@ external.clear_traversal_blacklist = function(caller)
     navigator.failed_target         = nil
     navigator.failed_target_time    = -1
     navigator.failed_target_radius  = 15
+    -- The 60 s global suppression set after a custom target's partial->full
+    -- path is a traversal blacklist too; leaving it made every consumer's
+    -- traversal recovery a silent no-op for up to a minute.
+    navigator.all_trav_blocked_until = 0
 end
 
 -- Trap-recovery query.  Returns true once the navigator has been stuck in a
@@ -273,6 +403,60 @@ external.clear_giving_up = function(caller)
     tracker.external_caller = caller
     utils.log(2, 'clear_giving_up called by ' .. tostring(caller))
     navigator.clear_trap_state()
+end
+
+-- Deterministic hand-off (C3).  Stops the caller's long route, drops its
+-- goal plus all traversal-routing state (last_trav, trav_delay,
+-- trav_final_target, escape/post-traversal goal, partial-path tracker),
+-- pauses Batmobile and restores the default explorer priority.  Owned by
+-- that caller: a route or goal another plugin claimed since, or a resume by
+-- another caller, is left alone.  Never clears the native pathfinder path
+-- (a companion may own movement).  The caller's failed-target zone and 60 s
+-- portal-ledge traversal block survive a plain release (same plugin
+-- resuming after a yield); another plugin claiming the navigator drops
+-- them.  Exploration history is kept; reset() is the full wipe.
+external.release = function (caller)
+    if caller == nil then
+        utils.log(2, 'release called with no caller')
+        return false
+    end
+    tracker.external_caller = caller
+    local who = norm(caller)
+    local route_owner = long_path.navigating and long_path.owner or nil
+    local foreign_route = route_owner ~= nil and route_owner ~= who
+    local foreign_goal = own.target ~= nil and own.target ~= who and holds_caller_goal()
+    local foreign_resume = own.pause ~= nil and own.pause ~= who and not navigator.paused
+    local changed = long_path.navigating or navigator.target ~= nil or navigator.last_trav ~= nil
+        or navigator.trav_escape_pos ~= nil or not navigator.paused
+    if long_path.navigating and not foreign_route then long_path.stop_navigation() end
+    if not foreign_route and not foreign_goal then
+        navigator.release_movement(false)
+        set_goal_owner(nil)
+        if not foreign_resume then
+            own.pause = who
+            navigator.pause()
+        end
+    end
+    if own.priority == nil or own.priority == who then
+        if explorer.priority ~= default_priority() then changed = true end
+        explorer.priority = default_priority()
+        own.priority = nil
+    end
+    if foreign_route or foreign_goal then
+        log_limited('release:' .. who, '[batmobile] release by ' .. who .. ': movement now owned by ' ..
+            tostring(route_owner or own.target) .. ' left untouched')
+    elseif changed then
+        log_limited('release:' .. who, '[batmobile] released by ' .. who ..
+            (foreign_resume and ' (kept resume by ' .. tostring(own.pause) .. ')' or ''))
+    end
+    return true
+end
+
+-- Current movement owner (normalized caller of the active long route or of
+-- the last accepted goal), or nil.
+external.get_owner = function ()
+    if long_path.navigating and long_path.owner ~= nil then return long_path.owner end
+    return own.target
 end
 
 return external

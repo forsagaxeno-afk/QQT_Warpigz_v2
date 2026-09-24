@@ -449,4 +449,10 @@ task.reset = function ()
     cluster_cooldown = {}
 end
 
+-- C5: time spent yielding to Alfred is not "no nav progress" / "stuck".
+task.on_yield = function (seconds)
+    if nav_tracking.pos then nav_tracking.time = nav_tracking.time + seconds end
+    if stuck_pos then stuck_time = stuck_time + seconds end
+end
+
 return task

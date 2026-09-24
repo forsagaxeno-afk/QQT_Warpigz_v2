@@ -487,6 +487,7 @@ function task.Execute()
 
             local ok = BatmobilePlugin.navigate_long_path(plugin_label, target)
             if ok then
+                navigation_owner.route_started()
                 nav.long_path_goal          = target
                 nav.long_path_retries       = 0
                 nav.long_path_wait_frames   = 0
@@ -629,6 +630,7 @@ function task.Execute()
                     utils.distance_to(altar)))
                 local ok = BatmobilePlugin and BatmobilePlugin.navigate_long_path(plugin_label, altar:get_position())
                 if ok then
+                    navigation_owner.route_started()
                     nav.long_path_goal = altar:get_position()
                     nav.phase_start    = now()
                 else
@@ -657,6 +659,7 @@ function task.Execute()
                     dist))
                 local ok = BatmobilePlugin and BatmobilePlugin.navigate_long_path(plugin_label, altar:get_position())
                 if ok then
+                    navigation_owner.route_started()
                     nav.long_path_goal = altar:get_position()
                     nav.phase_start    = now()
                 else

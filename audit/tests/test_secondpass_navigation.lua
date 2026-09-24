@@ -9,15 +9,26 @@ REAPER_TEST_HARNESS_ONLY=nil
 
 -- Reaper release must not erase an already-running Alfred's Batmobile goal,
 -- including status implementations that omit the legacy trigger booleans.
-for _,state in ipairs({'running','teleport','pending','paused','unreadable','missing_method','missing_enabled'}) do
-    local e,c=reaper_harness();local calls=0
-    e.BatmobilePlugin={stop_long_path=function()calls=calls+1 end,clear_target=function()calls=calls+1 end}
+-- (Legacy Batmobile without release(); RPR-5: Reaper's own route still stops.)
+for _,state in ipairs({'running','teleport','pending','unreadable','missing_method','missing_enabled'}) do
+    local e,c=reaper_harness();local calls,stops=0,0
+    e.BatmobilePlugin={stop_long_path=function()calls=calls+1;stops=stops+1 end,clear_target=function()calls=calls+1 end}
     e.AlfredTheButlerPlugin={get_status=function()if state=='unreadable' then error('stale') end return {[state]=true,enabled=true} end}
     if state=='missing_method' then e.AlfredTheButlerPlugin.get_status=nil end
     if state=='missing_enabled' then e.AlfredTheButlerPlugin.get_status=function()return {}end end
     local owner=e.require('core.navigation_owner');owner.claim();owner.release()
     eq(calls,0,state..' prevents foreign navigation reset');eq(owner.active,false)
     owner.release();eq(calls,0,'idempotent cleanup')
+    owner.route_started();owner.release()
+    eq(stops,1,state..': Reaper-started route is stopped');eq(calls,1,state..': Alfred goal is not cleared')
+end
+-- C1: a foreign pause without live work does not own movement.
+do
+    local e,c=reaper_harness();local calls=0
+    e.BatmobilePlugin={stop_long_path=function()calls=calls+1 end,clear_target=function()calls=calls+1 end}
+    e.AlfredTheButlerPlugin={get_status=function()return {paused=true,enabled=true} end}
+    local owner=e.require('core.navigation_owner');owner.claim();owner.release()
+    eq(calls,2,'paused Alfred: owned route and goal are released')
 end
 do
     local e,c=reaper_harness();local calls=0
@@ -26,13 +37,15 @@ do
     eq(calls,2,'normal owned route is stopped')
 end
 -- Passive handoff must not overwrite a companion reporting modern busy fields.
+-- C1/RPR-4: a foreign pause with no work is idle for Reaper (no yield), but a
+-- paused Alfred is still never triggered.
 for _,state in ipairs({'running','teleport','pending','paused','unreadable','missing_method','missing_enabled'}) do
     local e,c,settings=reaper_harness();settings.use_alfred=true;local triggers=0
     e.AlfredTheButlerPlugin={get_status=function()if state=='unreadable' then error('stale') end return {[state]=true,enabled=true} end,
         trigger_tasks_with_teleport=function()triggers=triggers+1 end}
     if state=='missing_method' then e.AlfredTheButlerPlugin.get_status=nil end
     if state=='missing_enabled' then e.AlfredTheButlerPlugin.get_status=function()return {}end end
-    local task=e.require('tasks.alfred');eq(task.shouldExecute(),true,state..' yields')
+    local task=e.require('tasks.alfred');eq(task.shouldExecute(),state~='paused',state..' yields')
     task.Execute();eq(triggers,0,'busy/unknown companion is not overwritten')
 end
 
@@ -40,6 +53,7 @@ end
 -- Recovery retires only our wait, never resumes/pauses Alfred or invents success.
 do
     local e,c,s=reaper_harness();s.use_alfred=true
+    c.zone('Town') -- RPR-3: advisory need_trigger is serviced outside boss lairs
     local status={enabled=true,need_trigger=true};local callbacks={};local resumes,pauses=0,0
     e.AlfredTheButlerPlugin={get_status=function()if status=='unknown' then error('loading')end return status end,
         resume=function()resumes=resumes+1 end,pause=function()pauses=pauses+1 end,

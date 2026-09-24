@@ -24,6 +24,14 @@ Batmobile also handles any traversals in game if move command is given.
 ## Example integrations
 TBD (Arkham Asylum is integrated, so check there in the mean time)
 
+### Sharing Batmobile between plugins
+- `BatmobilePlugin.release(caller)`: call it when your plugin is disabled or hands movement over. It stops your long path, clears your target and traversal routing, pauses Batmobile and restores the default explorer priority. If another plugin has claimed movement since, its route and target are left alone. It never clears the native pathfinder path. Fallback for older builds: `stop_long_path` + `clear_target` + `pause`.
+- `BatmobilePlugin.get_owner()`: returns the caller that owns the active route or target, or nil.
+- A target or long path left by another plugin is dropped when a different caller calls `set_target`, `navigate_long_path`, `resume`, `move` or `try_traversal_route`.
+- `reset(caller)` also restores the default explorer priority (`direction`). A world change or teleport resets explorer, trap and traversal state automatically.
+- `pause(caller)` followed by `navigate_long_path(caller)` in the same tick keeps Batmobile paused, and the caller drives the route with `move()`. Paused callers see `is_long_path_navigating()` turn false at the goal.
+- `set_target` returns `true, 'deferred'` when it queues the goal behind a traversal or post-traversal escape that is in progress.
+
 ## Changelog
 ### V1.0.12
 Added paladin advance skill as movement spell

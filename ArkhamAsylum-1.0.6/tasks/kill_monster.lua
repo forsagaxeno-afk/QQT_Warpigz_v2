@@ -201,4 +201,9 @@ task.reset = function ()
     long_path_target = nil
 end
 
+-- C5: time spent yielding to Alfred is not "no nav progress" to a monster.
+task.on_yield = function (seconds)
+    if nav_tracking.pos then nav_tracking.time = nav_tracking.time + seconds end
+end
+
 return task

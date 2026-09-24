@@ -94,6 +94,11 @@ task.Execute = function ()
     end
 end
 
+-- C5: time spent yielding (e.g. to Alfred) does not expire the objective.
+task.on_yield = function (seconds)
+    if task.interact_time then task.interact_time = task.interact_time + seconds end
+end
+
 task.reset = function ()
     task.active_key = nil
     task.interact_time = nil

@@ -173,6 +173,7 @@ function task.Execute()
             if not BatmobilePlugin.is_long_path_navigating() then
                 console.print(string.format("[Reaper] Altar at dist=%.1f — starting long path.", dist))
                 local ok = BatmobilePlugin.navigate_long_path(plugin_label, altar:get_position())
+                if ok then navigation_owner.route_started() end
                 if not ok then
                     console.print("[Reaper] Long path failed — using direct move.")
                     pathfinder.request_move(altar:get_position())

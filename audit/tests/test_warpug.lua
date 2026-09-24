@@ -310,6 +310,9 @@ local function gui_fixture(contents)
         return { write = function(_, chunk) f.saved = f.saved .. chunk; return true end, close = function() return true end }
     end }
     f.gui = dofile(root .. 'gui.lua')
+    -- The plugin's first update observes the keybinds before any user press;
+    -- a latch already set at that poll is a restored state (WPG-9).
+    f.gui.poll_keybinds()
     return f
 end
 do
@@ -326,6 +329,18 @@ do
 end
 io, package.path = real_io, real_package_path
 
+-- The real gui.lua loaded in an isolated environment, for its keybind helper.
+local function real_gui_module()
+    local env = setmetatable({
+        checkbox = { new = function() return { get = function() return false end } end },
+        keybind = { new = function() return { get_state = function() return 0 end, get_key = function() return 0x0A end } end },
+        tree_node = { new = function() return {} end },
+        get_hash = function(s) return s end,
+        io = { open = function() return nil end },
+    }, { __index = _G })
+    return assert(loadfile(root .. 'gui.lua', 't', env))()
+end
+
 -- Drive the actual main update callback through a held calibration-test key,
 -- live enable transition, death and a late callback; no delayed click survives.
 local function main_fixture()
@@ -333,7 +348,8 @@ local function main_fixture()
     local function element(value) return { value = value, get = function(self) return self.value end } end
     local kb = { state = 0, get_state = function(self) return self.state end, get_key = function() return 65 end }
     local g = { positions = {}, elements = { main_toggle = element(false), keybind_test_clicks = kb,
-        show_click_points = element(false) }, poll_keybinds = function() end }
+        show_click_points = element(false) }, poll_keybinds = function() end,
+        consume_press = real_gui_module().consume_press }
     f.settings.update_settings = function() f.settings.enabled = g.elements.main_toggle:get() end
     package.loaded.gui, package.loaded['core.settings'], package.loaded['core.planner'] = g, f.settings, f.p
     package.loaded['core.external'] = {}
@@ -343,6 +359,7 @@ local function main_fixture()
     dofile(root .. 'main.lua')
     f.gui, f.kb = g, kb
     function f.pulse(dt) f.now = f.now + (dt or 0.5); f.update() end
+    f.pulse() -- first update after load, before any press
     return f
 end
 do

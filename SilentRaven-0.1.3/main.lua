@@ -58,6 +58,12 @@ local _last_reload_state     = false
 -- wasted work.  Keep it cheap on the game thread.
 local D4REMOTE_REPORT_INTERVAL_S = 1.0
 local last_d4remote_report_t     = 0
+-- D4Remote may load after SilentRaven: register lazily until it succeeds.
+local d4remote_registered        = false
+
+-- An auto-fire held by a companion shows its reason in the status and is
+-- logged once after this long (a >1 s gap between samples ends the hold).
+local HOLD_LOG_S                 = 60
 
 local function refresh_ready(now)
     if (now - (tracker.last_ready_check_t or 0)) < READY_CHECK_INTERVAL_S then return end
@@ -90,6 +96,17 @@ local function maybe_consume_external_trigger(now)
     tracker.teleport_required = false
 end
 
+local function note_hold(reason, now)
+    if not tracker.hold_since or now - (tracker.hold_seen_t or -math.huge) > 1 then
+        tracker.hold_since, tracker.hold_logged = now, false
+    end
+    tracker.hold_reason, tracker.hold_seen_t = reason, now
+    if not tracker.hold_logged and now - tracker.hold_since >= HOLD_LOG_S then
+        tracker.hold_logged = true
+        log.info(string.format('auto-fire waiting %.0fs: %s', now - tracker.hold_since, tostring(reason)))
+    end
+end
+
 local function maybe_autofire(now, cur_zone)
     if not settings.auto_fire or tracker.managed_by then return end
     if tracker.running or tracker.paused then return end
@@ -106,6 +123,12 @@ local function maybe_autofire(now, cur_zone)
     local has_actor  = whispers.find_tree_npc() ~= nil
     local has_coords = whispers.has_known_coords(cur_zone)
     if not (has_actor or has_coords) then return end
+    -- Without WarPigs' Whisper management nobody else admits this run:
+    -- WarPug mid-session, Alfred live/pending work, the Looter and an
+    -- enabled WarPigs doing town work each own movement or clicks.
+    local clear, reason = coordination.companions('auto', now)
+    if not clear then note_hold(reason, now); return end
+    tracker.hold_reason, tracker.hold_since, tracker.hold_seen_t = nil, nil, nil
     fsm.start(settings, 'auto', false, nil)
 end
 
@@ -119,6 +142,7 @@ local function handle_manual_keybind(now)
         return
     end
     local allowed, reason = coordination.can_start(nil)
+    if allowed then allowed, reason = coordination.companions('manual', now) end
     if not allowed then
         log.info('manual trigger deferred: ' .. tostring(reason))
         return
@@ -159,17 +183,21 @@ local function build_d4remote_payload()
         end
     end
 
+    local hold = tracker.current_hold((get_time_since_inject and get_time_since_inject()) or 0)
     local status
     if not settings.enabled then
         status = 'Disabled'
     elseif tracker.running then
         status = 'Running: ' .. (tracker.state or 'STARTING')
+        if hold then status = status .. ' (waiting: ' .. hold .. ')' end
     elseif tracker.paused then
         status = 'Paused'
     elseif whispers.in_whisper_town() then
         if tracker.ready then
             if tracker.last_zone_handled == cur_zone then
                 status = 'Idle in town (latched)'
+            elseif hold then
+                status = 'Waiting: ' .. hold
             else
                 status = 'Ready -- bounty queued'
             end
@@ -192,6 +220,7 @@ local function build_d4remote_payload()
         legendary_bonus      = settings.legendary_bonus_weight or 0,
         ready                = tracker.ready == true,
         attempts             = tracker.attempts or 0,
+        hold_reason          = hold or '',
 
         -- Catalog
         catalog_source       = rewards.CATALOG_SOURCE or 'unknown',
@@ -233,10 +262,17 @@ end
 -- Push stats to the D4Remote dashboard.  Throttled to 1 Hz on the
 -- game thread; D4Remote itself buffers writes to ~3s on the disk
 -- side, so anything faster is wasted work.
+local function register_d4remote()
+    if d4remote_registered or not (D4Remote and D4Remote.register) then return end
+    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.1.4') end) == true
+end
+
 local function report_to_d4remote(now)
-    if not (D4Remote and D4Remote.update_stats) then return end
+    if not D4Remote then return end
     if (now - last_d4remote_report_t) < D4REMOTE_REPORT_INTERVAL_S then return end
     last_d4remote_report_t = now
+    register_d4remote()
+    if not D4Remote.update_stats then return end
     pcall(function () D4Remote.update_stats('SilentRaven', build_d4remote_payload()) end)
 end
 
@@ -330,8 +366,7 @@ PLUGIN_silent_raven = external
 SilentRavenPlugin   = external
 
 -- Register with D4Remote dashboard if present (best-effort, non-blocking).
-if D4Remote and D4Remote.register then
-    pcall(function () D4Remote.register('SilentRaven', '0.1.4') end)
-end
+-- report_to_d4remote retries while D4Remote loads later or register fails.
+register_d4remote()
 
 log.info('loaded magoogle | SilentRaven | v0.1.4')

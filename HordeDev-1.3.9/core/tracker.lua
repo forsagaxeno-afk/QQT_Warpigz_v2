@@ -26,6 +26,12 @@ local tracker = {
     teleported_from_town = false,
     keep_items = 0,
     sigil_used = false,
+    -- HRD-1: message of a chest phase that could not finish (unspendable
+    -- aether, unreadable aether API). The phase is terminal: exit may proceed.
+    chest_fault = nil,
+    -- C1: time of the last completed HordeDev Alfred cycle. Advisory flags
+    -- cannot re-trigger within the sticky grace; never cleared by cancel/reset.
+    alfred_completed_at = nil,
     -- Timestamp of the last InfernalHordesPlugin.enable(). Used by horde.lua's
     -- shouldExecute as a settle gate so the wave-clearing task doesn't fire
     -- the same tick an external orchestrator (WarPigs) flipped the toggle —
@@ -95,6 +101,7 @@ function tracker.fresh_run_reset()
     tracker.start_dungeon_time        = nil
     tracker.exit_horde_start_time     = nil
     tracker.has_entered               = false
+    tracker.chest_fault               = nil
     tracker.clear_runtime_timers()
 end
 

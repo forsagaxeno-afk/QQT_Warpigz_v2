@@ -26,6 +26,12 @@ local explorer = {
     backtrack_failed_time = -1,
     backtrack_timeout = 5,
     priority = 'direction',
+    -- Batmobile's own default; restored by BatmobilePlugin.reset/release and
+    -- on a world change so one consumer's choice never leaks into the next.
+    default_priority = 'direction',
+    -- false while walkability is still streaming in (see navigator.note_loading):
+    -- non-walkable results are then re-checked instead of cached forever.
+    cache_negative = true,
     wrong_dir_count = 0,
     -- Cells (walkable or not) ever examined by an update() scan. A frontier is
     -- a walkable cell with at least one neighbor NOT in `scanned` — i.e. the
@@ -733,9 +739,13 @@ explorer.update = function (local_player)
                     _scan_walkable_checks = _scan_walkable_checks + 1
                     if walkable then
                         add_frontier(node_str, valid)
-                    else
+                    elseif explorer.cache_negative ~= false then
                         -- Cache the negative result so the next scan skips this cell
                         explorer.scanned[node_str] = false
+                    elseif prev_scanned == nil then
+                        -- Load grace: an untrusted negative stays "unknown", so the
+                        -- cell is re-checked and its neighbours remain frontiers.
+                        explorer.scanned[node_str] = nil
                     end
                 end
             end

@@ -53,8 +53,10 @@ function M.companion_may_own_movement()
     local ok, status = pcall(alfred.get_status)
     if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return true end
     if not status.enabled then return false end
-    return not not (status.trigger_tasks or status.external_trigger or status.running or status.pending
-        or (status.teleport and not status.teleport_done))
+    -- C1 live work: a teleport latched after a finished or failed trip is not.
+    return status.trigger_tasks == true or status.external_trigger == true or status.pending == true
+        or status.running == true
+        or (status.teleport == true and status.teleport_done ~= true and status.teleport_failed ~= true)
 end
 
 return M

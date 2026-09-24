@@ -1,5 +1,10 @@
 local tracker = require 'core.tracker'
+-- Captured at load (no cycle: settings only needs gui). A require inside a
+-- function would resolve in the CALLER's module context if another plugin
+-- ever reached it through an exported API (shared QQT module cache).
+local settings = require 'core.settings'
 
+local plugin_label = 'arkham_asylum'
 local utils    = {
     settings = {},
 }
@@ -9,7 +14,6 @@ local utils    = {
 -- cancels the teleport_to_waypoint channel every frame.
 utils.exit_pit_forced = function ()
     if not tracker.pit_start_time then return false end
-    local settings = require 'core.settings'
     if not settings.reset_timeout then return false end
     return tracker.pit_start_time + settings.reset_timeout < get_time_since_inject()
 end
@@ -88,9 +92,61 @@ end
 -- autonomous driver. Stop that driver before a channel or movement handoff.
 utils.stop_movement = function ()
     if not BatmobilePlugin then return end
-    BatmobilePlugin.stop_long_path('arkham_asylum')
-    BatmobilePlugin.clear_target('arkham_asylum')
-    BatmobilePlugin.pause('arkham_asylum')
+    BatmobilePlugin.stop_long_path(plugin_label)
+    BatmobilePlugin.clear_target(plugin_label)
+    BatmobilePlugin.pause(plugin_label)
+end
+
+-- C3 hand-off (disable, WarPigs release, Alfred taking over). The new
+-- BatmobilePlugin.release is owner-aware: it stops only Arkham's own long
+-- route/goal/traversal routing, pauses, restores the default explorer
+-- priority (ARK-8) and never clears the native path a companion may own.
+-- companion_owns: Alfred (or an unknown Alfred) owns control right now; an
+-- older Batmobile without release() then only loses Arkham's autonomous
+-- long route (ARK-5), never the target/pause a companion may rely on.
+utils.release_movement = function (companion_owns)
+    if not BatmobilePlugin then return end
+    if type(BatmobilePlugin.release) == 'function' then
+        BatmobilePlugin.release(plugin_label)
+        return
+    end
+    if companion_owns then
+        if type(BatmobilePlugin.is_long_path_navigating) ~= 'function'
+            or BatmobilePlugin.is_long_path_navigating()
+        then
+            BatmobilePlugin.stop_long_path(plugin_label)
+        end
+        return
+    end
+    utils.stop_movement()
+    if type(BatmobilePlugin.set_priority) == 'function' then
+        BatmobilePlugin.set_priority(plugin_label, 'direction')
+    end
+end
+
+-- Bounded Looter yield shared by upgrade_glyph and the Alfred trip start
+-- (ARK-4: both yield to Looter the same way). True while Looter has been
+-- continuously busy for less than max_hold seconds; afterwards the caller
+-- proceeds (one log line per busy episode) so a Looter stuck in approach
+-- retries cannot hold the Pit (C6). A gap in sampling starts a new episode.
+local looter = {since = nil, seen = -math.huge, logged = false}
+utils.looter_hold = function (max_hold, what)
+    local now = get_time_since_inject()
+    if not utils.is_looting() then
+        looter.since, looter.logged = nil, false
+        return false
+    end
+    if looter.since == nil or now - looter.seen > 2 then
+        looter.since, looter.logged = now, false
+    end
+    looter.seen = now
+    if now - looter.since < max_hold then return true end
+    if not looter.logged then
+        looter.logged = true
+        console.print(string.format('[arkham] Looter busy for %.0fs — %s proceeds (bounded Looter yield)',
+            now - looter.since, tostring(what or 'task')))
+    end
+    return false
 end
 
 return utils

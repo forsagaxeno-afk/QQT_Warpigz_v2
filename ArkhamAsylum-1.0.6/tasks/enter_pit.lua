@@ -57,7 +57,12 @@ local open_portal = function (delay)
     else
         task.debounce_time = get_time_since_inject()
         local pit_address = pit_levels[settings.pit_level]
-        if pit_address then utility.open_pit_portal(pit_address) end
+        if pit_address then
+            utility.open_pit_portal(pit_address)
+            -- A newly opened pit is a new run, never the one left for Alfred.
+            tracker.resume_key = nil
+            task.committed_at = get_time_since_inject()
+        end
     end
 end
 local enter_portal = function (portal)
@@ -65,7 +70,15 @@ local enter_portal = function (portal)
     task.last_enter_time = get_time_since_inject()
     utils.stop_movement()
     interact_object(portal)
+    task.committed_at = get_time_since_inject()
     task.status = status_enum['ENTERING'] .. tostring(settings.pit_level)
+end
+-- C2 committed_entry: a pit was opened or its portal interacted with in
+-- the last ENTRY_WINDOW seconds and we are not inside yet (cleared by the
+-- world transition into the pit via reset()).
+local ENTRY_WINDOW = 30
+task.committed = function ()
+    return task.committed_at ~= nil and get_time_since_inject() - task.committed_at < ENTRY_WINDOW
 end
 -- Close-range threshold (matches portal.lua). The pit obelisk sits on
 -- non-walkable terrain, so A* returns limit_partial; the partial-path
@@ -145,6 +158,7 @@ end
 task.reset = function ()
     task.debounce_time = -math.huge
     task.last_enter_time = -math.huge
+    task.committed_at = nil
     task.status = status_enum.IDLE
 end
 

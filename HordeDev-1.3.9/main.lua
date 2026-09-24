@@ -4,25 +4,96 @@ local settings     = require "core.settings"
 local tracker = require "core.tracker"
 local movement = require "core.movement"
 local utils        = require "core.utils"
+local loot_guard   = require "core.loot_guard"
 local meteor       = require "Meteor"
 local exit_horde_task = require "tasks.exit_horde"
 local start_dungeon_task = require "tasks.start_dungeon"
 local enter_horde_task = require "tasks.enter_horde"
+local open_chests_task = require "tasks.open_chests"
+local alfred_task = require "tasks.alfred"
+local HORDE_ZONE = "S05_BSK_Prototype02"
 
 local local_player, player_position
 local was_active = false
 local next_revive_time = -math.huge
+local dead_since = nil -- HRD-4: death while a transaction is pending
 
 local function update_locals()
     local_player = get_local_player()
     player_position = local_player and local_player:get_position()
 end
 
+-- C2 / HRD-1 / HRD-4: the fault of any run phase, or nil. A chest fault is
+-- terminal (exit_horde leaves on its own); the transaction faults below are
+-- latched until a restart (`latched_only`).
+local function current_fault(latched_only)
+    if tracker.chest_fault and not latched_only then return "chests: " .. tostring(tracker.chest_fault) end
+    if exit_horde_task.reset_phase == "FAULT" then return "exit: " .. tostring(exit_horde_task.reset_error) end
+    if start_dungeon_task.activation_phase == "FAULT" then return "entry: " .. tostring(start_dungeon_task.activation_error) end
+    if enter_horde_task.entry_phase == "FAULT" then return "entry: " .. tostring(enter_horde_task.entry_error) end
+    return nil
+end
+
+-- C2 / CRT-2: committed to a horde (entry, run, chests, exit/RESET or an
+-- Alfred trip HordeDev started). Idle, walking or town is not a run.
+local function run_in_progress()
+    if tracker.reset_exit_pending or tracker.sigil_activation_pending or tracker.horde_entry_pending then return true end
+    if tracker.horde_opened or tracker.sigil_used then return true end
+    if alfred_task.trip_in_progress and alfred_task.trip_in_progress() then return true end
+    local chest_state = open_chests_task.current_state
+    if chest_state ~= nil and chest_state ~= "INIT" and not tracker.finished_chest_looting then return true end
+    return utils.player_in_zone(HORDE_ZONE)
+end
+
+-- Same wipe as a fresh enable(): every transaction, fault and chest flag.
+local function reset_run_state()
+    start_dungeon_task:reset()
+    enter_horde_task:reset()
+    exit_horde_task:reset()
+    tracker.fresh_run_reset()
+    open_chests_task:reset()
+end
+
+-- HRD-4: a latched fault ("restart HordeDev") is cleared by any stop: the GUI
+-- toggle / keybind off edge and disable(). A healthy pending transaction
+-- survives a pause and resumes when re-activated; a chest fault is restarted
+-- too unless its exit transaction is already running.
+local function stop_run()
+    local pending = tracker.reset_exit_pending or tracker.sigil_activation_pending or tracker.horde_entry_pending
+    local fault = current_fault(pending)
+    if task_manager.stop then task_manager.stop() end
+    if fault then
+        console.print("[HordeDev] Clearing latched fault on stop: " .. fault)
+        reset_run_state()
+    end
+end
+
+-- HRD-4: death during a pending transaction. Revive (the snapshot of a dead
+-- player is nil, so the transaction cannot progress) and do not count the
+-- dead time toward its timeout.
+local function pending_player_dead()
+    local ok, dead = pcall(function()
+        local world = get_current_world()
+        local name = world and world:get_name()
+        if type(name) ~= 'string' or name:lower():find("limbo", 1, true) or name:lower():find("loading", 1, true) then
+            return false
+        end
+        return local_player:is_dead() == true
+    end)
+    return ok and dead
+end
+
+local function extend_pending_deadlines(dt)
+    if exit_horde_task.reset_started then exit_horde_task.reset_started = exit_horde_task.reset_started + dt end
+    if start_dungeon_task.started then start_dungeon_task.started = start_dungeon_task.started + dt end
+    if enter_horde_task.started then enter_horde_task.started = enter_horde_task.started + dt end
+end
+
 local function main_pulse()
     settings:update_settings()
     local active = settings.enabled and utils.get_keybind_state()
     if not active then
-        if was_active and task_manager.stop then task_manager.stop() end
+        if was_active then stop_run() end
         was_active = false
         return
     end
@@ -30,6 +101,7 @@ local function main_pulse()
     if not local_player then return end
     local pending = tracker.reset_exit_pending or tracker.sigil_activation_pending or tracker.horde_entry_pending
     if not pending then
+        dead_since = nil
         local world = get_current_world()
         local name = world and world:get_name()
         if not world or not player_position or type(name) ~= 'string'
@@ -46,6 +118,21 @@ local function main_pulse()
             end
             return
         end
+        next_revive_time = -math.huge
+    elseif pending_player_dead() then
+        local now = get_time_since_inject()
+        if not dead_since then
+            dead_since = now
+            console.print("[HordeDev] Player dead during a pending transaction; reviving at checkpoint")
+        end
+        if now >= next_revive_time then
+            next_revive_time = now + 1
+            revive_at_checkpoint()
+        end
+        return
+    elseif dead_since then
+        extend_pending_deadlines(get_time_since_inject() - dead_since)
+        dead_since = nil
         next_revive_time = -math.huge
     end
     if settings.manage_orbwalker and orbwalker.get_orb_mode() ~= 3 then
@@ -79,11 +166,15 @@ local function render_pulse()
             graphics.text_3d("Exit: " .. (current_task.reset_error or current_task.reset_phase),
                 vec3:new(px, py - 2, pz + 1), 14, color_white(255))
         end
+        -- C6: a companion hold (Alfred/Looter) is visible, not a silent stall.
+        local hold = alfred_task.hold_reason or loot_guard.hold_reason()
+        if hold then
+            graphics.text_3d("Hold: " .. hold, vec3:new(px, py - 2, pz), 14, color_white(255))
+        end
     end
 end
 
 -- Set Global access for other plugins
-local open_chests_task = require "tasks.open_chests"
 InfernalHordesPlugin = {
     enable = function ()
         console.print('HORDE ACTIVATING')
@@ -94,14 +185,10 @@ InfernalHordesPlugin = {
         -- open_chests entirely (exit_horde fires the moment the player is back
         -- in BSK). fresh_run_reset() also covers the normal Library->sigil flow
         -- as a no-op because start_dungeon's reset_chest_flags() runs anyway.
-        start_dungeon_task:reset()
-        enter_horde_task:reset()
-        exit_horde_task:reset()
-        tracker.fresh_run_reset()
         -- open_chests has its own internal state machine (current_state etc.)
         -- that finishes at chest_state.FINISHED on the prior run; reset it so
         -- the SM re-enters at INIT.
-        open_chests_task:reset()
+        reset_run_state()
         -- Stamp the enable time so the horde task's settle gate (in horde.lua's
         -- shouldExecute) can wait for world/zone to stabilize before firing
         -- the wave loop. Read by horde.shouldExecute alongside a world-name
@@ -116,13 +203,21 @@ InfernalHordesPlugin = {
         gui.elements.main_toggle:set(false)
         gui.elements.keybind_toggle:set(false)
         settings:update_settings()
-        if task_manager.stop then task_manager.stop() end
+        stop_run()
         was_active = false
     end,
+    -- C2 additive fields: in_run (committed to a horde), fault (latched fault
+    -- message or nil), alfred_trip (HordeDev's own Alfred round trip), hold
+    -- (companion hold reason or nil).
     status = function ()
         return {
-            ['enabled'] = gui.elements.main_toggle:get(),
-            ['task'] = task_manager.get_current_task()
+            -- HRD-7: execution is gated on the keybind too (like Arkham/WonderCity).
+            ['enabled'] = gui.elements.main_toggle:get() and utils.get_keybind_state(),
+            ['task'] = task_manager.get_current_task(),
+            ['in_run'] = run_in_progress(),
+            ['fault'] = current_fault(),
+            ['alfred_trip'] = alfred_task.trip_in_progress ~= nil and alfred_task.trip_in_progress() or false,
+            ['hold'] = alfred_task.hold_reason or loot_guard.hold_reason(),
         }
     end,
     getState = function ()
@@ -190,7 +285,8 @@ InfernalHordesPlugin = {
             -- any aether. exit_horde.shouldExecute also gates on this, so
             -- reaching "Exit Horde" task normally implies aether==0, but this
             -- guard survives any future path that bypasses shouldExecute.
-            if type(get_aether_count) == 'function' then
+            -- After a terminal chest fault (HRD-1) the aether is unspendable.
+            if type(get_aether_count) == 'function' and not tracker.chest_fault then
                 local ok, count = pcall(get_aether_count)
                 if ok and type(count) == 'number' and count > 0 then
                     first_seen = nil

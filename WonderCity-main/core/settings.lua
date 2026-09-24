@@ -132,15 +132,20 @@ settings.update_settings = function ()
     settings.manage_orbwalker = gui.elements.manage_orbwalker:get()
 end
 
+-- C4/L12: a clear-toggle off / movement block this plugin forced is always
+-- restored, even if 'Manage orbwalker' was switched off in between.
+local orb_forced = {clear = false, block = false}
 settings.orb_set_clear = function (v)
-    if settings.manage_orbwalker then
+    if settings.manage_orbwalker or (v and orb_forced.clear) then
         orbwalker.set_clear_toggle(v)
+        orb_forced.clear = not v
     end
 end
 
 settings.orb_set_block = function (v)
-    if settings.manage_orbwalker then
+    if settings.manage_orbwalker or (not v and orb_forced.block) then
         orbwalker.set_block_movement(v)
+        orb_forced.block = v and true or false
     end
 end
 

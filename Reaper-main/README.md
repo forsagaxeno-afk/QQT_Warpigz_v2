@@ -71,7 +71,7 @@ Defaults match the values that were hard-coded in earlier versions; you only nee
 
 ## Dungeon Reset
 
-Resets all dungeons after every N completed runs (configurable). Useful for keeping dungeon layouts fresh.
+Resets all dungeons after every N completed runs (configurable). Useful for keeping dungeon layouts fresh. The run count is kept for the whole session, also across WarPigs one-shot runs; a reset that comes due during a one-shot run is done in town before the run reports back.
 
 ## Combat Behaviour
 
@@ -98,11 +98,15 @@ During boss fights Reaper keeps the player within **15 units of the altar/anchor
 
 ## External control and completion
 
-`ReaperPlugin.run_once(boss_id, run_type, on_complete)` accepts one run when Reaper is idle. `run_boss` uses the same one-run rotation without a callback. A busy request returns `false` and preserves the active run. `nil`, `"material"`, and `"lair_key"` infer the boss's configured tier; `"lair"`, `"greater"`, and `"husk"` select it explicitly.
+`ReaperPlugin.run_once(boss_id, run_type, on_complete)` accepts one run when Reaper is idle. `run_boss` uses the same one-run rotation without a callback. A refused request returns `false` plus a reason (`"busy"`, `"unknown boss"`, `"unsupported run type"`, `"sigil runs are not supported"`, `"belial_chest_disabled"`) and preserves the active run. `nil`, `"material"`, and `"lair_key"` infer the boss's configured tier; `"lair"`, `"greater"`, and `"husk"` select it explicitly. A Belial one-shot is refused while the Belial Chest sequence is off, because nothing would confirm the Ritual of Lies reward dialog.
 
 Explicit `"sigil"` requests return `false`: this version has no verified sigil activation path. They are never converted into a material run. The legacy `sigil_complete.lua` heuristic is intentionally not scheduled.
 
-A successful run requires reward-chest consumption and confirmed arrival in the selected town. The callback fires after cleanup, so it may safely request the next run. A long fight or delayed teleport is not success; town teleports retry until arrival. Manual stops and failed navigation/chest attempts do not invoke the success callback. `disable()` clears task state immediately.
+A successful run requires reward-chest consumption and confirmed arrival in the selected town. `on_complete(result)` is called exactly once per run, after cleanup (Reaper is already off), so it may safely request the next run: `"success"`, `"failed"` (failed navigation or chest attempts) or `"cancelled"` (`disable()`, toggle off). A long fight or delayed teleport is not success; town teleports retry until arrival. `disable()` clears task state immediately.
+
+`ReaperPlugin.status()` adds `in_run` (an orchestrator run from acceptance until it reports; a manual run only at the altar, in the fight, at the chest, during its own Alfred trip or the return to town), `external_run` (started by `run_once`), `last_result` / `last_error` (kept after the stop) and `hold_reason` (why Reaper is waiting on Alfred or the Looter).
+
+Companions: Reaper yields while Alfred has live work (including another caller's trip), treats a pause it does not own as idle, and waits at most about 10 s on an unreadable Alfred status. Restock or stash-only requests wait out a 30 s grace after any finished Alfred cycle and never pull the player out of a boss lair; a full inventory or repair still does. Before leaving a lair after the chest, Reaper waits for the Looter to finish plus 3 s of quiet (at most 30 s). Stopping or yielding releases Reaper's own Batmobile route, and Reaper never leaves the orbwalker clear toggle forced OFF.
 
 Reaper captures its tracker, task helpers, inventory definitions and recorded
 paths during plugin load. External calls from WarPigs then reuse those references

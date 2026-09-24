@@ -65,6 +65,10 @@ local last_progress_time   = 0
 local last_recovery_time   = -999
 local nudge_applied        = false
 local micro_applied        = false
+-- C5: time this task did not run (preempted by Alfred/salvage/a transaction,
+-- plugin paused, loading) is not "no progress" for the stuck watchdog.
+local YIELD_GAP_S          = 1.0
+local last_execute_time    = nil
 
 local function reset_progress_tracker()
     last_progress_pos  = nil
@@ -156,6 +160,10 @@ function walking_to_horde_task.Execute()
 
     local current_time = get_time_since_inject()
     local player_pos = get_player_position()
+    if last_execute_time and current_time - last_execute_time > YIELD_GAP_S then
+        reset_progress_tracker()
+    end
+    last_execute_time = current_time
 
     -- Stuck recovery: only arms once the post-teleport cooldown has elapsed
     -- (during cooldown the player is supposed to be standing still).

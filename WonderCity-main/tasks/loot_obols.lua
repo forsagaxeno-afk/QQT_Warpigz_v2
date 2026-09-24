@@ -65,6 +65,11 @@ task.Execute = function ()
     task.status = 'walking to obols'
 end
 
+-- C5: time spent yielding (e.g. to Alfred) is not 'no progress' time.
+task.on_yield = function (seconds)
+    if progress_time then progress_time = progress_time + seconds end
+end
+
 task.reset = function ()
     skipped, active_key, best_dist, progress_time = {}, nil, nil, nil
 end

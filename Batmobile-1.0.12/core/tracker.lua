@@ -4,6 +4,7 @@ local plugin_label = 'batmobile_explorer'
 local tracker = {
     name        = plugin_label,
     external_caller = nil,
+    movement_owner = nil,  -- caller owning the navigator goal (core.external)
     timer_update = 0,
     timer_move = 0,
     timer_draw = 0,

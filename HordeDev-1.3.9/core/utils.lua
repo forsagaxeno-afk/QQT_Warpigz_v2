@@ -214,7 +214,10 @@ end
 function utils.navigate_to(target)
     local player_pos = get_player_position()
 
-    local path = navigation.find_path(player_pos, target)
+    -- No plugin in the suite defines a `navigation` global; never index nil.
+    local host_navigation = rawget(_G, "navigation")
+    if type(host_navigation) ~= "table" or type(host_navigation.find_path) ~= "function" then return end
+    local path = host_navigation.find_path(player_pos, target)
 
     if path then
         local current_index = 1
@@ -307,31 +310,97 @@ function utils.get_aether_actor()
     return nil
 end
 
+-- C1 canonical Alfred reading (suite contract, copied into each plugin; never
+-- shared across plugins). A `teleport` flag latched after a finished or failed
+-- trip is not live work.
+local ALFRED_UNKNOWN_GRACE = 10   -- unreadable status counts as busy this long
+local ALFRED_STICKY_GRACE = 30    -- advisory flags cannot re-trigger after a cycle
+local alfred_unknown = {since = nil, logged = false}
+
+function utils.get_alfred()
+    return AlfredTheButlerPlugin or PLUGIN_alfred_the_butler
+end
+
+function utils.alfred_live_work(s)
+    return s.trigger_tasks == true or s.external_trigger == true or s.pending == true or s.running == true
+        or (s.teleport == true and s.teleport_done ~= true and s.teleport_failed ~= true)
+end
+
+function utils.alfred_hard_need(s)
+    return s.inventory_full == true or s.need_repair == true
+end
+
+-- Readable status table; {enabled=false} when Alfred is absent; nil while an
+-- unreadable status (missing get_status, throw, non-table, non-boolean
+-- `enabled`) is inside ALFRED_UNKNOWN_GRACE (callers treat nil as busy);
+-- after the grace {enabled=false, unavailable=true}, logged once.
+function utils.read_alfred_status()
+    local a = utils.get_alfred()
+    if not a then
+        alfred_unknown.since, alfred_unknown.logged = nil, false
+        return {enabled = false}
+    end
+    local ok, status = false, nil
+    if type(a.get_status) == 'function' then ok, status = pcall(a.get_status) end
+    if ok and type(status) == 'table' and type(status.enabled) == 'boolean' then
+        alfred_unknown.since, alfred_unknown.logged = nil, false
+        return status
+    end
+    local now = get_time_since_inject()
+    alfred_unknown.since = alfred_unknown.since or now
+    if now - alfred_unknown.since < ALFRED_UNKNOWN_GRACE then return nil end
+    if not alfred_unknown.logged then
+        alfred_unknown.logged = true
+        console.print(string.format("[HordeDev] Alfred status unreadable for %ds; treating Alfred as unavailable", ALFRED_UNKNOWN_GRACE))
+    end
+    return {enabled = false, unavailable = true}
+end
+
+-- Advisory need_trigger alone cannot re-trigger within the sticky grace after
+-- a completed HordeDev Alfred cycle (tracker.alfred_completed_at); a hard need
+-- (inventory_full / need_repair) always can.
+function utils.alfred_trip_wanted(s, completed_at)
+    if s.enabled ~= true then return false end
+    if utils.alfred_hard_need(s) then return true end
+    if s.need_trigger ~= true then return false end
+    return not (completed_at and get_time_since_inject() - completed_at < ALFRED_STICKY_GRACE)
+end
+
 function utils.is_inventory_full()
     if AlfredTheButlerPlugin then
-        if type(AlfredTheButlerPlugin.get_status) ~= 'function' then return nil end
-        local ok, status = pcall(AlfredTheButlerPlugin.get_status)
-        if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return nil end
+        local status = utils.read_alfred_status()
+        if not status then return nil end
         if status.enabled and type(status.need_trigger) ~= 'boolean' then return nil end
         if (status.enabled and status.need_trigger) then
             return true
         end
     elseif PLUGIN_alfred_the_butler then
-        if type(PLUGIN_alfred_the_butler.get_status) ~= 'function' then return nil end
-        local ok, status = pcall(PLUGIN_alfred_the_butler.get_status)
-        if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return nil end
+        local status = utils.read_alfred_status()
+        if not status then return nil end
         if status.restock_count ~= nil and type(status.restock_count) ~= 'number' then return nil end
+        -- WPT-1: only a live teleport is Alfred work; the latch left after a
+        -- finished/failed trip is not "needs town".
         if status.enabled and (
             status.inventory_full or
             (status.restock_count or 0) > 0 or
             status.need_repair or
-            status.teleport
+            (status.teleport == true and status.teleport_done ~= true and status.teleport_failed ~= true)
         ) then
             return true
         end
     end
     local player = get_local_player()
     return player ~= nil and player:get_item_count() >= 33
+end
+
+-- True while the waypoint teleport (spell 186139, as used by Arkham/WonderCity)
+-- is channeling. A second teleport_to_waypoint() would cancel it.
+function utils.is_teleport_casting()
+    local ok, id = pcall(function()
+        local player = get_local_player()
+        return player and player:get_active_spell_id()
+    end)
+    return ok and id == 186139
 end
 
 function utils.get_character_class()

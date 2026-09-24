@@ -79,7 +79,10 @@ check('unavailable materials fall back to existing gold chest and unresolved gol
  task:try_next_chest(false)
  assert(task.current_chest_type=='GOLD' and task.current_state=='MOVING_TO_CHEST')
  task:try_next_chest(false)
- assert(task.current_state=='FAULT' and task.chest_error and not tr.finished_chest_looting)
+ -- HRD-1: the fault is terminal and published, never a latch that holds the
+ -- chest room; exit_horde may leave with the unspendable aether.
+ assert(task.current_state=='FAULT' and task.chest_error and tr.finished_chest_looting and tr.chest_fault==task.chest_error)
+ task:reset();assert(tr.chest_fault==nil and not tr.finished_chest_looting)
 end)
 check('failed chest never fabricates opened flags; reset clears all chest timers',function()
  local e,s=harness();local task,tr=chest_task(e,s)

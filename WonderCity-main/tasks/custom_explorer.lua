@@ -441,6 +441,11 @@ end
 -- Expose floor state for potential GUI overlay
 task.get_floor_state = function () return floor end
 
+-- C5: time spent yielding (e.g. to Alfred) is not 'stuck' time.
+task.on_yield = function (seconds)
+    if floor.target_dist_time then floor.target_dist_time = floor.target_dist_time + seconds end
+end
+
 task.reset = function ()
     floor.run_time = nil
     floor.in_boss_room = false

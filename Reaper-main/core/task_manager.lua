@@ -6,6 +6,7 @@
 -- WarMachine) may invoke reset_all under a different plugin's require context.
 local tracker        = require "core.tracker"
 local utils          = require "core.utils"
+local settings       = require "core.settings"
 local task_manager   = {}
 local tasks          = {}
 local current_task   = { name = "Idle" }
@@ -14,6 +15,14 @@ local predicate_errors = {}
 
 function task_manager.register_task(task)
     table.insert(tasks, task)
+end
+
+-- C4: Kill Monsters is the only task that blocks orbwalker movement. Any
+-- switch away from it (revive, Alfred, navigation, idle) releases the block.
+local function leave_task(next_task)
+    if current_task ~= next_task and current_task.name == "Kill Monsters" then
+        settings.orb_set_block(false)
+    end
 end
 
 function task_manager.execute_tasks()
@@ -30,6 +39,7 @@ function task_manager.execute_tasks()
             predicate_errors[task] = nil
         end
         if ok and should then
+            leave_task(task)
             current_task = task
             local ok2, err = pcall(task.Execute, task)
             if not ok2 then
@@ -38,6 +48,7 @@ function task_manager.execute_tasks()
             return
         end
     end
+    leave_task(nil)
     current_task = { name = "Idle" }
 end
 
@@ -54,6 +65,7 @@ function task_manager.reset_all()
     end
     tracker.reset_run()
     utils.reset_boss_quest_tracking()
+    utils.reset_loot_guard()
     last_call_time = 0
     current_task = { name = "Idle" }
 end

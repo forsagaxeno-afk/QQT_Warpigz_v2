@@ -127,8 +127,11 @@ end
 
 task.shouldExecute = function ()
     if not utils.player_in_pit() then
-        -- Outside pit: full reset so the next pit run starts clean.
-        if tracker.boss_seen or tracker.boss_dead or tracker.boss_position then
+        -- Outside pit: full reset so the next pit run starts clean -- unless
+        -- the run resumes after an Alfred trip (ARK-3, tracker.resume_key).
+        if tracker.resume_key == nil
+            and (tracker.boss_seen or tracker.boss_dead or tracker.boss_position)
+        then
             tracker.boss_seen = false
             tracker.boss_dead = false
             tracker.boss_position = nil
@@ -312,5 +315,12 @@ task.Execute = function ()
 end
 
 task.reset = reset_remembered_hunt_state
+
+-- C5: time spent yielding to Alfred is not "no progress" toward the boss.
+task.on_yield = function (seconds)
+    if remembered_hunt_progress_time then
+        remembered_hunt_progress_time = remembered_hunt_progress_time + seconds
+    end
+end
 
 return task

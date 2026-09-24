@@ -8,6 +8,10 @@ local running = false
 local pending_navigation_reset = false
 local exit_task = nil
 local alfred_task = nil
+local enter_task = nil
+-- C5: when the alfred task became the active task (Arkham yielding control
+-- to Alfred). That time is not progress time for any walk/stuck window.
+local yield_started = nil
 local current_task = { name = 'Idle', status = 'Idle' } -- Default state when no task is active
 local function alfred_owns_control()
     return alfred_task and alfred_task.is_busy and alfred_task.is_busy()
@@ -19,14 +23,23 @@ end
 
 task_manager.release_control = function ()
     if running then
-        -- Alfred owns its movement after the handoff; do not cancel its trip.
-        if active_task and active_task.name ~= 'alfred_running' and not alfred_owns_control() then utils.stop_movement() end
+        -- C3/ARK-5/L10: always hand Batmobile back, also while Alfred owns
+        -- control. BatmobilePlugin.release is owner-aware (a route or goal
+        -- Alfred claimed stays untouched, the native path is never cleared);
+        -- without it Arkham's own autonomous long route is still stopped.
+        if active_task and active_task ~= alfred_task then
+            utils.release_movement(alfred_owns_control())
+        elseif BatmobilePlugin and type(BatmobilePlugin.release) == 'function' then
+            BatmobilePlugin.release('arkham_asylum')
+        end
         for _, task in ipairs(tasks) do
             if task.on_cancel then task.on_cancel() end
         end
         settings.orb_set_block(false)
         settings.orb_set_clear(true)
+        if enter_task then enter_task.committed_at = nil end
         active_task = nil
+        yield_started = nil
         running = false
     end
 end
@@ -34,15 +47,35 @@ end
 local function execute(task)
     running = true
     if active_task ~= task then
-        if active_task and active_task.name ~= 'alfred_running'
-            and not alfred_owns_control()
-            and not (task.name == 'cross_traversal'
-                and BatmobilePlugin.is_traversal_routing())
-        then
-            utils.stop_movement()
+        local now = get_time_since_inject()
+        if active_task == alfred_task and yield_started then
+            -- C5: shift walk/stuck windows by the time spent yielding.
+            local yielded = now - yield_started
+            if yielded > 0 then
+                for _, t in ipairs(tasks) do
+                    if t.on_yield then t.on_yield(yielded) end
+                end
+            end
         end
-        if active_task and active_task.on_cancel then active_task.on_cancel() end
+        yield_started = task == alfred_task and now or nil
+        if active_task and active_task.name ~= 'alfred_running' then
+            if task == alfred_task and alfred_owns_control() then
+                -- ARK-5: Alfred (or an unknown Alfred) takes over: release
+                -- what Arkham owns (its long route/goal) but nothing Alfred
+                -- may already drive.
+                utils.release_movement(true)
+            elseif not (task.name == 'cross_traversal'
+                and BatmobilePlugin.is_traversal_routing())
+            then
+                utils.stop_movement()
+            end
+        end
+        if active_task and active_task.on_preempt then active_task.on_preempt()
+        elseif active_task and active_task.on_cancel then active_task.on_cancel() end
         settings.orb_set_clear(true)
+        -- C4/L12: never leave movement blocked for the next task (combat
+        -- tasks re-block on their own Execute).
+        settings.orb_set_block(false)
         active_task = task
     end
     current_task = task
@@ -64,28 +97,32 @@ task_manager.execute_tasks = function ()
         or world_name:find('Limbo', 1, true) or world_name:find('Loading', 1, true)
         or type(zone) ~= 'string' or zone == '' or zone == '[sno none]'
     then return end
-    local transition = tracker.observe_world()
+    local transition = tracker.observe_world(alfred_owns_control())
     if transition then
+        -- 'resume' (same pit after an Alfred trip, ARK-3) keeps the map.
         if transition == 'run' or transition == 'floor' then pending_navigation_reset = true end
         for _, task in ipairs(tasks) do
             if task.reset then task.reset(transition) end
         end
         active_task = nil
+        yield_started = nil
     end
     if pending_navigation_reset and not alfred_owns_control() then
         BatmobilePlugin.reset('arkham_asylum')
         pending_navigation_reset = false
     end
+    -- Deadline overrides reward, boss and traversal work as well as portals.
+    -- Only positive Alfred evidence may hold it: an unreadable status never
+    -- blocks the forced exit (ARK-9).
+    local forced = utils.player_in_pit() and utils.exit_pit_forced()
     -- Town relocation and reward tasks must not preempt an accepted Alfred
     -- trip (including a foreign caller's trip to a different service town).
-    if alfred_task.is_busy and alfred_task.is_busy() then
+    if alfred_task.is_busy and alfred_task.is_busy(forced) then
         execute(alfred_task)
         return
     end
-    -- Deadline overrides reward, boss and traversal work as well as portals.
-    if utils.player_in_pit() and utils.exit_pit_forced() then
-        if alfred_task.is_busy and alfred_task.is_busy() then execute(alfred_task)
-        else execute(exit_task) end
+    if forced then
+        execute(exit_task)
         return
     end
     current_task = { name = 'Idle', status = 'Idle' }
@@ -100,6 +137,20 @@ end
 
 task_manager.get_current_task = function ()
     return current_task
+end
+
+-- C2 provider fields for ArkhamAsylumPlugin.get_status(). Local state and
+-- host globals only (no require, no Alfred/Looter calls).
+task_manager.get_run_status = function ()
+    local alfred_trip = alfred_task ~= nil and alfred_task.own_trip ~= nil and alfred_task.own_trip() or false
+    local in_pit = utils.player_in_pit()
+    local committed = not in_pit and enter_task ~= nil and enter_task.committed ~= nil
+        and enter_task.committed() or false
+    return {
+        alfred_trip = alfred_trip,
+        in_run = in_pit or alfred_trip or committed,
+        committed_entry = committed,
+    }
 end
 
 local task_files = {
@@ -154,6 +205,7 @@ for _, file in ipairs(task_files) do
     task_manager.register_task(task)
     if file == 'exit_pit' then exit_task = task end
     if file == 'alfred' then alfred_task = task end
+    if file == 'enter_pit' then enter_task = task end
 end
 
 return task_manager

@@ -5,7 +5,35 @@ local enums = require "data.enums"
 local settings = require "core.settings"
 local zone_overrides = require "data.zone_overrides"
 local recovery = require "core.recovery"
+local loot_guard = require "core.loot_guard"
 local plugin_label = "helltide_revamped"
+
+-- HLT-8: never teleport away while the Looter is still collecting (e.g. the
+-- chest drop the WarPlan run was for when the buff drops at :55). Bounded so
+-- a Looter that never reports idle cannot pin the search.
+local LOOT_HOLD_MAX_S = 20.0
+local loot_hold_since, loot_hold_logged = nil, false
+local function loot_hold()
+    if not loot_guard.busy() then
+        loot_hold_since, loot_hold_logged = nil, false
+        return false
+    end
+    local now = get_time_since_inject()
+    loot_hold_since = loot_hold_since or now
+    if now - loot_hold_since < LOOT_HOLD_MAX_S then return true end
+    if not loot_hold_logged then
+        loot_hold_logged = true
+        console.print(string.format("[HelltideRevamped] Looter still busy after %.0fs — teleporting anyway",
+            now - loot_hold_since))
+    end
+    return false
+end
+
+-- HLT-7 (needs live confirmation): after an external enable (WarPigs lands
+-- the player with the warplan teleport and then enables HR) give the buff a
+-- short grace to apply before searching teleports away and undoes the
+-- arrival. Bounded; the landing zone is logged once for live diagnosis.
+local ARRIVAL_GRACE_S = 15.0
 
 local current_city_index = 0
 -- Remembers which helltide_tps entry is active this hour so we can return directly
@@ -107,15 +135,10 @@ local search_helltide_task = {
             end
             console.print("Helltide is not active, wait until helltide starts")
             if not utils.player_in_zone(settings.town_zone) then
-                -- Let the dedicated Alfred task preserve caller/callback ownership.
-                if settings.salvage and not idle_salvage_requested
-                    and (AlfredTheButlerPlugin or PLUGIN_alfred_the_butler) then
-                    tracker.needs_salvage = true
-                    idle_salvage_requested = true
-                end
                 local now = get_time_since_inject()
-                if not idle_teleport_fired_time
-                    or now - idle_teleport_fired_time >= IDLE_TELEPORT_DEBOUNCE_S
+                if (not idle_teleport_fired_time
+                    or now - idle_teleport_fired_time >= IDLE_TELEPORT_DEBOUNCE_S)
+                    and not loot_hold()
                 then
                     teleport_to_waypoint(settings.town_waypoint) -- Idle in selected home town until helltide starts
                     idle_teleport_fired_time = now
@@ -124,6 +147,16 @@ local search_helltide_task = {
                 -- We're in the home town zone — channel completed, drop the
                 -- debounce stamp so the next "go idle" cycle fires immediately.
                 idle_teleport_fired_time = nil
+                -- HLT-4: one mover at a time. Salvage is requested only after
+                -- our own teleport has arrived, and only for a hard Alfred
+                -- need; the dedicated Alfred task keeps caller/callback
+                -- ownership. Advisory restock never costs an off-window trip.
+                if settings.salvage and not idle_salvage_requested and not tracker.alfred_paused_skip
+                    and utils.alfred_available() == true and utils.is_inventory_full() == true
+                then
+                    tracker.needs_salvage = true
+                    idle_salvage_requested = true
+                end
             end
             return
         elseif utils.is_in_helltide() and not zone_overrides.is_excluded_zone() then
@@ -143,10 +176,13 @@ local search_helltide_task = {
             -- Player landed in a working helltide; clear the skip flag and
             -- any pending scan-cycle cooldown so future returns are fast.
             tracker.skip_cached_zone = false
+            tracker.external_enable_at = nil
             cycle_tp_count = 0
             last_cycle_end_time = nil
             console.print("Found helltide")
             self.current_state = search_helltide_state.FOUND_HELLTIDE
+        elseif self:arrival_grace() then
+            return
         elseif confirmed_helltide_tp and not tracker.skip_cached_zone then
             -- We know where this hour's helltide is — go back directly
             console.print("[HelltideRevamped] Returning to known helltide zone: " .. confirmed_helltide_tp.file)
@@ -225,7 +261,9 @@ local search_helltide_task = {
                 return
             else
                 local now = get_time_since_inject()
-                if not self._teleport_fired_at or now - self._teleport_fired_at >= IDLE_TELEPORT_DEBOUNCE_S then
+                if (not self._teleport_fired_at or now - self._teleport_fired_at >= IDLE_TELEPORT_DEBOUNCE_S)
+                    and not loot_hold()
+                then
                     teleport_to_waypoint(enums.helltide_tps[current_city_index].id)
                     self._teleport_fired_at = now
                 end
@@ -249,6 +287,30 @@ local search_helltide_task = {
         console.print("Found helltide")
     end,
 
+    -- HLT-7: true while a fresh external arrival without the buff is inside
+    -- ARRIVAL_GRACE_S (never in the idle town, never after the grace).
+    arrival_grace = function(self)
+        local at = tracker.external_enable_at
+        if not at or utils.player_in_zone(settings.town_zone) then return false end
+        local world = get_current_world()
+        local where = world and (tostring(world:get_name()) .. "/" .. tostring(world:get_current_zone_name())) or "?"
+        local now = get_time_since_inject()
+        if now - at < ARRIVAL_GRACE_S then
+            if self._arrival_logged ~= at then
+                self._arrival_logged = at
+                console.print(string.format(
+                    "[HelltideRevamped] External enable in %s without the helltide buff — waiting up to %.0fs before searching",
+                    where, ARRIVAL_GRACE_S))
+            end
+            return true
+        end
+        tracker.external_enable_at = nil
+        console.print(string.format(
+            "[HelltideRevamped] Still no helltide buff %.0fs after arriving in %s — searching other zones",
+            ARRIVAL_GRACE_S, where))
+        return false
+    end,
+
     cancel_pending = function(self)
         cycle_tp_count = 0
         last_cycle_end_time = nil
@@ -258,6 +320,8 @@ local search_helltide_task = {
         tracker.confirmed_helltide_tp = nil
         tracker.teleporting = false
         tracker.clear_key("wait_in_town")
+        tracker.external_enable_at = nil
+        loot_hold_since, loot_hold_logged = nil, false
         self._farming_reset = false
         self._teleport_fired_at = nil
         self.current_state = search_helltide_state.SEARCHING_HELLTIDE

@@ -6,15 +6,14 @@ local external = require 'core.external'
 local last_tick     = 0
 local TICK_INTERVAL = 0.5
 
--- Manual calibration remains available while disabled. The press edge and
--- context snapshot prevent repeats or a delayed confirmation after interruption.
-local test_down, test_pending = false, nil
+-- Manual calibration remains available while disabled. One action per press
+-- and the context snapshot prevent repeats or a delayed confirmation after
+-- interruption.
+local test_pending = nil
 local function tick_test()
     local now = get_time_since_inject()
-    local kb = gui.elements.keybind_test_clicks
-    local down = kb:get_state() == 1 and kb:get_key() ~= 0x0A
-    local pressed = down and not test_down
-    test_down = down
+    -- Consume every poll so a press during a pending test is not replayed later.
+    local pressed = gui.consume_press(gui.elements.keybind_test_clicks, 'test_clicks')
     if test_pending then
         local p = test_pending
         if gui.elements.main_toggle:get() or planner.click_context() ~= p.world or

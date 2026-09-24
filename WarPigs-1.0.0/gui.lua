@@ -65,10 +65,11 @@ gui.render = function()
         'Enable the bundled SilentRaven. Waits for Alfred and Looter; never teleports for Whispers.')
 
     gui.elements.manage_orbwalker:render('Manage orbwalker',
-        'Before enabling each managed plugin, force orbwalker.set_clear_toggle(true)\n' ..
-        'so the next plugin starts with orbwalker clear ON, regardless of what the\n' ..
-        'previous plugin left it at. Off by default — leaves orbwalker fully under\n' ..
-        'individual plugins / your rotation\'s control.')
+        'At every handoff (after the outgoing plugin stops, and before and after\n' ..
+        'enabling the next one) force orbwalker.set_clear_toggle(true) so the next\n' ..
+        'plugin starts with orbwalker clear ON, regardless of what the previous plugin\n' ..
+        'or a plugin\'s start-up reset left it at. Off by default — leaves orbwalker\n' ..
+        'fully under individual plugins / your rotation\'s control.')
 
     gui.elements.verbose_logs:render('Verbose logs', 'Print WarPlans quest diffs to console')
     gui.elements.log_all_quests:render('Log ALL quests', 'Print every newly-seen quest name + id to console (use to capture quest names for new activities)')

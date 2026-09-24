@@ -127,10 +127,16 @@ do
     eq(f.guard(),false); f:tick(); eq(f.cancels,1); eq(f.preserve,true)
     eq(f.triggers,1)
 end
--- Unknown companion data never authorizes the new NPC task.
+-- Unknown Looter data never authorizes the new NPC task. Unreadable Alfred
+-- data holds it for at most ~10 s, then Alfred counts as unavailable (C1).
+do
+    local f=fixture(); LooteerPlugin={getSettings=function() error('missing') end}
+    f:steps(50); eq(f.triggers,0,'unknown Looter never authorizes the walk')
+end
 do
     local f=fixture(); AlfredTheButlerPlugin={get_status=function() error('unknown') end}
-    f:steps(50); eq(f.triggers,0)
+    f:steps(18); eq(f.triggers,0,'unreadable Alfred briefly holds')
+    f:steps(6); eq(f.triggers,1,'unreadable Alfred stops holding after ~10s')
 end
 -- Legacy false-as-nil getters and modern active override are both supported.
 do

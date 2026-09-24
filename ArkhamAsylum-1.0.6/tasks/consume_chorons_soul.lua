@@ -359,4 +359,12 @@ task.reset = function ()
     task.status = status_enum.IDLE
 end
 
+-- C5: time spent yielding to Alfred never counts toward the walk/sweep
+-- timeouts that give up on the soul.
+task.on_yield = function (seconds)
+    if walk_phase_started then walk_phase_started = walk_phase_started + seconds end
+    if orb_sweep_start_time then orb_sweep_start_time = orb_sweep_start_time + seconds end
+    if orb_sweep_pt_started then orb_sweep_pt_started = orb_sweep_pt_started + seconds end
+end
+
 return task

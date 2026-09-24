@@ -1,5 +1,6 @@
 local utils    = {}
 local enums = require "data.enums"
+local tracker = require "core.tracker"
 
 function utils.distance_to(target)
     local player_pos = get_player_position()
@@ -60,36 +61,73 @@ function utils.get_consumable_info(item)
     return info
 end
 
+-- C1 canonical Alfred reading (suite contract, copied into each plugin and
+-- never shared across plugins). A `teleport` flag latched after a finished
+-- or failed trip is not live work.
+local ALFRED_UNKNOWN_GRACE = 10   -- unreadable status counts as busy this long
+-- The unknown-since stamp lives in tracker so tasks/alfred.lua and this
+-- reader share ONE grace (two sequential 10 s holds would be 20 s).
+
+function utils.get_alfred()
+    return AlfredTheButlerPlugin or PLUGIN_alfred_the_butler
+end
+
+function utils.alfred_live_work(s)
+    return s.trigger_tasks == true or s.external_trigger == true or s.pending == true or s.running == true
+        or (s.teleport == true and s.teleport_done ~= true and s.teleport_failed ~= true)
+end
+
+-- Only these send HR to town. need_trigger alone, restock_count and
+-- need_stash_* are advisory; tasks/alfred.lua handles them with the sticky
+-- grace after a completed cycle (HLT-1/HLT-2).
+function utils.alfred_hard_need(s)
+    return s.inventory_full == true or s.need_repair == true
+end
+
+-- Readable status table; {enabled=false} when Alfred is absent; nil while an
+-- unreadable status (missing get_status, throw, non-table, non-boolean
+-- `enabled`) is inside ALFRED_UNKNOWN_GRACE (callers hold); after the grace
+-- {enabled=false, unavailable=true}, logged once, so no hold is unbounded.
+function utils.read_alfred_status()
+    local a = utils.get_alfred()
+    if not a then
+        tracker.alfred_unknown_since, tracker.alfred_unknown_logged = nil, nil
+        return {enabled = false}
+    end
+    local ok, status = false, nil
+    if type(a.get_status) == 'function' then ok, status = pcall(a.get_status) end
+    if ok and type(status) == 'table' and type(status.enabled) == 'boolean' then
+        tracker.alfred_unknown_since, tracker.alfred_unknown_logged = nil, nil
+        return status
+    end
+    local now = get_time_since_inject()
+    tracker.alfred_unknown_since = tracker.alfred_unknown_since or now
+    if now - tracker.alfred_unknown_since < ALFRED_UNKNOWN_GRACE then return nil end
+    if not tracker.alfred_unknown_logged then
+        tracker.alfred_unknown_logged = true
+        console.print(string.format("[HelltideRevamped] Alfred status unreadable for %ds; treating Alfred as unavailable",
+            ALFRED_UNKNOWN_GRACE))
+    end
+    return {enabled = false, unavailable = true}
+end
+
 function utils.alfred_available()
-    local alfred = AlfredTheButlerPlugin or PLUGIN_alfred_the_butler
-    if not alfred then return false end
-    if type(alfred.get_status) ~= 'function' then return nil end
-    local ok, status = pcall(alfred.get_status)
-    if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return nil end
+    if not utils.get_alfred() then return false end
+    local status = utils.read_alfred_status()
+    if not status then return nil end
     return status.enabled
 end
 
+-- True only for a hard Alfred need. The local item count is a fallback for a
+-- provider that does not publish inventory_full; when it does, its view wins
+-- (a trip for items its rules keep would bounce town<->portal forever).
 function utils.is_inventory_full()
-    if AlfredTheButlerPlugin then
-        if type(AlfredTheButlerPlugin.get_status) ~= 'function' then return nil end
-        local ok, status = pcall(AlfredTheButlerPlugin.get_status)
-        if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return nil end
-        if status.enabled and type(status.need_trigger) ~= 'boolean' then return nil end
-        if (status.enabled and status.need_trigger) then
-            return true
-        end
-    elseif PLUGIN_alfred_the_butler then
-        if type(PLUGIN_alfred_the_butler.get_status) ~= 'function' then return nil end
-        local ok, status = pcall(PLUGIN_alfred_the_butler.get_status)
-        if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return nil end
-        if status.restock_count ~= nil and type(status.restock_count) ~= 'number' then return nil end
-        if status.enabled and (
-            status.inventory_full or
-            (status.restock_count or 0) > 0 or
-            status.need_repair or
-            status.teleport
-        ) then
-            return true
+    if utils.get_alfred() then
+        local status = utils.read_alfred_status()
+        if not status then return nil end
+        if status.enabled then
+            if utils.alfred_hard_need(status) then return true end
+            if type(status.inventory_full) == 'boolean' then return false end
         end
     end
     local player = get_local_player()

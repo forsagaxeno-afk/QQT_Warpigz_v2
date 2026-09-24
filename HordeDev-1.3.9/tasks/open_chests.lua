@@ -156,6 +156,10 @@ open_chests_task = {
             self:wait_for_vfx()
         elseif self.current_state == chest_state.WAITING_FOR_LOOT then
             self:wait_for_loot()
+        elseif self.current_state == chest_state.FAULT then
+            -- HRD-1: terminal chest fault. Hold still (the Looter may still be
+            -- collecting) until exit_horde takes over the queue.
+            movement.stop()
         end
     end,
 
@@ -175,6 +179,17 @@ open_chests_task = {
     waiting_for_salvage = function(self)
         console.print("Need salvage. Setting tracker.needs_salvage to start salvage task")
         tracker.needs_salvage = true
+        -- C1/C6: an Alfred that became unavailable (disabled, or unreadable
+        -- past its bounded grace) and a bag the built-in salvage would not
+        -- empty leave nobody to service this pause; resume the chests.
+        if settings.use_alfred and utils.get_alfred() then
+            local status = utils.read_alfred_status()
+            if status == nil or status.enabled == true then return end
+        end
+        if settings.salvage and utils.is_inventory_full() ~= false then return end
+        console.print("[open_chests] No salvage owner available (Alfred unavailable, bag not full); resuming chests.")
+        tracker.needs_salvage = false
+        self.current_state = self.state_before_pause or chest_state.OPENING_CHEST
         return
     end,
 
@@ -323,13 +338,15 @@ open_chests_task = {
             console.print("Current self.current_chest_type: " .. tostring(self.current_chest_type))
             console.print("Current self.selected_chest_type: " .. tostring(self.selected_chest_type))
             if settings.salvage then
-                local alfred = AlfredTheButlerPlugin or PLUGIN_alfred_the_butler
-                if settings.use_alfred and alfred then
-                    if type(alfred.get_status) ~= 'function' then return end
-                    local ok, status = pcall(alfred.get_status)
-                    if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return end
+                if settings.use_alfred and utils.get_alfred() then
+                    -- C1: unreadable status holds at most the bounded grace,
+                    -- then Alfred counts as unavailable (enabled=false).
+                    local status = utils.read_alfred_status()
+                    if not status then return end
                     if status.enabled and type(status.need_trigger) ~= 'boolean' then return end
-                    if (status.enabled and status.need_trigger) then
+                    -- C1: need_trigger alone cannot re-pause within the sticky
+                    -- grace after HordeDev's own completed cycle.
+                    if utils.alfred_trip_wanted(status, tracker.alfred_completed_at) then
                         self.state_before_pause = self.current_state
                         self.current_state = chest_state.PAUSED_FOR_SALVAGE
                         return
@@ -392,11 +409,17 @@ open_chests_task = {
         end
     end,
 
+    -- HRD-1: a chest phase that cannot finish is terminal, not a latch. The
+    -- fault is published (InfernalHordesPlugin.status().fault) and the phase is
+    -- marked finished so exit_horde leaves BSK (ignoring the unspendable
+    -- aether) instead of standing in the chest room forever.
     fail_chests = function(self, message)
         self.chest_error = message
         self.current_state = chest_state.FAULT
-        tracker.finished_chest_looting = false
-        console.print("[open_chests] " .. message)
+        tracker.chest_fault = message
+        tracker.finished_chest_looting = true
+        movement.stop()
+        console.print("[open_chests] " .. message .. " Leaving the Horde without spending it.")
     end,
 
     try_next_chest = function(self, was_successful)
@@ -493,6 +516,7 @@ open_chests_task = {
         tracker.clear_key("aether_drop_wait")
         tracker.clear_key("salvage_return_time")
         tracker.finished_chest_looting = false
+        tracker.chest_fault = nil
 
         tracker.ga_chest_opened = false
         tracker.talisman_chest_opened = false

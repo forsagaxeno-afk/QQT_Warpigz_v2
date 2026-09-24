@@ -2,6 +2,7 @@ local plugin_label = 'arkham_asylum' -- change to your plugin name
 
 local utils = require "core.utils"
 local settings = require 'core.settings'
+local tracker = require 'core.tracker'
 
 local status_enum = {
     IDLE = 'idle',
@@ -11,6 +12,8 @@ local status_enum = {
 local task = {
     name = 'alfred_running', -- change to your choice of task name
     status = status_enum['IDLE'],
+    -- Why the task is holding (shown next to the status; nil = no hold).
+    note = nil,
     loot_start = get_time_since_inject(),
     loot_timeout = 3,
     debounce_time = -1,
@@ -19,14 +22,6 @@ local task = {
 
 local function get_alfred()
     return AlfredTheButlerPlugin or PLUGIN_alfred_the_butler
-end
-
-local function get_alfred_status()
-    local a = get_alfred()
-    if not a then return {enabled = false} end
-    if type(a.get_status) ~= 'function' then return nil end
-    local ok, status = pcall(a.get_status)
-    return ok and type(status) == 'table' and type(status.enabled) == 'boolean' and status or nil
 end
 
 local floor_has_loot = function ()
@@ -45,6 +40,7 @@ end
 
 -- Tracks last cycle completion for restock-stickiness escape. See
 -- HelltideRevamped/tasks/alfred.lua for the full rationale.
+-- ARK-1: a task switch (on_cancel) never erases it; the grace expires by itself.
 local last_completion_at = nil
 local STUCK_NEED_TRIGGER_GRACE = 30.0
 
@@ -53,10 +49,100 @@ local request_plugin, request_started, quiet_since
 local manual_teleport, manual_attempts = false, 0
 local retry_after = -math.huge
 local RETRY_DELAY, PICKUP_WINDOW, QUIET_WINDOW = 5, 8, 2
-local function live_work(status)
-    return status and (status.trigger_tasks or status.external_trigger or status.running or status.pending
-        or (status.teleport and not status.teleport_done and not status.teleport_failed))
+-- Bounded holds (C6). A paused Alfred with hard work cannot self-start;
+-- after PAUSED_HOLD_MAX we continue without it. Looter yield before a new
+-- trip (ARK-4) and the pending-glyph deferral are bounded the same way.
+local PAUSED_HOLD_MAX, LOOTER_HOLD_MAX, GLYPH_DEFER_MAX = 60, 20, 120
+-- A with-teleport trip's callback may land before the return portal; the
+-- trip still counts as ours until back in the pit (bounded, C2 alfred_trip).
+local RETURN_WINDOW = 30
+local HOLD_LOG_AFTER = 60
+local trip = {teleport = false, return_until = nil, live_seen = false,
+    paused_since = nil, paused_logged = false, glyph_since = nil,
+    hold = nil, hold_since = nil, hold_logged = -math.huge}
+
+-- C1 canonical live-work predicate (a latched teleport after a finished or
+-- failed trip is not live work).
+local function live_work(s)
+    return s.trigger_tasks == true or s.external_trigger == true or s.pending == true or s.running == true
+        or (s.teleport == true and s.teleport_done ~= true and s.teleport_failed ~= true)
 end
+-- Hard need leaves a pit; advisory flags (restock/stash) never do. A legacy
+-- provider that exposes only need_trigger keeps it as its only signal.
+local function hard_need(s)
+    if s.inventory_full == true or s.need_repair == true then return true end
+    return s.need_trigger == true and s.inventory_full == nil and s.need_repair == nil
+end
+local function in_pit()
+    return type(utils.player_in_pit) == 'function' and utils.player_in_pit() or false
+end
+-- Status text + one rate-limited log line for any hold longer than a minute.
+local function note_hold(reason)
+    local now = get_time_since_inject()
+    if reason ~= trip.hold then trip.hold, trip.hold_since = reason, now end
+    task.note = reason
+    if reason and now - trip.hold_since >= HOLD_LOG_AFTER and now - trip.hold_logged >= HOLD_LOG_AFTER then
+        trip.hold_logged = now
+        console.print(string.format('[alfred] holding for %.0fs: %s', now - trip.hold_since, reason))
+    end
+end
+-- A paused Alfred with hard work: hold (true) up to PAUSED_HOLD_MAX.
+local function paused_hold(status)
+    if not (status.paused and hard_need(status)) then
+        trip.paused_since, trip.paused_logged = nil, false
+        return false
+    end
+    local now = get_time_since_inject()
+    trip.paused_since = trip.paused_since or now
+    if now - trip.paused_since < PAUSED_HOLD_MAX then return true end
+    if not trip.paused_logged then
+        trip.paused_logged = true
+        console.print(string.format('[alfred] Alfred paused with inventory/repair work for %.0fs — continuing without it',
+            now - trip.paused_since))
+    end
+    return false
+end
+-- Any observed live -> idle edge is a finished cycle (ours or a foreign
+-- caller's): advisory flags get the same sticky grace either way.
+local function observe_cycle(status)
+    if status.enabled and live_work(status) then
+        trip.live_seen = true
+    elseif trip.live_seen then
+        trip.live_seen = false
+        last_completion_at = get_time_since_inject()
+    end
+end
+-- C1: an unreadable status (throws, non-table, non-boolean enabled) holds
+-- like busy for at most UNKNOWN_HOLD seconds, then Alfred counts as
+-- unavailable (not busy) with one log line until it reads again.
+local UNKNOWN_HOLD = 10
+local UNAVAILABLE = {enabled = false, unavailable = true}
+local unknown = {since = nil, logged = false}
+local function get_alfred_status()
+    local a = get_alfred()
+    if not a then unknown.since = nil; return {enabled = false} end
+    local status
+    if type(a.get_status) == 'function' then
+        local ok, s = pcall(a.get_status)
+        if ok and type(s) == 'table' and type(s.enabled) == 'boolean' then status = s end
+    end
+    if status then
+        if unknown.logged then console.print('[alfred] Alfred status readable again') end
+        unknown.since, unknown.logged = nil, false
+        observe_cycle(status)
+        return status
+    end
+    local now = get_time_since_inject()
+    unknown.since = unknown.since or now
+    if now - unknown.since < UNKNOWN_HOLD then return nil end
+    if not unknown.logged then
+        unknown.logged = true
+        console.print(string.format('[alfred] Alfred status unreadable for %.0fs — treating Alfred as unavailable',
+            now - unknown.since))
+    end
+    return UNAVAILABLE
+end
+
 local function clear_request()
     request_plugin, request_started, quiet_since = nil, nil, nil
     manual_teleport, manual_attempts = false, 0
@@ -66,11 +152,15 @@ local function retire_request()
     clear_request()
     task.status = status_enum.IDLE
     retry_after = get_time_since_inject() + RETRY_DELAY
+    -- A lost callback most likely means a finished cycle: same grace.
+    last_completion_at = get_time_since_inject()
 end
 local function waiting_for_request(status)
     if task.status ~= status_enum.WAITING then return false end
     if get_alfred() ~= request_plugin then retire_request(); return true end
-    if not status or live_work(status) or status.paused then
+    -- C1: a paused Alfred without hard work is idle for us (we never own
+    -- its pause); with hard work it holds, bounded by paused_hold().
+    if not status or live_work(status) or paused_hold(status) then
         quiet_since = nil
         return true
     end
@@ -114,6 +204,8 @@ local reset = function ()
     else
         task.status = status_enum['IDLE']
     end
+    trip.return_until = trip.teleport and not in_pit() and get_time_since_inject() + RETURN_WINDOW or nil
+    trip.teleport = false
     clear_request()
     retry_after = -math.huge
     last_completion_at = get_time_since_inject()
@@ -129,6 +221,7 @@ local function trigger_alfred(use_teleport)
     generation = generation + 1
     local token = generation
     task.status = status_enum.WAITING
+    trip.teleport, trip.return_until = use_teleport == true, nil
     request_plugin, request_started, quiet_since = a, get_time_since_inject(), nil
     local ok, accepted = pcall(method, plugin_label, function ()
         if token == generation and task.status == status_enum.WAITING and get_alfred() == a then reset() end
@@ -143,11 +236,54 @@ local function trigger_alfred(use_teleport)
     return true -- legacy nil is an accepted request, not a rejection
 end
 
+-- ARK-4: the Awakened Glyphstone is used before any town trip (a trip from
+-- here loses the upgrade). Bounded so an unreachable gizmo cannot pin a full
+-- inventory forever; the reset timeout still wins over everything.
+local function glyph_pending()
+    if not settings.upgrade_toggle or tracker.glyph_done or not in_pit()
+        or type(utils.get_glyph_upgrade_gizmo) ~= 'function' or utils.get_glyph_upgrade_gizmo() == nil
+    then
+        trip.glyph_since = nil
+        return false
+    end
+    local now = get_time_since_inject()
+    if trip.glyph_since == nil then
+        trip.glyph_since = now
+        console.print('[alfred] Alfred trip deferred until the glyph upgrade is done')
+    end
+    return now - trip.glyph_since < GLYPH_DEFER_MAX
+end
+
+-- Should a NEW request start now (no own request, no live work)?
+local function wants_new_request(status)
+    if status.need_trigger ~= true then return false end
+    if not hard_need(status) then
+        -- need_trigger covers restock/stash extras too (Steroid). Those are
+        -- advisory: never leave a pit for them, and not again within the
+        -- grace after a completed cycle (sticky restock_count; mirrors the
+        -- WarPigs orchestrator's alfred_idle escape). Paused = idle (C1).
+        if in_pit() or status.paused then return false end
+        local now = get_time_since_inject()
+        if last_completion_at and (now - last_completion_at) < STUCK_NEED_TRIGGER_GRACE then
+            return false -- stuck need_trigger — skip
+        end
+        return true
+    end
+    if status.paused then return paused_hold(status) end
+    if glyph_pending() then return false end
+    -- ARK-4: yield to Looter like upgrade_glyph does, bounded.
+    if type(utils.looter_hold) == 'function' and utils.looter_hold(LOOTER_HOLD_MAX, 'Alfred trip') then
+        return false
+    end
+    return true
+end
+
 task.shouldExecute = function ()
     local status = get_alfred_status()
     if not status then quiet_since = nil; return true end -- unknown interrupts idle confirmation
     if not status.enabled then
         if task.status == status_enum.WAITING then retire_request() end
+        if task.status == status_enum.LOOTING then task.status = status_enum.IDLE end
         return false
     end
 
@@ -160,52 +296,49 @@ task.shouldExecute = function ()
     end
 
     -- Yield while Alfred is busy under any caller (WarPigs preamble, etc.).
-    local alfred_busy = live_work(status)
-    if alfred_busy then return true end
+    if live_work(status) then return true end
 
-    -- need_trigger covers inventory_full, repair, restock, etc. — the
-    -- documented Steroid signal and also accurate on AlfredTheButler-main.
-    -- Restock-stickiness escape: don't re-fire on persistent need_trigger
-    -- when the last cycle already completed without progress and the only
-    -- sticky flags are restock/stash-extras (see HelltideRevamped for the
-    -- same shape; also mirrors WarPigs orchestrator's alfred_idle escape).
-    if status.need_trigger then
-        local now = get_time_since_inject()
-        local cycle_just_completed = last_completion_at
-            and (now - last_completion_at) < STUCK_NEED_TRIGGER_GRACE
-        if cycle_just_completed
-            and not status.inventory_full
-            and not status.need_repair
-        then
-            -- stuck need_trigger — skip
-        else
-            return true
-        end
-    end
-
-    return false
+    return wants_new_request(status)
 end
 
 task.Execute = function ()
     local status = get_alfred_status()
-    if not status then quiet_since = nil; return end
+    if not status then quiet_since = nil; note_hold('Alfred status unreadable'); return end
     if not status.enabled then
         if task.status == status_enum.WAITING then retire_request() end
+        note_hold(nil)
         return
     end
     -- Forced cleanup paths can execute this task without shouldExecute().
     if task.status == status_enum.WAITING then
         waiting_for_request(status)
         retry_manual_teleport(status)
+        note_hold(task.status == status_enum.WAITING and (status.paused and 'Alfred paused with our request pending'
+            or 'waiting for our Alfred cycle') or nil)
         return
     end
-    if status.paused or get_time_since_inject() < retry_after then return end
+    -- The local floor-loot window always expires (a paused or busy Alfred
+    -- must not keep is_busy() true through it forever).
+    if task.status == status_enum['LOOTING'] then
+        note_hold(nil)
+        if get_time_since_inject() > task.loot_start + task.loot_timeout then
+            task.status = status_enum['IDLE']
+        end
+        return
+    end
+    if status.paused then
+        note_hold(hard_need(status) and 'Alfred paused with inventory/repair work' or nil)
+        return
+    end
+    if get_time_since_inject() < retry_after then note_hold(nil); return end
 
     -- Don't overwrite another caller's in-flight cycle.
     local alfred_busy = live_work(status)
     if alfred_busy then
+        note_hold('Alfred busy with another caller')
         return
     end
+    note_hold(nil)
 
     if task.status == status_enum['IDLE'] then
         if BatmobilePlugin and type(BatmobilePlugin.pause) == 'function' then
@@ -226,17 +359,31 @@ task.Execute = function ()
         else
             trigger_alfred(true)
         end
-    elseif task.status == status_enum['LOOTING'] and get_time_since_inject() > task.loot_start + task.loot_timeout then
-        task.status = status_enum['IDLE']
     end
 end
 
-task.is_busy = function ()
+-- known_only: count only positive evidence (own request/loot window or C1
+-- live work). The forced reset-timeout exit uses it so an unreadable status
+-- can never block it (ARK-9/WCY-6).
+task.is_busy = function (known_only)
     local status = get_alfred_status()
-    if not status then return true end
+    if not status then return not known_only end
     if not status.enabled then return false end
     return task.status == status_enum.WAITING or task.status == status_enum.LOOTING
         or live_work(status) or false
+end
+
+-- C2 alfred_trip: Arkham's own Alfred round trip is in progress (request in
+-- flight, post-callback loot window, or a with-teleport return not yet back
+-- in the pit). Reads only local state; safe from the exported get_status.
+task.own_trip = function ()
+    if task.status == status_enum.WAITING or task.status == status_enum.LOOTING then return true end
+    if trip.return_until == nil then return false end
+    if in_pit() or get_time_since_inject() >= trip.return_until then
+        trip.return_until = nil
+        return false
+    end
+    return true
 end
 
 task.on_cancel = function ()
@@ -246,7 +393,19 @@ task.on_cancel = function ()
     task.status = status_enum.IDLE
     task.loot_start = get_time_since_inject()
     task.debounce_time = -math.huge
-    last_completion_at = nil
+    trip.teleport, trip.return_until = false, nil
+    task.note = nil
+    -- last_completion_at is kept: preemption/cancel must not re-arm a
+    -- sticky need_trigger (ARK-1).
+end
+
+-- Ordinary preemption by another task (task_manager.execute): same as a
+-- cancel, but a with-teleport trip whose callback already fired keeps its
+-- return window (C2 alfred_trip) until Arkham is back in the pit.
+task.on_preempt = function ()
+    local return_until = trip.return_until
+    task.on_cancel()
+    trip.return_until = return_until
 end
 
 task.reset = function (transition)

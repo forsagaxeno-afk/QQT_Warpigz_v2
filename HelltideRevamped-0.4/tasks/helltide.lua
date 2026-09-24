@@ -76,10 +76,14 @@ local CHEST_INTERACT_ATTEMPT_LIMIT = 6
 -- between the chest and frontiers ~46u away until the trap detector gives up
 -- the zone (logzewx: 60s trapped + helltide abandoned). Fix: pause Batmobile,
 -- retry long-path every 2s, and blacklist the chest if either watchdog trips.
-local RECALL_LONG_PATH_RETRY     = 2.0   -- seconds between navigate_long_path attempts
-local RECALL_FAIL_THRESHOLD      = 3     -- consecutive long_path returns=false → blacklist
-local RECALL_NO_PROGRESS_SECS    = 25    -- best-dist not improved by DELTA in this long → blacklist
-local RECALL_PROGRESS_DELTA      = 2.0   -- meters of improvement to count as progress
+-- One table (not four locals): this chunk is at LuaJIT's 200-local limit and
+-- move_to_remembered_chest was over the 50-upvalue margin.
+local RECALL = {
+    LONG_PATH_RETRY  = 2.0,  -- seconds between navigate_long_path attempts
+    FAIL_THRESHOLD   = 3,    -- consecutive long_path returns=false → blacklist
+    NO_PROGRESS_SECS = 25,   -- best-dist not improved by DELTA in this long → blacklist
+    PROGRESS_DELTA   = 2.0,  -- meters of improvement to count as progress
+}
 local _recall_long_path_target   = nil
 local _recall_path_issue_time    = -math.huge
 local _recall_fail_count         = 0
@@ -686,6 +690,10 @@ end
 
 local function clear_movement()
     reset_navigate_state()
+    -- The patrol goal is dropped below, so patrol must re-issue it when it
+    -- resumes (after a Looter/Alfred yield a paused Batmobile without a goal
+    -- never moves and the 5 s patrol-stuck timer would fire instead).
+    last_target_ni = nil
     if BatmobilePlugin and movement_owned then
         if BatmobilePlugin.stop_long_path then BatmobilePlugin.stop_long_path(plugin_label) end
         BatmobilePlugin.clear_target(plugin_label)
@@ -1547,7 +1555,19 @@ local helltide_task = {
 
         if loot_guard.busy() then
             clear_movement()
+            self:note_hold("waiting for Looter to finish")
             return
+        end
+
+        -- HLT-5: WarPigs can drop HR straight into a helltide, so search's
+        -- reset never runs; start every HR session with a clean Batmobile
+        -- explorer (the previous activity's visited/backtrack/frontiers).
+        if not self._bm_session_reset then
+            self._bm_session_reset = true
+            if BatmobilePlugin and BatmobilePlugin.reset then
+                console.print("[HelltideRevamped] New session — resetting Batmobile exploration")
+                BatmobilePlugin.reset(plugin_label)
+            end
         end
 
         settings.apply_cinder_orb_gate()
@@ -1654,6 +1674,7 @@ local helltide_task = {
                 BatmobilePlugin.clear_giving_up(plugin_label)
             end
             force_zone_change = false
+            tracker.abandoning_zone = nil
             -- Re-evaluate the no-waypoint fallback for the new zone — the next
             -- INIT pass will set it back to true if this zone also has no
             -- waypoint file, or leave it false for a known-region zone.
@@ -1688,10 +1709,14 @@ local helltide_task = {
             -- Tell search_helltide to skip the cached helltide zone (the one
             -- we just gave up on) and cycle through the others.
             tracker.skip_cached_zone = true
+            -- HLT-3: this recovery owns the trip out; no Alfred with-teleport
+            -- round trip may start from inside the trap (see back_to_town).
+            tracker.abandoning_zone = true
             -- Configured idle-town waypoint (same one search_helltide uses
             -- between helltides).  Drops the helltide buff so
             -- search_helltide.shouldExecute starts firing.
             teleport_to_waypoint(settings.town_waypoint)
+            self._town_tp_at = now
             self.current_state = helltide_state.BACK_TO_TOWN
             return
         end
@@ -1710,15 +1735,23 @@ local helltide_task = {
             self.current_state = helltide_state.RETURN_TO_HELLTIDE
         end
 
+        -- HLT-1: only a hard need (inventory_full/need_repair, or the local
+        -- item count when Alfred publishes no inventory view) sends HR to
+        -- town here; advisory need_trigger/restock is tasks/alfred.lua's job,
+        -- behind its sticky grace. Unreadable status holds at most ~10 s (C1)
+        -- and a foreign Alfred pause at most PAUSED_HOLD_MAX (alfred_paused_skip).
         local needs_salvage = false
-        if settings.salvage and not tracker.has_salvaged then
+        if settings.salvage and not tracker.has_salvaged and not tracker.alfred_paused_skip then
             local available = utils.alfred_available()
-            if available == nil then clear_movement(); return end
+            if available == nil then clear_movement(); self:note_hold("Alfred status unreadable"); return end
             if available then
                 needs_salvage = utils.is_inventory_full()
-                if needs_salvage == nil then clear_movement(); return end
+                if needs_salvage == nil then clear_movement(); self:note_hold("Alfred status unreadable"); return end
             end
         end
+        -- C5/L11: credit any time the state handlers did not run before they
+        -- run again (the town hand-off branches below are yields themselves).
+        if not tracker.has_salvaged and not needs_salvage then self:credit_yield(now) end
         if tracker.has_salvaged then
             self:return_from_salvage()
         elseif needs_salvage then
@@ -1910,6 +1943,12 @@ local helltide_task = {
         -- Batmobile's select_target() uses get_closeby_node() to find a walkable
         -- approach node — this only works when is_custom_target=false.
         if BatmobilePlugin then
+            -- HLT-9: the patrol waypoint is still Batmobile's custom goal on
+            -- entry; drop it once per traversal target so select_target runs.
+            if self._trav_cleared_for ~= trav_start_time then
+                self._trav_cleared_for = trav_start_time
+                BatmobilePlugin.clear_target(plugin_label)
+            end
             BatmobilePlugin.resume(plugin_label)
             bm_pulse()
         end
@@ -3024,21 +3063,21 @@ local helltide_task = {
             BatmobilePlugin.pause(plugin_label)
 
             -- No-progress watchdog: track best-ever distance to chest. If it
-            -- doesn't shrink by RECALL_PROGRESS_DELTA in RECALL_NO_PROGRESS_SECS,
+            -- doesn't shrink by RECALL.PROGRESS_DELTA in RECALL.NO_PROGRESS_SECS,
             -- the chest is unreachable from the current side — blacklist and
             -- yield to patrol.
             if _recall_best_dist == nil
-                or dist < _recall_best_dist - RECALL_PROGRESS_DELTA
+                or dist < _recall_best_dist - RECALL.PROGRESS_DELTA
             then
                 _recall_best_dist     = dist
                 _recall_progress_time = now_t
             end
             if _recall_progress_time
-                and (now_t - _recall_progress_time) > RECALL_NO_PROGRESS_SECS
+                and (now_t - _recall_progress_time) > RECALL.NO_PROGRESS_SECS
             then
                 console.print(string.format(
                     "[CHEST RECALL] no progress toward %s for %ds (best=%.1f cur=%.1f) — blacklisting %.0fs and resuming patrol",
-                    entry.name, RECALL_NO_PROGRESS_SECS, _recall_best_dist, dist, CHEST_BLACKLIST_DURATION))
+                    entry.name, RECALL.NO_PROGRESS_SECS, _recall_best_dist, dist, CHEST_BLACKLIST_DURATION))
                 chest_temp_blacklist[remembered_chest_target] = now_t + CHEST_BLACKLIST_DURATION
                 chest_blacklist_data[remembered_chest_target] = {pos = entry.position, expiry = now_t + CHEST_BLACKLIST_DURATION, name = entry.name}
                 if BatmobilePlugin.stop_long_path then
@@ -3054,15 +3093,15 @@ local helltide_task = {
 
             -- (Re)issue navigate_long_path: first attempt, target drift, or
             -- long-path session ended (completed/failed) and retry interval
-            -- elapsed. Failure-count guard blacklists after RECALL_FAIL_THRESHOLD
+            -- elapsed. Failure-count guard blacklists after RECALL.FAIL_THRESHOLD
             -- consecutive returns=false (target genuinely unreachable from here).
             local need_repath = false
             if _recall_long_path_target == nil then
-                need_repath = (now_t - _recall_path_issue_time) > RECALL_LONG_PATH_RETRY
+                need_repath = (now_t - _recall_path_issue_time) > RECALL.LONG_PATH_RETRY
             elseif _recall_long_path_target:dist_to(entry.position) > 3 then
                 need_repath = true
             elseif not long_path_active
-                and (now_t - _recall_path_issue_time) > RECALL_LONG_PATH_RETRY
+                and (now_t - _recall_path_issue_time) > RECALL.LONG_PATH_RETRY
             then
                 need_repath = true
             end
@@ -3080,11 +3119,11 @@ local helltide_task = {
                     _recall_fail_count = _recall_fail_count + 1
                     console.print(string.format(
                         "[CHEST RECALL] long_path to %s failed (#%d/%d)",
-                        entry.name, _recall_fail_count, RECALL_FAIL_THRESHOLD))
-                    if _recall_fail_count >= RECALL_FAIL_THRESHOLD then
+                        entry.name, _recall_fail_count, RECALL.FAIL_THRESHOLD))
+                    if _recall_fail_count >= RECALL.FAIL_THRESHOLD then
                         console.print(string.format(
                             "[CHEST RECALL] %d consecutive long_path failures — blacklisting %s for %.0fs and resuming patrol",
-                            RECALL_FAIL_THRESHOLD, entry.name, CHEST_BLACKLIST_DURATION))
+                            RECALL.FAIL_THRESHOLD, entry.name, CHEST_BLACKLIST_DURATION))
                         chest_temp_blacklist[remembered_chest_target] = now_t + CHEST_BLACKLIST_DURATION
                         chest_blacklist_data[remembered_chest_target] = {pos = entry.position, expiry = now_t + CHEST_BLACKLIST_DURATION, name = entry.name}
                         if BatmobilePlugin.stop_long_path then
@@ -3443,6 +3482,23 @@ local helltide_task = {
 
     back_to_town = function(self)
         clear_movement()
+        if self.current_state == helltide_state.BACK_TO_TOWN then
+            -- HLT-3: Batmobile give-up recovery owns this trip. The buff still
+            -- present means the waypoint channel was interrupted (damage):
+            -- keep clearing the mobs and re-fire it (6 s channel debounce).
+            -- Salvage waits until we are out: an Alfred with-teleport trip
+            -- from here would portal straight back into the trap.
+            if utils.is_in_helltide() then
+                settings.force_orb_clear_for(5)
+                local now = get_time_since_inject()
+                if now - (self._town_tp_at or -math.huge) >= 6 and not utils.is_teleporting() then
+                    console.print("[HELLTIDE] Still in the abandoned zone — re-firing the town teleport")
+                    teleport_to_waypoint(settings.town_waypoint)
+                    self._town_tp_at = now
+                end
+            end
+            return
+        end
         if settings.salvage then
             tracker.needs_salvage = true
         end
@@ -3457,15 +3513,78 @@ local helltide_task = {
         self.current_state = helltide_state.EXPLORE_HELLTIDE
     end,
 
-    suspend = function(self)
-        clear_movement()
-        if settings.manage_orbwalker then
-            settings.orb_set_block(false)
+    -- C5/L11/CRT-4: seconds in which the state handlers did not run (Looter
+    -- or Alfred yield, another HR task, loading, revive) never count toward a
+    -- no-progress/stuck/timeout window that blacklists or abandons a target.
+    -- Only a real gap is credited; ordinary ticks are far below 0.5 s. The
+    -- geometry detectors themselves are unchanged.
+    credit_yield = function(self, now)
+        local last = self._handlers_ran_at
+        self._handlers_ran_at = now
+        self.hold_reason, self._hold_since = nil, nil
+        local gap = last and (now - last) or 0
+        if gap < 0.5 then return end
+        _chest_stuck_t = _chest_stuck_t + gap
+        if _chest_combat_block_t then _chest_combat_block_t = _chest_combat_block_t + gap end
+        if _recall_progress_time then _recall_progress_time = _recall_progress_time + gap end
+        if trav_start_time then trav_start_time = trav_start_time + gap end
+        if patrol_stuck_time then patrol_stuck_time = patrol_stuck_time + gap end
+        if patrol_free_explore_start then patrol_free_explore_start = patrol_free_explore_start + gap end
+        for _, nav in pairs(km_nav_map) do nav.time = nav.time + gap end
+        for _, key in ipairs({"chest_drop_time", "remembered_chest_timeout", "farm_chest_gone"}) do
+            if tracker[key] then tracker[key] = tracker[key] + gap end
         end
+        -- A companion may have pulled the player away meanwhile: measure the
+        -- chest's progress from here, never from the pre-yield distance.
+        local pos
+        if self.current_state == helltide_state.MOVING_TO_HELLTIDE_CHEST then
+            pos = found_chest_position
+        elseif self.current_state == helltide_state.MOVING_TO_REMEMBERED_CHEST then
+            local entry = remembered_chest_target and remembered_chests[remembered_chest_target]
+            pos = entry and entry.position
+        end
+        if pos and _chest_stuck_key then
+            local d = utils.distance_to(pos)
+            if d > _chest_stuck_dist then _chest_stuck_dist = d end
+        end
+        if gap >= 5 then
+            console.print(string.format("[HELLTIDE] Resumed after %.1fs yield — stuck/no-progress windows paused meanwhile", gap))
+        end
+    end,
+
+    -- C6: a companion hold is published as hold_reason (see main.lua
+    -- status().hold) and logged once a minute while it lasts over a minute.
+    note_hold = function(self, reason)
+        local now = get_time_since_inject()
+        if self.hold_reason ~= reason then
+            self.hold_reason, self._hold_since, self._hold_logged = reason, now, now
+        end
+        if now - (self._hold_logged or now) >= 60 then
+            self._hold_logged = now
+            console.print(string.format("[HELLTIDE] Holding for %.0fs: %s", now - (self._hold_since or now), reason))
+        end
+    end,
+
+    -- C3/C4: deterministic hand-off on every exit path this task owns.
+    -- Batmobile.release drops our route, goal, traversal routing and
+    -- priority (owner-aware, never the native path a companion may own);
+    -- the orbwalker goes back to block OFF / clear ON.
+    release_movement = function(self)
+        if BatmobilePlugin and BatmobilePlugin.release then
+            BatmobilePlugin.release(plugin_label)
+            movement_owned = false
+        end
+        clear_movement()
+        settings.orb_release()
+    end,
+
+    suspend = function(self)
+        self:release_movement()
     end,
 
     cancel_pending = function(self)
         self:reset(true)
+        self:release_movement()
     end,
 
     -- reset() clears most of this file's run state. It is split into two
@@ -3553,6 +3672,14 @@ local helltide_task = {
         if BatmobilePlugin and not preserve_external then
             BatmobilePlugin.reset(plugin_label)
         end
+        -- HLT-5: a cancelled session (preserve_external) resets Batmobile on
+        -- its next first tick instead.
+        self._bm_session_reset = not preserve_external
+        self._handlers_ran_at = nil
+        self.hold_reason, self._hold_since, self._hold_logged = nil, nil, nil
+        self._town_tp_at = nil
+        self._trav_cleared_for = nil
+        tracker.abandoning_zone = nil
     end
 }
 

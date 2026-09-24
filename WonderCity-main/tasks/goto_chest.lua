@@ -7,6 +7,16 @@ local reward_phase = require 'core.reward_phase'
 local INTERACT_REFIRE_COOLDOWN = 1
 local INTERACT_TIMEOUT = 8
 local CONFIRM_SECONDS = 1
+-- CRT-1/L9 bounded waits (seconds of this task's own execution; time spent
+-- yielding to Alfred is shifted out, C5):
+--  * a chest that is non-interactable before our first click was opened
+--    already (by hand, a companion, or before an Alfred round trip) unless
+--    it unlocks: LOCKED_WAIT after an observed boss kill, else LOCKED_WAIT_UNKNOWN;
+--  * our interacted chest vanished from stable scans without new loot;
+--  * no approach progress at close range: interact from where we stand.
+local LOCKED_WAIT, LOCKED_WAIT_UNKNOWN = 10, 30
+local VANISH_WAIT = 5
+local APPROACH_STALL, APPROACH_FALLBACK_RANGE, APPROACH_PROGRESS = 8, 4, 0.5
 local task = {name = 'goto_chest', status = 'idle'}
 
 local function item_ids()
@@ -64,6 +74,36 @@ local function clear_confirmation()
     task.confirm_reason, task.confirm_since = nil, nil
 end
 
+-- Non-interactable before our first click: wait (bounded) for an unlock.
+local function locked_wait(now)
+    if tracker.boss_alive then
+        task.locked_since = nil
+        task.status = 'waiting for reward chest to unlock (boss alive)'
+        return
+    end
+    local limit = tracker.boss_kill_time and LOCKED_WAIT or LOCKED_WAIT_UNKNOWN
+    if task.locked_since == nil then
+        task.locked_since = now
+        console.print(string.format('[WonderCity:chest] reward chest is not interactable before our click; '
+            .. 'treating it as already opened in %ds unless it unlocks', limit))
+    end
+    local waited = now - task.locked_since
+    if waited >= limit then
+        complete(string.format('chest not interactable for %.0fs before our click (already opened)', waited))
+        return
+    end
+    task.status = string.format('waiting for reward chest to unlock (%.0fs)', limit - waited)
+end
+
+-- Approach progress (close-range stall falls back to interacting in place).
+local function approach_stalled(distance, now)
+    if task.approach_best == nil or distance < task.approach_best - APPROACH_PROGRESS then
+        task.approach_best, task.approach_time = distance, now
+        return false
+    end
+    return distance <= APPROACH_FALLBACK_RANGE and now - task.approach_time >= APPROACH_STALL
+end
+
 task.shouldExecute = function ()
     return utils.player_in_undercity() and not tracker.done and not tracker.chest_failed
         and (utils.get_undercity_chest() ~= nil or task.last_interact_call ~= nil)
@@ -80,16 +120,26 @@ task.Execute = function ()
     if task.last_interact_call and has_new_loot() then task.loot_observed = true end
 
     -- A single empty actor list is not an opened chest. Disappearance requires
-    -- our own close-range interaction, newly observed loot and a stable read.
+    -- our own close-range interaction, and newly observed loot or a stable
+    -- absence of VANISH_WAIT seconds.
     if not chest then
         if task.last_interact_call and task.loot_observed then
             task.loot_observed = true
             confirm('chest disappeared with new loot')
+        elseif task.last_interact_call then
+            clear_confirmation()
+            task.missing_since = task.missing_since or now
+            if now - task.missing_since >= VANISH_WAIT then
+                console.print('[WonderCity:chest] interacted reward chest vanished; treating it as opened')
+                complete('interacted chest vanished')
+                return
+            end
         else
             clear_confirmation()
         end
         task.status = tracker.done and 'reward opened; waiting for loot' or 'waiting for chest confirmation'
     else
+        task.missing_since = nil
         local key = chest_key(chest)
         if not key then clear_confirmation();return end
         if task.active_key and task.active_key ~= key then task.reset() end
@@ -98,7 +148,7 @@ task.Execute = function ()
             return utils.distance(player, chest), chest:is_interactable()
         end)
         if not read then clear_confirmation();return end
-        if distance > 2 then
+        if distance > 2 and not approach_stalled(distance, now) then
             clear_confirmation()
             BatmobilePlugin.set_target(plugin_label, chest)
             BatmobilePlugin.move(plugin_label)
@@ -107,6 +157,7 @@ task.Execute = function ()
         end
         utils.stop_movement()
         if interactable then
+            task.locked_since = nil
             task.interact_time = task.interact_time or now
             clear_confirmation()
             settings.orb_set_clear(false)
@@ -123,23 +174,37 @@ task.Execute = function ()
             task.status = tracker.done and 'reward opened; waiting for loot' or 'confirming reward chest'
         else
             -- A closed/non-interactable object seen before our first click
-            -- may still be locked by the boss; never count it as a reward.
-            task.status = 'waiting for reward chest to unlock'
+            -- may still be locked by the boss. Bounded (L9: an already opened
+            -- chest stays non-interactable forever).
+            settings.orb_set_clear(true)
+            locked_wait(now)
         end
     end
 
     if not tracker.done and task.interact_time and now - task.interact_time > INTERACT_TIMEOUT then
-        console.print('[WonderCity:chest] opening unconfirmed; waiting for configured run reset')
-        tracker.chest_failed = true
-        task.reset()
-        settings.orb_set_clear(true)
-        task.status = 'reward opening unconfirmed'
+        -- CRT-1: the host can keep an opened chest flagged interactable.
+        -- Bounded completion (upstream behavior) instead of waiting for
+        -- the run reset; loot still gets its quiet period before the exit.
+        console.print('[WonderCity:chest] opening unconfirmed after ' .. INTERACT_TIMEOUT
+            .. 's of interaction; treating the reward chest as opened')
+        complete(task.loot_observed and 'interacted; new loot observed (chest stays interactable)'
+            or 'interaction unconfirmed; chest stays interactable')
+    end
+end
+
+-- C5: time spent yielding (e.g. to Alfred) is not waiting/progress time.
+task.on_yield = function (seconds)
+    for _, field in ipairs({'interact_time', 'last_interact_call', 'confirm_since', 'locked_since',
+        'missing_since', 'approach_time'}) do
+        if task[field] then task[field] = task[field] + seconds end
     end
 end
 
 task.reset = function ()
     task.interact_time, task.last_interact_call, task.active_key = nil, nil, nil
     task.items_before, task.loot_observed = nil, false
+    task.locked_since, task.missing_since = nil, nil
+    task.approach_best, task.approach_time = nil, nil
     clear_confirmation()
 end
 

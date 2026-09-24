@@ -18,6 +18,11 @@ local TELEPORT_TIMEOUT        = 30.0
 -- WonderCity / HordeDev) self-disabled inside the dungeon, leaving nobody to
 -- navigate the player out.
 local STUCK_NOT_IN_TOWN_SECS  = 20.0
+-- CRT-6 / L4: when the orchestrator reports ctx.activity_quiet (no managed
+-- activity plugin is on, pending disable or inside its post-disable gap),
+-- nothing can still be driving the player out, so a short settle is enough.
+-- The 20 s window above stays the fallback whenever that signal is absent.
+local QUIET_SETTLE_SECS       = 3.0
 
 local STATE = {
     IDLE         = 'IDLE',
@@ -43,27 +48,77 @@ local DIAG_INTERVAL = 4.0  -- seconds between "NPC not found" diagnostic dumps
 local function log(msg) console.print('[WarPigs:turn_in] ' .. msg) end
 local function now() return get_time_since_inject() end
 
--- Returns true when Alfred has no pending work. Mirrors orchestrator's
--- alfred_idle() — we gate the turn-in here so we never teleport to Temis
--- while Alfred is mid-stash/salvage (that teleport would cancel Alfred's
--- return portal and cause item loss).
+-- Returns true when Alfred has no live work. C1 canonical reading (the same
+-- predicate as the orchestrator and every other plugin of the suite) — we
+-- gate the turn-in here so we never teleport to Temis while Alfred is
+-- mid-stash/salvage (that teleport would cancel Alfred's return portal and
+-- cause item loss).
+--   * a teleport latched after a finished/failed trip is not live (WPT-1);
+--   * enabled == false: idle. Unreadable status: busy for at most
+--     UNREADABLE_HOLD, then Alfred counts as unavailable (logged once);
+--   * paused without hard work (inventory_full/need_repair): idle, WarPigs
+--     never owns an Alfred pause (WPD-5). Paused WITH hard work: a bounded
+--     hold, logged when it starts and when it expires (WPT-5).
+local alfred_gate = {UNREADABLE_HOLD = 10.0, PAUSED_WORK_HOLD = 60.0,
+    unreadable_since = nil, unreadable_logged = false, paused_since = nil, paused_logged = false}
+local function alfred_live_work(s)
+    return s.trigger_tasks == true or s.external_trigger == true or s.pending == true or s.running == true
+        or (s.teleport == true and s.teleport_done ~= true and s.teleport_failed ~= true)
+end
 local function alfred_idle()
     local alfred = (_G.AlfredTheButlerPlugin or _G.PLUGIN_alfred_the_butler)
     if not alfred then return true end
-    if type(alfred.get_status) ~= 'function' then return false end
-    local ok, s = pcall(alfred.get_status)
-    if not ok or type(s) ~= 'table' then return false end
-    if s.external_trigger or s.trigger_tasks or s.pending or s.teleport or s.running then return false end
-    if s.enabled == false then return true end
-    if s.enabled ~= true then return false end
-    if s.paused then
-        if s.need_trigger or s.inventory_full or s.need_repair then return false end
-        return false
+    local G, t = alfred_gate, now()
+    local ok, s = false, nil
+    if type(alfred) == 'table' and type(alfred.get_status) == 'function' then ok, s = pcall(alfred.get_status) end
+    if not ok or type(s) ~= 'table' or type(s.enabled) ~= 'boolean' then
+        G.unreadable_since = G.unreadable_since or t
+        if t - G.unreadable_since < G.UNREADABLE_HOLD then return false end
+        if not G.unreadable_logged then
+            G.unreadable_logged = true
+            log(string.format('Alfred status unreadable for %.0fs — treating Alfred as unavailable', t - G.unreadable_since))
+        end
+        return true
     end
-    if s.trigger_tasks then return false end
+    G.unreadable_since, G.unreadable_logged = nil, false
+    local paused_work = s.enabled == true and s.paused == true and not alfred_live_work(s)
+        and (s.inventory_full == true or s.need_repair == true)
+    if not paused_work then G.paused_since, G.paused_logged = nil, false end
+    if s.enabled == false then return true end
+    if alfred_live_work(s) then return false end
+    if paused_work then
+        if not G.paused_since then
+            G.paused_since = t
+            log(string.format('waiting — Alfred is paused by %s with pending work (up to %.0fs)',
+                tostring(s.paused_by or '?'), G.PAUSED_WORK_HOLD))
+        end
+        if t - G.paused_since < G.PAUSED_WORK_HOLD then return false end
+        if not G.paused_logged then
+            G.paused_logged = true
+            log(string.format('Alfred still paused by %s with pending work after %.0fs — continuing the turn-in',
+                tostring(s.paused_by or '?'), t - G.paused_since))
+        end
+    end
     return true
 end
 local alfred_wait_logged = false
+local hold_logged        = nil
+
+-- WPD-1: the orchestrator passes its bounded companion gate (Looter pickup /
+-- live Alfred work, any zone) as ctx.hold. Every teleport this task fires
+-- waits for it; the orchestrator bounds the hold, so this cannot block forever.
+local function teleport_held(ctx)
+    local reason = type(ctx) == 'table' and ctx.hold or nil
+    if reason then
+        if hold_logged ~= reason then
+            log('teleport held — ' .. tostring(reason))
+            hold_logged = reason
+        end
+        return true
+    end
+    hold_logged = nil
+    return false
+end
 
 local function set_state(s)
     if s ~= state then
@@ -137,7 +192,8 @@ local function diagnose_missing_npc()
     end
 end
 
-function M.tick(active)
+-- ctx (optional, from the orchestrator): {activity_quiet = bool, hold = reason|nil}.
+function M.tick(active, ctx)
     if not active then
         if state ~= STATE.IDLE then
             log('Quest gone — resetting.')
@@ -145,12 +201,17 @@ function M.tick(active)
         end
         stuck_not_in_town_since = nil
         alfred_wait_logged      = false
+        hold_logged             = nil
         return
     end
 
     -- Alfred may start after this task has already reached Tyrael. Yield
     -- every state, including teleport retries and NPC movement/interactions.
-    if not alfred_idle() then return end
+    -- C5: time spent yielding is not time spent stuck outside town.
+    if not alfred_idle() then
+        stuck_not_in_town_since = nil
+        return
+    end
 
     if state == STATE.IDLE then
         -- Hold until Alfred has finished any pending stash/salvage work.
@@ -184,13 +245,27 @@ function M.tick(active)
         -- player out. After STUCK_NOT_IN_TOWN_SECS we teleport ourselves so
         -- the turn-in doesn't block forever.
         if not in_town_attribute() then
+            -- C5: a companion hold (Looter pickup / Alfred cycle) is not
+            -- "stuck"; restart the window once it clears.
+            if teleport_held(ctx) then
+                stuck_not_in_town_since = nil
+                return
+            end
             stuck_not_in_town_since = stuck_not_in_town_since or now()
             local waited = now() - stuck_not_in_town_since
-            if waited >= STUCK_NOT_IN_TOWN_SECS
+            local quiet = type(ctx) == 'table' and ctx.activity_quiet == true
+            local limit = quiet and QUIET_SETTLE_SECS or STUCK_NOT_IN_TOWN_SECS
+            if waited >= limit
                and (now() - last_teleport_time) >= TELEPORT_DEBOUNCE_S then
-                log(string.format(
-                    'Stuck outside town for %.0fs — escape-teleporting to Temis (exit plugin may be gone).',
-                    waited))
+                if quiet then
+                    log(string.format(
+                        'Outside town %.0fs after the last activity stopped (none running or exiting) — teleporting to Temis.',
+                        waited))
+                else
+                    log(string.format(
+                        'Stuck outside town for %.0fs — escape-teleporting to Temis (exit plugin may be gone).',
+                        waited))
+                end
                 teleport_to_waypoint(TEMIS_WP)
                 last_teleport_time = now()
                 set_state(STATE.TELEPORTING)
@@ -201,6 +276,7 @@ function M.tick(active)
         if (now() - last_teleport_time) < TELEPORT_DEBOUNCE_S then
             return  -- recent teleport channel still completing
         end
+        if teleport_held(ctx) then return end
         log('Teleporting to Temis.')
         teleport_to_waypoint(TEMIS_WP)
         last_teleport_time = now()
@@ -214,6 +290,11 @@ function M.tick(active)
             return
         end
         if (now() - state_entered) > TELEPORT_TIMEOUT then
+            -- C5: a companion hold pauses the retry timeout.
+            if teleport_held(ctx) then
+                state_entered = now()
+                return
+            end
             -- Same debounce applies on retry so the retry can't end up
             -- cancelling its own previous channel.
             if (now() - last_teleport_time) >= TELEPORT_DEBOUNCE_S then
@@ -229,6 +310,7 @@ function M.tick(active)
     if state == STATE.APPROACH_NPC then
         if get_zone() ~= TEMIS_ZONE then
             if (now() - last_teleport_time) < TELEPORT_DEBOUNCE_S then return end
+            if teleport_held(ctx) then return end
             log('Left Temis unexpectedly — teleporting back.')
             teleport_to_waypoint(TEMIS_WP)
             last_teleport_time = now()

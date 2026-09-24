@@ -1,6 +1,6 @@
-reroll_rx=0.179541
-reroll_ry=0.971173
-confirm_rx=0.713987
-confirm_ry=0.728628
-reroll_set=true
-confirm_set=true
+reroll_rx=0.000000000
+reroll_ry=0.000000000
+confirm_rx=0.000000000
+confirm_ry=0.000000000
+reroll_set=false
+confirm_set=false

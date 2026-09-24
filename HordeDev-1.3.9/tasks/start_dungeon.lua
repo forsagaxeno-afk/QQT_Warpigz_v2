@@ -182,12 +182,14 @@ local function use_dungeon_sigil(task, now, snapshot)
     -- inventory will also report as full when need restock and 
     -- if stash have more compasses and if alfred is configured to restock
     if settings.use_alfred and AlfredTheButlerPlugin then
-        if type(AlfredTheButlerPlugin.get_status) ~= 'function' then return false end
-        local ok, status = pcall(AlfredTheButlerPlugin.get_status)
-        if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return false end
+        -- C1: an unreadable status is bounded by utils.read_alfred_status().
+        local status = utils.read_alfred_status()
+        if not status then return false end
         if status.enabled and type(status.need_trigger) ~= 'boolean' then return false end
         -- add additional conditions to trigger if required
-        if (status.enabled and status.need_trigger) then
+        -- C1: advisory need_trigger alone cannot re-trigger within the sticky
+        -- grace after HordeDev's own completed Alfred cycle.
+        if utils.alfred_trip_wanted(status, tracker.alfred_completed_at) then
             tracker.start_dungeon_time = nil
             tracker.needs_salvage = true
             return false
@@ -196,15 +198,40 @@ local function use_dungeon_sigil(task, now, snapshot)
     
     -- Stop script and run pit
     if settings.run_pit then
-        if PitPlugin then
-            InfernalHordesPlugin.disable()
-            PitPlugin.enable()
-        else 
-            console.print("Pit version does not support auto start")
-        end
+        task:start_pit()
     end
     
     return false
+end
+
+-- HRD-9: no plugin exports PitPlugin; ArkhamAsylum exports ArkhamAsylumPlugin.
+-- While WarPigs is on it owns activity handoffs, so HordeDev must not start
+-- a Pit behind its back.
+local function warpigs_on()
+    local wp = WarPigsPlugin
+    if type(wp) ~= 'table' or type(wp.status) ~= 'function' then return false end
+    local ok, st = pcall(wp.status)
+    return ok and type(st) == 'table' and st.enabled == true
+end
+
+function task:start_pit()
+    if warpigs_on() then
+        if not self.pit_skip_logged then
+            self.pit_skip_logged = true
+            console.print("[start_dungeon] Out of compasses; 'Run pit' skipped because WarPigs manages activity handoffs.")
+        end
+        return false
+    end
+    local pit = PitPlugin or ArkhamAsylumPlugin
+    if type(pit) ~= 'table' or type(pit.enable) ~= 'function' then
+        console.print("Pit version does not support auto start")
+        return false
+    end
+    console.print("[start_dungeon] Out of compasses; starting the Pit plugin.")
+    InfernalHordesPlugin.disable()
+    local ok, why = pcall(pit.enable)
+    if not ok then console.print("[start_dungeon] Pit plugin failed to start: " .. tostring(why)) end
+    return ok
 end
 
 task.shouldExecute = function()

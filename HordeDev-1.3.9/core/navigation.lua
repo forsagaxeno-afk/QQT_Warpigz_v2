@@ -1,4 +1,5 @@
 local utils = require "core.utils"
+local explorer = require "core.explorer" -- captured at load; never a global
 local navigation = {}
 
 function navigation:move_to(target)
@@ -16,7 +17,7 @@ function navigation:pathfind_to(target)
     --console.print("Pathfinding to target.")
     target = target.get_position and target:get_position() or target
 
-    explorer.set_custom_target(target)
+    explorer:set_custom_target(target)
 end
 
 return navigation

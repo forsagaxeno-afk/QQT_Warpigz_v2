@@ -337,6 +337,11 @@ task.Execute = function ()
     task.status = string.format('approaching (%.1f)', trav_dist)
 end
 
+-- C5: time spent yielding to Alfred is not charged to the gizmo's budget.
+task.on_yield = function (seconds)
+    if _engagement_start > 0 then _engagement_start = _engagement_start + seconds end
+end
+
 task.reset = function ()
     reset_engagement(false)
     _gizmo_attempts = {}

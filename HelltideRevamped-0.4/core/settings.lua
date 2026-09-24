@@ -144,4 +144,16 @@ settings.orb_set_block = function (v)
     end
 end
 
+-- C4/HLT-6: leaving HR (disable, task switch, loading) hands the orbwalker
+-- back in its neutral state: movement unblocked and clear ON, which the
+-- cinder gate may have forced OFF. A pending chest-combat force window is
+-- dropped so it cannot outlive the session.
+settings.orb_release = function ()
+    force_clear_until = -math.huge
+    if settings.manage_orbwalker then
+        orbwalker.set_block_movement(false)
+        orbwalker.set_clear_toggle(true)
+    end
+end
+
 return settings

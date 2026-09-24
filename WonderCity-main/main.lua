@@ -123,6 +123,7 @@ local render_pulse = function  ()
         if current_task.status ~= nil then
             msg = "WonderCity: " .. current_task.name .. ' (' .. current_task.status .. ')'
         end
+        if current_task.note then msg = msg .. ' - ' .. current_task.note end
         local x_pos = get_screen_width()/2 - (#msg * 5.5)
         local y_pos = 80
         graphics.text_2d(msg, vec2:new(x_pos, y_pos), 20, color_white(255))

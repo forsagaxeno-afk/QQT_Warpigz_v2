@@ -65,7 +65,7 @@ function settings:update_settings()
     local managed_before = settings.manage_orbwalker
     settings.manage_orbwalker = gui.elements.manage_orbwalker:get()
     if managed_before and not settings.manage_orbwalker then
-        settings.orb_set_clear(false)
+        -- C4: release our movement block; leave clear ON (never force it OFF).
         settings.orb_set_block(false)
     end
 

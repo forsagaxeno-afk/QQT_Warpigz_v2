@@ -152,6 +152,38 @@ utils.stop_movement = function ()
     BatmobilePlugin.stop_long_path('wonder_city')
     BatmobilePlugin.clear_target('wonder_city')
     BatmobilePlugin.pause('wonder_city')
+    utils.own_long_path = false
+end
+-- WCY-5: true after walk_kurast started a Batmobile long route. Batmobile's
+-- main pulse drives such a route on its own until it is stopped.
+utils.own_long_path = false
+-- Stops only the long route WonderCity started (never a route another
+-- plugin or companion claimed since); target and pause are left alone.
+utils.stop_own_long_path = function ()
+    if not utils.own_long_path then return end
+    utils.own_long_path = false
+    local bat = BatmobilePlugin
+    if not bat or type(bat.stop_long_path) ~= 'function' then return end
+    if type(bat.is_long_path_navigating) == 'function' and not bat.is_long_path_navigating() then return end
+    local owner = type(bat.get_owner) == 'function' and bat.get_owner() or nil
+    if owner ~= nil and owner ~= 'wonder_city' then return end
+    bat.stop_long_path('wonder_city')
+end
+-- C3/WCY-5/WCY-8: hand Batmobile back. BatmobilePlugin.release is
+-- owner-aware (stops our long route, drops our goal and traversal routing,
+-- pauses, restores the default explorer priority, never clears the native
+-- path a companion may own). Older Batmobile: the previous sequence, or only
+-- our own long route while a companion (Alfred) owns movement.
+utils.release_movement = function (companion_owns)
+    local bat = BatmobilePlugin
+    if not bat then return end
+    if type(bat.release) == 'function' then
+        utils.own_long_path = false
+        bat.release('wonder_city')
+        return
+    end
+    if companion_owns then utils.stop_own_long_path() else utils.stop_movement() end
+    if type(bat.set_priority) == 'function' then bat.set_priority('wonder_city', 'direction') end
 end
 
 return utils

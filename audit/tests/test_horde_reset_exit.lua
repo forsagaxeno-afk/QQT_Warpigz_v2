@@ -14,7 +14,8 @@ local function fresh()
     local s={time=10,zone="S05_BSK_Prototype02",name="S05_BSK_Prototype02",id=42,leaves=0,resets=0,teleports=0,stops=0,clears=0,bm_clears=0,long_stops=0,logs={},aether=0,stash=true}
     console={print=function(line) s.logs[#s.logs+1]=line end}
     vec3={new=function(_,x,y,z) return {x=function() return x end,y=function() return y end,z=function() return z end} end}
-    local player={is_dead=function() return s.dead==true end,get_position=function() return vec3:new(1,2,3) end}
+    local player={is_dead=function() return s.dead==true end,get_position=function() return vec3:new(1,2,3) end,
+        get_active_spell_id=function() return s.casting and 186139 or 0 end}
     local world={get_name=function() return s.name end,get_current_zone_name=function() return s.zone end,get_world_id=function() return s.id end}
     get_local_player=function() if not s.no_player then return player end end
     get_current_world=function() if s.world_error then error("unavailable") end; if not s.no_world then return world end end
@@ -116,11 +117,15 @@ do
     eq(s.resets,1);eq(s.tracker.reset_exit_pending,false)
 end
 
--- TELEPORT retains the existing five-second debounce and does not call Leave/Reset.
+-- TELEPORT keeps a six-second debounce (HRD-10: the suite's waypoint
+-- debounce), never re-fires while the channel casts, and does not call Leave/Reset.
 do
     local s=fresh();s.settings.exit_mode=1;s:tick(10);eq(s.teleports,1)
-    s:tick(11);s:tick(14.9);eq(s.teleports,1);s:tick(15);eq(s.teleports,2)
+    s:tick(11);s:tick(15.9);eq(s.teleports,1);s:tick(16);eq(s.teleports,2)
     eq(s.leaves,0);eq(s.resets,0);eq(s.tracker.reset_exit_pending,false)
+    s.casting=true;s:tick(22);s:tick(30.9);eq(s.teleports,2,"no re-fire while the teleport channel casts")
+    s:tick(31);eq(s.teleports,3,"a stuck cast id is not trusted forever")
+    s.casting=false;s:tick(36.9);eq(s.teleports,3);s:tick(37);eq(s.teleports,4)
 end
 
 -- Two consecutive RESET runs; previous state never skips the second leave.

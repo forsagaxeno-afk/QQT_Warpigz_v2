@@ -34,6 +34,11 @@ function utils.in_boss_zone(boss)
     return enums.zone_matches(boss, utils.get_zone())
 end
 
+-- True inside any boss lair (not only the current rotation's boss).
+function utils.in_any_boss_zone()
+    return enums.is_boss_zone(utils.get_zone())
+end
+
 function utils.get_altar()
     local ok, actors = pcall(function() return actors_manager:get_all_actors() end)
     if not ok or type(actors) ~= "table" then return nil, false end
@@ -149,6 +154,80 @@ function utils.reset_boss_quest_tracking()
         console.print("[Reaper] Boss quest tracking reset for new run.")
     end
     boss_quest_seen = false
+end
+
+-- RPR-6: read-only Looter coordination (same contract reading as HordeDev's
+-- loot_guard; the Looter's settings are never changed). A failed/invalid
+-- read is not idle.
+function utils.looter_busy()
+    local looter = LooteerPlugin
+    if not looter then return false end
+    local function read(fn, ...)
+        if type(fn) ~= "function" then return false, nil end
+        return pcall(fn, ...)
+    end
+    if type(looter.get_enabled) == "function" then
+        local ok, enabled = read(looter.get_enabled)
+        if not ok or type(enabled) ~= "boolean" then return true end
+        if not enabled then return false end
+    elseif type(looter.getSettings) == "function" then
+        local ok, enabled = read(looter.getSettings, "enabled")
+        if not ok then return true end
+        if enabled == false or enabled == nil then return false end
+        if enabled ~= true then return true end
+    end
+    local modern_unknown = false
+    if type(looter.is_actively_looting) == "function" then
+        local ok, active = read(looter.is_actively_looting)
+        if ok and type(active) == "boolean" then return active end
+        modern_unknown = true
+    end
+    if type(looter.is_idle) == "function" then
+        local ok, idle = read(looter.is_idle)
+        if ok and type(idle) == "boolean" then return not idle end
+        modern_unknown = true
+    end
+    if modern_unknown then return true end
+    if type(looter.getSettings) == "function" then
+        local ok, active = read(looter.getSettings, "looting")
+        if not ok then return true end
+        return not (active == false or active == nil)
+    end
+    return true -- no readable ownership contract
+end
+
+-- Hold a lair exit (town teleport / next-run teleport) while the Looter picks
+-- up the boss drops, then require LOOT_QUIET seconds of quiet. Bounded (C6):
+-- after LOOT_HOLD_MAX of continuous busy the exit proceeds with one log line.
+local LOOT_QUIET, LOOT_HOLD_MAX = 3, 30
+local loot = { quiet_since = nil, busy_since = nil, logged = false }
+
+function utils.loot_ready()
+    if not LooteerPlugin then return true end
+    local now = get_time_since_inject()
+    if utils.looter_busy() then
+        loot.quiet_since = nil
+        loot.busy_since = loot.busy_since or now
+        if now - loot.busy_since < LOOT_HOLD_MAX then return false end
+        if not loot.logged then
+            loot.logged = true
+            console.print(string.format("[Reaper] Looter busy for %ds; leaving the lair without waiting any longer", LOOT_HOLD_MAX))
+        end
+        return true
+    end
+    loot.busy_since, loot.logged = nil, false
+    loot.quiet_since = loot.quiet_since or now
+    return now - loot.quiet_since >= LOOT_QUIET
+end
+
+-- Reason text while the Looter holds a lair exit (nil when not holding).
+function utils.loot_hold_reason()
+    if not LooteerPlugin or not loot.busy_since or loot.logged then return nil end
+    return string.format("waiting for Looter (%ds)", math.floor(get_time_since_inject() - loot.busy_since))
+end
+
+function utils.reset_loot_guard()
+    loot.quiet_since, loot.busy_since, loot.logged = nil, nil, false
 end
 
 local MOVEMENT_SPELL_IDS = { 288106, 358761, 355606, 1663206, 1871821, 337031 }

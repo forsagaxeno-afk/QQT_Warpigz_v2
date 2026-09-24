@@ -12,12 +12,25 @@ local REROLL_CLICK1_DELAY, REROLL_CLICK_DEADLINE = 1.5, 4.0
 local REROLL_SETTLE_DELAY, DONE_WAIT_TIMEOUT = 4.0, 30.0
 local MAX_REROLLS, SEARCH_BUDGET, MAX_PICKS = 10, 512, 64
 local CLICK_FADE = 6.0
+-- Companion gates: an advisory-only Alfred flag may hold a new session for
+-- ADVISORY_HOLD; unreadable Alfred status holds for at most
+-- ALFRED_UNREADABLE_LIMIT; a paused session resumes after RESUME_QUIET of
+-- clear town; long holds are logged every HOLD_LOG_INTERVAL.
+local ADVISORY_HOLD, ALFRED_UNREADABLE_LIMIT = 30.0, 10.0
+local RESUME_QUIET, HOLD_LOG_INTERVAL = 3.0, 60.0
 local state, state_entered = 'IDLE', -math.huge
 local last_interact, last_diag = -math.huge, -math.huge
 local session_started, session_world, owned_path
 local reroll_count, reroll_pending, pending_click = 0, false, nil
 local halt_reason
 local recent_clicks = {}
+-- session.alfred latches the Alfred API admitted at session start (false when
+-- none was loaded). paused_at/paused_from describe a session suspended while a
+-- companion owns town. Grouped tables keep tick() far below LuaJIT's limit.
+local session = { alfred = nil, paused_at = nil, paused_from = nil }
+local hold = { reason = nil, since = nil, logged_at = -math.huge, cleared_at = nil }
+local alfred_gate = { advisory_since = nil, advisory_logged = false,
+    unreadable_since = nil, unreadable_logged = false }
 
 local function now() return get_time_since_inject() end
 local function log(m) console.print('[WarPug] ' .. m) end
@@ -30,12 +43,16 @@ local function set_state(s)
 end
 local function halt(reason)
     halt_reason, pending_click, reroll_pending = reason, nil, false
+    session.paused_at, session.paused_from = nil, nil
     log(reason .. ' — disable and re-enable WarPug to retry')
     set_state('HALTED')
 end
 local function reset()
     owned_path, session_started, session_world = nil, nil, nil
     reroll_count, reroll_pending, pending_click, halt_reason = 0, false, nil, nil
+    session.alfred, session.paused_at, session.paused_from = nil, nil, nil
+    hold.reason, hold.since, hold.cleared_at = nil, nil, nil
+    alfred_gate.advisory_since = nil
     set_state('IDLE')
 end
 
@@ -108,35 +125,80 @@ local function looter_busy()
     return true -- a loaded but unreadable collector may still own movement
 end
 
+-- Suite-wide Alfred "live work" reading. A teleport flag left latched after a
+-- finished or failed trip is not live work.
+local function alfred_live_work(s)
+    return s.trigger_tasks == true or s.external_trigger == true or s.pending == true or s.running == true
+        or (s.teleport == true and s.teleport_done ~= true and s.teleport_failed ~= true)
+end
+
+-- Returns a hold reason while Alfred owns town, or nil. need_trigger alone is
+-- advisory (e.g. a restock the stash cannot fill): it holds only a NEW session,
+-- and only until WarPigs reports its completed-cycle grace or ADVISORY_HOLD
+-- passes without live work. An admitted session latches its Alfred API, so an
+-- expiring grace can never stop it; live work, full inventory or repair can.
+local function alfred_hold(alfred, dispatcher)
+    local t = now()
+    local status = read_status(alfred, 'get_status')
+    if not status or type(status.enabled) ~= 'boolean' then
+        alfred_gate.unreadable_since = alfred_gate.unreadable_since or t
+        if t - alfred_gate.unreadable_since < ALFRED_UNREADABLE_LIMIT then return 'Alfred status unreadable' end
+        if not alfred_gate.unreadable_logged then
+            alfred_gate.unreadable_logged = true
+            log(string.format('Alfred status unreadable for %.0fs; treating Alfred as unavailable',
+                ALFRED_UNREADABLE_LIMIT))
+        end
+        return nil
+    end
+    alfred_gate.unreadable_since, alfred_gate.unreadable_logged = nil, false
+    local live = alfred_live_work(status)
+    local hard = status.inventory_full == true or status.need_repair == true
+    -- The advisory timer runs only while need_trigger alone is what holds us.
+    -- A pause WarPug does not own, with no hard need or live work, is idle.
+    if status.enabled == false or live or hard or status.need_trigger ~= true or status.paused == true
+        or (session.alfred ~= nil and session.alfred == alfred)
+        or (dispatcher and dispatcher.enabled == true and dispatcher.alfred_idle == true) then
+        alfred_gate.advisory_since, alfred_gate.advisory_logged = nil, false
+        if status.enabled == false then return nil end
+        if live then return 'Alfred working' end
+        if hard then return 'Alfred inventory/repair work' end
+        return nil
+    end
+    alfred_gate.advisory_since = alfred_gate.advisory_since or t
+    if t - alfred_gate.advisory_since < ADVISORY_HOLD then return 'Alfred need_trigger' end
+    if not alfred_gate.advisory_logged then
+        alfred_gate.advisory_logged = true
+        log(string.format('Alfred need_trigger stayed advisory for %.0fs without live work; planning anyway',
+            ADVISORY_HOLD))
+    end
+    return nil
+end
+
+-- Returns the companion that currently owns town, or nil.
 local function integrations_busy()
-    local dispatcher
+    local dispatcher, dispatcher_reason
     if WarPigsPlugin then
         dispatcher = read_status(WarPigsPlugin, 'status')
-        if not dispatcher or dispatcher.busy == true then return true end
+        if not dispatcher then dispatcher_reason = 'WarPigs status unavailable'
+        elseif dispatcher.busy == true then dispatcher_reason = 'WarPigs busy' end
     end
+    -- Always read Alfred so its advisory/unreadable timers see every tick.
     local alfred = AlfredTheButlerPlugin or PLUGIN_alfred_the_butler
-    if alfred then
-        local status = read_status(alfred, 'get_status')
-        if not status then return true end
-        if status.enabled ~= true and status.enabled ~= false then return true end
-        -- A recent completed-cycle grace may relax only a sticky pending flag.
-        -- Live/queued work, teleport, full inventory and repair still own town.
-        if status.trigger_tasks or status.external_trigger or status.running or status.teleport then return true end
-        if status.enabled ~= false then
-            if status.inventory_full or status.need_repair then return true end
-            if status.need_trigger and not (dispatcher and dispatcher.enabled == true
-                and dispatcher.alfred_idle == true) then return true end
-        end
-    end
+    if not alfred then alfred_gate.unreadable_since, alfred_gate.advisory_since = nil, nil end
+    local alfred_reason = alfred and alfred_hold(alfred, dispatcher) or nil
+    if dispatcher_reason or alfred_reason then return dispatcher_reason or alfred_reason end
     -- These direct guards also apply when the master dispatcher is disabled.
     local raven = SilentRavenPlugin or PLUGIN_silent_raven
     if raven then
         local status = read_status(raven, 'get_status')
-        if not status or status.running or status.pending or status.external_trigger then return true end
+        if not status then return 'SilentRaven status unavailable' end
+        if status.running or status.pending or status.external_trigger then return 'SilentRaven busy' end
     end
-    return looter_busy()
+    if looter_busy() then return 'Looter busy' end
+    return nil
 end
 
+-- Third result true: only a companion owns town, so a session may pause.
 local function context()
     local ok, alive = pcall(function()
         local player = get_local_player()
@@ -147,8 +209,25 @@ local function context()
     if not key then return nil, 'outside Temis or world unavailable' end
     local quests = has_warplan_quests()
     if quests ~= false then return nil, quests and 'war plan quest active' or 'quest snapshot unavailable' end
-    if integrations_busy() then return nil, 'town work busy or unavailable' end
+    local busy = integrations_busy()
+    if busy then return nil, busy, true end
     return key
+end
+
+-- Rate-limited visibility for companion holds (status line + periodic log).
+local function note_hold(reason)
+    local t = now()
+    if not reason then
+        if hold.since then hold.since, hold.cleared_at = nil, t end
+        hold.reason = nil
+        return
+    end
+    if not hold.since then hold.since, hold.logged_at, hold.cleared_at = t, t, nil end
+    hold.reason = reason
+    if t - hold.logged_at >= HOLD_LOG_INTERVAL then
+        hold.logged_at = t
+        log(string.format('still waiting for town work after %.0fs: %s', t - hold.since, reason))
+    end
 end
 
 local function same_path(a, b)
@@ -268,22 +347,54 @@ local function calibrated()
         valid_coordinates(settings.reroll_confirm_x, settings.reroll_confirm_y)
 end
 
+-- A companion (Alfred, Looter, SilentRaven, WarPigs) took over town mid-session.
+-- Never move or click against it: drop any delayed click and report IDLE so
+-- every companion treats WarPug as idle. The owned selection, reroll budget
+-- and Alfred admission are kept; the session resumes with a fresh search.
+local function pause_session(reason)
+    session.paused_at, session.paused_from = now(), state
+    pending_click, reroll_pending = nil, false
+    log('Pausing ' .. state .. ' for town work (' .. reason .. '); planning resumes when it clears')
+    set_state('IDLE')
+end
+local function resume_session(key)
+    if hold.cleared_at and now() - hold.cleared_at < RESUME_QUIET then return end
+    local paused, from = now() - session.paused_at, session.paused_from
+    session.paused_at, session.paused_from = nil, nil
+    if key ~= session_world then
+        -- A selection from another instance cannot be verified or undone here.
+        if owned_path and #owned_path > 0 then halt('World changed during planning') else reset() end
+        return
+    end
+    -- Time spent yielding is not planning time.
+    session_started = session_started + paused
+    log(string.format('Resuming after %.0fs of town work (paused in %s)', paused, tostring(from)))
+    set_state(warplan_api_ready() and 'FIND_PATH' or 'APPROACH_TABLE')
+end
+
 function planner.tick()
     if not settings.enabled then
         if state ~= 'DONE_WAIT' then clear_owned_path() end
         reset()
         return
     end
-    local key, reason = context()
+    local key, reason, companion = context()
+    note_hold(companion and reason or nil)
     if not key then
         -- An accepted plan appearing is normal completion. Never deselect it.
         if has_warplan_quests() == true then reset(); return end
+        -- Companion work is transient: pause instead of a permanent stop.
+        if companion then
+            if state ~= 'IDLE' and state ~= 'HALTED' and state ~= 'DONE_WAIT' then pause_session(reason) end
+            return
+        end
         if state ~= 'IDLE' and state ~= 'HALTED' then
             halt('Stopped: ' .. reason)
         end
         return
     end
     if state == 'HALTED' then return end
+    if session.paused_at then resume_session(key); return end
     if session_world and key ~= session_world then halt('World changed during planning'); return end
     if state ~= 'IDLE' and state ~= 'DONE_WAIT' and now() - session_started >= SESSION_TIMEOUT then
         halt('Planning session timed out'); return
@@ -291,6 +402,8 @@ function planner.tick()
 
     if state == 'IDLE' then
         session_world, session_started = key, now()
+        -- Latch Alfred admission for this session (see alfred_hold).
+        session.alfred = AlfredTheButlerPlugin or PLUGIN_alfred_the_butler or false
         set_state(warplan_api_ready() and 'FIND_PATH' or 'APPROACH_TABLE')
         return
     end
@@ -331,7 +444,13 @@ function planner.tick()
         local ok, found = pcall(function()
             local path = selected_path()
             -- A user's existing path must never be cleared or auto-confirmed.
-            if #path > 0 then return 'manual' end
+            -- Only this session's own complete selection, kept while paused
+            -- for town work, continues to the full CONFIRMING validation.
+            if #path > 0 then
+                if owned_path and #owned_path > 0 and same_path(path, owned_path)
+                    and warplan.is_complete() == true then return true end
+                return 'manual'
+            end
             owned_path = path
             local required = warplan.required_picks()
             assert(type(required) == 'number' and required > 0 and required <= MAX_PICKS and
@@ -358,13 +477,19 @@ function planner.tick()
         local ok, valid = pcall(function()
             if not owns_current_path() or #owned_path == 0 or #owned_path ~= warplan.required_picks() or
                 warplan.is_complete() ~= true then return false end
-            for _, id in ipairs(owned_path) do
+            local names = {}
+            for i, id in ipairs(owned_path) do
                 local name = warplan.node_name(id)
                 if type(name) ~= 'string' or name == '' or BLOCKED[name] then return false end
+                names[i] = name
             end
-            return true
+            return names
         end)
         if not ok or not valid then halt('Selection changed or became invalid before confirmation'); return end
+        -- WarPug excludes only Nightmare Dungeons. Name every node so a plan
+        -- step WarPigs cannot map is visible in the log.
+        log('Submitting war plan path: ' .. table.concat(valid, ' -> ') ..
+            ' (only Nightmare Dungeons are excluded; WarPigs runs the activities it maps)')
         -- confirm() has no documented return value; a successful call is a
         -- submission, not proof of server acceptance. Never resend on a timer.
         local sent, err = pcall(warplan.confirm)
@@ -427,6 +552,11 @@ function planner.stop(reason) halt(reason or 'Stopped by caller') end
 function planner.get_status_line()
     if not settings.enabled then return nil end
     if halt_reason then return 'WarPug: ' .. halt_reason end
+    if hold.since then
+        return string.format('WarPug: %s for %s (%.0fs)', session.paused_at and 'paused' or 'waiting',
+            tostring(hold.reason), now() - hold.since)
+    end
+    if session.paused_at then return 'WarPug: resuming after town work' end
     return string.format('WarPug: %s (reroll %d/%d)', state, reroll_count, MAX_REROLLS)
 end
 -- Manual calibration uses the same native path and safety context. No OS input.

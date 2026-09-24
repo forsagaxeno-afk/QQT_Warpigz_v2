@@ -76,7 +76,15 @@ local function fixture(options)
         self.bridge:observe(self.now, true)
         self.now = self.now + 1.1
         self.bridge:observe(self.now, true)
-        eq(self.bridge:tick(self.now, true), true, 'visit owns a queued reward task')
+        local queued = self.bridge:tick(self.now, true)
+        -- L7: with a Looter loaded, the bridge first waits for its quiet window.
+        for _ = 1, 6 do
+            if self.api.get_status().pending then break end
+            self.now = self.now + 1
+            self.bridge:observe(self.now, true)
+            queued = self.bridge:tick(self.now, true)
+        end
+        eq(queued, true, 'visit owns a queued reward task')
         eq(self.api.get_status().pending, true, 'actual external queue is visible')
     end
     function c:walk()

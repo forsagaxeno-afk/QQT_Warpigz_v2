@@ -55,6 +55,7 @@ local function watchdog(player_pos)
     console.print(string.format(
         '[wonder_city walk_kurast] stuck %.1fs near (%.1f,%.1f) — re-teleporting to town waypoint',
         now - task.last_pos_time, player_pos:x(), player_pos:y()))
+    utils.own_long_path = false
     BatmobilePlugin.stop_long_path(plugin_label)
     BatmobilePlugin.clear_target(plugin_label)
     BatmobilePlugin.reset(plugin_label)
@@ -100,6 +101,7 @@ task.Execute = function ()
     if settings.town_long_path_target then
         local target = settings.town_long_path_target
         if utils.distance(player_pos, target) <= LONG_PATH_ARRIVED then
+            utils.own_long_path = false
             BatmobilePlugin.stop_long_path(plugin_label)
             BatmobilePlugin.clear_target(plugin_label)
             task.status = status_enum['IDLE']
@@ -112,7 +114,8 @@ task.Execute = function ()
             local now = get_time_since_inject()
             if (now - task.last_long_path_attempt) < LONG_PATH_RETRY then return end
             task.last_long_path_attempt = now
-            BatmobilePlugin.navigate_long_path(plugin_label, target)
+            -- WCY-5: remember the autonomous route is ours to stop.
+            if BatmobilePlugin.navigate_long_path(plugin_label, target) then utils.own_long_path = true end
         end
         task.status = status_enum['WALKING']
         return
@@ -145,6 +148,11 @@ task.Execute = function ()
     end
     BatmobilePlugin.move(plugin_label)
     task.status = status_enum['WALKING']
+end
+
+-- C5: a preempted walk (Alfred, entry, ...) starts a fresh stuck window.
+task.on_cancel = function ()
+    reset_progress()
 end
 
 task.reset = function ()

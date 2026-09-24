@@ -51,6 +51,13 @@ local M = {
     -- and the next trigger.  Lets callers detect callback-firing from a
     -- one-shot poll if they didn't pass a callback.
     all_task_done       = false,
+
+    -- Auto-fire admission hold (a companion owns town): reason, first and
+    -- latest sample, and whether the 60 s notice was logged.
+    hold_reason         = nil,
+    hold_since          = nil,
+    hold_seen_t         = nil,
+    hold_logged         = false,
 }
 
 M.reset_run = function ()
@@ -74,6 +81,21 @@ M.reset_run = function ()
     M.continuation_guard = nil
     M.confirm_since     = nil
     M.run_started_t     = nil
+    -- Walk progress (via-point latch, stall detection) and claim selection.
+    M.walk_via_done     = false
+    M.walk_kind         = nil
+    M.walk_best         = nil
+    M.walk_progress_t   = nil
+    M.walk_stalls       = 0
+    M.walk_stall_logged = false
+    M.claim_pick        = nil
+    M.reward_dumped     = false
+    -- Own runs (auto/manual) yield to companions; yield time is not run time.
+    M.companion_yield   = false
+    M.yield_reason      = nil
+    M.yield_since       = nil
+    M.yield_t           = nil
+    M.yield_logged      = false
     M.paused            = false
     M.paused_by         = nil
 end
@@ -86,6 +108,14 @@ M.finish = function(result)
     M.all_task_done = true
     M.reset_run()
     if callback then pcall(callback, result) end
+end
+
+-- Current companion hold (own-run yield or a fresh auto-fire admission
+-- hold), or nil. Shown in the status payloads.
+M.current_hold = function(now)
+    if M.running then return M.yield_reason end
+    if M.hold_reason and M.hold_seen_t and now - M.hold_seen_t <= 1 then return M.hold_reason end
+    return nil
 end
 
 -- Unknown/loading zones cannot manufacture a new visit.

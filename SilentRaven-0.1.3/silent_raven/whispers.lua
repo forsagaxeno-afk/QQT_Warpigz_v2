@@ -214,6 +214,9 @@ M.RAVEN_INTERMEDIATE = { x = 2597.24, y = -488.08, z = 30.52 }
 
 M.INTERMEDIATE_RANDOMIZE_RADIUS = 2.0    -- yards (uniform jitter)
 M.INTERMEDIATE_ARRIVAL_RADIUS   = 3.5    -- "close enough" to advance
+-- Already this close to the Raven: the intermediate (~7.8 yd from the NPC)
+-- would be a detour, so the walk goes straight to the NPC.
+M.VIA_SKIP_RADIUS               = 9.0
 
 -- Per-zone hard-coded NPC + intermediate coords.  Used by WALK_NPC's
 -- static fallback (when the actor isn't in stream yet) AND by
@@ -274,6 +277,16 @@ M.move_to_pos = function (pos)
     end
 end
 
+-- Direct move command for a stalled walk.  request_move is only a
+-- "move if not already moving" request, so it is ignored while another
+-- stored path is still active; force_move_raw is the direct command other
+-- suite plugins use for short hops.  Returns true when a command was sent.
+M.force_move = function (pos)
+    if not pos or not pathfinder or type(pathfinder.force_move_raw) ~= 'function' then return false end
+    if not vec3 or not vec3.new then return false end
+    return (pcall(pathfinder.force_move_raw, vec3:new(pos.x, pos.y, pos.z)))
+end
+
 -- Abort any in-flight pathfinding.  Used when SilentRaven disables /
 -- cancels mid-walk so the bot actually STOPS instead of carrying on
 -- to its last requested goal.
@@ -281,6 +294,23 @@ M.stop_movement = function ()
     if pathfinder and pathfinder.clear_stored_path then
         pcall(pathfinder.clear_stored_path)
     end
+end
+
+-- Read-only Batmobile snapshot for the stalled-walk diagnostic: a leftover
+-- Batmobile target/path in Temis competes with this walk.  Never mutates
+-- Batmobile (its owner releases it).
+M.batmobile_brief = function ()
+    local b = BatmobilePlugin
+    if type(b) ~= 'table' then return 'batmobile=absent' end
+    local function read(name)
+        if type(b[name]) ~= 'function' then return nil end
+        local ok, value = pcall(b[name])
+        if ok then return value end
+        return nil
+    end
+    local path = read('get_path')
+    return string.format('batmobile paused=%s target=%s path=#%s', tostring(read('is_paused')),
+        read('get_target') ~= nil and 'set' or 'none', type(path) == 'table' and tostring(#path) or '?')
 end
 
 -- 2D Euclidean distance from local player to a {x, y, z} position.
@@ -308,45 +338,54 @@ end
 
 -- Diagnostic: dump every entry from quest_reward.enumerate() to console.
 -- Triggered by the "Dump reward options" GUI keybind when the panel is
--- open -- useful for confirming the right Reward card index when D4
--- ships 3-5 choices that vary by season.
+-- open, and automatically (once per run) when a claim finds no usable
+-- card or cannot verify its selection -- useful for confirming the host's
+-- real entry fields and index conventions from a live log.
 --
--- Output shape (one line per entry):
---   [SilentRaven/dump]  [<index>] sno=<hex>(<dec>) name=<internal_name> valid=<bool> [<-- SELECTED>]
+-- Output shape (one line per entry, then the classifier and every field):
+--   [SilentRaven/dump]  [<index>] <type> sno=<value>(<type>) name=<internal_name> valid=<value>(<type>) usable=<bool> [<-- selected_index ...]
 --
 -- Always safe to call: gracefully degrades when the host doesn't expose
 -- quest_reward / individual sub-functions.  Not on a hot path -- only
--- fires on user keybind, never per-frame.
-M.dump_rewards = function ()
+-- fires on user keybind or a failed claim, never per-frame.
+-- `rewards_mod` is optional; the caller passes its captured module.
+M.dump_rewards = function (rewards_mod)
     if not console or not console.print then return end
     local PFX = '[SilentRaven/dump] '
+    local function typed(value) return tostring(value) .. '(' .. type(value) .. ')' end
 
     if not quest_reward then
         console.print(PFX .. 'quest_reward API not exposed by this host')
         return
     end
+    local api = {}
+    for _, name in ipairs({'is_open', 'enumerate', 'select', 'selected_index', 'accept', 'pick_and_accept'}) do
+        api[#api + 1] = name .. '=' .. type(quest_reward[name])
+    end
+    console.print(PFX .. 'api: ' .. table.concat(api, ' '))
 
-    local open = false
+    local open = nil
     if type(quest_reward.is_open) == 'function' then
         local ok, ret = pcall(quest_reward.is_open)
-        if ok then open = (ret == true) end
+        if ok then open = ret else open = 'error: ' .. tostring(ret) end
     end
-    console.print(PFX .. 'panel open: ' .. tostring(open))
+    console.print(PFX .. 'panel open: ' .. typed(open))
 
-    local sel = -1
+    local sel = nil
     if type(quest_reward.selected_index) == 'function' then
         local ok, ret = pcall(quest_reward.selected_index)
-        if ok and type(ret) == 'number' then sel = ret end
+        if ok then sel = ret else sel = 'error: ' .. tostring(ret) end
     end
-    console.print(PFX .. 'selected index: ' .. tostring(sel))
+    console.print(PFX .. 'selected index: ' .. typed(sel))
+    local sel_n = tonumber(sel)
 
     if type(quest_reward.enumerate) ~= 'function' then
         console.print(PFX .. 'enumerate() not exposed; cannot list entries')
         return
     end
     local ok, entries = pcall(quest_reward.enumerate)
-    if not ok or not entries then
-        console.print(PFX .. 'enumerate() returned nothing')
+    if not ok or type(entries) ~= 'table' then
+        console.print(PFX .. 'enumerate() returned ' .. typed(entries))
         return
     end
 
@@ -364,50 +403,65 @@ M.dump_rewards = function ()
 
     console.print(PFX .. 'enumerate() count: ' .. #keys)
 
-    -- Lazy require so this still works if rewards.lua fails to load
-    -- for any reason -- the basic field dump must always be available.
-    local rewards_ok, rewards = pcall(require, 'silent_raven.rewards')
+    -- Lazy require only for the manual path, so the basic field dump
+    -- still works if rewards.lua failed to load for any reason.
+    local rewards = rewards_mod
+    if rewards == nil then
+        local rewards_ok, loaded = pcall(require, 'silent_raven.rewards')
+        rewards = rewards_ok and loaded or nil
+    end
 
     for _, k in ipairs(keys) do
-        local e = entries[k] or {}
-        local sno_str = '?'
-        if type(e.sno) == 'number' then
-            sno_str = string.format('0x%X(%d)', e.sno, e.sno)
-        elseif e.sno ~= nil then
-            sno_str = tostring(e.sno)
+        local e = entries[k]
+        local is_table = type(e) == 'table'
+        local sno, valid, name
+        if is_table then sno, valid, name = e.sno, e.valid, e.internal_name end
+        local sno_str = typed(sno)
+        if type(sno) == 'number' and sno >= 0 and sno % 1 == 0 then
+            sno_str = string.format('0x%X(%d)', sno, sno)
         end
-        local marker = (k == sel) and ' <-- SELECTED' or ''
-        console.print(string.format('%s  [%s] sno=%s name=%s valid=%s%s',
-            PFX, tostring(k), sno_str,
-            tostring(e.internal_name or '?'),
-            tostring(e.valid),
-            marker))
+        local usable = '?'
+        if rewards and type(rewards.entry_usable) == 'function' then
+            local u_ok, u = pcall(rewards.entry_usable, e)
+            usable = u_ok and tostring(u) or 'error'
+        end
+        -- Both index conventions are marked; the host's is unverified.
+        local marker = ''
+        if sel_n and k == sel_n then marker = marker .. ' <-- selected_index' end
+        if sel_n and k == sel_n + 1 then marker = marker .. ' <-- selected_index+1' end
+        console.print(string.format('%s  [%s] %s sno=%s name=%s valid=%s usable=%s%s',
+            PFX, tostring(k), type(e), sno_str, tostring(name or '?'), typed(valid), usable, marker))
 
         -- Slot + legendary verdict from the rewards classifier.  Gives
         -- the user immediate feedback on whether catalog/heuristic
         -- parsing is finding the right thing.
-        if rewards_ok and rewards then
-            local slot      = rewards.extract_slot(e)
-            local legendary, evidence = rewards.is_legendary(e)
-            local display   = rewards.display_name(e)
-            console.print(string.format('%s        -> display="%s" slot=%s legendary=%s (%s)',
-                PFX, display, slot, tostring(legendary), evidence))
-        end
-
-        -- Every field outside {sno, internal_name, valid}.  This is
-        -- where we'll see any rarity / legendary / quality field the
-        -- host exposes that the API stub didn't document.  If a field
-        -- shows up here that we should be using for legendary
-        -- detection, add it to rewards.is_legendary.
-        local extras = {}
-        for fk, fv in pairs(e) do
-            if fk ~= 'sno' and fk ~= 'internal_name' and fk ~= 'valid' then
-                extras[#extras + 1] = tostring(fk) .. '=' .. tostring(fv)
+        if rewards and is_table then
+            local c_ok, slot, legendary, evidence, display = pcall(function ()
+                local l, ev = rewards.is_legendary(e)
+                return rewards.extract_slot(e), l, ev, rewards.display_name(e)
+            end)
+            if c_ok then
+                console.print(string.format('%s        -> display="%s" slot=%s legendary=%s (%s)',
+                    PFX, tostring(display), tostring(slot), tostring(legendary), tostring(evidence)))
             end
         end
-        if #extras > 0 then
-            table.sort(extras)
-            console.print(PFX .. '        extras: ' .. table.concat(extras, ', '))
+
+        -- Every field outside {sno, internal_name, valid}, with its type.
+        -- This is where we'll see any rarity / legendary / quality field
+        -- the host exposes that the API stub didn't document.  If a field
+        -- shows up here that we should be using for legendary
+        -- detection, add it to rewards.is_legendary.
+        if is_table then
+            local extras = {}
+            for fk, fv in pairs(e) do
+                if fk ~= 'sno' and fk ~= 'internal_name' and fk ~= 'valid' then
+                    extras[#extras + 1] = tostring(fk) .. '=' .. typed(fv)
+                end
+            end
+            if #extras > 0 then
+                table.sort(extras)
+                console.print(PFX .. '        extras: ' .. table.concat(extras, ', '))
+            end
         end
     end
 end

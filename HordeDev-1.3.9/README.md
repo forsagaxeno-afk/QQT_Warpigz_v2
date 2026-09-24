@@ -194,9 +194,10 @@ chest spending. Payment or the attempted chest becoming non-interactable
 confirms an opening; unrelated global coin/light effects do not. Materials
 continue while aether remains, with the existing Gold chest used for the
 remainder when Materials cannot be opened. No new chest costs are assumed.
-A rejected Gold chest leaves an explicit `Chests:` error and retains the aether
-instead of claiming completion. Temporarily unavailable aether readings also
-cannot prove completion.
+A rejected Gold chest leaves an explicit `Chests:` error; the chest phase then
+ends as a fault (reported in `status().fault`) and HordeDev leaves the Horde
+through its normal exit with the unspendable aether instead of waiting in the
+chest room. Temporarily unavailable aether readings cannot prove completion.
 
 Chest discovery checks both documented actor and loot/chest sources. State,
 attempt counts and delays reset between runs. Missing chest actors no longer
@@ -227,9 +228,21 @@ identifier or cost has been guessed.
 Offline checks from the suite directory:
 
 ```sh
-python3 audit/tests/run_tests.py test_horde_reset_exit.lua test_horde_sigil_entry.lua test_horde_audit.lua
+python3 audit/tests/run_tests.py test_horde_reset_exit.lua test_horde_sigil_entry.lua test_horde_audit.lua test_integration_horde.lua
 ```
 
 These retain all 350 prior reset/entry assertions and add 22 behavior checks.
 They do not replace an in-game check of routes, live actor names, battle
 rotation, seasonal availability or actual teleport/interaction timing.
+
+### Integration review fixes
+
+- A chest phase that cannot finish no longer freezes HordeDev or WarPigs: the fault is published and the configured exit (Leave Dungeon/Reset or Teleport) runs. A latched Leave/Reset, sigil or entry fault is also published, and turning HordeDev off and on (menu toggle, keybind, or a WarPigs disable/enable) clears it. A healthy pending transaction still survives a pause.
+- Dying while a Leave/Reset, sigil or entry transaction is pending revives at the checkpoint, and the dead time does not count toward that transaction's timeout.
+- `InfernalHordesPlugin.status()` additionally reports `in_run` (committed to a horde: entry, run, chests, exit/Reset or HordeDev's own Alfred trip), `fault`, `alfred_trip` and `hold`; `enabled` now includes the keybind gate.
+- Alfred: "Use alfred" off means HordeDev never waits on Alfred. An unreadable Alfred status holds at most 10 s. A finished trip's teleport flag is not treated as live work, a sticky `need_trigger` cannot re-trigger within 30 s of HordeDev's own completed cycle, and a salvage pause nobody can service resumes the chests. When Alfred's callback arrives while the player is still outside the Horde, HordeDev waits up to 20 s for the return portal before other tasks may leave; the built-in Cerrigar salvage does not run after a delegated Alfred trip.
+- Waypoint teleports are not re-fired into their own channel: 6 s for the Teleport exit, 8 s for the built-in salvage trip, and not while the teleport spell is still casting (for up to 15 s).
+- "Run pit when finish compasses" starts ArkhamAsylum, and is skipped while WarPigs manages the handoffs.
+- Time spent yielding to Alfred or another task no longer counts toward the walking watchdog or the Bartuc pylon timeout. A Looter that never reports idle holds the chest/exit handoff for at most 120 s. Holds are shown on screen and logged when they last longer than 60 s.
+
+Offline regression coverage is in `audit/tests/test_horde_*.lua` and `audit/tests/test_integration_horde.lua`.

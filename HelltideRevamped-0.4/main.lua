@@ -3,6 +3,7 @@
 local gui          = require "gui"
 local task_manager = require "core.task_manager"
 local settings     = require "core.settings"
+local tracker      = require "core.tracker"
 
 local local_player, player_position
 local was_enabled = false
@@ -46,6 +47,11 @@ end
 HelltideRevampedPlugin = {
     enable = function ()
         console.print('HELLTIDE REVAMPED ACTIVATING')
+        -- HLT-7: an external enable edge marks a fresh arrival, so search
+        -- gives the buff a short grace instead of teleporting away at once.
+        if gui.elements.main_toggle and not gui.elements.main_toggle:get() then
+            tracker.external_enable_at = get_time_since_inject()
+        end
         if gui.elements.main_toggle then gui.elements.main_toggle:set(true) end
         -- HR doesn't currently expose a keybind_toggle GUI element, but guard
         -- the access so an external orchestrator (WarPigs) doesn't crash on
@@ -62,9 +68,12 @@ HelltideRevampedPlugin = {
         was_enabled = false
     end,
     status = function ()
+        local task = task_manager.get_current_task()
         return {
             ['enabled'] = gui.elements.main_toggle:get(),
-            ['task'] = task_manager.get_current_task()
+            ['task'] = task,
+            -- C6: why HR is holding for a companion (Looter/Alfred), else nil.
+            ['hold'] = type(task) == 'table' and task.hold_reason or nil,
         }
     end,
     getSettings = function (setting)

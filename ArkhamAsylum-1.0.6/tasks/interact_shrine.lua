@@ -110,4 +110,9 @@ task.reset = function ()
     skipped_shrines = {}
 end
 
+-- C5: time spent yielding to Alfred is not a stuck shrine interaction.
+task.on_yield = function (seconds)
+    if stuck_since then stuck_since = stuck_since + seconds end
+end
+
 return task

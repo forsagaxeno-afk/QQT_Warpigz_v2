@@ -81,4 +81,12 @@ Glyph upgrades support the documented Lua table API and older vector wrappers, s
 
 Disabling Arkham stops its pending navigation and invalidates its own Alfred callback without pausing a foreign Alfred service cycle. Existing configuration keys, defaults, Pit level identifiers and Warplans interactions are preserved. The Magoogle integration remains an upstream TODO.
 
-Offline regression coverage is in `audit/tests/test_arkham.lua`; the dedicated findings and live-validation limits are in `audit/reviews/arkham.md` at the suite root.
+### Integration review fixes
+
+- Alfred: a finished cycle's 30 s grace for a sticky `need_trigger` (for example a restock item missing from the stash) survives task switches, so Arkham no longer re-triggers Alfred in a loop. Restock or stash flags alone never pull the bot out of a pit; a full inventory or repair still does. A paused Alfred with only advisory work counts as idle. With a full inventory or repair pending, Arkham waits up to 60 s and shows the reason in its status. An unreadable Alfred status holds at most 10 s and never blocks the reset-timeout exit.
+- Returning to the same pit after an Alfred trip resumes the run: the reset timeout, boss and glyph state, and the explored map are kept. Opening a new pit always starts a new run.
+- The Awakened Glyphstone is used before any inventory trip. Both the glyph upgrade and a new Alfred trip yield to an active Looter, with a bound so a stuck Looter cannot hold the pit.
+- Hand-off to Alfred, disabling Arkham, and a WarPigs release always hand Batmobile back through `BatmobilePlugin.release` (or stop Arkham's own long route on older Batmobile builds) and restore the default explorer priority. Orbwalker block-movement is released on every task switch and on release, even if "Manage orbwalker" was unticked in the meantime. Time spent yielding to Alfred or Looter no longer counts toward walk or stuck timeouts.
+- `enable()` works with "Use keybind" ticked but no key bound (logged once). `ArkhamAsylumPlugin.get_status()` additionally reports `alfred_trip`, `in_run` and `committed_entry`.
+
+Offline regression coverage is in `audit/tests/test_arkham.lua` and `audit/tests/test_integration_arkham.lua`; the dedicated findings and live-validation limits are in `audit/reviews/arkham.md` at the suite root.

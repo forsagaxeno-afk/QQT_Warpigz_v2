@@ -24,6 +24,7 @@ local OUT_OF_MATS_RETRIES     = 3    -- times chest can fail to despawn before s
 -- ---- State ----
 local phase              = "IDLE"
 local phase_start        = 0
+local phase_yield        = 0    -- tracker.companion_yield when the phase began (C5)
 local last_interact_time = 0
 local last_chest_pos     = nil
 local no_despawn_count   = 0    -- counts consecutive failures to despawn
@@ -31,11 +32,14 @@ local no_despawn_count   = 0    -- counts consecutive failures to despawn
 local function set_phase(p)
     phase       = p
     phase_start = os.time()
+    phase_yield = tracker.companion_yield or 0
     console.print("[Chest] Phase: " .. p)
 end
 
+-- C5: time spent yielding to Alfred never counts toward the despawn timeout
+-- (three timeouts abandon the run as "out of keys/husks").
 local function phase_elapsed()
-    return os.time() - phase_start
+    return os.time() - phase_start - ((tracker.companion_yield or 0) - phase_yield)
 end
 
 local function cooldown_ok()
@@ -112,6 +116,7 @@ local task = { name = "Open Chest" }
 function task.reset()
     phase = "IDLE"
     phase_start = 0
+    phase_yield = tracker.companion_yield or 0
     last_interact_time = 0
     last_chest_pos = nil
     no_despawn_count = 0
@@ -170,6 +175,11 @@ function task.Execute()
         if type(n) == "string" and n:find("^Boss_WT_Belial_") then
             tracker.belial_chest_interacted = true
             console.print("[Chest] Belial chest interacted – signalling UI task.")
+            if not settings.belial_chest_enabled then
+                -- RPR-8: nothing confirms the Ritual of Lies dialog, so the chest
+                -- stays closed and the bounded retry below fails this run.
+                console.print("[Chest] Belial chest sequence is OFF (Reaper > Belial Chest) — the reward dialog will not be confirmed.")
+            end
         end
 
         set_phase("WAIT_GONE")
@@ -238,7 +248,12 @@ function task.Execute()
         -- Require the chest to remain gone throughout the loot pause.
         local chest, readable = find_egb_chest()
         if chest or not readable then set_phase("WAIT_GONE"); return end
+        -- RPR-6: let the Looter collect the boss drops before this run ends
+        -- (the next step is a town or next-boss teleport). Polled from the
+        -- start so its quiet window overlaps the pause; bounded in utils.
+        local loot_ok = utils.loot_ready()
         if phase_elapsed() < WAIT_COMPLETE_SECS then return end
+        if not loot_ok then return end
         local boss = rotation.current()
         console.print(string.format("[Chest] Run complete — boss=%s  run_type=%s",
             tostring(boss and boss.id), tostring(boss and boss.run_type)))

@@ -150,11 +150,14 @@ do
     c.zone('Town'); c.time(151); c.update(); eq(callbacks,1)
     eq(e.require('core.boss_rotation').current().id,'varshan')
     e.ReaperPlugin.disable(); eq(e.ReaperPlugin.status().enabled,false); eq(e.require('core.tracker').altar_activated,false)
-    -- A failed run never invokes the success callback.
-    e.ReaperPlugin.run_once('duriel',nil,function() callbacks=callbacks+10 end)
+    -- C2/WPD-6: a failed run reports 'failed' exactly once (never 'success').
+    local results={}
+    e.ReaperPlugin.run_once('duriel',nil,function(result) callbacks=callbacks+10; results[#results+1]=result end)
     c.time(152); c.update(); c.time(153); c.update()
     e.require('core.boss_rotation').advance('unreachable')
-    c.time(154); c.update(); c.time(155); c.update(); eq(callbacks,1)
+    c.time(154); c.update(); c.time(155); c.update(); c.time(156); c.update()
+    eq(callbacks,11,'failure reported once'); eq(results[1],'failed')
+    eq(e.ReaperPlugin.status().last_result,'failed'); eq(e.ReaperPlugin.status().last_error,'unreachable')
 end
 
 -- QQT exposes coordinate methods; retry math and the DONE phase must work.

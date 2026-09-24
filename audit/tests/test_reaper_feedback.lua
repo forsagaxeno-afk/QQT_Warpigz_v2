@@ -57,6 +57,7 @@ end
 do
     local e,c,s,p,own = boot()
     s.boss_target='duriel'; s.use_alfred=true
+    c.zone('Town') -- RPR-3: an advisory need_trigger is serviced outside boss lairs
     p.get_dungeon_key_items=function()
         return {{get_acd=function() return 1 end, get_sno_id=function() return 2558255 end, get_stack_count=function() return 1 end}}
     end

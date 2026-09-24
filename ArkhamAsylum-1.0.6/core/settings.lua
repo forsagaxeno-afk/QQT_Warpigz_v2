@@ -62,6 +62,13 @@ local settings = {
     push_max_pull_dist = 40,
     push_min_cluster_weight = 5,
     death_recovery = false,
+    -- Runtime only (never persisted): true between an external enable()
+    -- (WarPigs) and disable() or the user switching the main toggle off.
+    external_control = false,
+    -- Orbwalker states this plugin forced; restored on release even if
+    -- 'Manage orbwalker' was switched off meanwhile (C4).
+    orb_block_forced = false,
+    orb_clear_forced = false,
 }
 
 settings.get_keybind_state = function ()
@@ -76,11 +83,17 @@ settings.get_keybind_state = function ()
     if use_keybind and toggle_key ~= 0x0A and toggle_state == 1 then
         return true
     end
+    -- ARK-7: 'Use keybind' with no key bound (0x0A) can never be satisfied;
+    -- an external controller's enable() must still take effect.
+    if toggle_key == 0x0A and settings.external_control then
+        return true
+    end
     return false
 end
 
 settings.update_settings = function ()
     settings.enabled = gui.elements.main_toggle:get()
+    if not settings.enabled then settings.external_control = false end
     local town_idx = gui.elements.town:get()
     -- gui.town_data may be nil if gui.lua somehow loaded partially; fall back
     -- to the hardcoded Temis defaults so we don't crash mid-pulse.
@@ -128,14 +141,19 @@ settings.update_settings = function ()
 end
 
 settings.orb_set_clear = function (v)
-    if settings.manage_orbwalker then
+    if settings.manage_orbwalker or (v == true and settings.orb_clear_forced) then
         orbwalker.set_clear_toggle(v)
+        settings.orb_clear_forced = v == false
     end
 end
 
+-- C4/L12: block_movement(true) is always released by the task switch and
+-- release paths; the forced flag lets the release reach the orbwalker even
+-- if 'Manage orbwalker' was unticked after we blocked movement.
 settings.orb_set_block = function (v)
-    if settings.manage_orbwalker then
+    if settings.manage_orbwalker or (v == false and settings.orb_block_forced) then
         orbwalker.set_block_movement(v)
+        settings.orb_block_forced = v == true
     end
 end
 

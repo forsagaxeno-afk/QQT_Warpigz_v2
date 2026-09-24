@@ -15,6 +15,9 @@ local task = {
 }
 local ATTEMPT_DELAY = 2
 local EMPTY_LIST_TIMEOUT = 8
+-- ARK-4/C6: yield to an active Looter (boss drops), but not forever.
+local LOOTER_HOLD_MAX = 45
+local looter_yield_since = nil
 
 -- QQT declares a Lua table; retain support for older vector wrappers.
 local function glyph_list()
@@ -69,16 +72,35 @@ task.reset = function ()
     task.pending_attempt = nil
     task.last_attempt_hash = nil
     task.status = 'idle'
+    looter_yield_since = nil
+end
+
+-- C5: time spent yielding to Looter/Alfred is not time the glyph UI stayed
+-- empty (EMPTY_LIST_TIMEOUT would otherwise mark the glyph done unused).
+task.on_yield = function (seconds)
+    if tracker.glyph_trigger_time then
+        tracker.glyph_trigger_time = tracker.glyph_trigger_time + seconds
+    end
 end
 
 task.shouldExecute = function ()
     if not utils.player_in_pit() or not settings.upgrade_toggle
-        or utils.is_looting() or tracker.glyph_done
+        or tracker.glyph_done
     then return false end
     -- Finished/blacklisted souls yield; a still-rendering actor alone must
     -- not prevent glyph upgrades forever after the soul task has given up.
     if soul_task.shouldExecute() then return false end
-    return utils.get_glyph_upgrade_gizmo() ~= nil
+    if utils.get_glyph_upgrade_gizmo() == nil then return false end
+    local now = get_time_since_inject()
+    if utils.looter_hold(LOOTER_HOLD_MAX, 'glyph upgrade') then
+        looter_yield_since = looter_yield_since or now
+        return false
+    end
+    if looter_yield_since then
+        task.on_yield(now - looter_yield_since)
+        looter_yield_since = nil
+    end
+    return true
 end
 
 task.Execute = function ()

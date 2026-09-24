@@ -46,18 +46,41 @@ function M.busy()
     return true -- no readable ownership contract
 end
 
+-- C6: an unreadable or never-idle Looter must not hold the chest/exit
+-- handoff forever. After LOOTER_MAX_HOLD of continuous busy the hold is
+-- released with one log line (a quiet sample re-arms the bound).
+local LOOTER_MAX_HOLD = 120
+local busy_since, busy_logged = nil, false
+
 function M.ready()
     if exit_committed then return true end
     if not LooteerPlugin then return true end
-    if M.busy() then quiet_since = nil;return false end
     local now = get_time_since_inject()
+    if M.busy() then
+        quiet_since = nil
+        busy_since = busy_since or now
+        if now - busy_since < LOOTER_MAX_HOLD then return false end
+        if not busy_logged then
+            busy_logged = true
+            console.print(string.format("[HordeDev] Looter busy for %ds; no longer holding the chest/exit handoff", LOOTER_MAX_HOLD))
+        end
+        return true
+    end
+    busy_since, busy_logged = nil, false
     quiet_since = quiet_since or now
     return now - quiet_since >= QUIET_SECONDS
+end
+
+-- Reason text while the Looter is holding HordeDev (nil when not holding).
+function M.hold_reason()
+    if exit_committed or not LooteerPlugin or not busy_since then return nil end
+    return string.format("waiting for Looter (%ds)", math.floor(get_time_since_inject() - busy_since))
 end
 
 function M.reset()
     quiet_since = nil
     exit_committed = false
+    busy_since, busy_logged = nil, false
 end
 
 function M.commit_exit()
@@ -74,8 +97,10 @@ function M.companion_may_own_movement()
     local ok, status = pcall(alfred.get_status)
     if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return true end
     if not status.enabled then return false end
-    return not not (status.trigger_tasks or status.external_trigger or status.running or status.pending
-        or (status.teleport and not status.teleport_done))
+    -- C1: a teleport latched after a finished or failed trip is not live work.
+    return status.trigger_tasks == true or status.external_trigger == true or status.running == true
+        or status.pending == true
+        or (status.teleport == true and status.teleport_done ~= true and status.teleport_failed ~= true)
 end
 
 return M

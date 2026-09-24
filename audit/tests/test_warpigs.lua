@@ -138,12 +138,13 @@ do
     equal(p.disables, 0); equal(p.enabled, true)
 end
 
--- Joining Alfred's active cycle must not replace its original caller.
+-- Joining Alfred's active cycle must not replace its original caller, and
+-- (WPD-1) a live cycle outside Temis also holds the outgoing Temis hop.
 do
     local f = fixture(); f.settings.use_teleport_transition = true; local triggers = 0
     local s = { enabled = true, trigger_tasks = true }
     AlfredTheButlerPlugin = { get_status = function() return s end, trigger_tasks = function() triggers = triggers + 1 end }
-    f.quests = { 'WarPlans_QST_ThePit' }; f.tick(); f.tick(3); equal(f.waypoints, 1)
+    f.quests = { 'WarPlans_QST_ThePit' }; f.tick(); f.tick(3); equal(f.waypoints, 0, 'no hop over a live Alfred cycle')
     f.zone = 'Skov_Temis'; f.town = true; f.tick(6); equal(triggers, 0)
     f.tick(10); equal(f.teleports, 0)
 end

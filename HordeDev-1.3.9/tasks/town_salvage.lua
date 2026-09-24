@@ -149,6 +149,8 @@ local town_salvage_task = {
     current_retries = 0,
     max_teleport_attempts = 5,
     teleport_wait_time = 30,
+    teleport_retry_interval = 8, -- HRD-8: above the ~5s channel (suite debounce is 6s)
+    teleport_cast_cap = 15,      -- never trust a stuck cast id forever
     last_teleport_check_time = 0,
     last_blacksmith_interaction_time = 0,
     last_salvage_action_time = 0,
@@ -161,14 +163,22 @@ local town_salvage_task = {
     
         -- If we are in Cerrigar, salvage if flag is true
         if in_cerrigar then
+            -- HRD-5: when the trip was delegated to an enabled Alfred, the
+            -- built-in blacksmith routine must not run after (or instead of)
+            -- Alfred's own town work. An unreadable status is bounded (C1).
+            if settings.use_alfred and utils.get_alfred() then
+                local status = utils.read_alfred_status()
+                if not status or status.enabled then return false end
+            end
             return settings.salvage and (tracker.needs_salvage or tracker.has_salvaged)
         end
     
         -- If we're not in Cerrigar, we need both high item count and a gold chest to start
-        return utils.is_inventory_full() and 
-               settings.salvage and
+        -- (cheap flags first: the inventory check may read Alfred's status)
+        return settings.salvage and
                tracker.needs_salvage and
-               gold_chest_exists
+               gold_chest_exists and
+               utils.is_inventory_full()
     end,
 
     Execute = function(self)
@@ -219,33 +229,43 @@ local town_salvage_task = {
         explorer:clear_path_and_target()
         teleport_to_waypoint(enums.waypoints.CERRIGAR)
         self.teleport_start_time = get_time_since_inject()
+        -- HRD-8: the first retry check is one full interval after this call,
+        -- never on the next tick (a second call cancels the channel).
+        self.last_teleport_check_time = self.teleport_start_time
         console.print("Teleport command issued")
     end,
     
     handle_teleporting = function(self)
         local current_time = get_time_since_inject()
-        if current_time - self.last_teleport_check_time >= 5 then
-            self.last_teleport_check_time = current_time
-            local current_zone = get_current_world():get_current_zone_name()
+        local world = get_current_world()
+        local current_zone = world and world:get_current_zone_name()
+        if type(current_zone) ~= "string" then return end -- loading: no evidence either way
+        if current_zone:find("Cerrigar") or utils.player_in_zone("Scos_Cerrigar") then
             console.print("Current zone: " .. tostring(current_zone))
-            
-            if current_zone:find("Cerrigar") or utils.player_in_zone("Scos_Cerrigar") then
-                console.print("Teleport complete, moving to blacksmith")
-                self.current_state = salvage_state.MOVING_TO_BLACKSMITH
-                self.teleport_attempts = 0 -- Reset attempts counter
-            else
-                console.print("Teleport unsuccessful, retrying...")
-                self.teleport_attempts = (self.teleport_attempts or 0) + 1
-                
-                if self.teleport_attempts >= self.max_teleport_attempts then
-                    console.print("Max teleport attempts reached. Resetting task.")
-                    self:reset()
-                    return
-                end
-                
-                self:teleport_to_town()
-            end
+            console.print("Teleport complete, moving to blacksmith")
+            self.current_state = salvage_state.MOVING_TO_BLACKSMITH
+            self.teleport_attempts = 0 -- Reset attempts counter
+            return
         end
+        -- HRD-8: retry only after a full interval, and never while the
+        -- waypoint channel is still casting (a second call cancels it).
+        if current_time - self.last_teleport_check_time < self.teleport_retry_interval then return end
+        if utils.is_teleport_casting()
+            and current_time - (self.teleport_start_time or current_time) < self.teleport_cast_cap then
+            return
+        end
+        self.last_teleport_check_time = current_time
+        console.print("Current zone: " .. tostring(current_zone))
+        console.print("Teleport unsuccessful, retrying...")
+        self.teleport_attempts = (self.teleport_attempts or 0) + 1
+
+        if self.teleport_attempts >= self.max_teleport_attempts then
+            console.print("Max teleport attempts reached. Resetting task.")
+            self:reset()
+            return
+        end
+
+        self:teleport_to_town()
     end,
 
     move_to_blacksmith = function(self)

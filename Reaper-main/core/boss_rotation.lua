@@ -357,16 +357,17 @@ function rotation.set_external(boss_id, run_type)
     for _, bd in ipairs(enums.boss_zones) do
         if bd.id == boss_id then boss_def = bd; break end
     end
+    -- A refusal returns false plus a short reason (C2: run_once reports it).
     if not boss_def then
         console.print(string.format("[Reaper] set_external: unknown boss_id '%s'", tostring(boss_id)))
-        return false
+        return false, "unknown boss"
     end
 
     -- Sigil activation/completion is not implemented by this farmer. Never
     -- reinterpret an explicit sigil request as permission to spend keys.
     if run_type == "sigil" then
         console.print("[Reaper] Sigil runs are not supported; request rejected.")
-        return false
+        return false, "sigil runs are not supported"
     end
     local tier = run_type
     if tier == nil or tier == "lair_key" or tier == "material" then
@@ -374,7 +375,7 @@ function rotation.set_external(boss_id, run_type)
     end
     if tier ~= "lair" and tier ~= "greater" and tier ~= "husk" then
         console.print("[Reaper] Unsupported run type: " .. tostring(run_type))
-        return false
+        return false, "unsupported run type"
     end
 
     rotation.boss_list = { {

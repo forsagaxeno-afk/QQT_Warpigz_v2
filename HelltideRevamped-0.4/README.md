@@ -49,6 +49,28 @@ update Helltide state without pausing Alfred. Disabling Helltide invalidates
 outstanding callbacks and pending chest/search state, and stops movement it
 issued. A disabled Looteer with a stale `looting` flag no longer blocks Helltide.
 
+Only a hard Alfred need (`inventory_full` or `need_repair`, or the local item
+count when Alfred publishes no inventory view) sends Helltide to town. A sticky
+advisory flag (`need_trigger` alone, restock) triggers Alfred at most once per
+30-second grace after any finished cycle, and a teleport flag left over from a
+finished or failed trip is not treated as work. An unreadable Alfred status
+holds for at most about 10 seconds; a pause set by another plugin holds a
+pending town request for at most 60 seconds.
+
+Time spent yielding to Looteer or Alfred does not count toward the chest,
+chest-recall, traversal or patrol stuck timers, so a reachable chest is no
+longer blacklisted right after a long Looteer pickup. After a Batmobile
+give-up the town teleport is retried every 6 seconds while the Helltide buff
+is still present, and no Alfred round trip starts from inside the trap. During
+minutes 55-59 Helltide teleports to the idle town first and asks Alfred for
+salvage only after arriving. Search teleports wait up to 20 seconds for an
+active Looteer pickup. After an external enable (WarPigs) without the buff,
+search waits up to 15 seconds for the buff before teleporting away. Every HR
+session starts with a Batmobile exploration reset, and disabling Helltide
+releases Batmobile and, with **Manage orbwalker**, turns orbwalker clear back
+on. `HelltideRevampedPlugin.status().hold` names any Looteer/Alfred hold, and
+holds longer than a minute are logged once a minute.
+
 **Do Maiden** takes priority over chest selection while its conditions hold.
 Use **Disable Maiden at Cinders** to release Maiden farming for chest spending.
 The existing Chaos Rift option still uses its source-provided seasonal name;

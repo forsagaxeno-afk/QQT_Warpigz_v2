@@ -40,8 +40,10 @@ local ALTAR_TETHER = 15.0
 
 local task = { name = "Kill Monsters" }
 
+-- C4/RPR-10: a reset (stop, run_once, finishing) releases the movement block
+-- but never forces the orbwalker clear toggle OFF: WarPigs forces clear ON at
+-- the handoff and the next activity must not inherit clear OFF from Reaper.
 function task.reset()
-    settings.orb_set_clear(false)
     settings.orb_set_block(false)
 end
 

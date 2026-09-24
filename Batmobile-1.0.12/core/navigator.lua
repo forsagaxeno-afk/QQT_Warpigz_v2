@@ -98,6 +98,27 @@ local navigator = {
     -- NEW floor and find that floor's escape gizmo (e.g. F1 → F2 via climb,
     -- then F2 → F3 via second climb without dropping out of trap mode).
     trap_post_escape_grace_until = -1,
+
+    -- Non-Jump traversal interact accounting: a gizmo that never produces
+    -- the Player_Traversal buff is abandoned after TRAV_INTERACT_MAX tries.
+    trav_interact_key         = nil,
+    trav_interact_count       = 0,
+    trav_interact_z           = nil,
+    -- Time of the last executed move().  A long gap means the caller yielded
+    -- (Looter, Alfred, another task); that idle time is not "no progress".
+    last_move_call            = nil,
+    -- World/zone observation (observe_world): explorer, trap and traversal
+    -- state never carry over into another world or a teleport destination.
+    world_key                 = nil,
+    world_zone                = nil,
+    world_pos                 = nil,
+    world_seen_at             = -1,    -- time of the last valid observation
+    target_set_at             = -1,    -- time set_target last assigned a goal
+    -- While walkability streams in (load, world change) explorer scans do
+    -- not cache "non-walkable" permanently.
+    scan_grace_until          = -1,
+    -- Set by core.long_path: returns true while a long route owns the goal.
+    long_path_active          = nil,
 }
 
 -- Tunables (kept as locals so they're visible in code but not part of the
@@ -112,6 +133,11 @@ local TRAP_GIVEUP_TIMEOUT   = 60    -- seconds in trapped state before giving_up
 local TRAV_HISTORY_MAX      = 5     -- recent traversals to consider for direction
 local TRAV_TRAP_BL_DURATION = 300   -- seconds to long-blacklist trap re-entry gizmos
 local TRAP_POST_ESCAPE_GRACE = 15   -- seconds to keep trap active after escape routes
+local TRAV_INTERACT_MAX     = 3     -- non-Jump interacts without a buff before giving up
+local INERT_TRAV_BL_DURATION = 60   -- seconds an inert traversal stays blacklisted
+local MOVE_GAP_GRACE        = 0.75  -- move() gap treated as a caller yield
+local WORLD_JUMP_DIST       = 100   -- zone change + jump beyond this = teleport
+local SCAN_GRACE_SECS       = 3     -- no negative walkability cache after load/world change
 
 -- Wire up failed-direction sharing once at module load.  The explorer reads this
 -- list during frontier scoring; navigator.record_failed_direction reassigns the
@@ -577,10 +603,30 @@ local get_unstuck_node = function ()
     end
     return nil, nil
 end
+-- A paused navigator or a custom target belongs to the calling plugin.
+-- unstuck() must never swap it for an explorer frontier or blacklist
+-- explorer.visited around it (HordeDev sets a waypoint once and drifted away;
+-- Arkham/HR fights wrote ~1000 visited cells per exhaustion).  Drop the stale
+-- path instead so the next tick replans from the current spot; the caller's
+-- own no-progress logic decides when the goal is unreachable.
+local function replan_caller_target(reason)
+    console.print('[unstuck] ' .. reason .. ' for caller-owned target ' ..
+        (navigator.target and utils.vec_to_string(navigator.target) or 'nil') ..
+        ' (paused=' .. tostring(navigator.paused) .. ') — replanning, target kept')
+    navigator.path = {}
+    navigator.pathfind_replan_cooldown = -1
+    navigator.unstuck_nodes = {}
+    navigator.unstuck_count = 0
+end
 local unstuck = function (local_player)
     navigator.unstuck_count = navigator.unstuck_count + 1
+    local caller_owned = navigator.paused or navigator.is_custom_target
 
     -- After too many consecutive unstuck attempts, blacklist the area and force a new target
+    if navigator.unstuck_count >= 5 and caller_owned then
+        replan_caller_target('EXHAUSTED')
+        return
+    end
     if navigator.unstuck_count >= 5 then
         console.print('[unstuck] EXHAUSTED (' .. navigator.unstuck_count .. ' attempts), blacklisting 16x16 area around ' .. (navigator.last_pos and utils.vec_to_string(navigator.last_pos) or 'nil'))
         local pos = navigator.last_pos
@@ -632,6 +678,10 @@ local unstuck = function (local_player)
             return
         end
     end
+    if caller_owned then
+        replan_caller_target('no side-step node')
+        return
+    end
     utils.log(1, 'unstuck by choosing new target')
     navigator.target = select_target(navigator.target)
     navigator.is_custom_target = false
@@ -681,6 +731,7 @@ navigator.update = function ()
         end
     end
     tracker.bench_start("nav_explorer_update")
+    explorer.cache_negative = get_time_since_inject() >= navigator.scan_grace_until
     explorer.update(local_player)
     tracker.bench_stop("nav_explorer_update")
 end
@@ -722,8 +773,100 @@ navigator.reset_movement = function ()
     navigator.last_trav_route_attempt_time = -1
     navigator.move_spell_pre_cast_pos = nil
     navigator.move_spell_fail_count = 0
+    navigator.trav_interact_key = nil
+    navigator.trav_interact_count = 0
     _trav_cache, _buff_cache = nil, nil
     _trav_cache_time, _buff_cache_time = -1, -1
+end
+
+-- Hand-off cleanup (BatmobilePlugin.release, or a new owner taking over a
+-- previous plugin's goal): drops the goal and every traversal-routing field
+-- that could swallow the next owner's set_target or interact with a stale
+-- gizmo.  Exploration history, crossed-gizmo blacklists and trap state stay.
+-- `takeover` (another plugin claims the navigator) also drops the previous
+-- goal's failed-target zone and 60 s traversal block; a plain release keeps
+-- them so the same plugin resuming after a yield keeps its safeguards.
+-- Never touches the native pathfinder (a companion may own movement).
+navigator.release_movement = function (takeover)
+    navigator.target = nil
+    navigator.is_custom_target = false
+    navigator.path = {}
+    navigator.disable_spell = nil
+    navigator.last_trav = nil
+    navigator.trav_delay = nil
+    navigator.trav_final_target = nil
+    navigator.trav_escape_pos = nil
+    navigator.post_trav_target = nil
+    navigator.pre_trav_z = nil
+    navigator.trav_interact_key = nil
+    navigator.trav_interact_count = 0
+    navigator.is_partial_path = false
+    navigator.partial_target_ref = nil
+    navigator.partial_target_best_dist = math.huge
+    navigator.partial_target_last_progress_time = -1
+    navigator.pathfind_fail_count = 0
+    navigator.pathfind_area_cooldown = -1
+    navigator.pathfind_replan_cooldown = -1
+    navigator.unstuck_nodes = {}
+    navigator.unstuck_count = 0
+    if takeover then
+        navigator.failed_target = nil
+        navigator.failed_target_time = -1
+        navigator.failed_target_radius = 15
+        navigator.all_trav_blocked_until = 0
+    end
+end
+
+-- Loading screens and fresh worlds stream walkability in; the explorer
+-- re-checks cells it saw as non-walkable during this window.
+navigator.note_loading = function ()
+    navigator.scan_grace_until = get_time_since_inject() + SCAN_GRACE_SECS
+end
+
+-- World boundary guard.  Explorer frontiers/visited/backtrack, trap history
+-- and traversal state describe one world; a plugin entered straight into a
+-- new world by WarPigs (no reset of its own) must not inherit them.  A
+-- zone change combined with a large jump is a waypoint teleport inside the
+-- same world.  Walking across a zone border (no jump) keeps everything.
+-- Returns true when state was reset (callers then drop long routes).
+navigator.observe_world = function ()
+    local world = get_current_world()
+    if not world or not world.get_name then return false end
+    local name = world:get_name()
+    local zone = world.get_current_zone_name and world:get_current_zone_name() or nil
+    if type(name) ~= 'string' or name == '' or name:find('Limbo', 1, true)
+        or name:find('Loading', 1, true) or type(zone) ~= 'string'
+        or zone == '' or zone == '[sno none]'
+    then return false end
+    local key = name .. ':' .. tostring(world.get_world_id and world:get_world_id() or '')
+    local player = get_local_player()
+    local pos = player and player:get_position() or nil
+    local prev_key, prev_zone, prev_pos = navigator.world_key, navigator.world_zone, navigator.world_pos
+    local prev_seen = navigator.world_seen_at
+    navigator.world_key, navigator.world_zone, navigator.world_pos = key, zone, pos
+    navigator.world_seen_at = get_time_since_inject()
+    if prev_key == nil then return false end
+    local teleported = zone ~= prev_zone and pos ~= nil and prev_pos ~= nil
+        and utils.distance(pos, prev_pos) > WORLD_JUMP_DIST
+    if key == prev_key and not teleported then return false end
+    console.print(string.format('[nav] %s (%s/%s -> %s/%s) — resetting explorer, trap and traversal state',
+        key ~= prev_key and 'world changed' or 'zone teleport',
+        prev_key, tostring(prev_zone), key, zone))
+    -- A goal a caller set after the old world was last seen (during the
+    -- loading screen) belongs to the new world: keep it for set-once callers.
+    local keep_target, keep_spell = nil, nil
+    if navigator.is_custom_target and navigator.target ~= nil and navigator.target_set_at > prev_seen then
+        keep_target, keep_spell = navigator.target, navigator.disable_spell
+    end
+    navigator.reset()
+    if keep_target ~= nil then
+        navigator.target = keep_target
+        navigator.is_custom_target = true
+        navigator.disable_spell = keep_spell
+    end
+    explorer.priority = explorer.default_priority or 'direction'
+    navigator.note_loading()
+    return true
 end
 
 -- record_failed_direction: called whenever we abandon a target (partial-path
@@ -814,10 +957,12 @@ navigator.set_target = function (target, disable_spell)
     end
     -- Post-traversal escape in progress: store the caller's target for later restoration
     -- but don't let it override the escape waypoint.
+    -- Deferred acceptances return (true, 'deferred'): existing callers only
+    -- test `== false`, and new callers can tell the goal is queued, not set.
     if navigator.trav_escape_pos ~= nil then
         navigator.post_trav_target = { pos = new_target, is_custom = true }
         navigator.disable_spell = disable_spell
-        return true
+        return true, 'deferred'
     end
     -- If we are mid-traversal to reach a custom target, don't disrupt the route
     -- (kill_monster keeps calling set_target every frame; return true so it doesn't
@@ -825,7 +970,7 @@ navigator.set_target = function (target, disable_spell)
     if navigator.trav_final_target ~= nil and navigator.last_trav ~= nil then
         if utils.distance(new_target, navigator.trav_final_target) < 50 then
             navigator.disable_spell = disable_spell
-            return true  -- silently accepted — traversal route in progress
+            return true, 'deferred'  -- accepted — traversal route in progress
         else
             -- Different enemy: abort traversal route, accept new target
             navigator.trav_final_target = nil
@@ -839,6 +984,7 @@ navigator.set_target = function (target, disable_spell)
     then
         navigator.failed_target = nil
         navigator.target = new_target
+        navigator.target_set_at = get_time_since_inject()
         navigator.is_custom_target = true
         -- Only clear the path when the target moved far enough to matter.
         -- For moving enemies (kill_monsters calls set_target every frame) a sub-2-unit
@@ -865,6 +1011,51 @@ navigator.clear_target = function ()
     navigator.disable_spell = nil
     navigator.pathfind_replan_cooldown = -1
 end
+-- Non-Jump traversal interacts are bounded.  A gizmo that never yields the
+-- Player_Traversal buff (not interactable, blocked, interact rejected in
+-- combat) was re-interacted every 2 s forever with target=nil and last_trav
+-- set: no new target could be selected and is_traversal_routing() pinned
+-- Arkham's cross_traversal above kill_boss/portal until the pit timeout.
+-- Returns true when the gizmo was abandoned (the caller skips the interact).
+navigator.give_up_inert_traversal = function (trav, player_pos)
+    local name = trav:get_skin_name()
+    if name:match('Jump') then return false end
+    local tpos = trav:get_position()
+    local key = name .. utils.vec_to_string(tpos)
+    if navigator.trav_interact_key ~= key or navigator.trav_interact_z == nil
+        or math.abs(player_pos:z() - navigator.trav_interact_z) >= 1
+    then
+        -- New gizmo, or the player's floor changed (a crossing is under
+        -- way): start counting again, never abandon mid-climb.
+        navigator.trav_interact_key = key
+        navigator.trav_interact_count = 0
+        navigator.trav_interact_z = player_pos:z()
+    end
+    if navigator.trav_interact_count < TRAV_INTERACT_MAX then
+        navigator.trav_interact_count = navigator.trav_interact_count + 1
+        return false
+    end
+    local now = get_time_since_inject()
+    console.print(string.format(
+        '[nav] traversal %s @(%.1f,%.1f,%.2f) produced no traversal buff after %d interacts — blacklisting %ds and resuming',
+        name, tpos:x(), tpos:y(), tpos:z(), navigator.trav_interact_count, INERT_TRAV_BL_DURATION))
+    navigator.blacklisted_trav[key] = now
+    navigator.trap_blacklisted_trav[key] = now + INERT_TRAV_BL_DURATION
+    navigator.last_trav = nil
+    navigator.trav_delay = nil
+    navigator.pre_trav_z = nil
+    navigator.trav_interact_key = nil
+    navigator.trav_interact_count = 0
+    navigator.path = {}
+    -- Give the routed-for destination back instead of leaving target=nil.
+    if navigator.trav_final_target ~= nil then
+        navigator.target = navigator.trav_final_target
+        navigator.is_custom_target = true
+        navigator.pathfind_fail_count = 0
+        navigator.trav_final_target = nil
+    end
+    return true
+end
 navigator.move = function ()
     if navigator.move_time + navigator.move_timeout > get_time_since_inject() then
         tracker.bench_count("move_skipped_throttle")
@@ -872,6 +1063,18 @@ navigator.move = function ()
     end
     navigator.move_time = get_time_since_inject()
     tracker.bench_count("move_ran")
+    -- Nobody drove Batmobile for a while: the caller yielded to Looter/Alfred
+    -- or another task.  That idle time must not count toward the STUCK,
+    -- partial-path no-progress (failed_target) or trap give-up windows.
+    local move_gap = navigator.last_move_call and (navigator.move_time - navigator.last_move_call) or 0
+    navigator.last_move_call = navigator.move_time
+    if move_gap > MOVE_GAP_GRACE then
+        if navigator.last_update ~= nil then navigator.last_update = navigator.last_update + move_gap end
+        if navigator.partial_target_ref ~= nil then
+            navigator.partial_target_last_progress_time = navigator.partial_target_last_progress_time + move_gap
+        end
+        if navigator.trapped_since ~= nil then navigator.trapped_since = navigator.trapped_since + move_gap end
+    end
     local local_player = get_local_player()
     if not local_player then return end
     local player_pos = local_player:get_position()
@@ -879,7 +1082,7 @@ navigator.move = function ()
     -- Update nav state snapshot for perf report (cheap string, overwritten every allowed frame)
     if tracker.bench_enabled then
         tracker.bench_nav_state = string.format(
-            "paused=%s  custom=%s  trav_routing=%s  last_trav=%s  pfail=%d  unstuck=%d  path_len=%d  trapped=%s",
+            "paused=%s  custom=%s  trav_routing=%s  last_trav=%s  pfail=%d  unstuck=%d  path_len=%d  trapped=%s  owner=%s",
             tostring(navigator.paused),
             tostring(navigator.is_custom_target),
             tostring(navigator.trav_final_target ~= nil),
@@ -887,13 +1090,25 @@ navigator.move = function ()
             navigator.pathfind_fail_count,
             navigator.unstuck_count,
             #navigator.path,
-            tostring(navigator.trapped))
+            tostring(navigator.trapped),
+            tostring(tracker.movement_owner))
     end
     -- Trap detection runs every move() tick; sampling and bbox check are
     -- internally rate-limited.  attempt_escape only fires while trapped.
-    navigator.update_trap_state(local_player)
-    if navigator.trapped then
-        navigator.attempt_escape(local_player)
+    -- Not while paused: a paused caller holds position by design (Maiden
+    -- lock, pyre, boss fight), which read as a trap, flipped giving_up (HR
+    -- abandoned the zone) and let attempt_escape retarget the caller to a
+    -- climb gizmo.  Unpaused custom goals (long paths, patrol) keep it.
+    if not navigator.paused then
+        navigator.update_trap_state(local_player)
+        if navigator.trapped then
+            navigator.attempt_escape(local_player)
+        end
+    elseif navigator.trapped then
+        -- No new samples while paused, but an existing trap still ages out
+        -- of the window instead of freezing (a stale `trapped` blocks
+        -- try_traversal_route for paused callers such as cross_traversal).
+        navigator.update_trap_state(local_player, true)
     end
     local traversal_buff = has_traversal_buff(local_player)
     local traversal_started = traversal_buff and not navigator.traversal_buff_active
@@ -908,6 +1123,7 @@ navigator.move = function ()
         if trav ~= nil and not traversal_buff and utils.distance(player_pos, trav:get_position()) <= 3 and
             (navigator.trav_delay == nil or get_time_since_inject() > navigator.trav_delay)
         then
+            if navigator.give_up_inert_traversal(trav, player_pos) then goto trav_interact_done end
             -- Snapshot pre-cross z RIGHT NOW (just before interact) — but
             -- ONLY if it's not already set this crossing.  pre_trav_z is
             -- cleared after buff detection, so nil = first interact for THIS
@@ -970,11 +1186,14 @@ navigator.move = function ()
                 navigator.is_partial_path = false
                 console.print('[nav] post-jump escape target: ' .. utils.vec_to_string(escape_pt))
             end
+            ::trav_interact_done::
         end
         if traversal_started then
             tracker.bench_count("trav_crossed")
             navigator.trav_delay = get_time_since_inject() + 4
             navigator.path = {}
+            navigator.trav_interact_key = nil
+            navigator.trav_interact_count = 0
             local trav_pos_for_escape = navigator.last_trav and navigator.last_trav:get_position() or nil
             -- Record the crossing's direction (from gizmo NAME) so trap-escape
             -- can detect ping-pong and prefer the opposite direction.
@@ -1167,6 +1386,8 @@ navigator.move = function ()
         -- Only blacklist the exact crossed gizmo with a timestamp (15s cooldown)
         navigator.blacklisted_trav[crossed_str] = get_time_since_inject()
         navigator.last_trav      = nil
+        navigator.trav_interact_key = nil
+        navigator.trav_interact_count = 0
         navigator.trav_delay     = get_time_since_inject() + 4
         navigator.failed_target  = nil
         navigator.failed_target_radius = 15
@@ -1372,6 +1593,10 @@ navigator.move = function ()
         console.print('[nav] no target or reached, selecting new (prev=' .. (navigator.target and utils.vec_to_string(navigator.target) or 'nil') .. ')')
         navigator.blacklisted_spell_node = {}
         if navigator.paused then return end
+        -- A long route owns the goal: arriving (or losing the target) ends
+        -- the route (main.lua / is_long_path_navigating), it must not turn
+        -- into exploration while long_path.navigating stays true.
+        if navigator.long_path_active and navigator.long_path_active() then return end
         tracker.bench_start("select_target")
         navigator.target = select_target(nil)
         tracker.bench_stop("select_target")
@@ -1621,7 +1846,11 @@ navigator.move = function ()
                 -- Record failed direction for future frontier scoring (works for
                 -- both custom and explorer targets without touching explorer.visited).
                 navigator.record_failed_direction(player_pos, navigator.target)
-                if navigator.paused then
+                -- Resumed callers with a custom goal (HR patrol_move, long
+                -- paths) get the same contract as paused ones: set_target
+                -- reports the rejected goal instead of explorer.visited
+                -- silently swallowing it.
+                if navigator.paused or navigator.is_custom_target then
                     -- Custom target (kill_monster, HR patrol etc.): mark unreachable.
                     -- Wider radius (25) than the N-fail path (15): partial-path stall
                     -- means the area is genuinely far / behind a wall, so we want
@@ -1752,8 +1981,10 @@ navigator.move = function ()
                 navigator.record_failed_direction(player_pos, navigator.target)
                 -- If paused (external caller like kill_monster set target), just mark
                 -- as unreachable and clear — do NOT blacklist explorer.visited since
-                -- the explorer didn't pick this target and blacklisting corrupts its state
-                if navigator.paused then
+                -- the explorer didn't pick this target and blacklisting corrupts its state.
+                -- Same for a resumed caller's custom goal (HR patrol_move expects
+                -- set_target to return false for a waypoint that cannot be reached).
+                if navigator.paused or navigator.is_custom_target then
                     local block_radius = closest_trav ~= nil and 50 or 15
                     console.print('[nav] clearing unreachable custom target ' .. utils.vec_to_string(navigator.target) .. ', cooldown=' .. navigator.failed_target_cooldown .. 's radius=' .. block_radius .. (closest_trav ~= nil and ' (no traversal route)' or ''))
                     navigator.failed_target = navigator.target
@@ -1792,7 +2023,9 @@ navigator.move = function ()
                     explorer.visited[node_str] = node_str
                 end
             end
-            if navigator.paused then return end
+            -- Below the threshold a caller's custom goal is retried after the
+            -- area cooldown; only explorer targets are swapped for a new pick.
+            if navigator.paused or navigator.is_custom_target then return end
             tracker.bench_start("select_target")
             navigator.target = select_target(navigator.target)
             tracker.bench_stop("select_target")
@@ -1907,12 +2140,12 @@ navigator.try_traversal_route = try_traversal_route
 -- teleport away and pick a new zone.
 -- ────────────────────────────────────────────────────────────────────────────
 
-navigator.update_trap_state = function(local_player)
+navigator.update_trap_state = function(local_player, no_sample)
     local now = get_time_since_inject()
     local pos = local_player:get_position()
 
     -- Sample position once per TRAP_SAMPLE_INTERVAL seconds
-    if now - navigator.trap_pos_sample_time >= TRAP_SAMPLE_INTERVAL then
+    if not no_sample and now - navigator.trap_pos_sample_time >= TRAP_SAMPLE_INTERVAL then
         navigator.trap_pos_sample_time = now
         navigator.trap_pos_history[#navigator.trap_pos_history + 1] = { pos = pos, t = now }
         if #navigator.trap_pos_history > TRAP_HISTORY_MAX then
@@ -2322,6 +2555,14 @@ navigator.attempt_escape = function(local_player)
             -- Wipe the recent blacklist for this traversal so we can re-cross
             local trav_str = best_trav:get_skin_name() .. utils.vec_to_string(best_trav:get_position())
             navigator.blacklisted_trav[trav_str] = nil
+            -- Restore, do not overwrite, a caller's goal (long path, patrol
+            -- waypoint): it comes back after the crossing like a
+            -- try_traversal_route destination.
+            if navigator.is_custom_target and navigator.target ~= nil
+                and navigator.trav_final_target == nil
+            then
+                navigator.trav_final_target = navigator.target
+            end
             navigator.target = approach
             navigator.is_custom_target = false
             navigator.path = {}
@@ -2367,6 +2608,9 @@ navigator.clear_trap_state = function()
     -- Long-term trap-traversal blacklist is per-zone; teleporting away
     -- invalidates it (those gizmos may not even exist in the new zone).
     navigator.trap_blacklisted_trav = {}
+    -- Crossing history feeds ping-pong detection; kept, a Down/Up pair from
+    -- the zone just left re-armed `trapped` on the first move() elsewhere.
+    navigator.trav_history = {}
 end
 
 return navigator
