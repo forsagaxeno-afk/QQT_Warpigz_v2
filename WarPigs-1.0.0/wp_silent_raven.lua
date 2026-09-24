@@ -1,0 +1,276 @@
+-- Optional SilentRaven v2-contract bridge; no Loot Steward dependency.
+-- Only Temis visits, only after managed activity cleanup, no borrowed callbacks.
+local M = {}
+local OWNER, TEMIS = 'WarPigs', 'Skov_Temis'
+local function call(object, name, ...)
+    if type(object) ~= 'table' or type(object[name]) ~= 'function' then return nil end
+    local ok, result = pcall(object[name], ...)
+    if ok then return result end
+end
+local function log(message)
+    if console and console.print then console.print('[WarPigs:Whispers] ' .. message) end
+end
+local function location()
+    local ok, zone, world, town = pcall(function()
+        local p, w = get_local_player(), get_current_world()
+        if not p or not w or p:is_dead() then return nil end
+        local z, n = w:get_current_zone_name(), w:get_name()
+        local t = p:get_attribute((attributes and attributes.PLAYER_IN_TOWN_LEVEL_AREA) or 'Player_In_Town_Level_Area')
+        return z, n, t
+    end)
+    if not ok or type(zone) ~= 'string' or zone == '' or zone == '[sno none]'
+        or type(world) ~= 'string' or world == ''
+        or world:lower():find('limbo', 1, true) or world:lower():find('loading', 1, true) then return nil end
+    if zone == TEMIS and town ~= 1 then return nil end
+    return zone
+end
+
+-- Prefer observed modern exports to the legacy flag, which can remain sticky.
+function M.looter_state()
+    local p = _G.LooteerPlugin
+    if not p then return false, 'not_loaded' end
+    if type(p) ~= 'table' then return nil, 'unavailable' end
+    local enabled
+    if type(p.get_enabled) == 'function' then
+        local ok
+        ok, enabled = pcall(p.get_enabled)
+        if not ok or type(enabled) ~= 'boolean' then return nil, 'enabled_unavailable' end
+        if enabled == false then return false, 'disabled' end
+    end
+    local modern_unknown = false
+    if type(p.is_actively_looting) == 'function' then
+        local active = call(p, 'is_actively_looting')
+        if type(active) == 'boolean' then return active, 'is_actively_looting' end
+        modern_unknown = true
+    end
+    if type(p.is_idle) == 'function' then
+        local idle = call(p, 'is_idle')
+        if type(idle) == 'boolean' then return not idle, 'is_idle' end
+        modern_unknown = true
+    end
+    -- An explicit second modern status can resolve the first, but legacy
+    -- nil/false cannot turn an unreadable modern owner into idle permission.
+    if modern_unknown then return nil, 'activity_unavailable' end
+    if type(p.getSettings) == 'function' then
+        local ok_enabled, legacy_enabled = pcall(p.getSettings, 'enabled')
+        local ok_looting, looting = pcall(p.getSettings, 'looting')
+        if not ok_enabled then return nil, 'enabled_unavailable' end
+        if legacy_enabled ~= nil and type(legacy_enabled) ~= 'boolean' then return nil, 'enabled_unavailable' end
+        -- The supplied legacy getter returns nil for stored false. Distinguish
+        -- that successful nil from an unavailable/throwing API.
+        if ok_enabled and (legacy_enabled == false or legacy_enabled == nil) and enabled ~= true then
+            return false, 'legacy_disabled'
+        end
+        if ok_looting and (type(looting) == 'boolean' or looting == nil) then
+            return looting == true, 'getSettings.looting'
+        end
+    end
+    return nil, 'unavailable'
+end
+
+local function companions_clear(advisory_idle, admitted_alfred)
+    local advisory_alfred
+    if location() ~= TEMIS then return false, 'not_in_temis' end
+    local p = _G.AlfredTheButlerPlugin or _G.PLUGIN_alfred_the_butler
+    if p then
+        local s = call(p, 'get_status')
+        if type(s) ~= 'table' then return false, 'alfred_status_unavailable' end
+        if s.trigger_tasks or s.external_trigger or s.pending or s.teleport or s.running then return false, 'alfred_busy' end
+        if type(s.enabled) ~= 'boolean' then return false, 'alfred_status_unavailable' end
+        if s.enabled and (s.inventory_full or s.need_repair) then return false, 'alfred_work_pending' end
+        if s.enabled and s.need_trigger then
+            if p ~= admitted_alfred then
+                local ok, idle = false, false
+                if type(advisory_idle) == 'function' then ok, idle = pcall(advisory_idle) end
+                if not (ok and idle == true) then return false, 'alfred_work_pending' end
+            end
+            advisory_alfred = p
+        end
+        if s.paused == true then return false, 'alfred_foreign_pause' end
+    end
+    local looting, source = M.looter_state()
+    if looting == nil then return false, 'looter_status_unavailable' end
+    if looting then return false, 'looter_busy:' .. source end
+    local creator = _G.WarPugPlugin
+    if creator then
+        local s = call(creator, 'status')
+        if type(s) ~= 'table' then return false, 'war_pug_status_unavailable' end
+        if s.enabled == true and s.state ~= 'IDLE' and s.state ~= 'HALTED' then
+            return false, 'war_pug_busy'
+        end
+    end
+    return true, nil, advisory_alfred
+end
+
+function M.new(options)
+    options = options or {}
+    local self = {enabled = false, serial = 0, generation = 0}
+    local function clear_companions()
+        -- Completed Alfred cycles may retain an advisory need_trigger flag.
+        -- The short admission grace must not expire halfway through our 60s
+        -- request. Preserve only the already admitted flag on the same API
+        -- object; every live-work flag above still revokes the request.
+        local admission_check = not self.running and options.alfred_idle or nil
+        local clear, reason, advisory_alfred = companions_clear(admission_check, self.advisory_alfred)
+        -- Once the admitted advisory flag clears, a later flag is new work.
+        if self.running and not advisory_alfred then self.advisory_alfred = nil end
+        return clear, reason, advisory_alfred
+    end
+    local function status(p) return call(p, 'get_status') end
+    local function active(s) return type(s) == 'table' and (s.running == true or s.pending == true) end
+    local function note(reason)
+        if self.reason ~= reason then self.reason = reason; log(reason) end
+    end
+    local function finish(result)
+        self.running, self.checked, self.last_result = false, true, result
+        self.started, self.wait_started = nil, nil
+        self.advisory_alfred = nil
+        self.generation = self.generation + 1
+        note('visit ' .. tostring(self.serial) .. ': ' .. tostring(result))
+    end
+    function self:cancel(reason)
+        if self.running and self.plugin then
+            local clear = clear_companions()
+            call(self.plugin, 'cancel', OWNER, not clear)
+            local s = status(self.plugin)
+            if type(s) ~= 'table' or (active(s) and s.owner == OWNER) then
+                note('waiting for SilentRaven cancellation confirmation')
+                return false
+            end
+            finish(reason or 'cancelled')
+        end
+        return true
+    end
+    function self:release()
+        self.enabled = false -- revoke the continuation guard even if cancel throws
+        if not self:cancel('stopped') then return false end
+        if self.plugin then
+            local s = status(self.plugin)
+            if type(s) ~= 'table' then
+                note('waiting for SilentRaven management release confirmation')
+                return false
+            end
+            if type(s) == 'table' and s.managed_by == OWNER then
+                if call(self.plugin, 'set_managed', OWNER, false) ~= true then return false end
+            end
+        end
+        self.plugin, self.enabled, self.pending_since = nil, false, nil
+        self.last_zone, self.candidate, self.candidate_since = nil, nil, nil
+        self.checked, self.wait_started = nil, nil
+        return true
+    end
+    -- Called even when quests are unreadable; it suppresses SR autonomous runs.
+    function self:observe(now, enabled)
+        if not enabled then return self:release() end
+        self.enabled = true
+        local p = _G.SilentRavenPlugin or _G.PLUGIN_silent_raven
+        if self.plugin and self.plugin ~= p then
+            if not self:release() then return false end
+            self.enabled = true
+        end
+        local s = status(p)
+        if type(s) == 'table' and (s.api_version or 0) >= 2 then
+            if s.managed_by == OWNER or call(p, 'set_managed', OWNER, true) == true then self.plugin = p end
+        end
+        local zone = location()
+        if not zone then self.candidate, self.candidate_since = nil, nil; return true end
+        if zone ~= self.candidate then self.candidate, self.candidate_since = zone, now end
+        if now - self.candidate_since < 1 then return true end
+        if zone ~= self.last_zone then
+            if zone == TEMIS then
+                self.serial = self.serial + 1
+                self.checked, self.wait_started = false, nil
+            else
+                self:cancel('left_temis')
+                self.checked, self.wait_started = nil, nil
+            end
+            self.last_zone = zone
+        end
+        return true
+    end
+    -- Hold all new WarPigs town navigation while a public Looter export says busy.
+    -- An unknown Looter blocks only the new Whisper attempt, not existing features.
+    function self:traffic_hold()
+        if location() ~= TEMIS then return nil end
+        local looting, source = M.looter_state()
+        if looting == true then return 'Looter collecting town loot (' .. source .. ')' end
+        local p = _G.SilentRavenPlugin or _G.PLUGIN_silent_raven
+        local s = status(p)
+        if active(s) then return 'SilentRaven has a queued or active reward task' end
+        if self.running then return 'waiting for SilentRaven result' end
+        return nil
+    end
+    function self:tick(now, safe_to_start)
+        if self.running then
+            local s = status(self.plugin)
+            local clear, reason = clear_companions()
+            if not self.enabled or not clear or now - self.started >= 60 then
+                self:cancel(reason or 'timeout')
+                return self.running == true
+            end
+            if type(s) ~= 'table' then note('SilentRaven status unavailable during owned request'); return true end
+            if not active(s) then finish(self.callback_result or s.last_result or 'unconfirmed'); return false end
+            if s.owner ~= OWNER then finish('ownership_changed'); return true end
+            return true
+        end
+        if not self.enabled or not safe_to_start or location() ~= TEMIS then return false end
+        local s = status(self.plugin)
+        if type(s) ~= 'table' or s.enabled ~= true or (s.api_version or 0) < 2 then
+            note('SilentRaven unavailable/disabled; Whisper step skipped')
+            return false
+        end
+        if self.last_zone ~= TEMIS or self.candidate ~= TEMIS then return true end
+        if self.checked then return false end
+        if active(s) or s.managed_by ~= OWNER then return true end
+        local clear, reason, advisory_alfred = clear_companions()
+        if not clear then
+            self.wait_started = self.wait_started or now
+            if now - self.wait_started >= 20 then finish('skipped:' .. reason); return false end
+            note('waiting: ' .. reason); return true
+        end
+        self.generation = self.generation + 1
+        local generation = self.generation
+        self.advisory_alfred = advisory_alfred
+        self.running, self.started, self.callback_result = true, now, nil
+        local function guard()
+            if generation ~= self.generation or not self.enabled then return false, 'request_revoked' end
+            return clear_companions()
+        end
+        local function completed(result)
+            if generation == self.generation and self.running then self.callback_result = result end
+        end
+        local accepted = call(self.plugin, 'trigger_tasks', OWNER, completed, guard)
+        if accepted ~= true then
+            local after = status(self.plugin)
+            -- A throwing call may have queued the request. Never submit twice.
+            if type(after) ~= 'table' or (active(after) and after.owner == OWNER) then
+                note('trigger response ambiguous; waiting for owned request'); return true
+            end
+            finish('trigger_rejected'); return active(after)
+        end
+        note('checking completed Whispers in Temis')
+        return true
+    end
+    function self:is_busy() return self.running == true end
+    function self:blocks_plan_creator()
+        if self.running then return true end
+        if not self.enabled or self.checked or location() ~= TEMIS then return false end
+        local s = status(self.plugin)
+        if type(s) ~= 'table' or s.enabled ~= true then return false end
+        local creator = _G.WarPugPlugin
+        if creator then
+            local c = call(creator, 'status')
+            -- Do not invalidate an already active planner transaction.
+            if type(c) ~= 'table' or (c.enabled == true and c.state ~= 'IDLE' and c.state ~= 'HALTED') then
+                return false
+            end
+        end
+        return true
+    end
+    function self:status_line()
+        if self.running then return 'WarPigs: SilentRaven reward check' end
+        return nil
+    end
+    return self
+end
+return M

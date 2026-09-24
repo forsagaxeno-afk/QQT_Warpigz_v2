@@ -1,0 +1,81 @@
+Final offline validation — 2026-09-23
+Command: python3 audit/tests/run_tests.py
+Runtime: system Lua 5.4 via Python ctypes
+Game client execution: not performed
+
+PASS: 184 runtime Lua files compile with Lua 5.4
+Arkham: 21 focused regressions passed
+PASS: test_arkham.lua
+PASS Batmobile: numeric and serialized crowd-control hashes are recognized
+PASS Batmobile: custom targets honor disable_spell, drift reuse, pause, and movement reset
+PASS Batmobile: traversal approach returns the validated height and accepts exploration routing
+PASS Batmobile: chain crossing uses a local timestamp and clears actual escape state
+PASS Batmobile: A* preserves endpoints, detours, partial status and snapshot IDs
+PASS Batmobile: long route reconstruction avoids quadratic front inserts
+PASS Batmobile: density result is preserved with one position read per enemy
+PASS Batmobile: backtrack restoration scales with active frontiers, not historical holes
+PASS Batmobile: normal log level avoids per-rule formatting and console writes
+PASS Batmobile: long path launch clears stale state, preserves drawing path and runtime budgets
+PASS Batmobile: long-path query survives traversal nil target; explicit reset cancels autonomous work
+PASS Batmobile: main tolerates absent player, avoids duplicate drive, and preserves crossing
+Batmobile regression suite: 12 tests, 84 assertions
+PASS: test_batmobile.lua
+PASS common Batmobile: Batmobile processes a traversal buff despite a temporarily empty actor scan
+PASS: test_batmobile_integration.lua
+PASS Helltide: documented loot source contributes chests and actor references deduplicate
+PASS Helltide: spent nearest chest does not hide a valid chest of the same type
+PASS Helltide: blacklisted nearest chest does not hide another same-type chest
+PASS Helltide: range, cinders, unknown skins and invalid handles are filtered safely
+PASS Helltide: reacquisition stays at the selected chest position
+PASS Helltide: real Helltide task discovers loot-only chests and opens the selected instance
+PASS Helltide: affordable distant chest uses recall instead of direct selection and abandonment
+PASS Helltide: rejected chest interactions stop after six attempts and respect temporary blacklist
+PASS Helltide: real task remembers a chest when cinders are lost en route
+PASS Helltide: reset immediately invalidates source cache, selected target and old route
+PASS Helltide: cancelled session drops pending chest state without resetting another movement owner
+PASS Helltide: opt-in unknown skin diagnostics are rate limited and never select unknowns
+PASS Helltide: search can leave an inactive override zone
+PASS Helltide: search visits all five destinations, debounces channel and preserves cooldown
+PASS Helltide: yield cancels owned autonomous movement; disabled stale Looteer does not hold
+PASS Helltide: disabling via public API cancels task ownership and false settings remain editable
+Helltide: 16 behavior regressions passed
+PASS: test_helltide.lua
+PASS Horde audit: unrelated chest VFX and missing actors do not crash or prove payment
+PASS Horde audit: actual aether payment confirms an opened actor that unloaded
+PASS Horde audit: vanished optional chest advances to remaining configured chest
+PASS Horde audit: selected repeatable chest continues while aether remains
+PASS Horde audit: unavailable materials fall back to existing gold chest and unresolved gold stops safely
+PASS Horde audit: failed chest never fabricates opened flags; reset clears all chest timers
+PASS Horde audit: unavailable aether evidence cannot mark chest sequence finished
+PASS Horde audit: active chest completion survives disappearance of gold-room actor
+PASS Horde audit: boss aether collection runs before chest spending
+PASS Horde audit: affix filters load after player class exists and refresh after character changes
+PASS Horde audit: Library teleport is debounced while origin world remains loaded
+PASS Horde audit: loading blocks both walking predicate branches
+PASS Horde audit: Batmobile walking can advance beyond final waypoint and complete
+PASS Horde audit: dead boss and spent pylon do not hide living wave targets
+PASS Horde audit: movement ownership is released only once and never before issuance
+PASS Horde audit: chest discovery includes documented loot list and skips invalid actor handles
+PASS Horde audit: repeated built-in salvage recounts protected items and actually processes the next cycle
+PASS Horde audit: unknown-SNO Unique and higher-rarity items are retained in both salvage modes even if junk
+PASS Horde audit: missing and unreadable rarity are retained in both salvage modes
+PASS Horde audit: empty or missing affix filters retain low-rarity items instead of treating missing rules as rejection
+PASS Horde audit: configured rejection still salvages known low-rarity junk in both modes
+PASS Horde audit: false settings remain externally writable and survive GUI sync
+Horde audit: 22 behavior regressions passed
+PASS: test_horde_audit.lua
+PASS: 120 assertions (Horde RESET exit flow + scheduler + external handoff)
+PASS: test_horde_reset_exit.lua
+PASS: 230 assertions (sigil confirmation, portal entry, loading and complete reset/start cycle)
+PASS: test_horde_sigil_entry.lua
+Reaper behavioral assertions: 66
+PASS: test_reaper.lua
+Suite contracts: 33 checks, 0 failures
+PASS: test_suite_contracts.lua
+PASS WarPigs: serialized tasks/bosses, cleanup gates, ownership, snapshot errors, teleport cancellation, Alfred callbacks, native turn-in
+PASS: test_warpigs.lua
+PASS WarPug: real DFS, manual ownership, context/death/loading, bounded rerolls, confirmation outcomes, integration gates, persistence and actual main sequencer
+PASS: test_warpug.lua
+WonderCity: 22 focused regressions passed
+PASS: test_wondercity.lua
+Offline test files: 12 passed, 0 failed

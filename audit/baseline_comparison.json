@@ -1,0 +1,14 @@
+{
+  "head": "e7fd3b1e078470d6993ab4220d34a9990c5a909e",
+  "archive_changed": [
+    "HordeDev-1.3.9/core/task_manager.lua",
+    "HordeDev-1.3.9/core/tracker.lua",
+    "HordeDev-1.3.9/gui.lua",
+    "HordeDev-1.3.9/main.lua",
+    "HordeDev-1.3.9/tasks/enter_horde.lua",
+    "HordeDev-1.3.9/tasks/exit_horde.lua",
+    "HordeDev-1.3.9/tasks/start_dungeon.lua"
+  ],
+  "archive_only": [],
+  "remote_only": []
+}
