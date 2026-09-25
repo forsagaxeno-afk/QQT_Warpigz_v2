@@ -2,6 +2,19 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.1.1] — 2026-09-25
+
+Fixes from the first live reports on v2.1.0.
+
+### Fixed
+
+- HelltideRevamped: "works for a few minutes, then searches for a Helltide in the middle of a Helltide". When the Helltide buff dropped for a moment (walking over the zone edge, a cellar, a buff refresh), the very next tick went to the search task, which reset HR and teleported away before HR could notice it had left the zone and walk back. HR now keeps the tick for 15 s after the buff was last seen while the Helltide hour is active, walks back into the zone, and gives up walking back after 90 s (logged) before searching.
+- WonderCity: "teleports to the entrance 5 times in a row, then starts the run". The Kurast teleport retried after 3 s, which is shorter than the channel plus loading screen, and the walk watchdog re-teleported to the same waypoint every 15 s while the player stood still after arrival. The teleport now waits 8 s and never retries during a loading screen; the watchdog ignores the teleport cast, waits 12 s, and re-teleports at most twice per stall (logged), then walks on.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: 42 test files × (Lua 5.4 + LuaJIT) = 84 runs pass. New regressions reproduce both live reports on 2.1.0 and pass now.
+
 ## [2.1.0] — 2026-09-25
 
 Integration release. A team of ten domain reviewers, one auditor and one critic checked every plugin for joint operation; five review/fix rounds followed, driven by the audit, the critic and real QQT client logs. All credits for the original foundation go to **@ZEWX — LONG LIVE LEGEND**.

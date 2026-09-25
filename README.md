@@ -6,7 +6,7 @@
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v2.1.0.** Project release numbering started with v2.0.0. Plugin folder names and upstream history remain separate from the bundle version.
+**Current release: v2.1.1.** Project release numbering started with v2.0.0. Plugin folder names and upstream history remain separate from the bundle version.
 
 [English changelog](CHANGELOG.md) · [Audit and validation](AUDIT.md) · [Credits](CREDITS.md) · [Version rules](CONTRIBUTING.md)
 
@@ -22,10 +22,10 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | `WarPug-1.0.0` | War Plan selection and creation | 1.0.12 |
 | `Batmobile-1.0.12` | Shared navigation | 2.1.0 |
 | `ArkhamAsylum-1.0.6` | The Pit | 2.1.0 |
-| `HelltideRevamped-0.4` | Helltides | 2.1.0 |
+| `HelltideRevamped-0.4` | Helltides | 2.1.1 |
 | `HordeDev-1.3.9` | Infernal Hordes | 2.1.0 |
 | `Reaper-main` | Boss lairs | 1.10.0 |
-| `WonderCity-main` | Kurast Undercity | 2.1.0 |
+| `WonderCity-main` | Kurast Undercity | 2.1.1 |
 | `SilentRaven-0.1.3` | Whisper reward checks in Temis | 0.2.0 |
 
 Nightmare Dungeons are not supported. WarPug excludes those nodes.

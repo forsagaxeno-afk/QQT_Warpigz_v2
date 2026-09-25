@@ -1519,14 +1519,35 @@ local helltide_task = {
         -- ownership during the helltide hour even before the buff lands so we
         -- can walk to the entry vec3 instead of letting search_helltide fly us
         -- back to a known town and undo the WarPigs teleport.
-        return utils.is_in_helltide()
-            or (returning_to_helltide and utils.helltide_active())
-            -- Override-zone clause: claim the tick before the buff lands so we
-            -- can walk to the entry vec3.  Once `override_buff_seen` latches,
-            -- a subsequent buff drop = helltide ended in this zone — release
-            -- the tick to search_helltide so it can TP to town and find the
-            -- next active helltide instead of looping on the entry walk.
-            or (zone_overrides.get_current() ~= nil and utils.helltide_active() and not override_buff_seen)
+        local now = get_time_since_inject()
+        if utils.is_in_helltide() then
+            tracker.helltide_seen_at, tracker.return_expired_logged = now, nil
+            return true
+        end
+        -- Live report: HR "stopped and searched for a helltide in the middle
+        -- of a helltide". Walking over the zone edge, a cellar or a buff-list
+        -- refresh drops the buff for a moment; without this grace the very
+        -- next tick went to search_helltide, which reset HR and teleported
+        -- away before Execute could notice "left the zone" and walk back.
+        -- Keep the tick for 15 s after the buff was last seen (hour still
+        -- active) and while walking back for at most 90 s (bounded, logged).
+        if utils.helltide_active() and tracker.helltide_seen_at
+            and now - tracker.helltide_seen_at < 15 then
+            return true
+        end
+        if returning_to_helltide and utils.helltide_active() then
+            if now - (tracker.return_started_at or now) < 90 then return true end
+            if not tracker.return_expired_logged then
+                tracker.return_expired_logged = true
+                console.print("[HELLTIDE] Could not walk back into the helltide zone within 90s — searching for a helltide")
+            end
+        end
+        -- Override-zone clause: claim the tick before the buff lands so we
+        -- can walk to the entry vec3. Once `override_buff_seen` latches, a
+        -- subsequent buff drop = helltide ended in this zone — release the
+        -- tick to search_helltide so it can TP to town and find the next
+        -- active helltide instead of looping on the entry walk.
+        return zone_overrides.get_current() ~= nil and utils.helltide_active() and not override_buff_seen
     end,
 
     Execute = function(self)
@@ -1731,6 +1752,7 @@ local helltide_task = {
                 helltide_explorer.mark_active_unreachable()
             end
             returning_to_helltide = true
+            tracker.return_started_at = now
             reset_navigate_state()
             self.current_state = helltide_state.RETURN_TO_HELLTIDE
         end

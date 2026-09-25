@@ -650,9 +650,10 @@ case('R13/L12b unticked mid-run: the forced clear is handed back, suspend unbloc
     t.tick(1)
     eq(t.orb.clear, true, 'the gate left its forced clear OFF after management was switched off')
     eq(t.orb.block, true, 'block is released on exit, not mid-run')
-    t.in_helltide = false                        -- task switch to search: suspend
+    t.in_helltide, t.minute = false, 57          -- helltide over: task switch to search, suspend
     t.tick(0.5)
     eq(t.orb.block, false, 'suspend left a forced block ON behind')
+    t.minute = 10
 
     -- Once handed back, an unmanaged orbwalker is never touched again.
     t.orb.clear, t.orb.block = false, true       -- the user's own choice
@@ -676,6 +677,38 @@ case('HLT-9 MOVING_TO_TRAVERSAL drops the stale patrol goal so Batmobile can sel
     eq(s.bm.paused, false, 'Batmobile runs its own selection')
 end)
 
+-- ── Live report: "searches for a helltide in the middle of a helltide" ────
+-- A short buff gap (zone edge, cellar, buff-list refresh) used to hand the
+-- very next tick to search_helltide, which reset HR and teleported away.
+case('live: a buff gap mid-helltide keeps HR (walks back), never searches or teleports; bounded 90 s', function()
+    local s = session()
+    s.tick(5)
+    eq(s.tm.get_current_task().name:match('^Explore Helltide') ~= nil, true, 'farming')
+    s.in_helltide = false                        -- a 3 s buff gap
+    s.tick(3)
+    eq(s.task_ticks['Search helltide'] or 0, 0, 'search_helltide took over during a short buff gap')
+    eq(#s.teleports, 0, 'teleported away during a short buff gap')
+    s.in_helltide = true
+    s.tick(2)
+    eq(s.helltide.current_state ~= 'RETURN_TO_HELLTIDE' or s.utils.is_in_helltide(), true)
+    -- Walked out of the zone: HR walks back instead of searching.
+    local left_before = s.logged('Left helltide zone')
+    s.in_helltide = false
+    s.tick(20)
+    eq(s.logged('Left helltide zone'), left_before + 1, 'left-zone detection ran')
+    eq(s.helltide.current_state, 'RETURN_TO_HELLTIDE')
+    eq(#s.teleports, 0, 'no teleport while walking back')
+    local back_before = s.logged('Back in helltide zone')
+    s.in_helltide = true
+    s.tick(1)
+    eq(s.logged('Back in helltide zone'), back_before + 1, 'resumed')
+    -- Never back within 90 s: search takes over, logged once.
+    s.in_helltide = false
+    s.tick(110)
+    eq(s.logged('Could not walk back into the helltide zone within 90s'), 1, 'bounded and logged')
+    ok((s.task_ticks['Search helltide'] or 0) > 0, 'search took over after the bound')
+end)
+
 -- ── C3: Batmobile release on HR exit paths ────────────────────────────────
 case('C3 HR release paths call BatmobilePlugin.release(helltide_revamped)', function()
     local s = session({release = true})
@@ -684,7 +717,7 @@ case('C3 HR release paths call BatmobilePlugin.release(helltide_revamped)', func
     ok(#s.bm.releases >= 1, 'no release on disable')
     for _, caller in ipairs(s.bm.releases) do eq(caller, 'helltide_revamped') end
     local before = #s.bm.releases
-    s.in_helltide = false                        -- task switch to search
+    s.in_helltide, s.minute = false, 57          -- helltide over: task switch to search
     s.tick(0.5)
     ok(#s.bm.releases > before, 'no release on task switch-away')
 end)

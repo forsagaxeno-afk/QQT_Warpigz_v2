@@ -12,7 +12,11 @@ local task = {
     name = 'teleport_kurast', -- change to your choice of task name
     status = status_enum['IDLE'],
     debounce_time = -1,
-    debounce_timeout = 3
+    -- Live report: "TPs to the entrance 5 times in a row". The channel plus
+    -- the loading screen outlast 3 s, so a retry fired after the cast ended
+    -- but before the zone changed and restarted the trip. 8 s covers both
+    -- (the suite's other waypoint debounces use 6-8 s).
+    debounce_timeout = 8
 }
 local function teleport_with_debounce()
     local local_player = get_local_player()
@@ -25,6 +29,13 @@ local function teleport_with_debounce()
         string.format('%.2f', task.debounce_time + task.debounce_timeout - get_time_since_inject()) .. 's'
     end
     if task.debounce_time + task.debounce_timeout > get_time_since_inject() then return end
+    -- A loading screen after the cast is the trip still arriving.
+    local world = get_current_world()
+    local world_name = world and world:get_name()
+    if type(world_name) ~= 'string' or world_name:find('Limbo', 1, true) or world_name:find('Loading', 1, true) then
+        task.debounce_time = get_time_since_inject()
+        return
+    end
     task.debounce_time = get_time_since_inject()
     utils.stop_movement()
     teleport_to_waypoint(settings.town_waypoint)

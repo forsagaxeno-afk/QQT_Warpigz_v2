@@ -27,11 +27,19 @@ local LONG_PATH_ARRIVED  = 5.0  -- meters from target to consider arrived
 --   2) Kurast waypoint follow: BatmobilePlugin gets caught on geometry and
 --      can't reach the next path[] waypoint.
 local STUCK_THRESHOLD_M    = 1.5
-local STUCK_WINDOW_S       = 8.0
+local STUCK_WINDOW_S       = 12.0
 local RECOVERY_COOLDOWN_S  = 15.0
+-- Live report: "TPs to the entrance 5 times in a row, then starts the run".
+-- Standing still right after arrival (loading, route calculation, a
+-- companion moving the player) re-armed the watchdog, and each recovery
+-- teleported back to the same waypoint. At most MAX_RECOVERIES re-teleports
+-- without real progress in between; after that the walk continues and the
+-- stall is logged once.
+local MAX_RECOVERIES       = 2
 task.last_pos          = nil
 task.last_pos_time     = 0
 task.last_recovery     = -999
+task.recoveries        = 0
 
 local function reset_progress()
     task.last_pos      = nil
@@ -42,15 +50,29 @@ end
 -- Execute for this tick).
 local function watchdog(player_pos)
     local now = get_time_since_inject()
-    if task.last_pos == nil
+    local lp = get_local_player()
+    local casting = lp and lp:get_active_spell_id() == 186139
+    if task.last_pos == nil or casting
         or utils.distance(task.last_pos, player_pos) > STUCK_THRESHOLD_M
     then
+        -- Real movement (not a teleport landing) ends a stall episode.
+        if task.last_pos ~= nil and not casting then task.recoveries = 0 end
         task.last_pos      = player_pos
         task.last_pos_time = now
         return false
     end
     if now - task.last_pos_time < STUCK_WINDOW_S then return false end
     if now - task.last_recovery < RECOVERY_COOLDOWN_S then return false end
+    if task.recoveries >= MAX_RECOVERIES then
+        if not task.recovery_cap_logged then
+            task.recovery_cap_logged = true
+            console.print(string.format(
+                '[wonder_city walk_kurast] still not moving after %d re-teleports — no further teleports, walking on',
+                task.recoveries))
+        end
+        return false
+    end
+    task.recoveries = task.recoveries + 1
     task.last_recovery = now
     console.print(string.format(
         '[wonder_city walk_kurast] stuck %.1fs near (%.1f,%.1f) — re-teleporting to town waypoint',
@@ -159,6 +181,7 @@ task.reset = function ()
     reset_progress()
     task.last_long_path_attempt = -math.huge
     task.last_recovery = -math.huge
+    task.recoveries, task.recovery_cap_logged = 0, nil
 end
 
 return task
