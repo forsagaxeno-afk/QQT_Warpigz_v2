@@ -302,18 +302,29 @@ case('TristramLoop friend_set follows the live setting after a refused start', f
     eq(api.friend_set, true, 'published friend_set follows too')
 end)
 
+-- Rosie is the bundle's Alfred provider: its REAL compatibility adapter
+-- (rosie/private/town/core/external.lua) over its real request lifecycle and
+-- tracker, with Rosie's settings/utils/movement reduced to what they read.
 local function real_alfred_external(h)
-    local tracker = { external_trigger_callbacks = {} }
-    local alfred_settings = { plugin_label = 'alfred', plugin_version = 't', allow_external = true,
-        is_enabled = function() return true end }
-    local mods = { ['core.utils'] = { log = function() end, classify = { db = { version = 't' } } },
-        ['core.settings'] = alfred_settings, ['core.tracker'] = tracker }
-    local e = setmetatable({ require = function(n) return mods[n] end }, { __index = h.e })
-    local external = assert(loadfile(SUITE_ROOT .. '/AlfredTheButler-WarPigz/core/external.lua', 't', e))()
-    return external, tracker
+    local root = SUITE_ROOT .. '/Rosie/rosie/private/town/core/'
+    local mods = {}
+    local e = setmetatable({}, { __index = h.e })
+    e._G = e
+    e.require = function(n) return assert(mods[n], 'unexpected require ' .. tostring(n)) end
+    local function load(name, file) mods[name] = assert(loadfile(root .. file, 't', e))() end
+    mods['rosie.movement'] = { for_owner = function() return { clear_stored_path = function() return true end } end }
+    mods['rosie.private.town.core.settings'] = { plugin_label = 'alfred_the_butler', plugin_version = 't',
+        enabled = true, allow_external = true, get_keybind_state = function() return true end }
+    load('rosie.private.town.core.tracker', 'tracker.lua')
+    local tracker = mods['rosie.private.town.core.tracker']
+    mods['rosie.private.town.core.utils'] = { is_in_town = function() return false end,
+        reset_all_task = function() tracker.failure_reason = nil end }
+    load('rosie.private.town.core.lifecycle', 'lifecycle.lua')
+    load('rosie.private.town.core.external', 'external.lua')
+    return mods['rosie.private.town.core.external'], tracker
 end
 
-case('TristramLoop Alfred bridge honours the real Alfred pause fields', function()
+case('TristramLoop Alfred bridge honours the Rosie Alfred adapter pause fields', function()
     local h = tristram()
     local bridge = h.e.package.loaded['tristram.bridge_alfred']
     local external, tracker = real_alfred_external(h)
@@ -322,22 +333,29 @@ case('TristramLoop Alfred bridge honours the real Alfred pause fields', function
         resume = function(caller) resumed[#resumed + 1] = caller; return external.resume(caller) end,
         trigger_tasks_with_teleport = external.trigger_tasks_with_teleport }
     -- Paused by someone else: refused, and that pause is left alone.
-    external.pause('WarPigs')
+    eq(external.pause('WarPigs'), true)
     local status = external.get_status()
-    ok(status.paused == true and status.paused_by == 'WarPigs', 'Alfred publishes paused/paused_by')
+    ok(status.paused == true and status.paused_by == 'WarPigs', 'Rosie publishes paused/paused_by')
+    ok(status.external_pause == true and status.pause_caller == 'WarPigs', 'and external_pause/pause_caller')
     local ticket, why = bridge.begin(peer, status, false)
     eq(ticket, nil, 'foreign pause refuses the request')
     ok(tostring(why):find('WarPigs'), 'reason names the pauser: ' .. tostring(why))
     eq(#resumed, 0, 'never resumes a foreign pause'); eq(tracker.external_pause, true)
+    eq(external.resume('TristramLoop'), false, 'Rosie refuses a resume by a non-owner')
     -- Not paused: trigger without calling resume.
-    external.resume('WarPigs'); resumed = {}
+    eq(external.resume('WarPigs'), true); resumed = {}
     ticket = bridge.begin(peer, external.get_status(), false)
     ok(ticket, 'unpaused Alfred accepts the request')
     eq(#resumed, 0, 'no resume when nothing is paused')
     eq(tracker.external_trigger, true); eq(tracker.external_caller, 'TristramLoop')
+    eq(external.get_status().owner, 'TristramLoop', 'owner published')
+    -- The bridge's recovery pause is accepted for its own request.
+    ok(ticket.set_recovering(true), 'owner may pause its own trip')
+    eq(external.get_status().paused_by, 'TristramLoop')
+    ok(ticket.set_recovering(false), 'and resume it')
     -- Our own stale pause is lifted.
     tracker.external_trigger = false; tracker.external_caller = nil
-    external.pause('TristramLoop'); resumed = {}
+    eq(external.pause('TristramLoop'), true); resumed = {}
     ticket = bridge.begin(peer, external.get_status(), false)
     ok(ticket, 'own pause does not block')
     eq(resumed[1], 'TristramLoop', 'own stale pause resumed')

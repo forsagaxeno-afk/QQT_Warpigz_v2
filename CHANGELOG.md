@@ -2,6 +2,21 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.1] — 2026-09-25
+
+Test build, released as a private draft (not published) until live testing is done.
+
+### Changed
+
+- **Rosie 1.0.1 replaces Alfred and Looter** (one plugin for town services and pickup; author anonymous). `AlfredTheButler-WarPigz` is removed from the bundle. Rosie publishes the `AlfredTheButlerPlugin`, `PLUGIN_alfred_the_butler` and `LooteerPlugin` APIs every bundle plugin uses; remove old Alfred/Looter folders. Mythics are rarity 8 (any Season 15 Mythic form of a Unique, Mythic charms and seals) and are always kept by default (*Always keep mythics*, also over the in-game loot filter).
+- Integration fixes inside Rosie (marked `QQT_Warpigz_v2`): C1 pause fields (`paused`, `paused_by`, `owner`, `pending`); a failed town trip no longer loops (bounded retry, then waits for *Run town service*; `stuck`, `stuck_retry_in`, `fail_streak` in status); callbacks report `nil` / `'failed'` / `'cancelled'` like Alfred; modules bound at load (no caller-context `require`); Batmobile is paused during trips and resumed after; per-item classification is pcall-guarded (unreadable items are kept); reload mid-trip hands off cleanly; pause ownership is respected by the manual keybind; per-frame counting is throttled.
+- WarPigs 1.1.3: reads Rosie's failed-trip result, waits at most 150 s on a stuck Rosie (logged with the reason). WonderCity 2.1.3: treats a failed town trip as failed. TristramLoop 1.0.1: Alfred bridge notes for Rosie.
+- Release workflow: a pre-release version (`X.Y.Z-rc.N`) is created as a private draft release.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: all test files × (Lua 5.4 + LuaJIT) pass; new `test_rosie_contract.lua` and `test_joint_rosie.lua` (real Rosie inside the joint host with WarPigs, Arkham, Helltide, WonderCity, Reaper; reloads). Still needs live testing.
+
 ## [2.2.1] — 2026-09-25
 
 ### Fixed

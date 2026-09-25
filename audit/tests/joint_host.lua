@@ -15,6 +15,13 @@
 -- keeps running; the test asserts that no error happened.
 -- The world, the player, AlfredTheButler, LooteerV3, the native warplan /
 -- quest_reward / pathfinder / orbwalker APIs are behaviour-level mocks.
+-- opts.rosie loads the REAL Rosie folder (Rosie publishes RosiePlugin plus the
+-- AlfredTheButlerPlugin / PLUGIN_alfred_the_butler / LooteerPlugin adapters)
+-- instead of the Alfred and Looter mocks; opts.dirs loads only those folders.
+-- Rosie mode adds the host surface Rosie needs: Temis vendors, vendor screens,
+-- salvage/sell/repair/stash commands, inventory gear (h.gear), ground items
+-- (h.drop), chat/inventory probes and the town portal a waypoint teleport
+-- out of a non-town place leaves in Temis (back to the exact spot).
 -- Round 4: widgets load persisted values (opts.persisted, by widget hash);
 -- use_item / confirm_sigil_notification model the Infernal Compass at the
 -- Caldeum gate (h.items, h.sigil_confirms, the Horde portal); every arrival
@@ -44,6 +51,8 @@ J.WAYPOINTS = {[J.TEMIS_WP] = 'temis', [J.KURAST_WP] = 'kurast', [0x10D63D] = 'c
     [0xACE9B] = 'frac', [0x27E01] = 'scos', [0xDEAFC] = 'kehj', [0x9346B] = 'helltide', [0x462E2] = 'step'}
 J.HELLTIDE_BUFF = 1066539
 J.TREE = {2596.38, -495.79}
+J.ROSIE_EXPORTS = {RosiePlugin = 'Rosie', AlfredTheButlerPlugin = 'Rosie', PLUGIN_alfred_the_butler = 'Rosie',
+    LooteerPlugin = 'Rosie'}
 
 local function copy(t)
     local out = {}
@@ -61,6 +70,22 @@ function J.new(opts)
         pit_opens = 0, quests = {}, minute = opts.minute or 30, aether = 0, cinders = 0, arrivals = {},
         floor_loot = false, dead = false, buffs = {}, events = {}, speed = opts.speed or 7}
     math.randomseed(opts.seed or 7)
+    local rosie = opts.rosie == true
+    h.rosie = rosie
+    local dirs = {}
+    for _, dir in ipairs(opts.dirs or J.DIRS) do dirs[#dirs + 1] = dir end
+    if rosie then
+        local present = false
+        for _, dir in ipairs(dirs) do if dir == 'Rosie' then present = true end end
+        if not present then dirs[#dirs + 1] = 'Rosie' end
+        table.sort(dirs)
+    end
+    h.dirs = dirs
+    h.exports = {}
+    for export, dir in pairs(J.EXPORTS) do
+        for _, d in ipairs(dirs) do if d == dir then h.exports[export] = dir end end
+    end
+    if rosie then for export, dir in pairs(J.ROSIE_EXPORTS) do h.exports[export] = dir end end
     local context = nil   -- plugin record whose callback is running
     local loading = nil   -- plugin record whose main.lua is running
 
@@ -361,7 +386,7 @@ function J.new(opts)
         local resume = o.resume_at
         bsk.on_arrive = function(_, trip)
             -- Alfred's return portal goes back into the same horde.
-            if trip and trip.why == 'alfred_return' then return end
+            if trip and (trip.why == 'alfred_return' or trip.why == 'town_portal') then return end
             bsk.actors = {}
             A.runs, A.wave, A.council_dead_at = A.runs + 1, 0, nil
             event('arrived in the Horde')
@@ -382,7 +407,7 @@ function J.new(opts)
 
     -- ── plugin records / code ownership ─────────────────────────────────────
     local prefixes = {}
-    for _, dir in ipairs(J.DIRS) do
+    for _, dir in ipairs(dirs) do
         local rec = {name = dir, dir = ROOT .. '/' .. dir .. '/', loaded = {}, update = {}, render = {}, menu = {}}
         h.plugins[#h.plugins + 1] = rec
         h.by_dir[dir] = rec
@@ -623,10 +648,13 @@ function J.new(opts)
         return function() graphics_used[k] = (graphics_used[k] or 0) + 1 end
     end}))
     for _, c in ipairs({'white', 'red', 'green', 'yellow', 'orange', 'blue', 'purple', 'cyan', 'pink', 'gray',
-        'grey', 'black', 'light_blue', 'dark_green', 'turquoise'}) do
+        'grey', 'black', 'light_blue', 'dark_green', 'turquoise', 'orange_red'}) do
         host('color_' .. c, function(a) return {c, a} end)
     end
-    host('color', {new = function(r, g, b, a) return {r, g, b, a} end})
+    host('color', {new = function(r, g, b, a)
+        if type(r) == 'table' then return {g, b, a} end -- color:new(...)
+        return {r, g, b, a}
+    end})
     host('get_screen_width', function() return 1920 end)
     host('get_screen_height', function() return 1080 end)
     host('get_cursor_position', function() return Vec2:new(960, 540) end)
@@ -670,12 +698,18 @@ function J.new(opts)
     function player:get_current_health() return h.dead and 0 or 100 end
     function player:get_max_health() return 100 end
     function player:get_skin_name() return 'Player' end
-    function player:get_item_count() return h.item_count or 0 end
+    function player:get_item_count()
+        h.item_count_reads = (h.item_count_reads or 0) + 1
+        if rosie and h.item_count == nil then return #(h.inventory or {}) end
+        return h.item_count or 0
+    end
     function player:get_inventory_items() return h.inventory or {} end
     function player:get_consumable_items() return {} end
     function player:get_dungeon_key_items() return h.keys_items or {} end
     function player:get_stash_items() return {} end
-    function player:get_equipped_items() return {} end
+    function player:get_equipped_items() return h.equipped or {} end
+    function player:get_talisman_items() return h.talismans or {} end
+    function player:get_socketable_items() return {} end
     function player:is_spell_ready() return false end
     function player:get_move_destination() return h.goal or h.pos end
     function player:is_moving() return h.goal ~= nil end
@@ -708,6 +742,11 @@ function J.new(opts)
     host('teleport_to_waypoint', function(sno)
         note_call(h.waypoints, {sno = sno})
         local key = h.waypoint_places[sno] or 'cerrigar'
+        -- Rosie mode: teleporting to Temis out of a non-town place leaves a
+        -- town portal in Temis that leads back to the exact spot.
+        if rosie and key == 'temis' and not h.place.town and h.place ~= P.limbo then
+            h.open_town_portal(h.place, h.pos)
+        end
         h.travel_to(key, 1.0, 'waypoint')
         return true
     end)
@@ -775,6 +814,9 @@ function J.new(opts)
     end)
     host('interact_vendor', function(a)
         note_call(h.vendors, {actor = a, skin = a and a.skin})
+        if rosie and a and a.vendor and h.pos:dist_to_ignore_z(a.pos) <= 4 then
+            h.vendor_screen, h.vendor_actor = true, a
+        end
         if a == h.table_actor and h.pos:dist_to_ignore_z(a.pos) <= 4 then h.board.ready = true end
         if a and a.on_interact then a.on_interact(h, a) end
         return true
@@ -863,7 +905,7 @@ function J.new(opts)
             for _, a in ipairs(actors_here()) do if a.enemy then out[#out + 1] = a end end
             return out
         end,
-        get_all_items = function() return {} end,
+        get_all_items = function() return rosie and (h.place.items or {}) or {} end,
     })
     host('loot_manager', {
         any_item_around = function() return h.floor_loot end,
@@ -875,6 +917,101 @@ function J.new(opts)
         end,
         is_obols = function() return false end,
     })
+    if rosie then
+        -- Rosie's town commands act on the vendor screen that is open.
+        local lm = G.loot_manager
+        local function take(item, list)
+            for i = #(list or {}), 1, -1 do if list[i] == item then table.remove(list, i); return true end end
+            return false
+        end
+        h.salvaged, h.sold, h.stashed, h.repairs = {}, {}, {}, 0
+        lm.get_current_vendor = function() return h.vendor_screen and h.vendor_actor or nil end
+        lm.get_item_identifier = function(item) return item and item.uid end
+        lm.is_gold = function() return false end
+        lm.is_potion = function() return false end
+        lm.is_lootable_item = function() return true end
+        lm.salvage_specific_item = function(item)
+            if take(item, h.inventory) or take(item, h.talismans) then h.salvaged[#h.salvaged + 1] = item end
+            return true
+        end
+        lm.sell_specific_item = function(item)
+            if take(item, h.inventory) or take(item, h.talismans) then h.sold[#h.sold + 1] = item end
+            return true
+        end
+        lm.repair_all_items = function()
+            h.repairs = h.repairs + 1
+            for _, item in ipairs(h.equipped or {}) do item.durability = 100 end
+            return true
+        end
+        lm.move_item_to_stash = function(item)
+            if take(item, h.inventory) then h.stashed[#h.stashed + 1] = item end
+            return true
+        end
+        lm.move_item_from_stash = function() return false end
+        host('is_chat_open', function() return h.chat_open == true end)
+        host('is_inventory_open', function() return false end)
+        host('get_actors_list', function() return actors_here() end)
+        host('orb_mode', {none = 0, pvp = 1, clear = 2, flee = 3})
+        -- Temis vendors Rosie services (skins and positions: rosie/private/town/core/town.lua).
+        h.blacksmith = h.actor('temis', 'TWN_Skov_Temis_Crafter_Blacksmith', 2574.25, -479.20, {vendor = true})
+        h.gambler = h.actor('temis', 'TWN_Skov_Temis_Vendor_Gambler', 2566.22, -478.74, {vendor = true})
+        h.temis_stash = h.actor('temis', 'Stash', 2574.04, -486.25, {vendor = true})
+        -- A waypoint teleport to Temis from a non-town place leaves a town
+        -- portal there that returns to the exact spot (one at a time).
+        function h.open_town_portal(place, pos)
+            if h.town_portal then h.remove_actor(h.town_portal) end
+            local portal = h.actor('temis', 'TownPortal', 2578.11, -482.26)
+            portal.on_interact = function()
+                h.remove_actor(portal); h.town_portal = nil
+                h.travel_to(place, 0.5, 'town_portal')
+                h.travel.pos = pos
+            end
+            h.town_portal = portal
+            return portal
+        end
+        -- Inventory gear Rosie can classify (legacy skin prefix, not in the catalog).
+        local uid = 5000
+        function h.gear(fields)
+            uid = uid + 1
+            local item = {uid = uid, name = 'Helm_Rare_Joint', rarity = 3, ancestral = false, junk = false,
+                locked = false, ga = 0, durability = 100, sno = 990000000 + uid}
+            for k, val in pairs(fields or {}) do item[k] = val end
+            function item:is_valid() return true end
+            function item:is_locked() return self.locked end
+            function item:get_sno_id() return self.sno end
+            function item:get_name() return self.name end
+            function item:get_skin_name() return self.name end
+            function item:get_display_name() return self.name end
+            function item:get_rarity() return self.rarity end
+            function item:is_ancestral() return self.ancestral end
+            function item:is_junk() return self.junk end
+            function item:get_attribute() return self.ga end
+            function item:get_affixes() return {} end
+            function item:get_durability() return self.durability end
+            function item:is_filtered_by_loot_filter() return self.filtered == true end
+            function item:get_stack_count() return 1 end
+            function item:get_item_info() return self end
+            return item
+        end
+        -- A ground drop at (x, y) of `place`; interacting picks it up.
+        function h.drop(place, x, y, fields)
+            place = type(place) == 'string' and P[place] or place
+            local item = h.gear(fields)
+            item.pos = v(x, y)
+            function item:get_position() return self.pos end
+            item.on_interact = function()
+                if item.picked then return end
+                item.picked = true
+                for i = #(place.items or {}), 1, -1 do if place.items[i] == item then table.remove(place.items, i) end end
+                h.inventory = h.inventory or {}
+                h.inventory[#h.inventory + 1] = item
+                h.pickups = (h.pickups or 0) + 1
+            end
+            place.items = place.items or {}
+            place.items[#place.items + 1] = item
+            return item
+        end
+    end
 
     -- ── orbwalker ───────────────────────────────────────────────────────────
     h.orb = {clear = true, block = false, mode = 0}
@@ -955,7 +1092,9 @@ function J.new(opts)
         local sno = entry and tonumber(entry.sno)
         h.inventory = h.inventory or {}
         h.inventory[#h.inventory + 1] = {get_sno_id = function() return sno end, get_acd = function() return 4321 end,
-            get_stack_count = function() return 1 end, get_skin_name = function() return 'cache' end}
+            get_stack_count = function() return 1 end, get_skin_name = function() return 'cache' end,
+            get_name = function() return 'BountyMeta_Cache' end, is_valid = function() return true end,
+            is_locked = function() return false end, get_rarity = function() return 0 end}
         h.panel, h.bounty_ready = false, false
     end
     host('quest_reward', {
@@ -994,7 +1133,7 @@ function J.new(opts)
         if teleport then al.teleport, al.teleport_done, al.teleport_failed = true, false, false end
         return true
     end
-    host('AlfredTheButlerPlugin', {
+    if not rosie then host('AlfredTheButlerPlugin', {
         get_status = function()
             if al.unreadable then error('Alfred status unavailable') end
             local s = {}
@@ -1005,7 +1144,7 @@ function J.new(opts)
         trigger_tasks_with_teleport = function(caller, cb) return queue_alfred(caller, cb, true) end,
         pause = function(caller) al.paused, al.paused_by = true, caller; return true end,
         resume = function(caller) al.paused, al.paused_by = false, nil; return true end,
-    })
+    }) end
     local function alfred_done()
         local job = al.job
         al.job = nil
@@ -1050,10 +1189,10 @@ function J.new(opts)
     -- ── LooteerV3 (closed source): read only ────────────────────────────────
     local lt = {enabled = true, busy = false}
     h.looter = lt
-    host('LooteerPlugin', {
+    if not rosie then host('LooteerPlugin', {
         get_enabled = function() return lt.enabled end,
         is_actively_looting = function() return lt.busy end,
-    })
+    }) end
     local function looter_tick()
         if lt.busy and lt.enabled and math.floor(h.now * 2) ~= math.floor((h.now - 0.1) * 2) then
             G.pathfinder.request_move(v(h.pos:x() + 2, h.pos:y() - 1))
@@ -1061,9 +1200,9 @@ function J.new(opts)
     end
 
     -- ── load every plugin ───────────────────────────────────────────────────
-    local sorted = copy(J.DIRS)
+    local sorted = copy(dirs)
     table.sort(sorted)
-    for i, dir in ipairs(sorted) do assert(J.DIRS[i] == dir, 'plugin folders must load in alphabetical order') end
+    for i, dir in ipairs(sorted) do assert(dirs[i] == dir, 'plugin folders must load in alphabetical order') end
     h.base_keys = {}
     for k in pairs(G) do h.base_keys[k] = true end
     for _, rec in ipairs(h.plugins) do
@@ -1074,6 +1213,25 @@ function J.new(opts)
         else
             local ok, lerr = xpcall(chunk, debug.traceback)
             if not ok then h.errors[#h.errors + 1] = {plugin = rec.name, kind = 'load', t = h.now, err = tostring(lerr)} end
+        end
+        loading = nil
+    end
+
+    -- QQT script reload of one plugin folder: its callbacks are dropped and
+    -- main.lua runs again. opts.keep_loaded keeps the folder's package.loaded
+    -- (a host that does not clear it); default is a fresh module cache.
+    function h.reload(dir, o)
+        o = o or {}
+        local rec = assert(h.by_dir[dir], dir)
+        if not o.keep_loaded then rec.loaded = {} end
+        rec.update, rec.render, rec.menu = {}, {}, {}
+        loading = rec
+        local chunk, err = loadfile(rec.dir .. 'main.lua', 't', G)
+        if not chunk then
+            h.errors[#h.errors + 1] = {plugin = rec.name, kind = 'reload', t = h.now, err = err}
+        else
+            local ok, lerr = xpcall(chunk, debug.traceback)
+            if not ok then h.errors[#h.errors + 1] = {plugin = rec.name, kind = 'reload', t = h.now, err = tostring(lerr)} end
         end
         loading = nil
     end
@@ -1108,8 +1266,10 @@ function J.new(opts)
         h.frames = h.frames + 1
         travel_tick()
         run_events()
-        invoke(h.alfred_ctx, 'update', alfred_tick)
-        invoke(h.looter_ctx, 'update', looter_tick)
+        if not rosie then
+            invoke(h.alfred_ctx, 'update', alfred_tick)
+            invoke(h.looter_ctx, 'update', looter_tick)
+        end
         for _, rec in ipairs(h.plugins) do
             for _, fn in ipairs(rec.update) do invoke(rec, 'on_update', fn) end
         end
@@ -1168,7 +1328,7 @@ function J.new(opts)
     h.bm_calls, h.api_calls = {}, {}
     local wrapped = {}
     function h.instrument_exports()
-        for export in pairs(J.EXPORTS) do
+        for export in pairs(h.exports) do
             local api = G[export]
             if type(api) == 'table' and not wrapped[api] then
                 wrapped[api] = true

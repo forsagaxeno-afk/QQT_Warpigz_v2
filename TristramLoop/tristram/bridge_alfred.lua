@@ -54,8 +54,8 @@ function M.begin(peer, status, adopt)
     if not peer or not status then return nil, "Alfred is unavailable. Enable SteroidAlfredV2 for automatic town service." end
     if status.enabled ~= true then return nil, "Alfred is disabled. Enable SteroidAlfredV2 and its external calls." end
     if not adopt and status.allow_external == false then return nil, "Alfred external calls are disabled." end
-    -- Legacy providers publish external_pause/pause_caller; AlfredTheButler-WarPigz
-    -- publishes paused/paused_by. Read both.
+    -- Legacy providers publish external_pause/pause_caller; the old WarPigz Alfred
+    -- published paused/paused_by; Rosie's Alfred adapter publishes both. Read both.
     local paused, pauser = M.pause_owner(status)
     if not adopt and paused and pauser ~= "TristramLoop" then
         return nil, "Alfred is paused by " .. tostring(pauser or "another caller") .. "."

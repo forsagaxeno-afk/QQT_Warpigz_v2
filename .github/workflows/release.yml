@@ -3,6 +3,7 @@
 # and LuaJIT (QQT's runtime). If the version in VERSION has no release yet, it
 # builds the installable package (scripts/ + docs) and creates release vX.Y.Z
 # on the pushed commit. A push that does not bump VERSION publishes nothing.
+# Pre-release versions (X.Y.Z-rc.N) are created as private drafts.
 name: Release
 
 on:
@@ -46,8 +47,15 @@ jobs:
             echo "$tag is already released; nothing to publish."
             exit 0
           fi
+          # A pre-release version (e.g. 2.3.0-rc.1) becomes a private DRAFT for
+          # testing: only repository owners/collaborators see it until someone
+          # presses Publish. A plain X.Y.Z version is published as latest.
+          case "$tag" in
+            *-*) visibility="--draft --prerelease" ;;
+            *)   visibility="--latest" ;;
+          esac
           gh release create "$tag" dist/*.zip \
             --target "$GITHUB_SHA" \
             --title "QQT_Warpigz_v2 $tag" \
             --notes-file dist/RELEASE_NOTES.md \
-            --latest
+            $visibility

@@ -1,6 +1,6 @@
 -- Static TristramLoop data. A coordinate without a world is a hint, never a route.
 return {
-    name = "TristramLoop", version = "1.0.0",
+    name = "TristramLoop", version = "1.0.1",
     -- Exact boss skins observed in the user's live runs. A replacement actor of
     -- the same council boss cannot stand in for another boss's missing death.
     BOSS_SLOTS = { Triad_A_Boss_Council = "A", S15_Triad_B_Boss_Council = "B", Triad_C_Boss_Council = "C" },

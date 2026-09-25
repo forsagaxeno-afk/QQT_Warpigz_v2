@@ -20,10 +20,14 @@ def require(condition, message):
 
 
 def semver(value):
-    if not re.fullmatch(r"\d+\.\d+\.\d+", value):
+    # X.Y.Z, or a pre-release X.Y.Z-rc.N (released as a private draft for
+    # testing); a pre-release sorts before its final version.
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?", value)
+    if not match:
         errors.append(f"Invalid release version: {value}")
-        return (-1, -1, -1)
-    return tuple(map(int, value.split(".")))
+        return (-1, -1, -1, -1)
+    major, minor, patch, rc = match.groups()
+    return (int(major), int(minor), int(patch), int(rc) if rc else 1 << 30)
 
 
 semver(version)
@@ -41,6 +45,9 @@ for folder, component_version in manifest["components"].items():
     if folder == "Reaper-main":
         source = (ROOT / folder / "main.lua").read_text()
         require(f"v{component_version}" in source, f"Reaper displayed version mismatch")
+    elif folder == "Rosie":
+        source = (ROOT / folder / "rosie" / "controller.lua").read_text()
+        require(f"s.version='{component_version}'" in source, f"Rosie displayed version mismatch")
     elif folder == "TristramLoop":
         source = (ROOT / folder / "tristram" / "data.lua").read_text()
         require(f'version = "{component_version}"' in source, f"TristramLoop displayed version mismatch")

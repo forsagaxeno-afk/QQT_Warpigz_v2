@@ -67,6 +67,12 @@ local alfred_gate = {
     ADVISORY_SETTLE  = 8.0,    -- same as ALFRED_PICKUP_TIMEOUT
     unreadable_since = nil, unreadable_logged = false,
     paused_since = nil, paused_logged = false,
+    -- A provider reporting stuck (Rosie: a failed trip whose need remains,
+    -- API requests refused): held while it will allow a retry
+    -- (stuck_retry_in), at most STUCK_HOLD per episode; a stuck provider that
+    -- waits for an explicit retry is not waited on. Logged once per episode.
+    STUCK_HOLD = 150.0,
+    stuck_since = nil, stuck_logged = false, refusal_logged = nil,
     visit_trigger_at = nil, visit_alfred = nil,  -- WarPigs trigger in this Temis visit
     kick_deferred_logged = false,
 }
@@ -117,6 +123,31 @@ function alfred_gate.paused_work_hold(s)
     return false
 end
 
+-- Stuck provider with hard work. True while the bounded hold still applies.
+function alfred_gate.stuck_hold(s)
+    local G, now = alfred_gate, get_time_since_inject()
+    local retry_in = type(s.stuck_retry_in) == 'number' and s.stuck_retry_in or nil
+    if not G.stuck_since then
+        G.stuck_since = now
+        if retry_in then
+            log(string.format('Alfred is stuck (%s) — it allows a retry in %.0fs; holding for it up to %.0fs',
+                tostring(s.stuck_reason or '?'), retry_in, G.STUCK_HOLD))
+        else
+            G.stuck_logged = true
+            log(string.format('Alfred is stuck (%s) and waits for an explicit Run town service — not holding for it',
+                tostring(s.stuck_reason or '?')))
+            return false
+        end
+    end
+    if retry_in and now - G.stuck_since < G.STUCK_HOLD then return true end
+    if not G.stuck_logged then
+        G.stuck_logged = true
+        log(string.format('Alfred still stuck (%s) after %.0fs — no longer holding for it (bounded hold)',
+            tostring(s.stuck_reason or '?'), now - G.stuck_since))
+    end
+    return false
+end
+
 -- A WarPigs trigger (kick, preamble or a joined live cycle) in this visit.
 function alfred_gate.note_trigger(alfred)
     alfred_gate.visit_trigger_at, alfred_gate.visit_alfred = get_time_since_inject(), alfred
@@ -138,7 +169,9 @@ local function new_alfred_completion_callback(plugin)
     return function(result)
         if generation ~= alfred_callback_generation then return end
         if (_G.AlfredTheButlerPlugin or _G.PLUGIN_alfred_the_butler) ~= plugin then return end
-        if result == false or result == 'failed' or result == 'cancelled' then return end
+        -- Rosie reports {success = false, reason = ...} for a failed trip.
+        if result == false or result == 'failed' or result == 'cancelled'
+            or (type(result) == 'table' and result.success == false) then return end
         last_alfred_completion_at = get_time_since_inject()
         last_alfred_completion_plugin = plugin
     end
@@ -160,7 +193,13 @@ local function alfred_idle()
     local hard = s.inventory_full == true or s.need_repair == true
     -- A new paused-with-work episode gets its own full bound.
     if live or not hard or s.paused ~= true then alfred_gate.paused_since, alfred_gate.paused_logged = nil, false end
+    if live or s.stuck ~= true then alfred_gate.stuck_since, alfred_gate.stuck_logged = nil, false end
     if live then return false end
+    -- Stuck (a failed trip whose need remains; requests are refused): a
+    -- bounded, logged hold instead of an indefinite hard-need wait.
+    if s.stuck == true and hard and s.paused ~= true then
+        return not alfred_gate.stuck_hold(s)
+    end
     -- Paused: Alfred cannot self-start. Without hard work (need_trigger
     -- alone is advisory) there is nothing to wait for; with hard work the
     -- kick resumes a WarPigs-owned pause, and any other pause is a bounded,
@@ -257,11 +296,22 @@ local function alfred_kick_if_needed()
         local resumed, result = pcall(alfred.resume, 'WarPigs')
         if not resumed or result == false then return end
     end
+    -- A stuck provider refuses requests until it allows a retry.
+    if s.stuck == true then return end
     if type(alfred.trigger_tasks) == 'function' then
         -- Recorded even if the call fails: the advisory flag had its chance.
         alfred_gate.note_trigger(alfred)
-        pcall(alfred.trigger_tasks, 'WarPigs', new_alfred_completion_callback(alfred))
+        local called, accepted, why = pcall(alfred.trigger_tasks, 'WarPigs', new_alfred_completion_callback(alfred))
+        if not called or accepted == false then
+            local reason = tostring(called and (why or 'no reason given') or accepted)
+            if alfred_gate.refusal_logged ~= reason then
+                alfred_gate.refusal_logged = reason
+                log('Alfred had work pending but refused the town request: ' .. reason)
+            end
+            return
+        end
     end
+    alfred_gate.refusal_logged = nil
     log('Alfred had work pending but was not processing — task requested in town')
 end
 
@@ -2288,6 +2338,7 @@ function dispatch.reset()
     alfred_gate.visit_trigger_at, alfred_gate.visit_alfred = nil, nil
     alfred_gate.paused_since, alfred_gate.paused_logged = nil, false
     alfred_gate.unreadable_since, alfred_gate.unreadable_logged = nil, false
+    alfred_gate.stuck_since, alfred_gate.stuck_logged, alfred_gate.refusal_logged = nil, false, nil
     alfred_gate.kick_deferred_logged = false
 end
 

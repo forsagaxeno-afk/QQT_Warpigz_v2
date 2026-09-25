@@ -229,12 +229,17 @@ local function trigger_alfred()
     trip.from_run, trip.return_until = utils.player_in_undercity(), nil
     request_plugin, request_started, quiet_since = a, get_time_since_inject(), nil
     local ok, accepted = pcall(a.trigger_tasks_with_teleport, plugin_label, function (result)
+        -- Rosie reports a table {success = bool, reason = string|nil, request_id}.
+        if type(result) == 'table' then
+            result = result.success == false and ('failed: ' .. tostring(result.reason or '?')) or nil
+        end
         if result ~= nil and not trip.result_logged then
             trip.result_logged = true -- one-time diagnostic of the host's callback argument
             console.print('[WonderCity:alfred] Alfred completion callback result=' .. tostring(result))
         end
         if token == generation and task.status == status_enum.WAITING and get_alfred() == a then
-            if result == false or result == 'failed' or result == 'cancelled' then failed_cycle(result)
+            if result == false or result == 'failed' or result == 'cancelled'
+                or (type(result) == 'string' and result:find('failed: ', 1, true) == 1) then failed_cycle(result)
             else reset() end
         end
     end)

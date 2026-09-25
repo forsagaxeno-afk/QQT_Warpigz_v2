@@ -8,8 +8,8 @@ Existing contributor names, source comments, and notices are preserved. Reaper r
 
 Project release numbering begins with **v2.0.0**. Earlier upstream component versions remain historical references.
 
-Since v2.2.0 the bundle also ships:
+Since v2.2.0 / v2.3.0 the bundle also ships:
 
-- **AlfredTheButler-WarPigz**, based on SteroidAlfredV2 (Alfred the Butler by Leoric and contributors); original notices are kept in its files. Its item database is generated from **DiabloTools/d4data**, the public JSON dump of Diablo IV's game files. `core/json.lua` is rxi's json.lua (MIT).
+- **Rosie** (town services and pickup, replacing Alfred and Looter), released here by its author's request without attribution. Its item catalog is built from **DiabloTools/d4data**, the public JSON dump of Diablo IV's game files; `core/json.lua` is rxi's json.lua (MIT). Bundle-integration edits are marked `QQT_Warpigz_v2` in its files.
 - **HelltideRevamped 2.2.0** ports the Pandemonium Rupture handling from Letrico's HelltideRevamped 2.5.0.
 - **TristramLoop**, released here by its author's request without attribution.
