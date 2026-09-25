@@ -1,10 +1,10 @@
 {
   "project": "QQT_Warpigz_v2",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "first_release": "2.0.0",
   "components": {
-    "WarPigs-1.0.0": "1.1.0",
-    "WarPug-1.0.0": "1.0.12",
+    "WarPigs-1.0.0": "1.1.1",
+    "WarPug-1.0.0": "1.0.13",
     "Batmobile-1.0.12": "2.1.0",
     "ArkhamAsylum-1.0.6": "2.1.0",
     "HelltideRevamped-0.4": "2.1.1",

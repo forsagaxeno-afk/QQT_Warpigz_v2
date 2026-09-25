@@ -12,6 +12,6 @@ Before publication:
 2. Add regressions for confirmed defects or materially risky behavior, using actual modules where feasible.
 3. Run `python3 audit/check_release.py --base vX.Y.Z` against the previous release tag (omit `--base` for the first release), then `python3 audit/tests/run_tests.py`.
 4. Save verification results and identify required live-client checks.
-5. Commit source, English changelog and version updates together; tag and push the verified release.
+5. Commit source, English changelog and version updates together and push. `.github/workflows/release.yml` re-runs the checks and the suite (Lua 5.4 + LuaJIT) and publishes release `vX.Y.Z` with the package from `audit/build_release.py` for every new version; a push without a version bump publishes nothing.
 
 Preserve original credits. Do not commit credentials, private logs, local settings, proprietary packs, or QQT binaries. The project cover's generation record is in `assets/branding/README.md`.

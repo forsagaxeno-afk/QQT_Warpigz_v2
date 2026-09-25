@@ -1,4 +1,8 @@
 local settings = require 'core.settings'
+-- Captured at load (never lazily): the route around the Whisper-tree wall.
+-- Without it (older install) walks go straight to the target as before.
+local route_ok, temis_route = pcall(require, 'warpug_temis_route')
+if not route_ok then console.print('[WarPug] Temis route module unavailable: walking directly') end
 local planner = {}
 -- QQT runs LuaJIT (Lua 5.1 library): table.unpack does not exist there.
 local unpack = table.unpack or unpack
@@ -35,8 +39,13 @@ local alfred_gate = { advisory_since = nil, advisory_logged = false,
 local function now() return get_time_since_inject() end
 local function log(m) console.print('[WarPug] ' .. m) end
 local function vlog(m) if settings.verbose_logs then log('debug: ' .. m) end end
+-- Way around the Whisper-tree wall on the walk to the War Plan table.
+local route = route_ok and temis_route.new(log)
+    or {reset = function() end, move = function(_, target) pathfinder.request_move(target) end}
+
 local function set_state(s)
     if s ~= state then
+        route.reset()
         log('state ' .. state .. ' -> ' .. s)
         state, state_entered = s, now()
     end
@@ -420,7 +429,7 @@ function planner.tick()
         if not ok then return end
         if distance > INTERACT_DIST then
             set_state('APPROACH_TABLE')
-            pathfinder.request_move(pos)
+            route.move(get_player_position(), pos, now())
         elseif state == 'APPROACH_TABLE' then
             set_state('INTERACT_TABLE')
         elseif now() - last_interact >= INTERACT_COOLDOWN then

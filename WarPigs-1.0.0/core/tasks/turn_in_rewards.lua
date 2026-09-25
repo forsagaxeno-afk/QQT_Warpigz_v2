@@ -3,6 +3,11 @@
 -- Resets to idle once the quest disappears (other tick logic detects the
 -- transition and calls tick(false)).
 
+-- Captured at load (never lazily): the route around the Whisper-tree wall.
+-- Without it (older install) walks go straight to the target as before.
+local route_ok, temis_route = pcall(require, 'wp_temis_route')
+if not route_ok then console.print('[WarPigs:turn_in] Temis route module unavailable: walking directly') end
+
 local M = {}
 
 local TEMIS_WP   = 0x1CE51E       -- Skov_Temis waypoint sno (from existing plugins)
@@ -120,8 +125,13 @@ local function teleport_held(ctx)
     return false
 end
 
+-- Way around the Whisper-tree wall on the walk to Tyrael (live report).
+local route = route_ok and temis_route.new(log)
+    or {reset = function() end, move = function(_, target) pathfinder.request_move(target) end}
+
 local function set_state(s)
     if s ~= state then
+        route.reset()
         log('state ' .. state .. ' -> ' .. s)
         state         = s
         state_entered = now()
@@ -335,7 +345,7 @@ function M.tick(active, ctx)
                 last_interact = now()
             end
         else
-            pathfinder.request_move(pos)
+            route.move(pp, pos, now())
         end
         return
     end

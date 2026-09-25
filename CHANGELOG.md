@@ -2,6 +2,20 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.1.2] — 2026-09-25
+
+### Fixed
+
+- WarPigs turn-in / WarPug: "right after the Whisper cache he wants to hand in the finished War Plan and gets stuck on the wall between the Whisper tree and the War Plan table" (reported 3 times). Both walked straight at Tyrael / the table with `pathfinder.request_move`. From the Whisper side they now walk out the way SilentRaven walks in (Raven → intermediate → teleport arrival → target); any direct walk with no progress for 3 s takes that detour, at most 3 times, logged.
+
+### Added
+
+- Every new bundle version is published automatically as a GitHub release with an installable package (`.github/workflows/release.yml`, `audit/build_release.py`): CI runs the release checks and the offline suite under Lua 5.4 and LuaJIT, builds `QQT_Warpigz_v2-vX.Y.Z.zip` (nine plugin folders under `scripts/` + docs) and creates release `vX.Y.Z`.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: 43 test files × (Lua 5.4 + LuaJIT) = 86 runs pass; `test_live_temis_wall.lua` reproduces the wall on 2.1.1 and passes now.
+
 ## [2.1.1] — 2026-09-25
 
 Fixes from the first live reports on v2.1.0.
