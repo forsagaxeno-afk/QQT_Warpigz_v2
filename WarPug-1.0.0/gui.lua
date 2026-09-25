@@ -1,5 +1,5 @@
 local plugin_label   = 'war_pug'
-local plugin_version = '1.0.11'
+local plugin_version = '1.0.12'
 console.print('Lua Plugin - WarPug - War Plan Creator - v' .. plugin_version)
 
 local gui = {}

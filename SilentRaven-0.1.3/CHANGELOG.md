@@ -1,3 +1,12 @@
+# 0.2.0 — QQT_Warpigz_v2 2.1.0 integration
+
+- A reward card is rejected only when it is explicitly invalid (`valid` false/0) or has no readable SNO; a missing `valid` field no longer rejects every card (live `failed (no_valid_reward)` on a normal 4-card panel). Numeric-string SNOs are accepted.
+- Selection verification tolerates a void `select()` and a `selected_index()` in either index space (0.5 s settle); one automatic `reward diagnostics` dump per run shows the host's fields when a claim cannot be verified.
+- Continuation guard may answer `yield:<reason>`: the request pauses (no attempt or timeout consumed, 120 s cap) instead of being cancelled; after accept a yield only lets the receipt be confirmed.
+- Unmanaged auto-fire waits for WarPug sessions, Alfred live work, the Looter and a busy WarPigs; own runs pause for Alfred/Looter without clearing their paths. `get_status().hold_reason` added.
+- ESC is sent only while the reward panel is open. The Temis walk always passes the intermediate waypoint and detects stalls.
+- D4Remote `record_loot` is sent per confirmed claim; registration retries when D4Remote loads later; catalog freshness is not re-read every frame.
+
 # 0.1.4 — WarPigs integration build
 
 - Added a versioned, owner-checked WarPigs bridge contract with a pending request state, reservation, continuation guard, and exactly-once callback delivery.

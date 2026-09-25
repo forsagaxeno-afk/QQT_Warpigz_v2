@@ -1,13 +1,18 @@
-QQT_Warpigz_v2 v2.0.0 — final offline validation, 2026-09-24
-No live Diablo IV/QQT process was used.
+QQT_Warpigz_v2 v2.1.0 — final offline validation, 2026-09-25
+No live Diablo IV/QQT process was used. Runtimes: Lua 5.4.6  Copyright (C) 1994-2023 Lua.org, PUC-Rio; LuaJIT 2.1.1703358377 -- Copyright (C) 2005-2023 Mike Pall. https://luajit.org/
 
-$ /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3 audit/check_release.py
-PASS: QQT_Warpigz_v2 v2.0.0, 9 component versions, credits and changelog
+$ python3 audit/check_release.py --base 2db9ce9   # v2.0.0 as imported
+PASS: QQT_Warpigz_v2 v2.1.0, 9 component versions, credits and changelog
 
-$ /opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3 audit/tests/run_tests.py
-PASS: 201 runtime Lua files compile with Lua 5.4
+$ python3 audit/tests/run_tests.py --luajit require
+PASS: 202 runtime Lua files compile with Lua 5.4
+PASS: runtime code uses no Lua 5.2+ library function without a LuaJIT fallback
+WARN: <HelltideRevamped-0.4/tasks/helltide.lua:0,0> declares 197 file-level locals (LuaJIT limit 200); keep a margin below the LuaJIT limits
+PASS: largest function captures 48 upvalues (LuaJIT limit 60)
+PASS: 202 runtime Lua files compile with LuaJIT (QQT runtime)
 Arkham: 21 focused regressions passed
 PASS: test_arkham.lua
+PASS (LuaJIT): test_arkham.lua
 PASS Batmobile: numeric and serialized crowd-control hashes are recognized
 PASS Batmobile: custom targets honor disable_spell, drift reuse, pause, and movement reset
 PASS Batmobile: traversal approach returns the validated height and accepts exploration routing
@@ -20,10 +25,12 @@ PASS Batmobile: normal log level avoids per-rule formatting and console writes
 PASS Batmobile: long path launch clears stale state, preserves drawing path and runtime budgets
 PASS Batmobile: long-path query survives traversal nil target; explicit reset cancels autonomous work
 PASS Batmobile: main tolerates absent player, avoids duplicate drive, and preserves crossing
-Batmobile regression suite: 12 tests, 84 assertions
+Batmobile regression suite: 12 tests, 85 assertions
 PASS: test_batmobile.lua
+PASS (LuaJIT): test_batmobile.lua
 PASS common Batmobile: Batmobile processes a traversal buff despite a temporarily empty actor scan
 PASS: test_batmobile_integration.lua
+PASS (LuaJIT): test_batmobile_integration.lua
 PASS Helltide: documented loot source contributes chests and actor references deduplicate
 PASS Helltide: spent nearest chest does not hide a valid chest of the same type
 PASS Helltide: blacklisted nearest chest does not hide another same-type chest
@@ -42,6 +49,7 @@ PASS Helltide: yield cancels owned autonomous movement; disabled stale Looteer d
 PASS Helltide: disabling via public API cancels task ownership and false settings remain editable
 Helltide: 16 behavior regressions passed
 PASS: test_helltide.lua
+PASS (LuaJIT): test_helltide.lua
 PASS Horde audit: unrelated chest VFX and missing actors do not crash or prove payment
 PASS Horde audit: actual aether payment confirms an opened actor that unloaded
 PASS Horde audit: vanished optional chest advances to remaining configured chest
@@ -66,6 +74,7 @@ PASS Horde audit: configured rejection still salvages known low-rarity junk in b
 PASS Horde audit: false settings remain externally writable and survive GUI sync
 Horde audit: 22 behavior regressions passed
 PASS: test_horde_audit.lua
+PASS (LuaJIT): test_horde_audit.lua
 PASS Horde feedback: known Chaos Rift variants beat nearby trash, elite adds and aether
 PASS Horde feedback: edge portal stays engaged after arrival without center retreat in both movement modes
 PASS Horde feedback: occupied marker also remains engaged instead of recentering
@@ -77,16 +86,281 @@ PASS Horde feedback: cancellation releases objective hold and the next run can n
 PASS Horde feedback: one remaining hit point is still a living portal objective
 Horde feedback: 9 behavior regressions passed
 PASS: test_horde_feedback.lua
-PASS: 120 assertions (Horde RESET exit flow + scheduler + external handoff)
+PASS (LuaJIT): test_horde_feedback.lua
+PASS: 126 assertions (Horde RESET exit flow + scheduler + external handoff)
 PASS: test_horde_reset_exit.lua
-PASS: 230 assertions (sigil confirmation, portal entry, loading and complete reset/start cycle)
+PASS (LuaJIT): test_horde_reset_exit.lua
+PASS: 233 assertions (sigil confirmation, portal entry, loading and complete reset/start cycle)
 PASS: test_horde_sigil_entry.lua
-Reaper behavioral assertions: 66
+PASS (LuaJIT): test_horde_sigil_entry.lua
+PASS HordeDev round 5 (joint): H5-1 static Stash from arrival, door approach and Council fight > CHEST_WAIT: one horde, Council killed first
+PASS HordeDev round 5 (joint): H5-2 persisted HordeDev + 6 s loading screen at startup: nothing before WarPigs decides in the loaded world
+PASS HordeDev round 5 (joint): H5-4 sticky advisory restock flag under WarPigs: no HordeDev Alfred trip from the War Plan chest room
+HordeDev round 5 (joint): 71 checks, 0 failures
+PASS: HordeDev round-5 joint regressions (71 checks)
+PASS: test_horde_warplan_r5.lua
+PASS (LuaJIT): test_horde_warplan_r5.lua
+PASS arkham integration: ARK-1 sticky restock need_trigger does not re-trigger Alfred right after a cycle in town
+PASS arkham integration: ARK-1 advisory-only Alfred flags never pull Arkham out of a pit; hard needs still do
+PASS arkham integration: ARK-3 same pit after an Alfred round trip keeps deadline, boss state and explorer map
+PASS arkham integration: R10 resuming a floor reached via portal keeps its back portal blacklisted
+PASS arkham integration: ARK-3 opening a new pit discards the pending resume
+PASS arkham integration: ARK-4 full inventory waits for the glyph upgrade instead of leaving the pit
+PASS arkham integration: ARK-4 a Looter that never goes idle delays the glyph upgrade only for a bounded time
+PASS arkham integration: ARK-4 an Alfred trip yields to an active Looter (bounded) like the glyph upgrade
+PASS arkham integration: ARK-5 hand-off to a busy Alfred stops Arkham's own long path (foreign_trigger, no release API)
+PASS arkham integration: ARK-5 hand-off to a busy Alfred stops Arkham's own long path (status_error, no release API)
+PASS arkham integration: ARK-5/ARK-8 C3 release is used on hand-off and disable, also while Alfred is busy
+PASS arkham integration: ARK-8 older Batmobile: disable restores the default explorer priority
+PASS arkham integration: ARK-7 external enable succeeds with an unbound keybind; manual gate unchanged
+PASS arkham integration: ARK-9 unreadable Alfred status holds at most ~10s, then Arkham continues
+PASS arkham integration: ARK-9 reset timeout exits even while Alfred status is unreadable
+PASS arkham integration: C1 paused Alfred with advisory flags does not hold Arkham in town
+PASS arkham integration: C1/C6 paused Alfred with hard work: visible bounded hold, then continue
+PASS arkham integration: C2 get_status exposes alfred_trip, in_run and committed_entry
+PASS arkham integration: C4 block_movement is released when a combat task hands off and on disable
+PASS arkham integration: C5 an in-place Alfred yield does not blacklist the Burden Altar being walked to
+PASS arkham integration: C5 a Looter yield mid-upgrade does not finish the glyph as "no glyphs available"
+PASS arkham integration: A5-1 WarPigs enabled: a sticky advisory flag starts no Arkham trip in town or in the pit (any alfred_idle)
+PASS arkham integration: A5-1 WarPigs disabled, unreadable or absent: the standalone advisory trip in town is unchanged
+PASS arkham integration: no late require from the exported API or the scheduler (shared module cache)
+PASS: Arkham integration: 24 regressions passed
+PASS: test_integration_arkham.lua
+PASS (LuaJIT): test_integration_arkham.lua
+PASS arkham+batmobile: R10 same pit after an Alfred with-teleport trip: run resumes and Batmobile map restored (arkham_first)
+PASS arkham+batmobile: R10 same pit after an Alfred with-teleport trip: run resumes and Batmobile map restored (batmobile_first)
+PASS arkham+batmobile: R10 callback before the return portal (Skov_Temis): Arkham holds, Alfred returns, run and map resume
+PASS arkham+batmobile: R10 callback before the return portal (Frac_Kyovashad): Arkham holds, Alfred returns, run and map resume
+PASS arkham+batmobile: R10 callback in town without a return: bounded hold, then Arkham continues in town
+PASS arkham+batmobile: R10 a failed Alfred return ends the hold at once
+PASS arkham+batmobile: R10 resumed floor reached through a portal keeps its back portal blacklisted
+PASS: Arkham+Batmobile joint: 7 regressions passed
+PASS: test_integration_arkham_batmobile.lua
+PASS (LuaJIT): test_integration_arkham_batmobile.lua
+PASS Batmobile integration: release clears goal, long route and traversal routing, pauses, restores priority
+PASS Batmobile integration: release by another plugin leaves the current owner alone
+PASS Batmobile integration: reset() restores the default explorer priority
+PASS Batmobile integration: set_target reports deferred acceptance as (true, "deferred")
+PASS Batmobile integration: paused stationary fight never trips trap/giving_up or interacts a nearby gizmo
+PASS Batmobile integration: a trap raised before a pause ages out instead of freezing while paused
+PASS Batmobile integration: unpaused navigation still detects a real trap
+PASS Batmobile integration: R9 probe: a paused-per-tick long route oscillating in a pocket trips the trap and escapes
+PASS Batmobile integration: R9 a slow paused route (no displacement signal) is still sampled while its own caller drives it
+PASS Batmobile integration: R9 a paused set_target drive that keeps moving in a pocket toward a far goal trips the trap
+PASS Batmobile integration: R9 controls: a paused boss fight on a long route and a still paused hold never trip
+PASS Batmobile integration: an inert non-Jump traversal is abandoned after 3 interacts
+PASS Batmobile integration: a paused caller does not interact a stale gizmo after release
+PASS Batmobile integration: paused unstuck keeps the caller waypoint and never writes explorer.visited
+PASS Batmobile integration: pause()+navigate_long_path keeps the pause; paused arrival ends the route
+PASS Batmobile integration: unpaused self-driven route at the goal does not turn into exploration
+PASS Batmobile integration: a release pause from another plugin does not stall a Reaper-style route
+PASS Batmobile integration: a kept-pause route nobody drives falls back to autonomous drive after 1 s
+PASS Batmobile integration: clear_traversal_blacklist lifts the 60 s global traversal block
+PASS Batmobile integration: explorer, trap and route state are reset on a world change or teleport
+PASS Batmobile integration: a goal set during the loading screen survives the world-change reset
+PASS Batmobile integration: clear_giving_up drops traversal ping-pong history
+PASS Batmobile integration: R10 pit -> town (Alfred trip) -> same pit restores the explorer map, nothing else
+PASS Batmobile integration: R10 an Alfred trip inside one open world (zone teleport there and back) keeps the helltide map
+PASS Batmobile integration: R10 controls: late, far, other-pit or explicitly reset returns start with a fresh map
+PASS Batmobile integration: resumed custom waypoint that cannot be reached is reported by set_target
+PASS Batmobile integration: a stale custom goal or route of a disabled plugin is replaced by the next goal claim
+PASS Batmobile integration: R11 move/resume by another caller keep the owner goal; only a new claim or its release replaces it
+PASS Batmobile integration: L10 end-to-end: after Arkham releases in Temis nothing keeps steering
+PASS Batmobile integration: external update/move respect the loading guard; load-time scans do not poison the explorer
+PASS Batmobile integration: a caller yield does not count toward the partial-path no-progress window
+PASS Batmobile integration suite: 31 cases, 183 checks
+PASS: test_integration_batmobile.lua
+PASS (LuaJIT): test_integration_batmobile.lua
+PASS Helltide integration: CRT-4/L11 Looter busy longer than the chest window, then idle: chest approached, not blacklisted
+PASS Helltide integration: CRT-4 Looter bursts with short idle gaps are all excluded from the chest window
+PASS Helltide integration: CRT-4 control: a genuinely stuck chest (no yield) is still blacklisted by geometry
+PASS Helltide integration: CRT-4 remembered-chest recall: Looter yield does not trip the recall stuck/no-progress windows
+PASS Helltide integration: CRT-4 recall control: a genuinely stuck recall is still blacklisted
+PASS Helltide integration: C5 patrol re-issues its goal after a Looter yield instead of idling into FREE_EXPLORE
+PASS Helltide integration: R12/HLT-1 a sticky advisory need_trigger never leaves the helltide: zero trips, EXPLORE_HELLTIDE > 80%
+PASS Helltide integration: R12/HLT-2 legacy restock_count is advisory: no trip from inside a helltide
+PASS Helltide integration: R12 a provider publishing only need_trigger keeps it as its signal, behind the 30 s grace
+PASS Helltide integration: HLT-1 a hard need (inventory_full) still triggers at once, even inside the grace
+PASS Helltide integration: HLT-2 legacy fork: a latched teleport_done/teleport_failed is neither work nor a town need
+PASS Helltide integration: C1 unreadable Alfred status holds HR at most ~10 s, then counts as unavailable (one log line)
+PASS Helltide integration: C1 a foreign Alfred pause: advisory need is idle at once; hard need holds <= 60 s then farms on
+PASS Helltide integration: C1 cancelling HR does not erase the sticky grace
+PASS Helltide integration: HLT-3 give-up: interrupted channel re-fires the town teleport; no Alfred trip from the trap
+PASS Helltide integration: HLT-3 give-up with salvage off still retries instead of parking in BACK_TO_TOWN
+PASS Helltide integration: HLT-8 the give-up teleport and its retries wait for an active Looter pickup
+PASS Helltide integration: HLT-4 minute 55-59: HR teleports first; salvage only after arrival and only for a hard need
+PASS Helltide integration: A5-2 guard: a sticky advisory flag starts no HR trip in town or in the helltide, with or without WarPigs
+PASS Helltide integration: HLT-8 search teleports wait for the Looter (bounded 20 s)
+PASS Helltide integration: HLT-7 external enable without the buff: bounded grace before search teleports away
+PASS Helltide integration: HLT-5 direct entry into a helltide resets Batmobile exploration once per session
+PASS Helltide integration: HLT-6 disabling HR restores orbwalker clear (cinder gate) and unblocks movement
+PASS Helltide integration: R13/L12b disable after Manage orbwalker is unticked still restores the clear OFF / block ON HR forced
+PASS Helltide integration: R13/L12b unticked mid-run: the forced clear is handed back, suspend unblocks, then HR leaves the orbwalker alone
+PASS Helltide integration: HLT-9 MOVING_TO_TRAVERSAL drops the stale patrol goal so Batmobile can select the traversal
+PASS Helltide integration: C3 HR release paths call BatmobilePlugin.release(helltide_revamped)
+PASS Helltide integration: C6 a Looter hold over a minute is logged once a minute and published in status
+Helltide integration: 28 cases, 125 checks, 0 failures
+PASS: test_integration_helltide (28 cases)
+PASS: test_integration_helltide.lua
+PASS (LuaJIT): test_integration_helltide.lua
+HordeDev integration: 268 checks, 0 failures
+PASS: HordeDev integration regressions (268 checks)
+PASS: test_integration_horde.lua
+PASS (LuaJIT): test_integration_horde.lua
+PASS Reaper integration: C2 success: on_complete(success) once, status run phase and result
+PASS Reaper integration: C2/WPD-6 failure: unreachable boss reports failed once with the reason
+PASS Reaper integration: C2 cancel: disable() mid-run reports cancelled once
+PASS Reaper integration: C2 cancel: a request switched off before its first frame still reports
+PASS Reaper integration: C2 refusals return false plus a reason
+PASS Reaper integration: RPR-8 run_once(belial) is refused while the Belial chest sequence is off
+PASS Reaper integration: RPR-2 manual Reaper reports external_run=false and in_run only in committed phases
+PASS Reaper integration: RPR-3 the sticky grace survives run_once (no second trip)
+PASS Reaper integration: RPR-3 a sticky advisory flag never pulls the player out of the lair
+PASS Reaper integration: RPR-3 legacy restock_count gets the same grace
+PASS Reaper integration: RPR-3 a hard need still triggers between runs inside the lair
+PASS Reaper integration: A5-2 WarPigs enabled: run_once from town with a sticky advisory flag starts no Alfred trip
+PASS Reaper integration: A5-2 WarPigs enabled: a hard need still triggers in town; the lair rule is unchanged
+PASS Reaper integration: A5-2 WarPigs disabled, unreadable or absent: the standalone advisory trip in town is unchanged
+PASS Reaper integration: RPR-4 a foreign pause without work does not stop the run (use_alfred off)
+PASS Reaper integration: RPR-4 a foreign pause without work does not stop the run (use_alfred on)
+PASS Reaper integration: RPR-4 an unreadable status holds at most ~10 s, then Alfred is unavailable
+PASS Reaper integration: RPR-4 use_alfred off: an unreadable status is not a hold
+PASS Reaper integration: RPR-5 legacy Batmobile: yielding to a busy Alfred and disable() stop the own route
+PASS Reaper integration: RPR-5 C3 Batmobile: disable() hands off through BatmobilePlugin.release(reaper)
+PASS Reaper integration: RPR-5 real Batmobile: a busy Alfred yield and disable() end the Reaper route
+PASS Reaper integration: RPR-6 the town teleport waits for the Looter plus 3 s of quiet
+PASS Reaper integration: RPR-6 a never-idle Looter holds the exit at most ~30 s (C6 bound)
+PASS Reaper integration: RPR-10 run_once, fight and stop never leave the orbwalker clear toggle OFF
+PASS Reaper integration: C4 switching away from the fight releases the movement block
+PASS Reaper integration: RPR-11 a due dungeon reset runs in town before the run reports
+PASS Reaper integration: C5 Alfred yields during WAIT_GONE do not abandon the chest
+PASS Reaper integration: C6 a long Alfred hold is logged once and shown in status
+PASS Reaper integration: Joint RPR-2: WarPigs releases a manually started Reaper and runs the Pit
+PASS Reaper integration: Joint WPD-6: a failing boss is reported with its reason and backed off
+Reaper integration: 30 cases, 165 checks, 0 failures
+PASS: test_integration_reaper (30 cases)
+PASS: test_integration_reaper.lua
+PASS (LuaJIT): test_integration_reaper.lua
+PASS: SilentRaven integration regressions: 41 cases, 262 checks
+PASS: test_integration_silentraven.lua
+PASS (LuaJIT): test_integration_silentraven.lua
+PASS WarPigs dispatch integration: 169 checks
+PASS: test_integration_warpigs_dispatch.lua
+PASS (LuaJIT): test_integration_warpigs_dispatch.lua
+PASS WarPigs town integration: 165 checks (C1 Alfred reading, Whisper slot, Temis kick vs WarPug, bounded Whisper admission/retry, Looter quiet window, bounded traffic hold)
+PASS: test_integration_warpigs_town.lua
+PASS (LuaJIT): test_integration_warpigs_town.lua
+PASS WarPug integration: latched Alfred admission, canonical Alfred predicate, pause/resume for companion work, bounded visible holds, logged plan nodes, no blind shipped calibration, one-shot keybinds, 5.1 library (107 checks)
+PASS: test_integration_warpug.lua
+PASS (LuaJIT): test_integration_warpug.lua
+PASS WonderCity integration: L9: already opened (non-interactable) chest after an observed boss kill completes and exits
+PASS WonderCity integration: L9: opened chest replaced by a new non-interactable actor after our click
+PASS WonderCity integration: CRT-1: chest that stays interactable after our interaction completes in ~8 s
+PASS WonderCity integration: CRT-1: interacted chest that vanishes without new loot completes after 5 s
+PASS WonderCity integration: CRT-1: chest seen but opened elsewhere (vanished, never clicked) completes after 20 s
+PASS WonderCity integration: CRT-1: an unreadable scan streak never counts as a vanished chest
+PASS WonderCity integration: CRT-1: a locked chest waits while the boss lives, then the bounded unlock wait runs
+PASS WonderCity integration: R14: without opened evidence the unlock wait is 60 s (was 30 s)
+PASS WonderCity integration: CRT-1: close-range approach stall interacts from where the player stands
+PASS WonderCity integration: R14: a boss corpse seen together with the locked chest is not evidence; one diagnostic line
+PASS WonderCity integration: R14: a chest still locked by a boss outside the actor stream is opened when it unlocks after 30 s
+PASS WonderCity integration: R14: a kill observed before the chest was first seen (another boss) is not evidence
+PASS WonderCity integration: R14: a kill seen across a brief gap is observed; a corpse returning long after is not
+PASS WonderCity integration: R14: a loot burst next to the locked chest is evidence; a single drop, obols or far loot are not
+PASS WonderCity integration: R14: our click before an Alfred round trip is evidence for the non-interactable chest on return
+PASS WonderCity integration: R14/C5: an Alfred yield does not count toward the 60 s evidence-free wait
+PASS WonderCity integration: CRT-1: a foreign Alfred trip after opening resumes the same run with the chest done
+PASS WonderCity integration: CRT-1: own with-teleport trip before the boss keeps deadline and enticements; new entry forgets it
+PASS WonderCity integration: CRT-1: leaving through the exit (not an Alfred trip) never resumes
+PASS WonderCity integration: WCY-2: defaults with tributes opens the portal without a tribute
+PASS WonderCity integration: WCY-2: empty inventory opens the portal without a tribute
+PASS WonderCity integration: WCY-2: configured tribute exhausted opens the portal without a tribute
+PASS WonderCity integration: WCY-2: configured tribute without a valid slot opens the portal without a tribute
+PASS WonderCity integration: C2/WCY-7: committed_entry and in_run follow the entry and are bounded
+PASS WonderCity integration: WCY-1: a sticky need_trigger does not livelock the town route
+PASS WonderCity integration: WCY-1: preemption/cancel keeps the grace; a hard need still re-triggers
+PASS WonderCity integration: WCY-1: a lost legacy callback gets the same sticky grace
+PASS WonderCity integration: A5-1: WarPigs enabled: a sticky advisory flag starts no trip at activity start, whatever alfred_idle says
+PASS WonderCity integration: A5-1: the joint hand-off shape: alfred_idle lapses 20 s after WarPigs' cycle, still no WonderCity trip
+PASS WonderCity integration: A5-1: WarPigs disabled, unreadable or absent keeps the standalone advisory trip
+PASS WonderCity integration: F-C1/A5-1: inside an Undercity the rules are unchanged under WarPigs
+PASS WonderCity integration: C1: paused Alfred without hard need is idle; with hard need the hold is bounded
+PASS WonderCity integration: WCY-9: failed/cancelled results retry without the grace; repeated failures stop the loop
+PASS WonderCity integration: WCY-6: unreadable Alfred status never blocks the forced run-timeout exit
+PASS WonderCity integration: WCY-6: unreadable status in town holds at most ~10 s, logged once
+PASS WonderCity integration: C6: a known live Alfred holds the forced exit at most 120 s
+PASS WonderCity integration: WCY-5: foreign Alfred takes over: own Temis long path stops (older Batmobile)
+PASS WonderCity integration: WCY-5: foreign Alfred takes over: own Temis long path stops (BatmobilePlugin.release)
+PASS WonderCity integration: WCY-5: a route another caller claimed since is never stopped by WonderCity
+PASS WonderCity integration: WCY-8: exploring leaves no distance priority behind after disable
+PASS WonderCity integration: WCY-8: exploring leaves no distance priority behind after disable (release)
+PASS WonderCity integration: C2: own trip callback in town holds for the return portal (bounded 30 s)
+PASS WonderCity integration: C4: a forced clear-toggle off is restored on disable even after Manage orbwalker was switched off
+PASS WonderCity integration: C5: an Alfred yield does not expire the chest interaction window
+PASS WonderCity integration: C5: an Alfred yield does not mark obols unreachable
+PASS WonderCity integration: C5: a preempted Temis walk starts a fresh stuck window
+WonderCity integration: 46 cases, 247 checks, 0 failures
+PASS: test_integration_wondercity (46 cases)
+PASS: test_integration_wondercity.lua
+PASS (LuaJIT): test_integration_wondercity.lua
+PASS joint: 1 load: all nine plugins load together, documented exports, exact global set (0.3s)
+PASS joint: 1 load: the caller-context detector records a foreign require (self-test) (0.1s)
+PASS joint: 2 Temis idle 60 s: managers on, activity plugins off, no plan table in stream (0.1s)
+PASS joint: 2 Temis start with activity toggles persisted on: WarPigs turns them off on its first tick (0.1s)
+PASS joint: 2 Temis session: Whisper claim -> WarPug plan -> WarPigs enables the Pit (0.4s)
+PASS joint: 2 Temis Whisper claim during Looter bursts: paused before accept, success after accept, no re-requests (0.1s)
+PASS joint: 2 Temis session with Alfred hard: bounded holds, one chain, pit entered (0.2s)
+PASS joint: 2 Temis session with Alfred unreadable: bounded holds, one chain, pit entered (0.2s)
+PASS joint: 3 API sweep from WarPigs context on a freshly loaded host (0.4s)
+PASS joint: 3 API sweep repeated in Temis with every plugin ticking (WarPigs off, SilentRaven unmanaged) (0.2s)
+PASS joint: 3 status reads from every plugin context mid-run (Arkham in the pit) (0.8s)
+PASS joint: 4 Pit -> Undercity: Arkham released in town, Batmobile and orbwalker clean, WonderCity after the gap (1.3s)
+PASS joint: 4 Undercity -> Helltide: WonderCity released on return to Kurast, Helltide after the gap (3.1s)
+PASS joint: 4 Horde -> turn-in: HordeDev released after its exit, turn-in teleports after the short settle (L4) (0.1s)
+PASS joint: 4 Pit hand-off waits over Arkham's own Alfred trip (town leg is not the end of the run) (1.2s)
+PASS joint: 4 Reaper boss dispatch from Temis; WarPigs stop cancels the run with one callback (2.5s)
+PASS joint: 4 Pit -> Undercity with Use teleport: via-Temis Alfred preamble, warplan teleport, WonderCity in Kurast (1.0s)
+PASS joint: 4 sticky restock flag with Use teleport: one Alfred cycle per Temis visit, the Pit starts without another (0.2s)
+PASS joint: 5 master stop: WarPigs off mid-pit releases everything; re-enable resumes in place (2.4s)
+PASS joint: 5 master stop via WarPigsPlugin.disable(); manual Arkham is adopted on re-enable (1.1s)
+PASS joint: 5 death in the pit under WarPigs: revive, no hand-off, Arkham continues (2.0s)
+PASS joint: J1 War Plan Horde, Use teleport off: WarPigs teleports, HordeDev in War Plan mode, 6 waves, exit, turn-in (3.8s)
+PASS joint: J2 War Plan Horde, Use teleport on: via-Temis preamble (one Alfred cycle), then the War Plan teleport (1.3s)
+PASS joint: J3 War Plan teleport misses the Horde 3 times: no compass, visible reason, 60 s backoff; compass fallback once (0.9s)
+PASS joint: J4 HordeDev toggle persisted on at load with WarPigs on: nothing before WarPigs decides (0.7s)
+PASS joint: J5 HordeDev hotkey pressed mid-horde under WarPigs: a user pause (W5-4), WarPigs waits visibly, horde resumes (1.7s)
+PASS joint: J6 Horde -> turn-in -> next Pit plan in one Temis visit (Use teleport on): one WarPigs Alfred cycle (1.1s)
+PASS joint: J7 standalone HordeDev (WarPigs off): compass farming unchanged (0.9s)
+PASS joint: K1 QQT reload mid War Plan horde (persisted toggles, place=bsk): War Plan mode, the run completes, exit, turn-in (3.9s)
+PASS joint: K2 Alfred's own teleport trip mid War Plan horde, back into the same horde: HordeDev kept, nothing leaves BSK (4.5s)
+PASS joint: K3 War Plan teleport lands in a BSK lobby zone: no compass, the reason and a report request (fallback on/off) (2.8s)
+PASS joint: K4 Stash visible from arrival: the Council is killed and the chests opened before the exit (3.9s)
+PASS joint: K5 user hotkey pause under WarPigs: HordeDev in the chest room, Arkham while the plan moves on; WarPigs waits (4.1s)
+PASS joint: K6 sticky advisory restock flag across a full plan: advisory Alfred only from WarPigs in Temis, once per visit (18.3s)
+NOTE joint: shared standard library mutated: table.contains (HordeDev core/utils.lua, pre-existing)
+NOTE joint: persisted toggle: WonderCity-main fired teleport_to_waypoint(0x1EAACC) in its first frame, before WarPigs' first tick (README: avoid starting activity controllers yourself)
+NOTE joint: Pit -> Undercity: Arkham issued 8 movement call(s) in Temis before its release (WarPigs ticks at 2 Hz)
+PASS: joint suite (all nine plugins in one host): 34 scenarios, 2784 checks
+PASS: test_joint_suite.lua
+PASS (LuaJIT): test_joint_suite.lua
+PASS r5 advisory joint: A5-1 WonderCity: sticky restock flag, Undercity plan from Temis: no WonderCity advisory trip (Use teleport on/off)
+PASS r5 advisory joint: A5-1 Arkham: sticky restock flag, Pit plan from Kurast: no Arkham advisory trip in Temis; a full bag still triggers
+PASS r5 advisory joint: A5-2 Reaper: sticky restock flag, boss plan from Temis: no Reaper advisory trip (Use teleport on/off)
+PASS r5 advisory joint: A5-2 HelltideRevamped guard: sticky restock flag, Helltide plan from Temis: no HR advisory trip
+PASS r5 advisory joint: A5-1 standalone unchanged: WarPigs off, WonderCity on by hand in Kurast: its advisory trip at the start
+r5 advisory joint: 5 cases, 44 checks, 0 failures
+PASS r5 advisory joint regressions: 44 checks
+PASS: test_r5_advisory_joint.lua
+PASS (LuaJIT): test_r5_advisory_joint.lua
+Reaper behavioral assertions: 69
 PASS: test_reaper.lua
+PASS (LuaJIT): test_reaper.lua
 Reaper feedback assertions: 20
 PASS: test_reaper_feedback.lua
-PASS independent bridge/SilentRaven contracts: 155 assertions
+PASS (LuaJIT): test_reaper_feedback.lua
+PASS independent bridge/SilentRaven contracts: 154 assertions
 PASS: test_secondpass_contracts.lua
+PASS (LuaJIT): test_secondpass_contracts.lua
 PASS second-pass dungeons: real GUI/external enable and disable control each actual main scheduler
 PASS second-pass dungeons: legacy getter returning nil for false is idle, disabled is idle, busy is busy
 PASS second-pass dungeons: modern unreadable status stays busy and is not replaced by a legacy nil
@@ -103,25 +377,78 @@ PASS second-pass dungeons: walking toward a traversal is not itself a completed 
 PASS second-pass dungeons: real GUI accepts the same alternate Alfred export as the runtime
 Second-pass dungeons: 14 behavior regressions passed
 PASS: test_secondpass_dungeons.lua
+PASS (LuaJIT): test_secondpass_dungeons.lua
 Farming data: 8703 coordinate rows, 151 affix rows validated
 Second-pass farming: 18 behavior regressions passed
 PASS: test_secondpass_farming.lua
-Second-pass navigation audit: 84 checks
+PASS (LuaJIT): test_secondpass_farming.lua
+Second-pass navigation audit: 94 checks
 PASS: test_secondpass_navigation.lua
-Second-pass town contracts: 322 checks
+PASS (LuaJIT): test_secondpass_navigation.lua
+SKIP: optional original Alfred source contract probe (QQT_REFERENCE_ROOT unavailable)
+SKIP: optional original LooteerV2 source contract probe (QQT_REFERENCE_ROOT unavailable)
+Second-pass town contracts: 306 checks
 PASS: test_secondpass_town.lua
+PASS (LuaJIT): test_secondpass_town.lua
 Second-pass WarPigs/WarPug assertions: 62
 PASS: test_secondpass_warpigs.lua
+PASS (LuaJIT): test_secondpass_warpigs.lua
 SilentRaven focused regressions: 101 checks
 PASS: test_silentraven.lua
+PASS (LuaJIT): test_silentraven.lua
 Suite contracts: 33 checks, 0 failures
 PASS: test_suite_contracts.lua
+PASS (LuaJIT): test_suite_contracts.lua
 PASS WarPigs: serialized tasks/bosses, cleanup gates, ownership, snapshot errors, teleport cancellation, Alfred callbacks, native turn-in
 PASS: test_warpigs.lua
-PASS WarPigs/SilentRaven: 55 assertions across visit, ownership and town handoff scenarios
+PASS (LuaJIT): test_warpigs.lua
+PASS WarPigs round-4 joint regressions: 26 checks
+PASS: test_warpigs_joint_r4.lua
+PASS (LuaJIT): test_warpigs_joint_r4.lua
+PASS WarPigs/SilentRaven R15 yield contract: 65 checks (actual bridge + actual SilentRaven)
+PASS: test_warpigs_raven_yield.lua
+PASS (LuaJIT): test_warpigs_raven_yield.lua
+PASS WarPigs user pause (W5-4): 147 checks
+PASS: test_warpigs_user_pause.lua
+PASS (LuaJIT): test_warpigs_user_pause.lua
+PASS WarPigs/SilentRaven: 62 assertions across visit, ownership and town handoff scenarios
 PASS: test_warpigs_whispers.lua
+PASS (LuaJIT): test_warpigs_whispers.lua
+PASS War Plan Horde: enable(opts) selects the entry mode; enable() stays compass; disable() resets it
+PASS War Plan Horde: War Plan mode outside BSK idles visibly: Temis
+PASS War Plan Horde: War Plan mode outside BSK idles visibly: Caldeum, away from the gate
+PASS War Plan Horde: War Plan mode outside BSK idles visibly: Caldeum at the gate with a compass
+PASS War Plan Horde: War Plan mode outside BSK idles visibly: Caldeum at an open portal, stale run flags
+PASS War Plan Horde: War Plan mode outside BSK idles visibly: Cerrigar with a full bag
+PASS War Plan Horde: compass mode (enable() without options) keeps the Library and compass chain
+PASS War Plan Horde: War Plan run in BSK: 6 waves, council, chests, Leave Dungeon, completed, no second cycle
+PASS War Plan Horde: back-to-back War Plan hordes: each arrival in BSK gets a fresh run (re-enable or not)
+PASS War Plan Horde: War Plan horde with a stash but no chest room: bounded skip, exit, completed (compass holds as before)
+PASS War Plan Horde: no false completion mid-wave: a stash in sight and a blank quest list before the waves end
+PASS War Plan Horde: War Plan horde without chest room or stash: the objective vanishing bounds completion
+PASS War Plan Horde: War Plan horde with nothing after the council: the quiet boss room bounds completion
+PASS War Plan Horde: War Plan chest room with no aether: the chest phase ends within its bounds and the run completes
+PASS War Plan Horde: War Plan chest room without a stash: leaves after the bounded stash wait (compass unchanged)
+PASS War Plan Horde: War Plan exit: Leave Dungeon landing elsewhere and a refused reset still complete the run
+PASS War Plan Horde: War Plan mode: a full bag with no Alfred never starts the Cerrigar walk-in; chests continue
+PASS War Plan Horde: re-enable in War Plan mode at the gate with stale run flags: full reset, idle, never a compass
+PASS War Plan Horde: persisted-on HordeDev waits for WarPigs before any Library teleport or compass (bounded, visible)
+PASS War Plan Horde: H5-1 stash visible from arrival, door approach and Council fight longer than CHEST_WAIT: the Council is killed first
+PASS War Plan Horde: H5-1 the War Plan objective gone mid-fight (or a blank quest list at the door) is no evidence before the boss room is idle
+PASS War Plan Horde: H5-1 an Alfred hold in the boss room is not idle time: no stale evidence while the wave task does not run
+PASS War Plan Horde: H5-2 F-H2 wait: Limbo / loading time does not count; the bound runs in the loaded world only
+PASS War Plan Horde: H5-4 chest room under WarPigs: an advisory-only flag starts no HordeDev Alfred trip; hard needs and standalone unchanged
+War Plan Horde (HordeDev): 327 checks, 0 failures
+PASS: War Plan Horde entry, HordeDev side (327 checks)
+PASS: test_warplan_horde_hordedev.lua
+PASS (LuaJIT): test_warplan_horde_hordedev.lua
+PASS War Plan Horde entry (WarPigs): 346 checks
+PASS: test_warplan_horde_warpigs.lua
+PASS (LuaJIT): test_warplan_horde_warpigs.lua
 PASS WarPug: real DFS, manual ownership, context/death/loading, bounded rerolls, confirmation outcomes, integration gates, persistence, actual main sequencer and external import isolation
 PASS: test_warpug.lua
+PASS (LuaJIT): test_warpug.lua
 WonderCity: 39 focused regressions passed
 PASS: test_wondercity.lua
-Offline test files: 22 passed, 0 failed
+PASS (LuaJIT): test_wondercity.lua
+Offline test files: 41 files x Lua 5.4 + LuaJIT; 82 runs passed, 0 failures

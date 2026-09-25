@@ -1,5 +1,5 @@
 -- ============================================================
---  Reaper  v1.9.1
+--  Reaper  v1.10.0
 --  by Magoogle
 --
 --  Flow per run:
@@ -296,7 +296,7 @@ on_render(function()
     end
 
     local x, y = 20, 60
-    graphics.text_2d("=== REAPER  v1.9.1  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
+    graphics.text_2d("=== REAPER  v1.10.0  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
     y = y + 20
 
     if boss then
@@ -472,6 +472,6 @@ ReaperPlugin = {
 }
 
 console.print("=============================================")
-console.print("  Reaper  v1.9.1  by Magoogle  - Loaded")
+console.print("  Reaper  v1.10.0  by Magoogle  - Loaded")
 console.print("  Enable in menu to start reaping")
 console.print("=============================================")
