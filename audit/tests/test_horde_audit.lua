@@ -142,6 +142,24 @@ check('dead boss and spent pylon do not hide living wave targets',function()
  e.require('tasks.horde'):Execute()
  assert(s.interactions==0 and s.targets[#s.targets]==living.pos)
 end)
+check('War Plan altar (The Black Pact) is taken like a pylon, once, and only when enabled',function()
+ local e,s,settings=harness();settings.take_warplan_altar=true
+ local a1=actor('Warplans_BSK_ReplicatorGizmo_HellsWrath',1);local a2=actor('Warplans_BSK_ReplicatorGizmo_AetherGoblins',1)
+ local idle=actor('Warplans_BSK_ReplicatorGizmo_Inactive',1)
+ e.require('data.pylons')[2]='HellsWrath'
+ s.actors={idle,a2,a1}
+ local horde=e.require('tasks.horde');horde:Execute()
+ assert(s.interactions==1,'altar interacted: '..s.interactions)
+ local took=false;for _,l in ipairs(s.logs) do if l:find('taking Warplans_BSK_ReplicatorGizmo_HellsWrath',1,true) then took=true end end
+ assert(took,'highest-priority offer (HellsWrath) taken')
+ -- the chosen offer is gone: the other offer is not accepted as a second one
+ s.actors={idle,a2};s.now=s.now+3;horde:Execute()
+ assert(s.interactions==1,'second offer ignored')
+ -- disabled: nothing
+ local e2,s2,settings2=harness();settings2.take_warplan_altar=false
+ s2.actors={actor('Warplans_BSK_ReplicatorGizmo_HellsWrath',1)};e2.require('tasks.horde'):Execute()
+ assert(s2.interactions==0,'option off')
+end)
 check('movement ownership is released only once and never before issuance',function()
  local e,s=harness();local m=e.require('core.movement');m.stop();assert(s.stops==0)
  m.claim(true);m.stop();m.stop();assert(s.stops==1)

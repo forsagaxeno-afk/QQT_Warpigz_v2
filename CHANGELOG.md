@@ -2,6 +2,23 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.2] — 2026-09-25
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.1.
+
+### Added
+
+- HordeDev 2.2.0: **Take War Plan altar (The Black Pact)** (default on). The War Plan node's altar between waves (`Warplans_BSK_ReplicatorGizmo_<Offer>`, same offer names as pylons) was ignored because HordeDev only looked for `BSK_Pyl*`. It is now accepted like a pylon, by the same priority list (offers missing from the list are still taken), once per offering window (the other offers are ignored for 60 s), and logged.
+- WonderCity 2.2.0: **Take the boss portal as soon as it opens** (default off). For the War Plan node that opens a portal straight to the boss at max attunement: the floor portal (`X1_Undercity_PortalSwitch`) is taken from anywhere in view (150 m) instead of only within the check distance; logged once per run. The existing one-time actor scan in the Undercity log lists the real names if the portal turns out to be a different object.
+
+### Changed
+
+- Releases v2.2.0 and v2.2.1 (AlfredTheButler-WarPigz, based on SteroidAlfredV2) are withdrawn from public distribution: the release workflow deletes every release listed in `audit/withdrawn_releases.txt`. The latest public release is v2.1.3 until 2.3.0 is published.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: all test files × (Lua 5.4 + LuaJIT) pass; new cases in `test_horde_audit.lua` and `test_wondercity.lua`.
+
 ## [2.3.0-rc.1] — 2026-09-25
 
 Test build, released as a private draft (not published) until live testing is done.

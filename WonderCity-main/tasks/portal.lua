@@ -18,16 +18,27 @@ local task = {
     portal_exit = -1,
     last_interact_time = -math.huge
 }
+-- War Plan node "portal to the boss at max attunement": with
+-- settings.rush_boss_portal the floor portal is taken from anywhere in view
+-- (RUSH_PORTAL_RANGE), not only within check_distance. Logged once per run.
+local RUSH_PORTAL_RANGE = 150
+local rush_logged_run = nil
 local get_portal = function ()
     local local_player = get_local_player()
     if not local_player then return end
+    local range = settings.rush_boss_portal and RUSH_PORTAL_RANGE or settings.check_distance
     local actors = actors_manager:get_ally_actors()
     for _, actor in pairs(actors) do
         if actor:is_interactable() then
             local actor_name = actor:get_skin_name()
             if actor_name == 'X1_Undercity_PortalSwitch' then
                 local dist = utils.distance(local_player, actor)
-                if dist <= settings.check_distance then
+                if dist <= range then
+                    if settings.rush_boss_portal and dist > settings.check_distance
+                        and rush_logged_run ~= tracker.undercity_start_time then
+                        rush_logged_run = tracker.undercity_start_time
+                        console.print(string.format('[WonderCity:portal] portal open %.0fm away - taking it (Take the boss portal as soon as it opens)', dist))
+                    end
                     return actor
                 end
             end

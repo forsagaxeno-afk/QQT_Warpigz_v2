@@ -499,6 +499,14 @@ test('standalone floor portal works without a visible warp pad', function()
     assert(#s.interactions==1)
 end)
 
+test('Take the boss portal as soon as it opens: a far floor portal is taken only with the option', function()
+    local s=session();s.actors={actor('X1_Undercity_PortalSwitch',60)}
+    local task=s.load('tasks.portal')
+    assert(not task.shouldExecute(),'60 m portal ignored by default (check distance 20)')
+    s.settings.rush_boss_portal=true
+    assert(task.shouldExecute(),'option on: far portal taken')
+end)
+
 test('arrived warp pad without a portal does not monopolize task priority', function()
     local s=session();s.actors={actor('X1_Undercity_WarpPad',0)}
     assert(not s.load('tasks.portal').shouldExecute())

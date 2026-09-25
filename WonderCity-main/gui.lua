@@ -1,5 +1,5 @@
 local plugin_label = 'wonder_city'
-local plugin_version = '2.1.3'
+local plugin_version = '2.2.0'
 console.print("Lua Plugin - WonderCity - Leoric - v" .. plugin_version)
 
 local gui = {}
@@ -134,6 +134,7 @@ gui.elements = {
     exit_mode = combo_box:new(0, get_hash(plugin_label .. '_' .. 'exit_mode')),
     loot_obols = create_checkbox(true, 'loot_obols'),
     chase_goblin = create_checkbox(true, 'chase_goblin'),
+    rush_boss_portal = create_checkbox(false, 'rush_boss_portal'),
     max_enticement = slider_int:new(0, 9, 5, get_hash(plugin_label .. '_' .. 'max_enticement')),
     enticement_timeout = slider_int:new(0, 10, 4, get_hash(plugin_label .. '_' .. 'enticement_timeout')),
     beacon_timeout = slider_int:new(0, 30, 10, get_hash(plugin_label .. '_' .. 'beacon_timeout')),
@@ -217,6 +218,7 @@ gui.render = function ()
         gui.elements.beacon_timeout:render('Beacon delay (s)', 'time in seconds to wait before leaving beacon')
         gui.elements.loot_obols:render('Loot Obols', 'Loot Obols')
         gui.elements.chase_goblin:render('Chase goblin', 'Prioritize chasing/killing treasure & chest goblins. On by default.')
+        gui.elements.rush_boss_portal:render('Take the boss portal as soon as it opens', 'War Plan node: at max attunement a portal straight to the boss opens. When on, WonderCity walks to a floor portal anywhere in view (not only within the check distance) and takes it right away. Off by default.')
         gui.elements.manage_orbwalker:render('Manage orbwalker', 'When enabled, this script will toggle orbwalker clear/block-movement during undercity tasks. Off by default — leaves orbwalker fully under your rotation\'s control.')
         if gui.elements.manage_orbwalker:get() then
             gui.elements.skip_monsters:render('Skip monsters', 'Disable orbwalker until reaching an enticement, beacon, elite or boss')

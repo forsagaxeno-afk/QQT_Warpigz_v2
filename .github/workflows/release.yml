@@ -38,6 +38,17 @@ jobs:
       - name: Build package
         run: python3 audit/build_release.py --out dist
 
+      - name: Remove withdrawn releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          grep -v '^[[:space:]]*#' audit/withdrawn_releases.txt | sed 's/[[:space:]]//g' | while read -r tag; do
+            [ -z "$tag" ] && continue
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release delete "$tag" --yes --cleanup-tag && echo "withdrew $tag"
+            fi
+          done
+
       - name: Publish release for a new version
         env:
           GH_TOKEN: ${{ github.token }}

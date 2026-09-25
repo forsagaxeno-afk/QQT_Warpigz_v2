@@ -295,6 +295,14 @@ function bomber:get_pylons()
         pylon_priority[pylon] = i
     end
 
+    -- War Plan node "The Black Pact": an altar between waves offering one
+    -- boon (Warplans_BSK_ReplicatorGizmo_<Offer>, same offer names as the
+    -- pylons; _Inactive while a wave runs). Only one can be accepted, so after
+    -- the first click the other offers are ignored for REPLICATOR_LOCK s.
+    local now = get_time_since_inject()
+    local replicator = bomber.replicator
+    local use_replicator = settings.take_warplan_altar
+    if replicator.taken_at and now - replicator.taken_at > replicator.LOCK then replicator.taken_at, replicator.taken = nil, nil end
     for _, actor in pairs(actors) do
         local name = actor:get_skin_name()
         if name:match("BSK_Pyl") and actor:is_interactable() then
@@ -304,11 +312,22 @@ function bomber:get_pylons()
                     highest_priority_actor = actor
                 end
             end
+        elseif use_replicator and name:match("^Warplans_BSK_ReplicatorGizmo_") and not name:match("_Inactive$")
+            and (replicator.taken == nil or replicator.taken == name) and actor:is_interactable() then
+            local priority = #pylons + 0.5 -- an offer missing from the list is still taken
+            for pylon, p in pairs(pylon_priority) do
+                if p < priority and name:match(pylon) then priority = p end
+            end
+            if priority < highest_priority then
+                highest_priority = priority
+                highest_priority_actor = actor
+            end
         end
     end
 
     return highest_priority_actor
 end
+bomber.replicator = {LOCK = 60, taken = nil, taken_at = nil}
 
 -- Function to get the locked door if it is present and not in a wave
 function bomber:get_locked_door()
@@ -447,6 +466,14 @@ function bomber:main_pulse()
                 -- Retry interact every 2 seconds (matching Bartuc pattern)
                 if not pylon_interact_time or get_current_time() - pylon_interact_time >= 2 then
                     console.print("Interacting with pylon.")
+                    local pylon_name = pylon:get_skin_name()
+                    if pylon_name:match("^Warplans_BSK_ReplicatorGizmo_") then
+                        if bomber.replicator.taken == nil then
+                            console.print("[HordeDev] War Plan altar (The Black Pact): taking " .. pylon_name)
+                        end
+                        bomber.replicator.taken = pylon_name
+                        bomber.replicator.taken_at = get_time_since_inject()
+                    end
                     interact_object(pylon)
                     pylon_interact_time = get_current_time()
                 end

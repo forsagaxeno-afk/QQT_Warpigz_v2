@@ -1,6 +1,6 @@
 local gui = {}
 local plugin_label = "infernal_horde"
-local version = "v2.1.0"
+local version = "v2.2.0"
 console.print("Lua Plugin - Infernal Hordes - Letrico - " .. version);
 
 local function create_checkbox(value, key)
@@ -34,6 +34,7 @@ gui.elements = {
     movement_tree = tree_node:new(3),
     run_pit_toggle = create_checkbox(false, "run_pit"),
     party_mode_toggle = create_checkbox(false, "party_mode"),
+    take_warplan_altar_toggle = create_checkbox(true, "take_warplan_altar"),
     do_bartuc_toggle = create_checkbox(false, "do_bartuc"),
     salvage_toggle = create_checkbox(true, "salvage_toggle"),
     aggresive_movement_toggle = create_checkbox(true, "aggresive_movement_toggle"),
@@ -84,6 +85,7 @@ function gui.render()
         gui.elements.manage_orbwalker:render("Manage orbwalker", "When enabled, this script will toggle orbwalker clear during horde tasks. Off by default — leaves orbwalker fully under your rotation's control.");
         gui.elements.run_pit_toggle:render("Run pit when finish compasses", "Run pit when finish compasses");
         gui.elements.party_mode_toggle:render("Party mode (Does not pick pylon)", "Does not activate Pylon");
+        gui.elements.take_warplan_altar_toggle:render("Take War Plan altar (The Black Pact)", "War Plan node: an altar between waves offers one boon. When on, HordeDev accepts it like a pylon (same priority list; only one is taken). On by default.");
         gui.elements.do_bartuc_toggle:render("Do Bartuc", "Choose Bartuc as first choice");
         gui.elements.aggresive_movement_toggle:render("Aggresive movement", "Move directly to target, will fight close to target");
         if not gui.elements.aggresive_movement_toggle:get() then
