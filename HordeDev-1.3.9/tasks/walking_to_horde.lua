@@ -149,6 +149,8 @@ end
 
 -- Task should execute function (without self)
 function walking_to_horde_task.shouldExecute()
+    -- F-H1: War Plan entry never teleports to the Library or walks to the gate.
+    if tracker.entry_mode == 'warplan' then return false end
     if is_loading_or_limbo() then return false end
     return not (utils.player_in_zone("Kehj_Caldeum") or utils.player_in_zone("S05_BSK_Prototype02")) or
         (utils.player_in_zone("Kehj_Caldeum") and not near_horde_gate())
@@ -156,6 +158,7 @@ end
 
 -- Task execute function (without self)
 function walking_to_horde_task.Execute()
+    if tracker.entry_mode == 'warplan' then return end -- F-H1 (forced paths too)
     console.print("Executing Walking to Horde task")
 
     local current_time = get_time_since_inject()

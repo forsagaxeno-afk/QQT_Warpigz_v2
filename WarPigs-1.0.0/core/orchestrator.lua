@@ -392,17 +392,21 @@ local function alfred_trigger_now()
         alfred_gate.note_trigger(alfred)
         return true
     end
-    -- The Temis kick already ran a WarPigs cycle in this visit and it just
-    -- finished: the inventory was serviced moments ago. Join it (the dwell and
-    -- settle checks still run) instead of a second Alfred walk; hard work that
-    -- came back since still triggers (joint suite: kick + preamble = 2 cycles).
+    -- WPT-3 (one WarPigs Alfred cycle per Temis visit): a cycle WarPigs
+    -- triggered in this visit (kick or preamble) by this Alfred has completed
+    -- and no hard need came back since. Join it instead of a second Alfred
+    -- walk, whatever its age (joint suite: kick + preamble = 2 cycles; critic
+    -- round 3: turn-in preamble + the R6 re-arm after the turn-in = 2 cycles).
+    -- A cycle that just finished (within STUCK_NEED_TRIGGER_GRACE) keeps the
+    -- dwell and settle checks (true); an older one returns 'serviced' and the
+    -- preamble only runs its settle checks. Hard work that came back triggers.
     if alfred_gate.visit_trigger_at and alfred_gate.visit_alfred == alfred
         and last_alfred_completion_plugin == alfred and last_alfred_completion_at
         and last_alfred_completion_at >= alfred_gate.visit_trigger_at
-        and get_time_since_inject() - last_alfred_completion_at < STUCK_NEED_TRIGGER_GRACE
         and s.inventory_full ~= true and s.need_repair ~= true
     then
-        return true
+        if get_time_since_inject() - last_alfred_completion_at < STUCK_NEED_TRIGGER_GRACE then return true end
+        return 'serviced'
     end
     if s.paused == true then
         if s.paused_by ~= 'WarPigs' and s.external_caller ~= 'WarPigs' then return false end
@@ -1030,11 +1034,24 @@ orchestrator.quest_plugin_map = {
         -- and the plugin would otherwise enable outside BSK and walk forever.
         -- With teleport off, the user is driving navigation themselves, so we
         -- don't impose the gate.
+        -- War Plan entry (settings.horde_warplan_entry, default ON): the gate
+        -- holds outside the Horde whatever 'Use teleport' says; `deliver`
+        -- then fires the War Plan teleport and `enable` passes
+        -- {entry = 'warplan'} (no compass). The compass fallback opens the
+        -- gate only after dispatch.HORDE_WARPLAN_TRIES missed deliveries.
         enable_gate = function()
+            if dispatch.horde_warplan() then return dispatch.hwe_gate() end
             if not settings.use_teleport_transition then return true end
             if in_bsk_world() then return true end
             return false, 'not in BSK world (teleport transition is on — refusing to start HordeDev outside BSK)'
         end,
+        enable = function(p) return dispatch.hwe_enable(p) end,
+        deliver = function(now, delivered) return dispatch.hwe_deliver(now, delivered) end,
+        -- War Plan mode: HordeDev never starts a second cycle after its exit.
+        -- A finished run (in_run == false outside the Horde) with the Horde
+        -- quest still wanted is released so the next one gets a new War
+        -- Plan teleport (back-to-back plans: exit, then a new teleport).
+        run_finished = function(now, by_warpigs) return dispatch.hwe_run_finished(now, by_warpigs) end,
         -- Quest vanishes when the wave bosses die, but HordeDev still has to
         -- run its full post-boss cycle: open the talisman chest (if enabled),
         -- the greater-affix chest (if enabled), the materials/selected chest,
@@ -1294,8 +1311,20 @@ local function plugin_enable(entry, reason)
     -- R8: an enable() that did not produce an enabled status (e.g. HordeDev
     -- with 'Use keybind' on and no key bound) is retried every ENABLE_RETRY
     -- seconds, not every tick: each enable() may reset the plugin's run state.
+    -- A plugin that reports enabled during that cooldown (the user fixed the
+    -- keybind, a transient status() failure cleared) is adopted at once,
+    -- without a second enable() (round-3 audit).
     local unconfirmed = dispatch.unconfirmed[entry.plugin]
     if unconfirmed and get_time_since_inject() - unconfirmed.at < dispatch.ENABLE_RETRY then
+        if is_plugin_on(entry.plugin) then
+            owned[entry.plugin] = true
+            enable_blocked[entry.plugin] = nil
+            dispatch.gate_denials[entry.plugin] = nil
+            dispatch.unconfirmed[entry.plugin] = nil
+            last_enabled_reason[entry.plugin] = reason
+            log(string.format('%s reports enabled after %d unconfirmed enable(s) — adopted without another enable() (%s)',
+                entry.plugin, unconfirmed.count or 0, reason or '?'))
+        end
         return
     end
     dispatch.restore_orbwalker('before enabling ' .. entry.plugin)
@@ -1537,6 +1566,10 @@ end
 -- after the turn-in) only re-arms the sequence and is not counted.
 function dispatch.gate_bypass(plugin_name, why, delivered)
     if not delivered then return false end
+    -- War Plan Horde entry: never enable HordeDev outside the Horde to walk
+    -- there itself (that walk ends at an Infernal Compass). Missed deliveries
+    -- are counted by hwe_deliver; only the compass fallback opens the gate.
+    if plugin_name == 'InfernalHordesPlugin' and dispatch.horde_warplan() then return false end
     local count = (dispatch.gate_denials[plugin_name] or 0) + 1
     dispatch.gate_denials[plugin_name] = count
     local ok, w, z = pcall(function()
@@ -1552,6 +1585,257 @@ function dispatch.gate_bypass(plugin_name, why, delivered)
     log(string.format('enable_gate for %s still denied after %d warplan teleports (landed %s) — enabling it to navigate itself',
         plugin_name, count, where))
     return true
+end
+
+-- ── Infernal Hordes War Plan entry (user feature, round 4) ─────────────────
+-- settings.horde_warplan_entry (default ON). The War Plan panel's Teleport
+-- (warplan.teleport_to_activity()) drops the player straight into the Horde
+-- (a 6-wave War Plan horde): no Infernal Compass is needed, and the old entry
+-- (Library walk + compass) stopped when the compasses ran out (live report).
+-- WarPigs fires that teleport itself, whatever 'Use teleport' says:
+--   * only from the enable phase without a transition gate, i.e. after the
+--     outgoing activity's cleanup/disable and the post-disable gap;
+--   * behind the C1 Alfred live-work and the bounded Looter holds
+--     (companion_hold gate 'horde_warplan');
+--   * protected (pcall), at most one call per TELEPORT_CHECK_INTERVAL and
+--     never into its own channel while it still casts (HORDE_CAST_CAP);
+--   * with 'Use teleport' on, a round starts with the via-Temis preamble
+--     (Alfred in Temis first, as for every activity); retries are direct.
+-- HordeDev is enabled with {entry = 'warplan'} only inside the Horde (alive,
+-- BSK world, zone S05_BSK_Prototype02); the landing of every delivery is
+-- logged once. After HORDE_WARPLAN_TRIES deliveries that miss the Horde,
+-- HordeDev is never enabled outside it (the WPD-3 bypass is off) unless
+-- settings.horde_compass_fallback (default OFF) is ticked: then enable()
+-- without arguments (compass mode), logged. Otherwise the reason is shown in
+-- the status line and logged (rate-limited), and the teleport is retried
+-- after HORDE_WARPLAN_BACKOFF. With the setting off nothing here runs.
+dispatch.HORDE_ZONE            = 'S05_BSK_Prototype02'
+dispatch.HORDE_WARPLAN_TRIES   = 3
+dispatch.HORDE_WARPLAN_BACKOFF = 60.0
+dispatch.HORDE_CAST_CAP        = 15.0    -- never trust a stuck teleport cast longer than this
+dispatch.HORDE_DONE_SETTLE     = 3.0     -- a finished War Plan run must look finished this long
+dispatch.TELEPORT_SPELL_ID     = 186139  -- the teleport channel (HordeDev and SilentRaven use it too)
+dispatch.HORDE_WAIT_REASON     = 'waiting for War Plan teleport into the Horde (War Plan entry, no compass)'
+
+-- Delivery state of one Horde want. `fired_at` survives a reset: the
+-- channel debounce also covers a new want right after the last call.
+function dispatch.hwe_new(fired_at)
+    return {state = 'IDLE', fired_at = fired_at or -math.huge, snap_world = nil, snap_zone = nil,
+        missed = 0, round = 1, backoff_until = nil, compass = false, mode = nil,
+        reason = nil, reason_at = nil, logged_at = nil, landing = nil, done_since = nil}
+end
+dispatch.hwe = dispatch.hwe_new()
+
+function dispatch.horde_warplan() return settings.horde_warplan_entry == true end
+
+-- Alive, in a loaded BSK world and in the Horde zone (HordeDev's own test).
+function dispatch.inside_horde()
+    local ok, inside = pcall(function()
+        local lp = get_local_player()
+        if not lp or lp:is_dead() then return false end
+        local w = get_current_world()
+        return w ~= nil and w:get_current_zone_name() == dispatch.HORDE_ZONE
+    end)
+    return ok and inside == true and in_bsk_world()
+end
+
+function dispatch.where()
+    local ok, w, z = pcall(function()
+        local world = get_current_world()
+        return world:get_name(), world:get_current_zone_name()
+    end)
+    return tostring(ok and w or '?'), tostring(ok and z or '?')
+end
+
+function dispatch.teleport_casting()
+    local ok, id = pcall(function()
+        local lp = get_local_player()
+        return lp and lp:get_active_spell_id()
+    end)
+    return ok and id == dispatch.TELEPORT_SPELL_ID
+end
+
+-- C6: the current wait of the War Plan entry, shown at once in the status line.
+function dispatch.hwe_status(now, reason)
+    dispatch.hwe.reason, dispatch.hwe.reason_at = reason, now
+end
+
+function dispatch.hwe_gate()
+    if dispatch.inside_horde() or dispatch.hwe.compass then return true end
+    return false, dispatch.HORDE_WAIT_REASON
+end
+
+-- One delivery that did not reach the Horde, logged once with its landing.
+function dispatch.hwe_missed(now, what)
+    local H = dispatch.hwe
+    local w, z = dispatch.where()
+    H.missed = H.missed + 1
+    H.landing = string.format('world=%s zone=%s', w, z)
+    log(string.format('War Plan Horde entry: %s — landed %s, not inside the Horde (%d of %d)',
+        what, H.landing, H.missed, dispatch.HORDE_WARPLAN_TRIES))
+    if H.missed >= dispatch.HORDE_WARPLAN_TRIES and settings.horde_compass_fallback ~= true then
+        H.backoff_until, H.logged_at = now + dispatch.HORDE_WARPLAN_BACKOFF, now
+        log(string.format('War Plan Horde entry: %d War Plan teleports did not reach the Horde (last landing %s) — '
+            .. 'not using a compass (compass fallback off); retrying in %.0fs',
+            H.missed, H.landing, dispatch.HORDE_WARPLAN_BACKOFF))
+    end
+end
+
+-- Enable phase, InfernalHordes gate denied, no transition gate this tick.
+-- `delivered`: the via-Temis preamble's warplan teleport (TELEPORTING
+-- confirmed or released, R2) arrived since the last enable attempt. Returns
+-- true when the War Plan entry handles the delivery (the caller then does
+-- not re-arm the via-Temis sequence).
+function dispatch.hwe_deliver(now, delivered)
+    if not dispatch.horde_warplan() then return false end
+    local H = dispatch.hwe
+    -- Nothing would run the Horde: never teleport the player into it.
+    if type(_G.InfernalHordesPlugin) ~= 'table' then
+        dispatch.hwe_status(now, 'InfernalHordesPlugin not loaded — no War Plan teleport')
+        return true
+    end
+    if delivered then dispatch.hwe_missed(now, 'the via-Temis warplan teleport arrived') end
+    if H.compass then return true end
+    if H.state == 'TELEPORTING' then
+        local age = now - H.fired_at
+        if age < TELEPORT_CHECK_INTERVAL or (age < dispatch.HORDE_CAST_CAP and dispatch.teleport_casting()) then
+            dispatch.hwe_status(now, 'War Plan teleport in flight')
+            return true
+        end
+        H.state = 'IDLE'
+        local w, z = dispatch.where()
+        dispatch.hwe_missed(now, string.format('War Plan teleport %d%s', H.missed + 1,
+            (w == H.snap_world and z == H.snap_zone) and ' did not move the player' or ' arrived'))
+    end
+    if H.missed >= dispatch.HORDE_WARPLAN_TRIES then
+        if settings.horde_compass_fallback == true then
+            H.compass = true
+            log(string.format('War Plan Horde entry: %d War Plan teleports did not reach the Horde (last landing %s) — '
+                .. 'compass fallback is on: starting HordeDev in compass mode (it uses an Infernal Compass)',
+                H.missed, tostring(H.landing)))
+            return true
+        end
+        H.backoff_until = H.backoff_until or now + dispatch.HORDE_WARPLAN_BACKOFF
+        if now < H.backoff_until then
+            dispatch.hwe_status(now, string.format('%d War Plan teleports did not reach the Horde (last landing %s), '
+                .. 'compass fallback off', H.missed, tostring(H.landing)))
+            if now - (H.logged_at or -math.huge) >= dispatch.HORDE_WARPLAN_BACKOFF then
+                H.logged_at = now
+                log(string.format('War Plan Horde entry: still waiting — %d War Plan teleports did not reach the Horde '
+                    .. '(last landing %s); retrying in %.0fs', H.missed, tostring(H.landing), H.backoff_until - now))
+            end
+            return true
+        end
+        H.missed, H.backoff_until, H.round = 0, nil, H.round + 1
+        log(string.format('War Plan Horde entry: retrying the War Plan teleport (round %d)', H.round))
+    end
+    -- 'Use teleport' on: a round starts with the via-Temis preamble; the
+    -- caller re-arms it (the preamble's warplan teleport comes back here as
+    -- `delivered` when it misses the Horde).
+    if settings.use_teleport_transition and H.missed == 0 then
+        dispatch.hwe_status(now, 'via-Temis preamble, then the War Plan teleport')
+        return false
+    end
+    -- C1 / WPD-1: never over live Alfred work or a Looter pickup (bounded).
+    local hold = dispatch.companion_hold(now, 'horde_warplan')
+    if hold then
+        dispatch.hwe_status(now, hold .. ' — holding the War Plan teleport')
+        return true
+    end
+    -- Channel debounce: never re-fire into our own channel.
+    local age = now - H.fired_at
+    if age < TELEPORT_CHECK_INTERVAL or (age < dispatch.HORDE_CAST_CAP and dispatch.teleport_casting()) then
+        dispatch.hwe_status(now, 'War Plan teleport channel settling')
+        return true
+    end
+    H.fired_at = now
+    if not (_G.warplan and type(warplan.teleport_to_activity) == 'function') then
+        dispatch.hwe_missed(now, 'warplan.teleport_to_activity() is unavailable')
+        return true
+    end
+    H.snap_world, H.snap_zone = dispatch.where()
+    local fired, err = pcall(warplan.teleport_to_activity)
+    if not fired then
+        dispatch.hwe_missed(now, 'warplan.teleport_to_activity() threw: ' .. tostring(err))
+        return true
+    end
+    H.state = 'TELEPORTING'
+    log(string.format('War Plan Horde entry: warplan.teleport_to_activity() called (teleport %d of %d, round %d) — world=%s zone=%s',
+        H.missed + 1, dispatch.HORDE_WARPLAN_TRIES, H.round, H.snap_world, H.snap_zone))
+    dispatch.hwe_status(now, 'War Plan teleport in flight')
+    return true
+end
+
+-- entry.enable of InfernalHordes. War Plan mode: enable({entry = 'warplan'})
+-- inside the Horde only; enable() only as the logged compass fallback.
+function dispatch.hwe_enable(p)
+    if type(p.enable) ~= 'function' then
+        log('cannot enable InfernalHordesPlugin — no enable function')
+        return false
+    end
+    if not dispatch.horde_warplan() then return p.enable() end
+    local H = dispatch.hwe
+    if dispatch.inside_horde() then
+        if H.state == 'TELEPORTING' or dispatch.delivered then
+            local w, z = dispatch.where()
+            log(string.format('War Plan Horde entry: %s — landed world=%s zone=%s, inside the Horde',
+                H.state == 'TELEPORTING' and 'War Plan teleport arrived' or 'the via-Temis warplan teleport arrived', w, z))
+        end
+        H.state, H.mode = 'IDLE', 'warplan'
+        log('starting HordeDev in War Plan entry mode (inside the Horde, no compass)')
+        return p.enable({entry = 'warplan'})
+    end
+    if H.compass then
+        H.mode = 'compass'
+        log('starting HordeDev in compass mode (compass fallback: the War Plan teleport did not reach the Horde)')
+        return p.enable()
+    end
+    log('War Plan Horde entry: not inside the Horde — not starting HordeDev (no compass)')
+    return false
+end
+
+-- Disable phase, InfernalHordes wanted and on. True when it must be released:
+--   * a HordeDev WarPigs did not start that is on outside the Horde without
+--     a run (persisted toggle, manual enable): it would farm with a compass;
+--   * a War Plan run that finished (C2 in_run == false, or last_result
+--     'completed' without its own Alfred trip or exit in progress, outside
+--     the Horde for HORDE_DONE_SETTLE): HordeDev never starts a second cycle
+--     then, so the next War Plan Horde gets its own teleport (back-to-back).
+-- The explicit compass fallback keeps HordeDev's own farming cycle.
+function dispatch.hwe_run_finished(now, by_warpigs)
+    local H = dispatch.hwe
+    -- An enable() of ours still unconfirmed (R8) is not a foreign start.
+    by_warpigs = by_warpigs or dispatch.unconfirmed.InfernalHordesPlugin ~= nil
+    local st = dispatch.horde_warplan() and not dispatch.inside_horde() and dispatch.status_of(_G.InfernalHordesPlugin)
+    local finished = st and st.enabled == true and (st.in_run == false or (by_warpigs and st.last_result == 'completed'
+        and st.alfred_trip ~= true and st.exit_pending ~= true))
+    if not finished or (by_warpigs and H.mode == 'compass') then
+        H.done_since = nil
+        return false
+    end
+    if not by_warpigs then
+        log('InfernalHordesPlugin is on outside the Horde without a run and was not started by WarPigs — '
+            .. 'stopping it (War Plan entry: HordeDev starts inside the Horde, no compass)')
+        return true
+    end
+    -- A run HordeDev reports in compass mode (adopted in the Horde) goes to
+    -- its compass entry right after the exit: released without the settle.
+    H.done_since = H.done_since or now
+    if st.entry_mode ~= 'compass' and now - H.done_since < dispatch.HORDE_DONE_SETTLE then return false end
+    H.done_since = nil
+    log('HordeDev finished its War Plan run (in_run=false outside the Horde) — releasing it; '
+        .. 'the next War Plan Horde gets a new War Plan teleport')
+    return true
+end
+
+-- Cold-start adoption (tick): in War Plan mode a HordeDev that is on outside
+-- the Horde and not in a run is not adopted (hwe_run_finished stops it).
+function dispatch.adoptable(plugin_name)
+    if plugin_name ~= 'InfernalHordesPlugin' or not dispatch.horde_warplan() or dispatch.inside_horde() then
+        return true
+    end
+    local st = dispatch.status_of(_G.InfernalHordesPlugin)
+    return st ~= nil and st.in_run == true
 end
 
 -- WPD-6 / RPR-7: account for a finished Reaper run once. A run that failed
@@ -1639,6 +1923,13 @@ function dispatch.stalled_enable(wants_)
         if dispatch.unconfirmed[plugin_name] and not owned[plugin_name] then
             return string.format('%s enable not confirmed (retrying every %.0fs)', plugin_name, dispatch.ENABLE_RETRY)
         end
+        -- C6: the War Plan Horde entry is waiting (stable text for the watchdog).
+        local H = dispatch.hwe
+        if plugin_name == 'InfernalHordesPlugin' and not owned[plugin_name] and dispatch.horde_warplan()
+            and H.reason_at and get_time_since_inject() - H.reason_at <= 2
+        then
+            return plugin_name .. ' ' .. dispatch.HORDE_WAIT_REASON
+        end
     end
     return nil
 end
@@ -1651,6 +1942,16 @@ function dispatch.forget_unwanted(wants_)
     end
     for plugin_name in pairs(dispatch.unconfirmed) do
         if not wants_[plugin_name] or owned[plugin_name] then dispatch.unconfirmed[plugin_name] = nil end
+    end
+    -- War Plan Horde entry: the delivery belongs to one want; an enabled
+    -- HordeDev ends it (its mode is kept while it is owned).
+    local H = dispatch.hwe
+    if not wants_.InfernalHordesPlugin or not dispatch.horde_warplan() then
+        if H.state ~= 'IDLE' or H.missed > 0 or H.compass or H.mode or H.reason then
+            dispatch.hwe = dispatch.hwe_new(H.fired_at)
+        end
+    elseif owned.InfernalHordesPlugin then
+        H.state, H.missed, H.round, H.backoff_until, H.compass, H.reason = 'IDLE', 0, 1, nil, false, nil
     end
     local R = reaper_run_once
     if R.refused_boss then
@@ -1728,6 +2029,13 @@ function dispatch.status_suffix(now)
                 plugin_name, u.count, dispatch.ENABLE_RETRY)
         end
     end
+    -- War Plan Horde entry: what the delivery waits for, shown at once (a
+    -- loading screen, when tick() does not run, keeps the last reason).
+    local H = dispatch.hwe
+    if H.reason and H.reason_at and now - H.reason_at <= 10 and not owned.InfernalHordesPlugin then
+        parts[#parts + 1] = 'Horde: ' .. H.reason .. ((H.backoff_until and now < H.backoff_until)
+            and string.format(' — retrying the War Plan teleport in %.0fs', H.backoff_until - now) or '')
+    end
     if #parts == 0 then return '' end
     return ' | ' .. table.concat(parts, ' | ')
 end
@@ -1738,6 +2046,7 @@ function dispatch.reset()
     dispatch.disable_reason, dispatch.watchdog, dispatch.reaper_backoff = {}, {}, {}
     dispatch.unmapped, dispatch.hold_reasons, dispatch.unconfirmed = {}, {}, {}
     dispatch.delivered = false
+    dispatch.hwe = dispatch.hwe_new(dispatch.hwe.fired_at)
     -- C1 / WPT-3: the next session starts without Alfred holds or latches.
     alfred_gate.visit_trigger_at, alfred_gate.visit_alfred = nil, nil
     alfred_gate.paused_since, alfred_gate.paused_logged = nil, false
@@ -1924,9 +2233,11 @@ function orchestrator.tick()
     -- An already-running matching activity owns its current run. Adopt it
     -- without resetting its chest/entry state or starting a cold-start town
     -- detour through the middle of that run.
+    -- War Plan Horde entry: not a HordeDev that is on outside the Horde
+    -- without a run (it would farm with a compass; see dispatch.adoptable).
     if not had_active_session then
         for plugin_name in pairs(wants) do
-            if is_plugin_on(plugin_name) then
+            if is_plugin_on(plugin_name) and dispatch.adoptable(plugin_name) then
                 owned[plugin_name] = true
                 last_enabled_reason[plugin_name] = matched_reason[plugin_name]
                 last_wanted[plugin_name] = true
@@ -2087,6 +2398,14 @@ function orchestrator.tick()
             log('detected self-disable of ' .. plugin_name .. ' — sequencing handoff')
             -- WPD-6: a Reaper run that ended by itself may have failed.
             if plugin_name == 'ReaperPlugin' then dispatch.reaper_run_ended(now, false) end
+        end
+        -- War Plan Horde entry: a finished War Plan run, or a HordeDev that is
+        -- on outside the Horde without WarPigs, is released while its quest
+        -- is still wanted (dispatch.hwe_run_finished).
+        if running and wants[plugin_name] and type(entry.run_finished) == 'function'
+            and entry.run_finished(now, owned[plugin_name] == true)
+        then
+            changed = true
         end
         if not wants[plugin_name] or changed or pending_disable[plugin_name] then
             if not running then
@@ -2426,7 +2745,14 @@ function orchestrator.tick()
                 local can_temis_detour = type(teleport_to_waypoint) == 'function'
                 if can_temis_detour and in_temis() then
                     -- Already in Temis: skip the waypoint hop and trigger Alfred now.
-                    if alfred_trigger_now() then
+                    local alfred_step = alfred_trigger_now()
+                    if alfred_step == 'serviced' then
+                        -- WPT-3: this visit's WarPigs Alfred cycle completed
+                        -- and no hard need came back: settle checks only.
+                        teleport_transition.state             = 'POST_ALFRED_SETTLE'
+                        teleport_transition.settle_started_at = now - POST_ALFRED_SETTLE_SECONDS
+                        log('via-Temis preamble: already in Temis — Alfred already serviced this visit, skipping the Alfred step')
+                    elseif alfred_step then
                         teleport_transition.state             = 'TEMIS_ALFRED'
                         teleport_transition.started_at        = now
                         teleport_transition.alfred_fired_at   = now
@@ -2799,9 +3125,12 @@ function orchestrator.tick()
                 end
             end
             if gate_reason then
-                if enable_blocked[plugin_name] ~= gate_reason then
+                -- Once per episode: the post-disable countdown is not part
+                -- of the dedup key (round-3 audit: logged every tick).
+                local gate_key = (gate_reason:gsub(' %([%d%.]+s left%)$', ''))
+                if enable_blocked[plugin_name] ~= gate_key then
                     log('deferring enable of ' .. plugin_name .. ' — ' .. gate_reason)
-                    enable_blocked[plugin_name] = gate_reason
+                    enable_blocked[plugin_name] = gate_key
                 end
             elseif entry_gate_reason and dispatch.gate_bypass(plugin_name, entry_gate_reason,
                 settings.use_teleport_transition and not teleport_pending and teleport_transition.state == 'IDLE'
@@ -2814,11 +3143,21 @@ function orchestrator.tick()
                     log('BLOCKING enable of ' .. plugin_name .. ' — ' .. entry_gate_reason)
                     enable_blocked[plugin_name] = entry_gate_reason
                 end
+                -- An entry that delivers the player itself (War Plan Horde
+                -- entry: warplan teleport, independent of 'Use teleport')
+                -- handles the delivery; `deliver` runs only here, i.e. with no
+                -- transition gate (after cleanup and the post-disable gap).
+                local delivers = false
+                if type(entry.deliver) == 'function' then
+                    local ok, handled = pcall(entry.deliver, now, dispatch.delivered)
+                    if not ok then log('deliver error (' .. plugin_name .. '): ' .. tostring(handled)) end
+                    delivers = ok and handled == true
+                end
                 -- Re-arm the teleport sequence if it has gone idle without
                 -- delivering us to the destination — otherwise the gate would
                 -- deadlock. Only re-arm when the state machine isn't already
                 -- working: teleport_pending false AND state IDLE.
-                if settings.use_teleport_transition
+                if not delivers and settings.use_teleport_transition
                     and not teleport_pending
                     and teleport_transition.state == 'IDLE'
                 then

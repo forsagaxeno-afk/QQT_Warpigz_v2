@@ -11,6 +11,7 @@ local start_dungeon_task = require "tasks.start_dungeon"
 local enter_horde_task = require "tasks.enter_horde"
 local open_chests_task = require "tasks.open_chests"
 local alfred_task = require "tasks.alfred"
+local warplan = require "core.warplan"
 local HORDE_ZONE = "S05_BSK_Prototype02"
 
 local local_player, player_position
@@ -43,7 +44,9 @@ end
 -- Alfred trip HordeDev started). Idle, walking or town is not a run.
 local function run_in_progress()
     if transaction_pending() then return true end
-    if tracker.horde_opened or tracker.sigil_used then return true end
+    -- F-H1: horde_opened / sigil_used are compass-entry flags; in War Plan
+    -- mode a stale pair (outside BSK) is not a run.
+    if (tracker.horde_opened or tracker.sigil_used) and not warplan.active() then return true end
     if alfred_task.trip_in_progress and alfred_task.trip_in_progress() then return true end
     local chest_state = open_chests_task.current_state
     if chest_state ~= nil and chest_state ~= "INIT" and not tracker.finished_chest_looting then return true end
@@ -53,8 +56,19 @@ end
 -- R8: an enable() while main_toggle is already on and a healthy run is in
 -- progress (WarPigs re-asserting ownership, a re-enable after a hotkey pause)
 -- keeps that run. A latched fault still gets the full restart, as in stop_run.
-local function keep_run_on_enable()
-    if not (gui.elements.main_toggle:get() and run_in_progress()) then return false end
+-- F-H3: only where the run actually is: a pending transaction, the player
+-- inside the Horde, or HordeDev's own Alfred trip. Stale horde_opened /
+-- sigil_used / has_entered with the player outside BSK and nothing pending
+-- take the full reset (as at 86340d4). A switch to War Plan entry never keeps
+-- a compass/portal transaction.
+local function keep_run_on_enable(mode)
+    if not gui.elements.main_toggle:get() then return false end
+    -- A finished War Plan run is never kept (its chest/exit flags would skip
+    -- the next horde's chests).
+    if warplan.completed then return false end
+    local own_trip = alfred_task.trip_in_progress ~= nil and alfred_task.trip_in_progress()
+    if not (transaction_pending() or own_trip or utils.player_in_zone(HORDE_ZONE)) then return false end
+    if mode == 'warplan' and (tracker.sigil_activation_pending or tracker.horde_entry_pending) then return false end
     return current_fault(transaction_pending()) == nil
 end
 
@@ -65,6 +79,51 @@ local function reset_run_state()
     exit_horde_task:reset()
     tracker.fresh_run_reset()
     open_chests_task:reset()
+    warplan.reset_run()
+end
+
+-- F-H2: a HordeDev whose main toggle was on at load must not start the
+-- compass / Library chain before WarPigs decides (enable() or disable()) when
+-- WarPigs is loaded and enabled. Bounded: after WARPIGS_DECIDE_S without a
+-- decision (WarPigs adopted the running plugin) it runs as configured.
+-- Standalone (no WarPigs, or WarPigs off) is unchanged.
+local WARPIGS_DECIDE_S = 5
+local WARPIGS_WAIT_TASK, WARPIGS_WAIT_TEXT = "Waiting for WarPigs", "waiting for WarPigs to take over (up to 5 s)"
+local session = {enabled_by_api = false, gate_done = false, gate_since = nil}
+
+local function warpigs_enabled()
+    local wp = WarPigsPlugin
+    if type(wp) ~= 'table' or type(wp.status) ~= 'function' then return false end
+    local ok, st = pcall(wp.status)
+    return ok and type(st) == 'table' and st.enabled == true
+end
+
+local function waiting_for_warpigs()
+    if session.gate_done then return false end
+    if session.enabled_by_api or not warpigs_enabled() then
+        session.gate_done = true
+        return false
+    end
+    local now = get_time_since_inject()
+    if not session.gate_since then
+        session.gate_since = now
+        console.print(string.format(
+            "[HordeDev] Main toggle on at load with WarPigs enabled; waiting up to %ds for WarPigs before acting",
+            WARPIGS_DECIDE_S))
+    end
+    if now - session.gate_since < WARPIGS_DECIDE_S then return true end
+    session.gate_done = true
+    console.print(string.format("[HordeDev] No enable/disable from WarPigs within %ds; running as configured",
+        WARPIGS_DECIDE_S))
+    return false
+end
+
+-- C2 hold: a companion hold (Alfred/Looter), else the visible idle state.
+local function hold_text()
+    local hold = alfred_task.hold_reason or loot_guard.hold_reason()
+    if hold then return hold end
+    local current = task_manager.get_current_task()
+    return type(current) == 'table' and current.hold or nil
 end
 
 -- HRD-4: a latched fault ("restart HordeDev") is cleared by any stop: the GUI
@@ -111,6 +170,11 @@ local function main_pulse()
     end
     was_active = true
     if not local_player then return end
+    if waiting_for_warpigs() then
+        movement.stop()
+        if task_manager.hold then task_manager.hold(WARPIGS_WAIT_TASK, WARPIGS_WAIT_TEXT) end
+        return
+    end
     local pending = transaction_pending()
     if not pending then
         dead_since = nil
@@ -150,6 +214,16 @@ local function main_pulse()
     if settings.manage_orbwalker and orbwalker.get_orb_mode() ~= 3 then
         orbwalker.set_clear_toggle(true);
     end
+    -- F-H1: HordeDev never goes to a new horde by itself after a War Plan
+    -- run; when the player is in one again (the next War Plan teleport),
+    -- that horde gets a fresh run instead of the finished run's flags.
+    if warplan.completed and warplan.active() and warplan.inside_bsk() then
+        console.print("[HordeDev] In a new Horde after the completed War Plan run; starting its run")
+        if task_manager.stop then task_manager.stop() end
+        reset_run_state()
+        tracker.enable_time = get_time_since_inject()
+    end
+    warplan.update(open_chests_task.current_state)
     task_manager.execute_tasks()
 end
 
@@ -178,8 +252,9 @@ local function render_pulse()
             graphics.text_3d("Exit: " .. (current_task.reset_error or current_task.reset_phase),
                 vec3:new(px, py - 2, pz + 1), 14, color_white(255))
         end
-        -- C6: a companion hold (Alfred/Looter) is visible, not a silent stall.
-        local hold = alfred_task.hold_reason or loot_guard.hold_reason()
+        -- C6: a companion hold (Alfred/Looter) is visible, not a silent stall;
+        -- so are the War Plan and WarPigs waits (F-H1/F-H2).
+        local hold = hold_text()
         if hold then
             graphics.text_3d("Hold: " .. hold, vec3:new(px, py - 2, pz), 14, color_white(255))
         end
@@ -188,9 +263,14 @@ end
 
 -- Set Global access for other plugins
 InfernalHordesPlugin = {
-    enable = function ()
-        console.print('HORDE ACTIVATING')
-        if keep_run_on_enable() then
+    -- F-H1: enable(opts); opts.entry == 'warplan' selects War Plan entry (the
+    -- War Plan teleport already entered the Horde: no compass, no Library,
+    -- one run). enable() without options is the compass/farming mode.
+    enable = function (opts)
+        local mode = type(opts) == 'table' and opts.entry == 'warplan' and 'warplan' or 'compass'
+        console.print('HORDE ACTIVATING' .. (mode == 'warplan' and ' (War Plan entry)' or ''))
+        session.enabled_by_api = true
+        if keep_run_on_enable(mode) then
             -- R8: already on and inside a healthy run: re-assert, never reset.
             console.print('[HordeDev] enable() during a run in progress; keeping the current run')
         else
@@ -211,6 +291,7 @@ InfernalHordesPlugin = {
             -- check ('BSK' substring) — both must hold before the bomber pulses.
             tracker.enable_time = get_time_since_inject()
         end
+        warplan.set_mode(mode)
         gui.elements.main_toggle:set(true)
         -- R8 (as Arkham's ARK-7): 'Use keybind' with no key bound could never
         -- pass the gate, so WarPigs re-enabled (and reset) HordeDev every tick.
@@ -232,11 +313,14 @@ InfernalHordesPlugin = {
         settings:update_settings()
         stop_run()
         was_active = false
+        warplan.set_mode('compass') -- F-H1: disable() resets the entry mode
     end,
     -- C2 additive fields: in_run (committed to a horde), fault (latched fault
     -- message or nil), alfred_trip (HordeDev's own Alfred round trip), hold
-    -- (companion hold reason or nil), exit_pending (R7: the Leave/RESET or
-    -- Teleport exit is actively in progress, including its Looter hold).
+    -- (companion hold reason, else the visible War Plan / WarPigs wait, or
+    -- nil), exit_pending (R7: the Leave/RESET or Teleport exit is actively in
+    -- progress, including its Looter hold), entry_mode ('warplan' |
+    -- 'compass', F-H1), last_result ('completed' after a War Plan exit).
     status = function ()
         -- HRD-7: execution is gated on the keybind too (like Arkham/WonderCity).
         local enabled = gui.elements.main_toggle:get() and utils.get_keybind_state()
@@ -246,9 +330,11 @@ InfernalHordesPlugin = {
             ['in_run'] = run_in_progress(),
             ['fault'] = current_fault(),
             ['alfred_trip'] = alfred_task.trip_in_progress ~= nil and alfred_task.trip_in_progress() or false,
-            ['hold'] = alfred_task.hold_reason or loot_guard.hold_reason(),
+            ['hold'] = hold_text(),
             ['exit_pending'] = enabled == true and exit_horde_task.exit_pending ~= nil
                 and exit_horde_task:exit_pending() == true,
+            ['entry_mode'] = warplan.mode(),
+            ['last_result'] = warplan.last_result,
         }
     end,
     getState = function ()
@@ -316,8 +402,9 @@ InfernalHordesPlugin = {
             -- any aether. exit_horde.shouldExecute also gates on this, so
             -- reaching "Exit Horde" task normally implies aether==0, but this
             -- guard survives any future path that bypasses shouldExecute.
-            -- After a terminal chest fault (HRD-1) the aether is unspendable.
-            if type(get_aether_count) == 'function' and not tracker.chest_fault then
+            -- After a terminal chest fault (HRD-1), or a War Plan horde without
+            -- a chest room (F-H1), the aether is unspendable.
+            if type(get_aether_count) == 'function' and not tracker.chest_fault and not tracker.chests_skipped then
                 local ok, count = pcall(get_aether_count)
                 if ok and type(count) == 'number' and count > 0 then
                     first_seen = nil

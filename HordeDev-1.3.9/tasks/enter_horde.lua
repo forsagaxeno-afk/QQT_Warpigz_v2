@@ -19,6 +19,8 @@ function task:fail(message)
 end
 
 task.shouldExecute = function()
+    -- F-H1: War Plan entry never walks into the Horde portal.
+    if tracker.entry_mode == 'warplan' then return false end
     if tracker.horde_entry_pending then return true end
     if tracker.sigil_activation_pending or tracker.has_entered then return false end
     local s=start_task.read_world()
@@ -26,6 +28,7 @@ task.shouldExecute = function()
 end
 
 function task:Execute()
+    if tracker.entry_mode == 'warplan' then return end -- F-H1 (forced paths too)
     local now=get_time_since_inject()
     if self.token~=start_task.entry_started or not self.started then
         self:reset()

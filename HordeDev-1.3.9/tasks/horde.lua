@@ -415,6 +415,10 @@ local pylon_interact_time = nil
 -- Main function to handle the bomber's actions based on the current game state
 function bomber:main_pulse()
     tracker.interacting_pylon = false
+    -- F-H1: boss-room idle time (read by core/warplan.lua); every pulse that
+    -- does anything else clears it.
+    local idle_since = tracker.horde_idle_since
+    tracker.horde_idle_since = nil
 
     if get_local_player():is_dead() then
         console.print("Player is dead. Reviving at checkpoint.")
@@ -544,6 +548,7 @@ function bomber:main_pulse()
                 boss_pylon = utils.get_bartuc_pylon()
                 if boss_pylon then
                     tracker.interacting_pylon = true
+                    tracker.council_seen = true -- F-H1: the waves are over
                     if utils.distance_to(boss_pylon) > 2 then
                         bomber:bomb_to(boss_pylon:get_position())
                         return
@@ -583,6 +588,7 @@ function bomber:main_pulse()
             boss_pylon = utils.get_boss_pylon()
             if boss_pylon then
                 tracker.interacting_pylon = true
+                tracker.council_seen = true -- F-H1: the waves are over
                 if utils.distance_to(boss_pylon) > 2 then
                     bomber:bomb_to(boss_pylon:get_position())
                     return
@@ -602,6 +608,7 @@ function bomber:main_pulse()
             end
             -- If no pylon, move to boss room and shoot in circle
             bartuc_failed = false
+            tracker.horde_idle_since = idle_since or current_time
             if get_player_pos():dist_to(horde_boss_room_position) > 2 then
                 console.print("Moving to boss room position.")
                 bomber:bomb_to(horde_boss_room_position)
@@ -617,6 +624,7 @@ function bomber:main_pulse()
 
     local locked_door = bomber:get_locked_door()
     if locked_door then
+        tracker.horde_idle_since = nil
         if utils.distance_to(locked_door) > 2 then
             console.print("Moving to locked door position.")
             bomber:bomb_to(locked_door:get_position())             

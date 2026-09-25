@@ -760,5 +760,54 @@ case('R8 an unconfirmed enable is rate-limited, logged once and shown', function
     truthy(#g.orb <= 2, 'orbwalker touched ' .. #g.orb .. ' times in 20 s')
 end)
 
+-- Round-3 audit (F-W4): a plugin that reports enabled during the R8 cooldown
+-- is adopted at once, without calling enable() again.
+case('F-W4 R8 cooldown: a plugin that turns on by itself is adopted at once, no second enable()', function()
+    local f = fixture()
+    local horde = horde_plugin(f)
+    horde.enable = function() horde.enables = horde.enables + 1 end   -- status stays enabled=false
+    local ark = f.plugin('ArkhamAsylumPlugin')
+    ark.enable = function() ark.enables = ark.enables + 1 end
+    f.quests = {'WarPlans_QST_ThePit'}
+    f.run(5)
+    eq(ark.enables, 1, 'one unconfirmed enable()')
+    truthy(f.o.get_status_line():find('ArkhamAsylumPlugin enable not confirmed', 1, true), f.o.get_status_line())
+    -- The user fixes the keybind: Arkham now reports enabled (10 s into the 30 s cooldown).
+    ark.enabled = true
+    f.run(1)
+    eq(ark.enables, 1, 'adopted without another enable() (d275b9d: owned only after the next retry)')
+    eq(f.logged('adopted without another enable()'), 1, 'adoption logged')
+    local line = f.o.get_status_line()
+    truthy(line:find('managing ArkhamAsylumPlugin', 1, true), 'owned at once: ' .. line)
+    truthy(not line:find('not confirmed', 1, true), 'unconfirmed cleared: ' .. line)
+    f.run(40)
+    eq(ark.enables, 1, 'no enable() on the adopted plugin after the cooldown')
+    -- Released normally when its quest ends (owned).
+    f.quests = {}
+    f.actors = {}
+    f.run(1)
+    eq(ark.disables, 1, 'the adopted plugin is released by WarPigs')
+end)
+
+-- Round-3 audit / joint (F-W5): the post-disable countdown is not part of the
+-- dedup key, so the line prints once per episode, not every tick.
+case('F-W5 "deferring enable — post-disable cooldown" is logged once per episode', function()
+    local f = fixture()
+    local ark = f.plugin('ArkhamAsylumPlugin'); ark.enabled = true
+    local wc = f.plugin('WonderCityPlugin')
+    f.quests = {'WarPlans_QST_ThePit'}; f.tick()
+    f.quests = {'WarPlans_QST_Undercity'}
+    truthy(f.until_true(function() return wc.enables == 1 end, 10), 'WonderCity after the gap')
+    eq(ark.disables, 1)
+    eq(f.logged('deferring enable of WonderCityPlugin — post-disable cooldown'), 1,
+        'one line per episode (d275b9d: one per tick)')
+    -- A second hand-off is a new episode.
+    f.quests = {'WarPlans_QST_ThePit'}
+    f.run(1)
+    wc.enabled = false
+    truthy(f.until_true(function() return ark.enables == 1 end, 10), 'Pit after the gap')
+    eq(f.logged('deferring enable of ArkhamAsylumPlugin — post-disable cooldown'), 1, 'new episode logged once')
+end)
+
 if #failures > 0 then error(#failures .. ' WarPigs dispatch regressions failed:\n' .. table.concat(failures, '\n')) end
 print('PASS WarPigs dispatch integration: ' .. checks .. ' checks')

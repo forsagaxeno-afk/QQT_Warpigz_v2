@@ -54,7 +54,7 @@ local RETRY_DELAY, PICKUP_WINDOW, QUIET_WINDOW = 5, 8, 2
 local PAUSED_HOLD_MAX, RETURN_WINDOW, HOLD_LOG_AFTER, FAILED_BEFORE_GRACE = 60, 30, 60, 3
 local trip = {from_run = false, return_until = nil, live_seen = false, failures = 0, result_logged = false,
     paused_since = nil, paused_logged = false, wait_paused_since = nil,
-    hold = nil, hold_since = nil, hold_logged = -math.huge}
+    hold = nil, hold_since = nil, hold_logged = -math.huge, advisory_logged = -math.huge}
 
 -- C1 canonical live-work predicate (a latched teleport after a finished or
 -- failed trip is not live work).
@@ -65,6 +65,19 @@ end
 -- C1 hard need; need_trigger alone (restock/stash extras) is advisory.
 local function hard_need(s)
     return s.inventory_full == true or s.need_repair == true
+end
+-- F-C1 (the same reading as ArkhamAsylum's warpigs_advisory_idle): under an
+-- enabled WarPigs, an advisory-only flag (need_trigger without
+-- inventory_full/need_repair) that WarPigs reports idle was just serviced by
+-- WarPigs' own Temis cycle, which WonderCity did not observe while it was
+-- off (C1 via WarPigsPlugin.status().alfred_idle, the rule WarPug uses).
+-- Starting another trip for it repeated the cycle at every activity start
+-- (joint suite). Hard needs and standalone WonderCity are unchanged.
+local function warpigs_advisory_idle()
+    local wp = WarPigsPlugin
+    if type(wp) ~= 'table' or type(wp.status) ~= 'function' then return false end
+    local ok, st = pcall(wp.status)
+    return ok and type(st) == 'table' and st.enabled == true and st.alfred_idle == true
 end
 -- Status text + one rate-limited log line for any hold longer than a minute.
 local function note_hold(reason)
@@ -257,6 +270,14 @@ local function wants_trigger(status)
         and (now - last_completion_at) < STUCK_NEED_TRIGGER_GRACE
     if cycle_just_completed and not hard_need(status) then return false end
     if utils.player_in_undercity() then return status.inventory_full and true or false end
+    if not hard_need(status) and warpigs_advisory_idle() then
+        -- F-C1: not a hold (the route continues); one line per minute at most.
+        if now - trip.advisory_logged >= HOLD_LOG_AFTER then
+            trip.advisory_logged = now
+            console.print('[WonderCity:alfred] advisory Alfred restock skipped: WarPigs reports it serviced')
+        end
+        return false
+    end
     return not utils.player_in_zone('[sno none]')
 end
 

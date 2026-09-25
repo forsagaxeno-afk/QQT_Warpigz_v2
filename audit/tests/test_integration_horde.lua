@@ -6,7 +6,11 @@
 -- the Pit fallback (HRD-9), the C1 teleport latch (WPT-1), captured modules
 -- instead of undefined globals, C5 yield accounting, and round 3: C2
 -- exit_pending (R7), external control with an unbound keybind and re-enable
--- without a reset (R8), and the bounded paused-Alfred holds (C1). The real HordeDev
+-- without a reset (R8), and the bounded paused-Alfred holds (C1); round 4:
+-- keep_run_on_enable keeps a run only where it is (F-H3, the round-3 critic's
+-- hotkey probe as a joint regression, War Plan entry off and on), no
+-- advisory-only Alfred trip at activity start under WarPigs (F-H4) and the
+-- War Plan entry end to end with the real WarPigs (R4 joint). The real HordeDev
 -- plugin is loaded in an isolated environment with QQT-shaped host mocks;
 -- the joint cases also load the real WarPigs orchestrator.
 local ROOT = assert(SUITE_ROOT) .. '/HordeDev-1.3.9/'
@@ -582,7 +586,10 @@ local function joint(opts)
     arkham.disable = function() arkham.enabled = false end
     arkham.status = function() return {enabled = arkham.enabled} end
     e.ArkhamAsylumPlugin = arkham
-    local settings = {enabled = true, manage_whispers = false, use_teleport_transition = false, manage_orbwalker = false}
+    -- Round 4: War Plan Horde entry off unless a case asks for it (off =
+    -- exactly the d275b9d behaviour).
+    local settings = {enabled = true, manage_whispers = false, use_teleport_transition = false, manage_orbwalker = false,
+        horde_warplan_entry = opts and opts.warplan == true or false, horde_compass_fallback = false}
     local modules = {['core.settings'] = settings,
         ['core.tasks.turn_in_rewards'] = {tick = function() end, get_state = function() return 'IDLE' end}}
     e.require = function(name)
@@ -592,6 +599,7 @@ local function joint(opts)
     end
     f.o = e.require('core.orchestrator')
     f.arkham = arkham
+    f.settings, f.env = settings, e
     function f.run(seconds, each)
         for i = 1, math.floor(seconds / 0.25 + 0.5) do
             s:tick(0.25)
@@ -850,6 +858,197 @@ case('R8 joint: with Use keybind on and no key bound WarPigs enables HordeDev on
     eq(s.P.status().enabled, true, 'enable() took effect')
     eq(s:logged('HORDE ACTIVATING'), 1, 'enabled once')
     eq(s:logged('fresh_run_reset'), 1, 'run state reset once')
+end)
+
+-- ── Round 4 ────────────────────────────────────────────────────────────────
+-- F-H3 (round-3 critic regression 1): keep_run_on_enable keeps the run only
+-- where it actually is. Stale horde_opened / sigil_used / has_entered with the
+-- player outside BSK and nothing pending take the full reset (as at 86340d4).
+local function hotkey_pause_to_gate(f)
+    local s = f.s
+    f.settings.use_teleport_transition = true
+    s.gui.elements.use_keybind:set(true); s.gui.elements.keybind_toggle.key = 0x70; s:tick()
+    f.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+    f.run(5)
+    local tr = s.loaded['core.tracker']
+    tr.horde_opened, tr.has_entered, tr.sigil_used = true, true, true
+    f.run(3)
+    -- host: the Temis waypoint lands in Temis; the Horde warplan lands at the Caldeum gate
+    f.env.teleport_to_waypoint = function(id) s.teleports[#s.teleports + 1] = 'WP:' .. tostring(id); s.pending_move = 'town' end
+    f.env.warplan.teleport_to_activity = function() f.warplans = (f.warplans or 0) + 1; s.pending_move = 'gate' end
+    local function host()
+        if s.pending_move == 'town' then s.pending_move = nil; s:town(); s.actors = {}
+        elseif s.pending_move == 'gate' then s.pending_move = nil; s:outside(); s.in_town = false
+            s.actors = {actor('QST_Caldeum_GatesToHell_Seal', 3, 0)} end
+    end
+    s.gui.elements.keybind_toggle.state = 0 -- the user presses HordeDev's bound hotkey mid-horde
+    return host
+end
+local function hordedev_teleports(s)
+    local n = 0
+    for _, t in ipairs(s.teleports) do if type(t) == 'number' then n = n + 1 end end
+    return n
+end
+
+case('F-H3 joint: hotkey pause mid-horde, warplan lands at the gate, the re-enable restarts with Start Dungeon', function()
+    local f = joint({aether = 0})
+    local s = f.s
+    local host = hotkey_pause_to_gate(f)
+    local started = false
+    f.run(240, function()
+        host()
+        if s:task_name() == 'Start Dungeon' then started = true end
+    end)
+    truthy(started, string.format('Start Dungeon after the re-enable at the gate (task=%s in_run=%s zone=%s)',
+        s:task_name(), tostring(s.P.status().in_run), s.zone))
+    eq(s:logged('keeping the current run'), 0, 'stale in-Horde flags at the gate are not a run')
+    eq(s.P.status().enabled, true)
+    eq(s.P.status().entry_mode, 'compass', 'War Plan entry off: compass mode as at d275b9d')
+end)
+
+case('F-H3 re-enable outside BSK: stale flags reset; pending transaction, BSK or own Alfred trip keep the run', function()
+    -- stale flags at the gate (compass): full reset, then Start Dungeon
+    local s = horde({aether = 0})
+    s.P.enable()
+    s:outside(); s.actors = {actor('QST_Caldeum_GatesToHell_Seal', 3, 0)}
+    local tr = s.loaded['core.tracker']
+    tr.horde_opened, tr.has_entered, tr.sigil_used = true, true, true
+    s:run(2)
+    eq(s:task_name(), 'Idle', 'the stale state blocks every entry task (the round-3 symptom)')
+    eq(s.P.status().in_run, true)
+    s.P.enable()
+    eq(s:logged('keeping the current run'), 0)
+    eq(tr.horde_opened, false, 'full reset')
+    s:run(2)
+    eq(s:task_name(), 'Start Dungeon', 'restarts the compass chain')
+    -- ... and in War Plan mode the same re-enable idles visibly, never a compass
+    local w = horde({aether = 0})
+    w.P.enable()
+    w:outside(); w.actors = {actor('QST_Caldeum_GatesToHell_Seal', 3, 0)}
+    w.keys = {{get_name = function() return 'S05_DungeonSigil_BSK_Wave6' end}}
+    local wtr = w.loaded['core.tracker']
+    wtr.horde_opened, wtr.has_entered, wtr.sigil_used = true, true, true
+    w:run(1)
+    w.P.enable({entry = 'warplan'})
+    w:run(60)
+    eq(w:task_name(), 'Waiting for War Plan teleport')
+    eq(w.P.status().hold, 'waiting for War Plan teleport')
+    eq(w.used, nil, 'no compass'); eq(#w.teleports, 0, 'no Library teleport')
+    -- own Alfred trip in town (outside BSK): the chest run is kept
+    local st = {enabled = true, need_trigger = true}
+    local a = horde({aether = 40, globals = {AlfredTheButlerPlugin = {get_status = function() return st end,
+        trigger_tasks_with_teleport = function() st.running = true; return true end}}})
+    a.P.enable()
+    a.actors = {actor('BSK_UniqueOpChest_Materials', 0.5, 0), actor('BSK_UniqueOpChest_Gold', 1.0, 0), actor('Stash', 1.5, 0)}
+    a:run(20)
+    eq(a.P.status().alfred_trip, true, 'HordeDev Alfred trip in flight')
+    a:town('Skov_Temis'); a:run(1)
+    a.P.enable()
+    eq(a:logged('keeping the current run'), 1, 'own Alfred trip outside BSK keeps the run')
+    eq(a.P.status().alfred_trip, true)
+end)
+
+case('F-H3 joint (War Plan entry on): the same hotkey pause never leads to a compass or a Library teleport', function()
+    local f = joint({aether = 0, warplan = true})
+    local s = f.s
+    local host = hotkey_pause_to_gate(f)
+    s.keys = {{get_name = function() return 'S05_DungeonSigil_BSK_Wave6' end}}
+    local outside_modes = {}
+    f.run(240, function()
+        host()
+        local st = s.P.status()
+        if st.enabled and s.zone ~= 'S05_BSK_Prototype02' then outside_modes[st.entry_mode .. ':' .. st.task.name] = true end
+    end)
+    -- the user resumes HordeDev with its hotkey at the gate: a visible War
+    -- Plan wait, not a run (stale compass flags are not in_run), no compass
+    eq(s.P.status().entry_mode, 'warplan', 'entered in War Plan mode inside BSK')
+    s.gui.elements.keybind_toggle.state = 1
+    local waited, in_run = false, false
+    f.run(30, function()
+        host()
+        local st = s.P.status()
+        if st.enabled and st.task.name == 'Waiting for War Plan teleport' and st.hold == 'waiting for War Plan teleport' then
+            waited = true
+        end
+        if st.enabled and st.in_run then in_run = true end
+    end)
+    truthy(waited, 'visible War Plan wait after the resume (task=' .. s:task_name() .. ')')
+    eq(in_run, false, 'stale compass flags outside BSK are not a War Plan run')
+    eq(s.used, nil, 'no compass used')
+    eq(hordedev_teleports(s), 0, 'no HordeDev Library teleport')
+    eq(s.loaded['core.tracker'].sigil_activation_pending, false)
+    for key in pairs(outside_modes) do
+        truthy(key == 'warplan:Waiting for War Plan teleport' or key == 'warplan:Idle',
+            'HordeDev on outside the Horde only as a visible War Plan wait: ' .. key)
+    end
+end)
+
+-- The contract end to end with the real WarPigs orchestrator: War Plan
+-- teleport (Use teleport off) -> BSK -> enable({entry = 'warplan'}) -> chests
+-- -> Leave Dungeon -> released with last_result 'completed'; no compass.
+case('R4 joint: War Plan entry, HordeDev runs in War Plan mode inside BSK, exits and is released', function()
+    local f = joint({aether = 0, warplan = true})
+    local s = f.s
+    s:town('Skov_Temis'); s.actors = {}
+    s.keys = {{get_name = function() return 'S05_DungeonSigil_BSK_Wave6' end}}
+    f.env.warplan.teleport_to_activity = function() f.warplans = (f.warplans or 0) + 1; s.pending_move = 'bsk' end
+    local modes = {}
+    local function step()
+        if s.pending_move == 'bsk' then
+            s.pending_move = nil
+            s.world, s.zone, s.id, s.in_town = 'S05_BSK_Prototype02', 'S05_BSK_Prototype02', s.id + 1, false
+            chest_room(s, true, true)
+        end
+        if s.outside_at and s.now >= s.outside_at then s.outside_at = nil; s:outside(); s.actors = {} end
+        local st = s.P.status()
+        if st.enabled then modes[st.entry_mode] = true end
+    end
+    s.on_leave = function() s.outside_at = s.now + 2 end
+    f.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+    truthy(f.until_true(function() return s.P.status().enabled end, 30, step), 'HordeDev enabled after the War Plan teleport')
+    eq(s.zone, 'S05_BSK_Prototype02', 'enabled inside the Horde')
+    eq(s.P.status().entry_mode, 'warplan', 'War Plan entry mode')
+    eq(f.warplans, 1, 'one War Plan teleport')
+    truthy(f.until_true(function() return s.leaves >= 1 end, 180, step), 'Leave Dungeon')
+    f.quests = {'WarPlans_QST_TurnIn_Rewards'}
+    truthy(f.until_true(function() return not s.gui.elements.main_toggle:get() end, 60, step), 'HordeDev released')
+    eq(s.P.status().last_result, 'completed', 'completed result visible')
+    eq(s.P.chests_done(), true)
+    eq(s.used, nil, 'no compass'); eq(hordedev_teleports(s), 0, 'no HordeDev teleport')
+    eq(modes.compass, nil, 'never enabled in compass mode')
+end)
+
+-- F-H4 (joint OPEN item): no advisory-only Alfred trip at activity start while
+-- WarPigs is enabled and reports alfred_idle (Arkham's warpigs_advisory_idle).
+local function advisory_at_gate(st, wp)
+    local triggers = 0
+    local alfred = {get_status = function() return st end,
+        trigger_tasks_with_teleport = function() triggers = triggers + 1; return true end}
+    local s = horde({aether = 0, globals = {AlfredTheButlerPlugin = alfred, WarPigsPlugin = wp}})
+    s.P.enable()
+    s:outside(); s.actors = {actor('QST_Caldeum_GatesToHell_Seal', 3, 0)} -- at the gate, no compass
+    s:run(40)
+    return s, triggers
+end
+case('F-H4 advisory restock at the gate under WarPigs (alfred_idle): no Alfred trip; hard needs and standalone unchanged', function()
+    local idle_wp = {status = function() return {enabled = true, alfred_idle = true} end}
+    local s, n = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, idle_wp)
+    eq(n, 0, 'no advisory Alfred trip while WarPigs serviced the flag')
+    eq(s.loaded['core.tracker'].needs_salvage, false)
+    eq(s:logged('Advisory Alfred restock skipped'), 1, 'logged once')
+    eq(s:task_name(), 'Start Dungeon')
+    local _, hard = advisory_at_gate({enabled = true, need_trigger = true, inventory_full = true}, idle_wp)
+    truthy(hard >= 1, 'inventory_full still triggers')
+    local _, repair = advisory_at_gate({enabled = true, need_trigger = true, need_repair = true}, idle_wp)
+    truthy(repair >= 1, 'need_repair still triggers')
+    local busy_wp = {status = function() return {enabled = true, alfred_idle = false} end}
+    local _, not_idle = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, busy_wp)
+    truthy(not_idle >= 1, 'WarPigs has not serviced it: trip as before')
+    local off_wp = {status = function() return {enabled = false, alfred_idle = true} end}
+    local _, off = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, off_wp)
+    truthy(off >= 1, 'WarPigs off: standalone rule')
+    local _, alone = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, nil)
+    truthy(alone >= 1, 'no WarPigs: standalone rule')
 end)
 
 for _, failure in ipairs(failures) do print('FAIL ' .. failure) end

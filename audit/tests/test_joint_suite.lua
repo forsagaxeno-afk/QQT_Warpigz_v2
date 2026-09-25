@@ -12,6 +12,12 @@
 --     next plan, Arkham's own Alfred trip, Reaper dispatch, via-Temis Alfred
 --     preamble, sticky restock flag
 --   5 master stop (toggle and API), re-enable in place, adoption, death
+--   6 Infernal Hordes War Plan entry (round 4): J1/J2 War Plan teleport ->
+--     HordeDev in War Plan mode -> 6 scripted waves -> Council -> chests (or
+--     none) -> exit -> turn-in, with 'Use teleport' off/on; J3 missed
+--     teleports, backoff, compass fallback; J4 persisted HordeDev toggle;
+--     J5 hotkey pause mid-horde; J6 Horde -> turn-in -> Pit in one Temis
+--     visit; J7 standalone compass farming
 -- Regressions for the defects this suite found are marked "Found by this
 -- suite". Runs under Lua 5.4 and LuaJIT (run_tests.py runs both).
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
@@ -301,6 +307,8 @@ case('2 Temis start with activity toggles persisted on: WarPigs turns them off o
             .. "WarPigs' first tick (README: avoid starting activity controllers yourself)", w.owner, w.sno))
     end
     ok(early <= 2, 'first-frame teleports bounded: ' .. early)
+    -- F-H2 (round 4): HordeDev waits for WarPigs' first decision (J4).
+    eq(h.count(h.waypoints, function(w) return w.context == HD end), 0, 'no HordeDev first-frame Library teleport')
     h.run(30)
     eq(#h.waypoints, early, 'no teleport after WarPigs took over')
     h.assert_clean('persisted')
@@ -891,6 +899,430 @@ case('5 death in the pit under WarPigs: revive, no hand-off, Arkham continues', 
             'Arkham drives again after the revive')
         h.assert_clean('death')
     end
+end)
+
+-- ═══ 6. Infernal Hordes War Plan entry (round 4) ═════════════════════════════
+-- The user feature: a Horde War Plan is entered through the War Plan
+-- teleport (no Infernal Compass, no Library walk); HordeDev runs in War Plan
+-- entry mode only inside the Horde. The host scripts the horde itself
+-- (joint_host.lua h.setup_horde: 6 waves, locked door, Council, chest room).
+-- Every scenario fails on d275b9d except J7 (standalone guard).
+local HORDE_Q, LIBRARY_WP = 'WarPlans_QST_InfernalHordes_BSK', 0x10D63D
+local LANDED_BSK = 'landed world=S05_BSK_Prototype02 zone=S05_BSK_Prototype02, inside the Horde'
+local function hd_calls(h, name)
+    local out = {}
+    for _, c in ipairs(h.api_calls) do
+        if c.export == 'InfernalHordesPlugin' and c.name == name and c.context == WP then out[#out + 1] = c end
+    end
+    return out
+end
+local function warplan_tps(h, since)
+    return h.count(h.warplans, function(w) return w.kind == 'teleport' and w.t >= (since or 0) end)
+end
+local function arena_event(A, what, run)
+    return first(A.events, function(e) return e.what == what and (run == nil or e.run == run) end)
+end
+-- Nothing of the compass chain ran: no use_item, no sigil confirmation, no
+-- Library waypoint, no HordeDev teleport, no compass countdown.
+local function no_compass(h, label)
+    eq(#h.items, 0, label .. ': use_item (Infernal Compass) calls')
+    eq(#h.sigil_confirms, 0, label .. ': sigil confirmations')
+    eq(h.count(h.waypoints, function(w) return w.sno == LIBRARY_WP end), 0, label .. ': Library teleports')
+    eq(h.count(h.waypoints, function(w) return w.context == HD end), 0, label .. ': HordeDev teleports')
+    eq(h.logged('Waiting five seconds before selecting a compass'), 0, label .. ': compass countdown')
+end
+-- Samples HordeDev's C2 status every frame.
+local function horde_watch(h)
+    local w = {tasks = {}, outside = {}, stall = 0, max_stall = 0}
+    function w.each()
+        local st = status(h, 'InfernalHordesPlugin')
+        local name = st.task and st.task.name or '?'
+        w.tasks[name] = (w.tasks[name] or 0) + 1
+        if st.enabled == true and h.place ~= h.P.bsk and h.place ~= h.P.limbo then
+            w.outside[tostring(st.entry_mode) .. ':' .. name] = true
+        end
+        -- The round-3 critic's silent stall: on, 'Idle', in_run, no hold.
+        if st.enabled == true and name == 'Idle' and st.in_run == true and st.hold == nil and not h.travel then
+            w.stall = w.stall + 0.1
+            if w.stall > w.max_stall then w.max_stall = w.stall end
+        else
+            w.stall = 0
+        end
+        if st.last_result == 'completed' and not w.completed then
+            w.completed = {t = h.now, in_run = st.in_run, enabled = st.enabled, place = h.place.key, task = name,
+                chests_done = h.as(WP, function() return h.G.InfernalHordesPlugin.chests_done() end)}
+        end
+        if st.hold == 'waiting for War Plan teleport' and not w.waiting then
+            w.waiting = {t = h.now, task = name, in_run = st.in_run, place = h.place.key}
+        end
+    end
+    return w
+end
+local function outside_only(w, allowed, label)
+    for key in pairs(w.outside) do ok(allowed[key], label .. ': HordeDev on outside the Horde as ' .. key) end
+end
+
+-- J1/J2: a Pit, then the Horde War Plan. WarPigs releases Arkham in Temis,
+-- fires the War Plan teleport itself, starts HordeDev in War Plan mode inside
+-- the Horde, and after the exit the turn-in follows.
+local function warplan_horde_chain(opts)
+    local h = setup({place = 'pit', quests = {'WarPlans_QST_ThePit'}, teleport = opts.teleport})
+    local A = h.setup_horde(opts.arena)
+    h.run(10)
+    ok(enabled(h, 'ArkhamAsylumPlugin'), 'Arkham running in the pit')
+    h.set_quests({HORDE_Q})
+    h.warplan_dest = 'bsk'
+    h.run(2)
+    h.travel_to('temis', 1.0, 'pit_exit')
+    ok(h.run_until(function() return not enabled(h, 'ArkhamAsylumPlugin') end, 10), 'Arkham released in Temis')
+    local w = horde_watch(h)
+    w.arkham_released = h.now
+    ok(h.run_until(function() return #h.quests == 0 end, 420, w.each), 'the turn-in completes\n' .. h.tail())
+    h.run(2, w.each)
+    h.assert_clean('war plan horde')
+    return h, A, w
+end
+-- The horde itself, the exit, the release and the turn-in (J1 and J2).
+local function assert_warplan_run(h, A, w, label, chest_room)
+    no_compass(h, label)
+    eq(h.logged('enabling it to navigate itself'), 0, label .. ': no WPD-3 enable outside the Horde')
+    local arrived = first(h.arrivals, function(a) return a.place == 'bsk' end)
+    ok(arrived and arrived.why == 'warplan', label .. ': the War Plan teleport put the player in the Horde')
+    local enables = hd_calls(h, 'enable')
+    eq(#enables, 1, label .. ': one HordeDev enable')
+    eq(enables[1].place, 'bsk', label .. ': enabled inside the Horde')
+    eq(enables[1].entry, 'warplan', label .. ': enable({entry = "warplan"})')
+    ok(enables[1].t >= arrived.t, label .. ': enabled only after the arrival')
+    eq(h.logged(LANDED_BSK), 1, label .. ': landing logged once')
+    -- 6 host-scripted waves, the Council, then the chest room (or none).
+    eq(A.runs, 1, label .. ': one horde')
+    eq(A.wave, 6, label .. ': six waves')
+    eq(h.count(A.events, function(e) return e.what:find('^pylon') ~= nil end), 6, label .. ': six offerings')
+    ok(arena_event(A, 'door opened') and arena_event(A, 'council dead'), label .. ': door and Council')
+    if chest_room then
+        eq(table.concat(A.opened, ','), 'BSK_UniqueOpChest_GreaterAffix,BSK_UniqueOpChest_Materials,'
+            .. 'BSK_UniqueOpChest_Materials', label .. ': chests opened with the aether')
+        eq(h.aether, 0, label .. ': aether spent')
+        eq(h.logged('Chest sequence finished'), 1, label .. ': chest phase finished')
+    else
+        eq(#A.opened, 0, label .. ': no chest room')
+        eq(h.logged('no chest room; leaving without chests'), 1, label .. ': bounded completion without chests')
+        local left = first(h.arrivals, function(a) return a.why == 'leave' end)
+        ok(left.t - A.council_dead_at <= 45, string.format('%s: left %.1fs after the Council (bounded)', label,
+            left.t - A.council_dead_at))
+    end
+    -- Found by this suite: the aether hold was logged every pulse from the
+    -- first wave on (~600 lines per horde).
+    ok(h.logged('holding — player still has') <= 1, label .. ': aether hold not logged every pulse ('
+        .. h.logged('holding — player still has') .. ')')
+    -- Exit, a visible completed result, released, turn-in.
+    eq(h.leaves, 1, label .. ': Leave Dungeon'); eq(h.resets, 1, label .. ': reset')
+    ok(w.completed ~= nil, label .. ': last_result completed')
+    eq(w.completed.in_run, false, label .. ': in_run false after the exit')
+    eq(w.completed.chests_done, true, label .. ': chests_done() after the exit')
+    ok(w.completed.place ~= 'bsk', label .. ': completed outside the Horde')
+    eq(h.logged('War Plan horde complete; no new cycle'), 1, label .. ': completion logged')
+    local released = first(hd_calls(h, 'disable'), function(c) return c.t >= w.completed.t end)
+    ok(released and released.t - w.completed.t <= 1.0, label .. ': released right after the exit')
+    eq(status(h, 'InfernalHordesPlugin').entry_mode, 'compass', label .. ': disable() reset the entry mode')
+    eq(w.tasks['Start Dungeon'], nil, label .. ': no compass cycle after the exit')
+    eq(w.tasks['Walking to Horde'], nil, label .. ': no Library walk')
+    eq(w.tasks['Enter Horde'], nil, label .. ': no portal walk')
+    outside_only(w, {['warplan:Exit Horde'] = true, ['warplan:War Plan horde complete'] = true}, label)
+    ok(w.max_stall <= 3, label .. ': no idle stall')
+    eq(h.logged('turn-in cycle completed'), 1, label .. ': turn-in')
+    eq(h.count(h.warplans, function(w2) return w2.kind == 'teleport' end), 1, label .. ': one War Plan teleport')
+end
+
+case('J1 War Plan Horde, Use teleport off: WarPigs teleports, HordeDev in War Plan mode, 6 waves, exit, turn-in', function()
+    for _, variant in ipairs({'chest room', 'no chest room (unspendable aether)', 'no chest room, no aether'}) do
+        local chest_room = variant == 'chest room'
+        local h, A, w = warplan_horde_chain({arena = {chest_room = chest_room,
+            aether_per_wave = variant == 'no chest room, no aether' and 0 or 5}})
+        local label = 'J1 ' .. variant
+        assert_warplan_run(h, A, w, label, chest_room)
+        -- The War Plan teleport comes from WarPigs itself, after Arkham's
+        -- release and the post-disable gap; no waypoint before the exit.
+        local tp = first(h.warplans, function(x) return x.kind == 'teleport' end)
+        eq(tp.context, WP, label .. ': War Plan teleport by WarPigs')
+        ok(tp.t - w.arkham_released >= 5 - 1e-6, string.format('%s: War Plan teleport %.1fs after the release (gap 5 s)',
+            label, tp.t - w.arkham_released))
+        eq(first(h.waypoints, function(x) return x.t < w.completed.t end), nil, label .. ': no waypoint teleport before the exit')
+        eq(h.count(h.alfred.triggers), 0, label .. ': no Alfred cycle (no need, Use teleport off)')
+        if not chest_room then eq(h.aether, variant == 'no chest room, no aether' and 0 or 30, label .. ': aether left') end
+    end
+end)
+
+case('J2 War Plan Horde, Use teleport on: via-Temis preamble (one Alfred cycle), then the War Plan teleport', function()
+    local h, A, w = warplan_horde_chain({teleport = true, arena = {}})
+    local label = 'J2'
+    assert_warplan_run(h, A, w, label, true)
+    local arrived = first(h.arrivals, function(a) return a.place == 'bsk' end)
+    local visit = h.count(h.alfred.triggers, function(t) return t.t < arrived.t end)
+    eq(visit, 1, 'J2: one Alfred cycle in the Temis visit before the Horde')
+    local trigger = h.alfred.triggers[1]
+    eq(trigger.context, WP, 'J2: WarPigs triggered it'); eq(trigger.place, 'temis', 'J2: in Temis')
+    eq(h.logged('via-Temis preamble: already in Temis — Alfred triggered'), 1, 'J2: preamble Alfred step')
+    local tp = first(h.warplans, function(x) return x.kind == 'teleport' end)
+    ok(tp.t >= trigger.t + h.alfred.work, 'J2: War Plan teleport after the Alfred cycle')
+    eq(h.logged('the via-Temis warplan teleport arrived — ' .. LANDED_BSK), 1, 'J2: landing logged once')
+    eq(h.count(h.alfred.triggers, function(t) return t.context == HD end), 0, 'J2: no HordeDev Alfred trip')
+end)
+
+case('J3 War Plan teleport misses the Horde 3 times: no compass, visible reason, 60 s backoff; compass fallback once', function()
+    -- Fallback off (default): three misses, then the backoff; never a compass.
+    local h = setup({quests = {HORDE_Q}})
+    h.give_compasses(2)
+    h.warplan_dest = 'caldeum'   -- the War Plan teleport lands at the Caldeum gate
+    local lines = {}
+    h.run(150, function()
+        local line = h.as(WP, function() return h.mod(WP, 'core.orchestrator').get_status_line() end)
+        if h.now >= 1025 and h.now < 1075 then lines[#lines + 1] = line end
+    end)
+    h.assert_clean('J3')
+    no_compass(h, 'J3')
+    eq(#hd_calls(h, 'enable'), 0, 'J3: HordeDev never enabled outside the Horde')
+    eq(enabled(h, 'InfernalHordesPlugin'), false)
+    local tps = {}
+    for _, x in ipairs(h.warplans) do if x.kind == 'teleport' then tps[#tps + 1] = x end end
+    eq(#tps, 6, 'J3: 3 War Plan teleports per round, 2 rounds in 150 s')
+    for i = 2, 3 do ok(tps[i].t - tps[i - 1].t >= 6 - 1e-6, 'J3: channel debounce between tries') end
+    ok(tps[4].t - tps[3].t >= 60, string.format('J3: 60 s backoff before round 2 (%.1fs)', tps[4].t - tps[3].t))
+    eq(h.logged('not using a compass (compass fallback off)'), 2, 'J3: one reason line per round')
+    eq(h.logged('retrying the War Plan teleport (round 2)'), 1, 'J3: round 2 logged')
+    ok(h.logged('War Plan Horde entry:') <= 18, 'J3: War Plan entry log rate-limited: ' .. h.logged('War Plan Horde entry:'))
+    ok(#lines > 50, 'J3: status sampled during the backoff')
+    for _, line in ipairs(lines) do
+        ok(line:find('did not reach the Horde', 1, true) and line:find('compass fallback off', 1, true),
+            'J3: backoff reason visible in the status line: ' .. line)
+    end
+    eq(h.logged('enabling it to navigate itself'), 0, 'J3: WPD-3 bypass off in War Plan mode')
+
+    -- Fallback on: compass mode exactly once after the three misses.
+    local f = setup({quests = {HORDE_Q}})
+    el(f, WP).horde_compass_fallback:set(true)
+    f.give_compasses(2)
+    local A = f.setup_horde({})
+    f.warplan_dest = 'caldeum'
+    local w = horde_watch(f)
+    ok(f.run_until(function() return #f.quests == 0 end, 420, w.each), 'J3 fallback: the compass horde and the turn-in\n'
+        .. f.tail())
+    f.assert_clean('J3 fallback')
+    local enables = hd_calls(f, 'enable')
+    eq(#enables, 1, 'J3 fallback: one HordeDev enable')
+    eq(enables[1].with_args, false, 'J3 fallback: enable() without arguments (compass mode)')
+    eq(enables[1].place, 'caldeum', 'J3 fallback: at the gate')
+    local third = log_time(f, 'compass fallback is on: starting HordeDev in compass mode')
+    ok(third and enables[1].t >= third, 'J3 fallback: only after the third miss')
+    eq(f.logged('starting HordeDev in compass mode (compass fallback'), 1, 'J3 fallback: logged once')
+    eq(warplan_tps(f), 3, 'J3 fallback: no War Plan teleport after the fallback')
+    eq(#f.items, 1, 'J3 fallback: one compass for the one horde')
+    eq(f.items[1].context, HD, 'J3 fallback: HordeDev used it')
+    local entered = first(f.arrivals, function(a) return a.place == 'bsk' end)
+    eq(entered.why, 'horde_portal', 'J3 fallback: entered through the compass portal')
+    eq(A.wave, 6, 'J3 fallback: the horde ran')
+    ok(w.outside['compass:Start Dungeon'], 'J3 fallback: compass mode at the gate')
+end)
+
+case('J4 HordeDev toggle persisted on at load with WarPigs on: nothing before WarPigs decides', function()
+    local PERSISTED = {infernal_horde_main_toggle = true, war_pigs_main_toggle = true, war_pug_main_toggle = true,
+        silent_raven_main_toggle = true}
+    local variants = {
+        {'Temis, no Horde plan', 'temis', nil, true},
+        {'Temis, Horde plan', 'temis', HORDE_Q, true},
+        {'at the gate with compasses, Horde plan', 'caldeum', HORDE_Q, true},
+        {'at the gate, Horde plan, War Plan entry off', 'caldeum', HORDE_Q, false},
+    }
+    for _, v in ipairs(variants) do
+        local label, warplan_on = 'J4 ' .. v[1], v[4]
+        local persisted = J.copy(PERSISTED)
+        persisted.war_pigs_horde_warplan_entry = warplan_on
+        local h = J.new({place = v[2], persisted = persisted})
+        h.assert_clean('load')
+        h.instrument_exports()
+        eq(el(h, HD).main_toggle:get(), true, label .. ': HordeDev toggle persisted on')
+        if v[2] == 'caldeum' then h.pos = h.v(-1714, -586) end
+        h.give_compasses(2)
+        local A = h.setup_horde({})
+        h.warplan_dest = 'bsk'
+        if v[3] then h.set_quests({v[3]}) end
+        h.run(60)
+        h.assert_clean(label)
+        -- WarPigs' first decision about HordeDev (stop it, or adopt it).
+        local decided = log_time(h, '[WarPigs] disabled InfernalHordesPlugin')
+            or log_time(h, 'adopted active InfernalHordesPlugin')
+        ok(decided and decided <= 1000.1 + 1e-6, label .. ': WarPigs decided on its first tick')
+        -- HordeDev runs before WarPigs within a frame: nothing at or before it.
+        local function before(list) return first(list, function(c) return c.context == HD and c.t <= decided + 1e-6 end) end
+        eq(before(h.waypoints), nil, label .. ': no HordeDev teleport before WarPigs decided')
+        eq(before(h.items), nil, label .. ': no compass before WarPigs decided')
+        eq(before(h.moves), nil, label .. ': no HordeDev movement before WarPigs decided')
+        eq(h.logged('waiting up to 5s for WarPigs before acting'), 1, label .. ': visible wait logged')
+        if warplan_on then
+            no_compass(h, label)
+            if v[3] then
+                ok(h.logged('was not started by WarPigs — stopping it') == 1, label .. ': persisted HordeDev not adopted')
+                local enables = hd_calls(h, 'enable')
+                eq(#enables, 1, label .. ': started once'); eq(enables[1].entry, 'warplan')
+                eq(enables[1].place, 'bsk', label .. ': inside the Horde')
+                ok(A.wave >= 1, label .. ': waves run')
+            else
+                eq(enabled(h, 'InfernalHordesPlugin'), false, label .. ': stays off')
+            end
+        else
+            -- d275b9d behaviour with the option off: adopted, compass after
+            -- HordeDev's bounded 5 s wait.
+            eq(h.logged('No enable/disable from WarPigs within 5s'), 1, label .. ': bounded wait ended')
+            ok(h.items[1] and h.items[1].t >= decided + 5, label .. ': compass only after the bounded wait')
+        end
+    end
+end)
+
+case('J5 HordeDev hotkey pressed mid-horde under WarPigs: no silent stall; compass restarts, War Plan waits visibly', function()
+    local function paused_horde(opts)
+        local h = setup({quests = {HORDE_Q}, teleport = opts.teleport})
+        -- (absent at d275b9d, where the compass entry is the only one)
+        local option = el(h, WP).horde_warplan_entry
+        if option then option:set(opts.warplan) end
+        el(h, HD).use_keybind:set(true); el(h, HD).keybind_toggle:set_key(0x70)
+        h.give_compasses(3)
+        local A = h.setup_horde({})
+        h.warplan_dest = opts.warplan and 'bsk' or 'caldeum'
+        local w = horde_watch(h)
+        ok(h.run_until(function() return A.wave >= 3 end, 240, w.each), 'horde reached wave 3\n' .. h.tail())
+        h.warplan_dest = opts.dest_after or h.warplan_dest
+        el(h, HD).keybind_toggle.state = 0 -- the user presses HordeDev's bound hotkey
+        w.paused_at = h.now
+        return h, A, w
+    end
+    -- (a) compass mode (War Plan entry off) with Use teleport on: the round-3
+    -- critic's regression. WarPigs detours via Temis, the warplan lands at the
+    -- gate and WPD-3 re-enables HordeDev there: it must restart the compass
+    -- chain, not sit 'Idle' with in_run=true.
+    local h, A, w = paused_horde({warplan = false, teleport = true})
+    local restarted
+    ok(h.run_until(function()
+        w.each()
+        local st = status(h, 'InfernalHordesPlugin')
+        if not restarted and st.task and st.task.name == 'Start Dungeon' then restarted = h.now end
+        return A.runs >= 2 and A.wave >= 1
+    end, 240), 'J5 compass: the next horde started\n' .. h.tail())
+    h.assert_clean('J5 compass')
+    ok(restarted ~= nil, 'J5 compass: Start Dungeon after the re-enable at the gate')
+    eq(h.logged('keeping the current run'), 0, 'J5 compass: stale in-Horde flags at the gate are not kept')
+    ok(w.max_stall <= 3, string.format('J5 compass: no silent idle stall (%.1fs)', w.max_stall))
+    eq(#h.items, 2, 'J5 compass: one compass per horde')
+    local reenable = first(hd_calls(h, 'enable'), function(c) return c.t > w.paused_at end)
+    ok(reenable and reenable.place == 'caldeum' and not reenable.with_args, 'J5 compass: re-enabled at the gate, compass mode')
+    eq(status(h, 'InfernalHordesPlugin').entry_mode, 'compass')
+
+    -- (b) War Plan mode, Use teleport on: the pause makes WarPigs detour via
+    -- Temis; the War Plan teleport lands at the gate and the user resumes
+    -- HordeDev there: a visible War Plan wait, never a compass.
+    h, A, w = paused_horde({warplan = true, teleport = true, dest_after = 'caldeum'})
+    local resumed
+    ok(h.run_until(function()
+        w.each()
+        if not resumed and h.place == h.P.caldeum and not h.travel then
+            resumed = h.now
+            el(h, HD).keybind_toggle.state = 1 -- the user resumes HordeDev at the gate
+        end
+        if resumed and h.now > resumed + 10 then h.warplan_dest = 'bsk' end
+        return A.runs >= 2 and A.wave >= 1
+    end, 300), 'J5 War Plan: the next War Plan horde started\n' .. h.tail())
+    h.assert_clean('J5 War Plan')
+    no_compass(h, 'J5 War Plan')
+    ok(w.waiting ~= nil, 'J5 War Plan: visible "waiting for War Plan teleport" after the resume')
+    eq(w.waiting.task, 'Waiting for War Plan teleport', 'J5 War Plan: task text')
+    eq(w.waiting.in_run, false, 'J5 War Plan: stale run flags outside the Horde are not a run')
+    eq(w.waiting.place, 'caldeum')
+    outside_only(w, {['warplan:Waiting for War Plan teleport'] = true}, 'J5 War Plan')
+    ok(w.max_stall <= 3, string.format('J5 War Plan: no silent idle stall (%.1fs)', w.max_stall))
+    for _, c in ipairs(hd_calls(h, 'enable')) do
+        eq(c.entry, 'warplan', 'J5 War Plan: every enable in War Plan mode'); eq(c.place, 'bsk', 'J5 War Plan: inside')
+    end
+    eq(status(h, 'InfernalHordesPlugin').entry_mode, 'warplan', 'J5 War Plan: the next horde runs in War Plan mode')
+
+    -- (c) War Plan mode, Use teleport off: WarPigs re-enables HordeDev in the
+    -- Horde after the gap and the same run continues to the exit.
+    h, A, w = paused_horde({warplan = true, teleport = false})
+    ok(h.run_until(function() w.each(); return #h.quests == 0 end, 300), 'J5 teleport off: horde and turn-in\n' .. h.tail())
+    h.assert_clean('J5 teleport off')
+    no_compass(h, 'J5 teleport off')
+    eq(A.runs, 1, 'J5 teleport off: the same horde'); eq(A.wave, 6)
+    eq(h.logged('keeping the current run'), 1, 'J5 teleport off: re-enable in the Horde keeps the run')
+    ok(w.completed and w.completed.chests_done, 'J5 teleport off: completed')
+    ok(w.max_stall <= 3, 'J5 teleport off: no silent idle stall')
+    note('J5: a HordeDev hotkey pause mid-horde is still treated by WarPigs as a self-disable (pre-existing): with '
+        .. "'Use teleport' off it re-enables HordeDev after the 5 s gap, with it on it leaves the horde via Temis")
+end)
+
+case('J6 Horde -> turn-in -> next Pit plan in one Temis visit (Use teleport on): one WarPigs Alfred cycle', function()
+    for _, sticky in ipairs({false, true}) do
+        local label = sticky and 'J6 sticky restock flag' or 'J6'
+        local h = setup({quests = {HORDE_Q}, teleport = true})
+        if sticky then h.alfred.need_trigger, h.alfred.sticky_need, h.alfred.restock_count = true, true, 2 end
+        local A = h.setup_horde({})
+        h.warplan_dest = 'bsk'
+        local released
+        ok(h.run_until(function()
+            if not released and A.council_dead_at and not enabled(h, 'InfernalHordesPlugin') then
+                released = h.now
+                h.bounty_ready = true
+                h.on_confirm = function() h.at(1.0, function() h.set_quests({'WarPlans_QST_ThePit'}) end) end
+            end
+            return enabled(h, 'ArkhamAsylumPlugin')
+        end, 480), label .. ': Arkham enabled for the next plan\n' .. h.tail())
+        h.assert_clean(label)
+        no_compass(h, label)
+        eq(A.runs, 1, label .. ': one War Plan horde'); eq(A.wave, 6)
+        eq(h.logged('War Plan horde complete; no new cycle'), 1, label .. ': completed')
+        eq(h.logged('turn-in cycle completed'), 1, label .. ': turned in')
+        eq(h.board.confirmed, 1, label .. ': next plan submitted')
+        eq(h.reward_accepts, 1, label .. ': Whisper claimed in the visit')
+        eq(h.logged('run finished: success'), 1, label .. ': SilentRaven verified the claim')
+        eq(h.count(h.alfred.triggers, function(t) return t.t >= released and t.context == WP end), 1,
+            label .. ': one WarPigs Alfred cycle in the Temis visit')
+        eq(h.count(h.alfred.triggers, function(t) return t.t >= released end), 1, label .. ': one Alfred cycle in total')
+        eq(h.logged('Alfred already serviced this visit'), 1, label .. ': the next preamble joins it')
+        ok(h.now - released <= 42, string.format('%s: Arkham enabled %.1fs after the Horde release', label, h.now - released))
+        eq(h.place, h.P.temis, label .. ': Pit tower in Temis')
+        if sticky and h.count(h.alfred.triggers, function(t) return t.context == HD end) > 0 then
+            note('J6: a sticky advisory restock flag still sends HordeDev on its own Alfred trip from the chest room '
+                .. '(open C1 item: advisory flags after the grace)')
+        end
+    end
+end)
+
+case('J7 standalone HordeDev (WarPigs off): compass farming unchanged', function()
+    local h = setup({warpigs = false, warpug = false})
+    h.remove_actor(h.table_actor)
+    h.give_compasses(2)
+    local A = h.setup_horde({quest_done = false})
+    el(h, HD).main_toggle:set(true)
+    local w = horde_watch(h)
+    ok(h.run_until(function() w.each(); return A.runs >= 2 and h.resets >= 2 end, 480), 'J7: two hordes\n' .. h.tail())
+    h.run(20, w.each)
+    h.assert_clean('J7')
+    eq(h.count(h.waypoints, function(x) return x.context == HD and x.sno == LIBRARY_WP end), 1, 'J7: Library teleport once')
+    eq(#h.items, 2, 'J7: one compass per horde')
+    for _, item in ipairs(h.items) do
+        eq(item.context, HD); eq(item.from, 'caldeum', 'J7: compass used at the gate')
+        eq(item.name, 'S05_DungeonSigil_BSK_Wave6')
+    end
+    eq(#h.sigil_confirms, 2, 'J7: sigil confirmed per horde')
+    eq(h.count(h.arrivals, function(a) return a.place == 'bsk' and a.why == 'horde_portal' end), 2, 'J7: portal entries')
+    eq(h.leaves, 2, 'J7: Leave Dungeon per horde'); eq(h.resets, 2, 'J7: reset per horde')
+    eq(#h.warplans, 0, 'J7: no War Plan call')
+    eq(h.logged('waiting up to 5s for WarPigs'), 0, 'J7: no WarPigs wait standalone')
+    eq(h.logged('Entry mode: warplan'), 0, 'J7: compass mode')
+    -- Guard: identical on d275b9d, which has no entry_mode / last_result.
+    local st = status(h, 'InfernalHordesPlugin')
+    ok(st.entry_mode == nil or st.entry_mode == 'compass', 'J7: compass mode')
+    eq(st.last_result, nil, 'J7: no War Plan result in compass mode')
+    ok(w.tasks['Start Dungeon'] and w.tasks['Enter Horde'] and w.tasks['Open Chests'], 'J7: the full compass cycle')
+    ok(h.logged('Dungeon Sigil not found in inventory') >= 1, 'J7: out of compasses on the third cycle')
+    eq(enabled(h, 'InfernalHordesPlugin'), true, 'J7: still farming')
 end)
 
 for _, line in ipairs(report) do print('NOTE joint: ' .. line) end

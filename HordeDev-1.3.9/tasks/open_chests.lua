@@ -197,6 +197,9 @@ open_chests_task = {
         if delegated and status.enabled == true then
             if not alfred_pause_expired(status) then return end
             why = "Alfred paused past its 60 s bound"
+        elseif tracker.entry_mode == 'warplan' then
+            -- F-H1: no built-in Cerrigar salvage in War Plan mode.
+            why = "no built-in town salvage in War Plan mode"
         elseif settings.salvage and utils.is_inventory_full() ~= false then
             return
         end
@@ -367,7 +370,9 @@ open_chests_task = {
                         self.current_state = chest_state.PAUSED_FOR_SALVAGE
                         return
                     end
-                else
+                elseif tracker.entry_mode ~= 'warplan' then
+                    -- F-H1: the built-in Cerrigar salvage does not run in
+                    -- War Plan mode, so a full bag does not pause the chests.
                     local full = utils.is_inventory_full()
                     if full == nil then return end -- unreadable external inventory owner
                     if full then
@@ -533,6 +538,7 @@ open_chests_task = {
         tracker.clear_key("salvage_return_time")
         tracker.finished_chest_looting = false
         tracker.chest_fault = nil
+        tracker.chests_skipped = nil
 
         tracker.ga_chest_opened = false
         tracker.talisman_chest_opened = false

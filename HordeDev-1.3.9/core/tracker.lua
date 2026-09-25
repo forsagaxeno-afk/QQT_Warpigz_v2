@@ -35,6 +35,19 @@ local tracker = {
     -- C1/C6: set by tasks/alfred.lua once HordeDev has waited 60 s on a paused
     -- Alfred; cleared when Alfred's pause ends. The chests then continue.
     alfred_pause_expired = false,
+    -- F-H1: 'compass' (farming: Library, compass, portal) or 'warplan' (the
+    -- War Plan Teleport entered the Horde; no compass). Runtime only, set by
+    -- InfernalHordesPlugin.enable(opts) / disable(); never persisted and
+    -- never touched by fresh_run_reset().
+    entry_mode = 'compass',
+    -- F-H1: War Plan mode found no chest room after the horde (reason text);
+    -- the chest phase is finished without spending the (unspendable) aether.
+    chests_skipped = nil,
+    -- F-H1: time the wave task has been idle in the boss room (waves
+    -- cleared, no target, pylon or locked door); nil otherwise.
+    horde_idle_since = nil,
+    -- F-H1: a Council/Bartuc pylon was seen this run (the waves are over).
+    council_seen = false,
     -- Timestamp of the last InfernalHordesPlugin.enable(). Used by horde.lua's
     -- shouldExecute as a settle gate so the wave-clearing task doesn't fire
     -- the same tick an external orchestrator (WarPigs) flipped the toggle —
@@ -105,6 +118,9 @@ function tracker.fresh_run_reset()
     tracker.exit_horde_start_time     = nil
     tracker.has_entered               = false
     tracker.chest_fault               = nil
+    tracker.chests_skipped            = nil
+    tracker.horde_idle_since          = nil
+    tracker.council_seen              = false
     tracker.clear_runtime_timers()
 end
 

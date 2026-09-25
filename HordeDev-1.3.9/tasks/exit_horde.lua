@@ -4,6 +4,7 @@ local tracker = require "core.tracker"
 local explorer = require "core.explorer"
 local enums = require "data.enums"
 local loot_guard = require "core.loot_guard"
+local warplan = require "core.warplan"
 
 local plugin_label = "infernal_horde"
 local HORDE_ZONE = "S05_BSK_Prototype02"
@@ -23,8 +24,12 @@ local function snapshot()
         if type(name) ~= "string" or name == "" or type(zone) ~= "string" or zone == "" or id == nil then return nil end
         local lower = name:lower()
         if lower:find("limbo", 1, true) or lower:find("loading", 1, true) then return nil end
+        local bsk = lower:find("bsk", 1, true) ~= nil
+        -- F-H1: a War Plan run is out once it is in any loaded non-Horde
+        -- world (Leave Dungeon may not land at the Caldeum gate).
         return {player=player, zone=zone, id=id, horde=zone==HORDE_ZONE,
-            outside=zone==EXIT_ZONE and not lower:find("bsk", 1, true)}
+            outside=zone==EXIT_ZONE and not bsk
+                or (tracker.entry_mode == 'warplan' and zone ~= HORDE_ZONE and not bsk)}
     end)
     return ok and result or nil
 end
@@ -66,20 +71,33 @@ end
 -- boss-room stash with the chest phase finished and no spendable aether.
 -- HRD-1: after a terminal chest fault the remaining aether is unspendable, so
 -- the aether hold is skipped and the Horde is left.
+-- The hold is logged only once the chest phase is finished (before that the
+-- exit is not due anyway) and once per aether count: the joint suite saw this
+-- line printed every pulse from the first wave on (~600 lines per horde).
+local aether_hold_logged = nil
 local function exit_due(log_hold)
     local s = snapshot()
     if not s or not s.horde then return false end
+    local war_plan = tracker.entry_mode == 'warplan'
     local aether_ok = true
-    if type(get_aether_count) == 'function' and not tracker.chest_fault then
+    -- F-H1: aether left after a War Plan horde without a chest room cannot
+    -- be spent.
+    if type(get_aether_count) == 'function' and not tracker.chest_fault
+        and not (war_plan and tracker.chests_skipped)
+    then
         local ok, count = pcall(get_aether_count)
         if ok and type(count) == 'number' and count > 0 then
-            if log_hold then console.print(string.format("[exit_horde] holding — player still has %d aether", count)) end
+            if log_hold and tracker.finished_chest_looting and aether_hold_logged ~= count then
+                aether_hold_logged = count
+                console.print(string.format("[exit_horde] holding — player still has %d aether", count))
+            end
             aether_ok = false
         end
     end
-    return utils.get_stash() ~= nil
-        and tracker.finished_chest_looting
-        and aether_ok
+    if not (tracker.finished_chest_looting and aether_ok) then return false end
+    if utils.get_stash() ~= nil then return true end
+    -- F-H1: a War Plan horde may have no stash; leave within a bound.
+    return war_plan and warplan.finished_for() >= warplan.STASH_WAIT
 end
 
 local exit_horde_task = {
@@ -92,6 +110,7 @@ local exit_horde_task = {
 
     reset = function(self)
         loot_guard.reset()
+        aether_hold_logged = nil
         if self.explorer_before_exit ~= nil then explorer.is_task_running = self.explorer_before_exit end
         self.explorer_before_exit = nil
         self.reset_phase, self.reset_error, self.reset_complete = nil, nil, false
@@ -141,7 +160,7 @@ local exit_horde_task = {
             if current_time - self.reset_settle_since < RESET_SETTLE then return end
             tracker.clear_runtime_timers()
             tracker.victory_lap, tracker.victory_positions = false, nil
-            tracker.locked_door_found = false
+            tracker.locked_door_found, tracker.council_seen = false, false
             tracker.exit_horde_start_time = nil
             tracker.exit_horde_completion_time = current_time
             tracker.horde_opened, tracker.sigil_used = false, false
@@ -152,6 +171,7 @@ local exit_horde_task = {
             self.reset_phase, self.reset_complete = "DONE", true
             exit_started = false
             console.print("[exit_horde] RESET sequence finished outside Horde; next cycle released.")
+            if tracker.entry_mode == 'warplan' then warplan.complete() end
             return
         end
         if s.outside then
@@ -165,8 +185,14 @@ local exit_horde_task = {
             self.reset_settle_since, self.reset_settle_id = current_time, s.id
             local ok, result = pcall(reset_all_dungeons)
             if not ok or result == false then
-                self:fail_reset("Reset request failed: " .. tostring(result))
-                return
+                if tracker.entry_mode ~= 'warplan' then
+                    self:fail_reset("Reset request failed: " .. tostring(result))
+                    return
+                end
+                -- F-H1: no new cycle follows a War Plan run, so a refused
+                -- reset does not keep the finished run from completing.
+                console.print("[exit_horde] Reset request failed (" .. tostring(result)
+                    .. "); the War Plan run is complete without it.")
             end
             self.reset_phase = "RESET_SETTLE"
             console.print("[exit_horde] Outside Horde confirmed. Reset requested; waiting before the next cycle.")
@@ -228,7 +254,14 @@ local exit_horde_task = {
             end
         end
 
-        if settings.exit_mode == 1 then
+        -- F-H1: a War Plan run always leaves through Leave Dungeon (never a
+        -- Library waypoint teleport).
+        if settings.exit_mode == 1 and tracker.entry_mode == 'warplan' and not self.warplan_exit_logged then
+            self.warplan_exit_logged = true
+            console.print("[exit_horde] War Plan run: leaving through Leave Dungeon"
+                .. " (the Teleport exit would use the Library waypoint).")
+        end
+        if settings.exit_mode == 1 and tracker.entry_mode ~= 'warplan' then
             -- Teleport mode: skip walking to center / 5s wait, just leave.
             -- Stop any in-flight long_path navigation BEFORE pausing.
             -- Batmobile's main_pulse re-runs navigator.unpause+update+move
@@ -261,7 +294,7 @@ local exit_horde_task = {
             tracker.clear_runtime_timers()
             tracker.victory_lap = false
             tracker.victory_positions = nil
-            tracker.locked_door_found = false
+            tracker.locked_door_found, tracker.council_seen = false, false
             tracker.exit_horde_start_time = nil
             tracker.exit_horde_completion_time = current_time
             tracker.horde_opened = false

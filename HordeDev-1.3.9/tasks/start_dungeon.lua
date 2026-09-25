@@ -189,10 +189,21 @@ local function use_dungeon_sigil(task, now, snapshot)
         -- add additional conditions to trigger if required
         -- C1: advisory need_trigger alone cannot re-trigger within the sticky
         -- grace after HordeDev's own completed Alfred cycle.
+        -- F-H4 (as Arkham's warpigs_advisory_idle): under WarPigs, an
+        -- advisory-only flag (restock, no inventory_full/need_repair) that
+        -- WarPigs reports serviced (alfred_idle) starts no trip here; the
+        -- via-Temis preamble covers restocking. Hard needs are unchanged.
         if utils.alfred_trip_wanted(status, tracker.alfred_completed_at) then
-            tracker.start_dungeon_time = nil
-            tracker.needs_salvage = true
-            return false
+            if utils.alfred_hard_need(status) or not task.warpigs_advisory_idle() then
+                tracker.start_dungeon_time = nil
+                tracker.needs_salvage = true
+                return false
+            end
+            if not task.advisory_skip_logged then
+                task.advisory_skip_logged = true
+                console.print("[start_dungeon] Advisory Alfred restock skipped:"
+                    .. " WarPigs reports it serviced for this visit.")
+            end
         end
     end
     
@@ -212,6 +223,14 @@ local function warpigs_on()
     if type(wp) ~= 'table' or type(wp.status) ~= 'function' then return false end
     local ok, st = pcall(wp.status)
     return ok and type(st) == 'table' and st.enabled == true
+end
+
+-- F-H4: the same reading as ArkhamAsylum's warpigs_advisory_idle().
+function task.warpigs_advisory_idle()
+    local wp = WarPigsPlugin
+    if type(wp) ~= 'table' or type(wp.status) ~= 'function' then return false end
+    local ok, st = pcall(wp.status)
+    return ok and type(st) == 'table' and st.enabled == true and st.alfred_idle == true
 end
 
 function task:start_pit()
@@ -235,6 +254,9 @@ function task:start_pit()
 end
 
 task.shouldExecute = function()
+    -- F-H1: War Plan entry never uses a compass (no use_item, no activation,
+    -- no sigil confirmation).
+    if tracker.entry_mode == 'warplan' then return false end
     if tracker.sigil_activation_pending then return true end
     if tracker.horde_entry_pending then return false end
     local s=task.read_world()
@@ -242,6 +264,7 @@ task.shouldExecute = function()
 end
 
 function task:Execute()
+    if tracker.entry_mode == 'warplan' then return end -- F-H1 (forced paths too)
     local now=get_time_since_inject()
     if tracker.sigil_activation_pending then self:activation_update(now);return end
     local s=self.read_world()

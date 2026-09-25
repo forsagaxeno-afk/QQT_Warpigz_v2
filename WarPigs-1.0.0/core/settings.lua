@@ -9,6 +9,11 @@ local settings = {
     run_pit_after_turnin = false,
     manage_orbwalker = false,
     manage_whispers = true,
+    -- Infernal Hordes War Plan entry: warplan.teleport_to_activity() into
+    -- the Horde and HordeDev in War Plan entry mode (no compass). The
+    -- compass fallback applies only after 3 deliveries miss the Horde.
+    horde_warplan_entry    = true,
+    horde_compass_fallback = false,
     verbose_logs    = false,
     log_all_quests  = false,
 }
@@ -20,6 +25,8 @@ settings.update_settings = function()
     settings.run_pit_after_turnin = gui.elements.run_pit_after_turnin:get()
     settings.manage_orbwalker = gui.elements.manage_orbwalker:get()
     settings.manage_whispers = gui.elements.manage_whispers:get()
+    settings.horde_warplan_entry = gui.elements.horde_warplan_entry:get()
+    settings.horde_compass_fallback = gui.elements.horde_compass_fallback:get()
     settings.verbose_logs   = gui.elements.verbose_logs:get()
     settings.log_all_quests = gui.elements.log_all_quests:get()
 end

@@ -566,6 +566,53 @@ case('R6 the first activity after the turn-in gets the native warplan transition
     eq(g.logged('teleport queued'), 0)
 end)
 
+-- F-W2 (round-3 critic regression 2): the R6 re-arm after the turn-in ran a
+-- second full WarPigs Alfred cycle in the same Temis visit because the J2
+-- join applied only within 20 s of the first cycle's completion. WPT-3 is per
+-- visit: a completed WarPigs cycle of this visit is joined whatever its age;
+-- a hard need that came back since still triggers Alfred.
+case('F-W2 one WarPigs Alfred cycle per Temis visit across the turn-in and the next plan', function()
+    for _, hard in ipairs({false, true}) do
+        local f = fixture({teleport = true})
+        local ark = f.plugin('ArkhamAsylumPlugin')
+        f.alfred({enabled = true}, 5, {'inventory_full'})
+        f.actors[#f.actors + 1] = {get_skin_name = function() return 'TWN_Kehj_IronWolves_PitKey_Crafter' end,
+            get_position = function() return {} end}
+        f.quests = {'WarPlans_QST_TurnIn_Rewards'}
+        truthy(f.until_true(function() return f.interacts > 0 end, 40), 'turn-in reached Tyrael')
+        eq(#f.alfred_calls, 1, 'the turn-in preamble ran one Alfred cycle')
+        f.quests = {}                                   -- reward claimed
+        f.run(5)
+        eq(f.logged('teleport queued — turn-in finished'), 1)
+        f.run(25)                                       -- the plan is made: > 20 s after the cycle
+        if hard then f.alfred_status.inventory_full = true end
+        local started = f.now
+        f.quests = {'WarPlans_QST_ThePit'}
+        truthy(f.until_true(function() return ark.enables > 0 end, 40), 'Pit enabled')
+        if hard then
+            eq(#f.alfred_calls, 2, 'hard work that came back still triggers Alfred')
+        else
+            eq(#f.alfred_calls, 1, 'no second Alfred cycle in the visit (d275b9d: 2)')
+            eq(f.logged('Alfred already serviced this visit'), 1, 'the preamble skips the Alfred step')
+            truthy(f.now - started <= 4, string.format('Pit enabled %.1fs after the plan (incoming settle only)', f.now - started))
+        end
+        eq(f.teleports, 0, 'Pit tower in Temis: no warplan teleport')
+    end
+    -- A new Temis visit gets its own cycle.
+    local g = fixture({teleport = true})
+    g.plugin('ArkhamAsylumPlugin')
+    g.alfred({enabled = true}, 5)
+    g.quests = {'WarPlans_QST_TurnIn_Rewards'}
+    truthy(g.until_true(function() return g.interacts > 0 end, 40))
+    g.quests = {}; g.run(30)
+    g.zone = 'Kehj_Caldeum'; g.run(2)                -- left Temis
+    g.zone = 'Skov_Temis'; g.run(2)
+    g.actors[#g.actors + 1] = {get_skin_name = function() return 'TWN_Kehj_IronWolves_PitKey_Crafter' end,
+        get_position = function() return {} end}
+    g.quests = {'WarPlans_QST_ThePit'}
+    truthy(g.until_true(function() return #g.alfred_calls == 2 end, 20), 'a new visit triggers Alfred again')
+end)
+
 -- R15 (live L7): a short Looter burst before accept pauses the managed
 -- Whisper request instead of cancelling it; the walk resumes.
 case('R15 a Looter burst before accept pauses the managed Whisper request', function()

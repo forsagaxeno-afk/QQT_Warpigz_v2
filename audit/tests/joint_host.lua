@@ -15,6 +15,11 @@
 -- keeps running; the test asserts that no error happened.
 -- The world, the player, AlfredTheButler, LooteerV3, the native warplan /
 -- quest_reward / pathfinder / orbwalker APIs are behaviour-level mocks.
+-- Round 4: widgets load persisted values (opts.persisted, by widget hash);
+-- use_item / confirm_sigil_notification model the Infernal Compass at the
+-- Caldeum gate (h.items, h.sigil_confirms, the Horde portal); every arrival
+-- is recorded (h.arrivals) and may run the place's on_arrive; h.setup_horde
+-- scripts an Infernal Horde (waves, locked door, Council, chest room).
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = {}
 
@@ -53,7 +58,7 @@ function J.new(opts)
         file_writes = {}, plugins = {}, by_dir = {}, frames = 0,
         waypoints = {}, warplans = {}, moves = {}, clears = {}, orb_log = {}, interactions = {},
         vendors = {}, clicks = {}, keys = {}, revives = 0, resets = 0, leaves = 0, boss_tps = {},
-        pit_opens = 0, quests = {}, minute = opts.minute or 30, aether = 0, cinders = 0,
+        pit_opens = 0, quests = {}, minute = opts.minute or 30, aether = 0, cinders = 0, arrivals = {},
         floor_loot = false, dead = false, buffs = {}, events = {}, speed = opts.speed or 7}
     math.randomseed(opts.seed or 7)
     local context = nil   -- plugin record whose callback is running
@@ -201,6 +206,129 @@ function J.new(opts)
                 end
             end)
         end
+    end
+
+    -- Infernal Horde script (HordeDev's actor names, data/enums.lua,
+    -- data/pylons.lua, tasks/horde.lua): every arrival in the BSK world is a
+    -- new horde. Each wave starts with an offering pylon; interacting spawns
+    -- its monsters; the last kill of a wave grants `aether_per_wave`. After
+    -- `waves` waves (War Plan hordes: 6) the locked boss door appears; opening
+    -- it shows the Council pylon; the Council boss's death ends the War Plan
+    -- objective (InfernalHordes quest -> TurnIn quest unless `quest_done` is
+    -- false) and, unless `chest_room` is false, reveals the chest room
+    -- (stash, greater-affix / materials chests at 10 aether, gold chest takes
+    -- the rest). `stash` defaults to `chest_room`. Aether starts at 0 in
+    -- every new horde; Alfred's return portal re-enters the same horde.
+    function h.setup_horde(o)
+        o = o or {}
+        local bsk = P.bsk
+        local A = {waves = o.waves or 6, per_wave = o.aether_per_wave or 5, monsters = o.monsters or 3,
+            chest_room = o.chest_room ~= false, runs = 0, wave = 0, events = {}, opened = {}}
+        if o.stash == nil then A.stash = A.chest_room else A.stash = o.stash end
+        h.arena = A
+        local function event(what)
+            A.events[#A.events + 1] = {t = h.now, what = what, run = A.runs}
+        end
+        A.event = event
+        -- Scheduled steps of a horde the player already left do nothing.
+        local function later(delay, fn)
+            local run = A.runs
+            h.at(delay, function() if A.runs == run then fn() end end)
+        end
+        local spawn_pylon, spawn_wave, spawn_door, spawn_council, boss_dead
+        spawn_pylon = function()
+            local p = h.actor(bsk, 'BSK_Pyl_ChaoticOffering', 14, 10)
+            p.on_interact = function()
+                if p.used then return end
+                p.used, p.interactable = true, false
+                event('pylon ' .. (A.wave + 1))
+                later(0.5, function() h.remove_actor(p); spawn_wave() end)
+            end
+        end
+        spawn_wave = function()
+            A.wave = A.wave + 1
+            event('wave ' .. A.wave)
+            local alive = A.monsters
+            for i = 1, A.monsters do
+                local ang = (i / A.monsters) * 2 * math.pi
+                local m = h.actor(bsk, 'BSK_Wave_Monster', 9 + 6 * math.cos(ang), 9 + 6 * math.sin(ang),
+                    {enemy = true, health = 100})
+                m.on_death = function()
+                    h.remove_actor(m)
+                    alive = alive - 1
+                    if alive > 0 then return end
+                    h.aether = h.aether + A.per_wave
+                    event('wave ' .. A.wave .. ' cleared')
+                    if A.wave < A.waves then later(1.0, spawn_pylon) else later(1.0, spawn_door) end
+                end
+            end
+        end
+        spawn_door = function()
+            event('locked door')
+            local icon = h.actor(bsk, 'BSK_MapIcon_LockedDoor', -18, -18)
+            local door = h.actor(bsk, 'Hell_Fort_BSK_Door_A_01_Dyn', -20, -20)
+            door.on_interact = function()
+                if door.opened then return end
+                door.opened = true
+                event('door opened')
+                h.remove_actor(icon); h.remove_actor(door)
+                later(0.5, spawn_council)
+            end
+        end
+        spawn_council = function()
+            local p = h.actor(bsk, 'BSK_PylChoiceGizmo_SelectCouncil', -30, -30)
+            p.on_interact = function()
+                if p.used then return end
+                p.used, p.interactable = true, false
+                event('council pylon')
+                later(1.0, function()
+                    h.remove_actor(p)
+                    local boss = h.actor(bsk, 'BSK_Council_Boss', -34, -34,
+                        {enemy = true, boss = true, health = o.boss_health or 300})
+                    boss.on_death = function() h.remove_actor(boss); boss_dead() end
+                end)
+            end
+        end
+        boss_dead = function()
+            event('council dead')
+            A.council_dead_at = h.now
+            if o.quest_done ~= false then
+                local keep = {}
+                for _, q in ipairs(h.quests) do
+                    local name = type(q) == 'table' and q.name or q
+                    if not tostring(name):find('WarPlans_QST_InfernalHordes', 1, true) then keep[#keep + 1] = q end
+                end
+                keep[#keep + 1] = 'WarPlans_QST_TurnIn_Rewards'
+                h.quests = keep
+            end
+            if A.stash then h.actor(bsk, 'Stash', -40, -38) end
+            if not A.chest_room then return end
+            local function chest(skin, x, y, cost, once)
+                local c = h.actor(bsk, skin, x, y)
+                c.on_interact = function()
+                    local price = cost or h.aether
+                    if price <= 0 or h.aether < price then return end
+                    h.aether = h.aether - price
+                    A.opened[#A.opened + 1] = skin
+                    event('opened ' .. skin)
+                    if once then c.interactable = false end
+                end
+            end
+            chest('BSK_UniqueOpChest_GreaterAffix', -38, -42, 10, true)
+            chest('BSK_UniqueOpChest_Materials', -34, -42, 10, false)
+            chest('BSK_UniqueOpChest_Gold', -36, -45, nil, false)
+        end
+        bsk.on_arrive = function(_, trip)
+            -- Alfred's return portal goes back into the same horde.
+            if trip and trip.why == 'alfred_return' then return end
+            bsk.actors = {}
+            A.runs, A.wave, A.council_dead_at = A.runs + 1, 0, nil
+            event('arrived in the Horde')
+            h.aether = 0 -- aether is a per-horde currency
+            later(1.0, spawn_pylon)
+        end
+        if h.place == bsk then bsk.on_arrive(h) end
+        return A
     end
 
     -- ── plugin records / code ownership ─────────────────────────────────────
@@ -406,15 +534,22 @@ function J.new(opts)
         function w:pop() end
         return w
     end
-    host('checkbox', {new = function(_, d) return widget(d == true) end})
+    -- QQT restores a widget's stored value at load: opts.persisted maps the
+    -- widget hash (get_hash returns its string) to the value it loads with.
+    local persisted = opts.persisted or {}
+    local function stored(key, default)
+        if key == nil or persisted[key] == nil then return default end
+        return persisted[key]
+    end
+    host('checkbox', {new = function(_, d, key) return widget(stored(key, d == true)) end})
     host('combo_box', {new = function(_, d) return widget(d or 0) end})
     host('slider_int', {new = function(_, _, _, d) return widget(d) end})
     host('slider_float', {new = function(_, _, _, d) return widget(d) end})
     host('tree_node', {new = function() return widget(false) end})
     host('button', {new = function() local w = widget(false); function w:render() return false end; return w end})
     host('input_text', {new = function(_, d) return widget(d or '') end})
-    host('keybind', {new = function(_, key, toggle)
-        local w = widget(false, key)
+    host('keybind', {new = function(_, key, toggle, hash)
+        local w = widget(false, stored(hash, key))
         w.state = 0
         return w
     end})
@@ -536,7 +671,37 @@ function J.new(opts)
         h.leaves = h.leaves + 1
         h.travel_to(h.leave_to or 'caldeum', 0.5, 'leave')
     end)
-    host('use_item', function() end)
+    -- Infernal Compasses (HordeDev's dungeon sigils). use_item at the
+    -- Caldeum gate consumes the compass and opens the Consume Sigil dialog;
+    -- confirming it opens the Horde portal next to the gate.
+    h.items, h.sigil_confirms = {}, {}
+    function h.sigil(name)
+        name = name or 'S05_DungeonSigil_BSK_Wave6'
+        return {get_name = function() return name end, get_skin_name = function() return name end,
+            get_sno_id = function() return 0 end}
+    end
+    function h.give_compasses(n, name)
+        h.keys_items = h.keys_items or {}
+        for _ = 1, n or 1 do h.keys_items[#h.keys_items + 1] = h.sigil(name) end
+    end
+    host('use_item', function(item)
+        note_call(h.items, {item = item, name = item and type(item.get_name) == 'function' and item:get_name() or nil})
+        for i = #(h.keys_items or {}), 1, -1 do
+            if h.keys_items[i] == item then table.remove(h.keys_items, i) end
+        end
+        if h.place == P.caldeum and h.pos:dist_to_ignore_z(h.horde_gate.pos) <= 20 then h.sigil_dialog = true end
+        return true
+    end)
+    function h.open_horde_portal()
+        if h.horde_portal then return h.horde_portal end
+        local portal = h.actor('caldeum', 'Portal_Dungeon_Generic', -1706, -596)
+        portal.on_interact = function()
+            h.remove_actor(portal); h.horde_portal = nil
+            h.travel_to('bsk', 0.5, 'horde_portal')
+        end
+        h.horde_portal = portal
+        return portal
+    end
     host('get_aether_count', function() return h.aether end)
     host('get_helltide_coin_cinders', function() return h.cinders end)
     host('get_glyphs', function() return {} end)
@@ -594,7 +759,14 @@ function J.new(opts)
         send_mouse_move = function() end,
         send_mouse_wheel = function() end,
         get_cursor_screen_position = function() return Vec2:new(960, 540) end,
-        confirm_sigil_notification = function() end,
+        confirm_sigil_notification = function()
+            note_call(h.sigil_confirms, {})
+            if h.sigil_dialog and h.place == P.caldeum then
+                h.sigil_dialog = false
+                h.open_horde_portal()
+            end
+            return true
+        end,
     })
     host('cast_spell', {position = function() return false end, target = function() return false end,
         self = function() return false end})
@@ -854,6 +1026,8 @@ function J.new(opts)
         else
             h.travel = nil
             h.place, h.pos, h.goal = t.to, t.pos or t.to.spawn, nil
+            h.arrivals[#h.arrivals + 1] = {t = h.now, place = t.to.key, why = t.why}
+            if t.to.on_arrive then t.to.on_arrive(h, t) end
         end
     end
     local function run_events()
@@ -940,7 +1114,10 @@ function J.new(opts)
                         api[name] = function(...)
                             local caller = (...)
                             local rec = {export = label, name = name, caller = type(caller) == 'string' and caller or nil,
-                                context = context and context.name or '-', t = h.now, place = h.place.key}
+                                context = context and context.name or '-', t = h.now, place = h.place.key,
+                                -- an options table's `entry` (HordeDev enable({entry = 'warplan'}))
+                                entry = type(caller) == 'table' and caller.entry or nil,
+                                with_args = select('#', ...) > 0}
                             h.api_calls[#h.api_calls + 1] = rec
                             if label == 'BatmobilePlugin' then h.bm_calls[#h.bm_calls + 1] = rec end
                             return fn(...)

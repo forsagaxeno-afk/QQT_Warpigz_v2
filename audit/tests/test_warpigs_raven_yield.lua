@@ -169,6 +169,42 @@ do
     eq(c.api.get_status().paused, false, 'no pause after accept')
 end
 
+-- Round-3 audit (probe_postaccept_alfred.lua): ANY companion reason after
+-- accept yields; Alfred self-starting because the claimed cache filled the
+-- bag cancelled the claimed request and re-requested it. The yield after
+-- accept is still bounded by the bridge's run limit.
+do
+    local c = fixture(); c:walk()
+    c.tracker.state, c.tracker.claim_sent = 'API_CLAIMING', true
+    c.env.AlfredTheButlerPlugin = {get_status = function() return {enabled = true, trigger_tasks = true} end}
+    local ok, why = c.tracker.continuation_guard()
+    eq(ok, false); eq(why, 'yield:alfred_busy', 'after accept: Alfred live work answers a yield')
+    eq(c.bridge:tick(c.now, false), true, 'after accept the bridge keeps the request over Alfred')
+    c.now = c.now + 0.5; c.update()
+    eq(c.api.get_status().running, true, 'SilentRaven keeps verifying the receipt')
+    for _, reason_status in ipairs({{inventory_full = true}, {need_repair = true}}) do
+        reason_status.enabled = true
+        c.env.AlfredTheButlerPlugin = {get_status = function() return reason_status end}
+        local ok2, why2 = c.tracker.continuation_guard()
+        eq(ok2, false); eq(why2, 'yield:alfred_work_pending', 'after accept: Alfred hard work answers a yield')
+    end
+    c.env.WarPugPlugin = {status = function() return {enabled = true, state = 'APPROACH_TABLE'} end}
+    c.env.AlfredTheButlerPlugin = nil
+    local ok3, why3 = c.tracker.continuation_guard()
+    eq(ok3, false); eq(why3, 'yield:war_pug_busy', 'after accept: any companion reason yields')
+    c.env.WarPugPlugin = nil
+    -- Bounded: a request stuck in API_CLAIMING is cancelled at the run limit.
+    c.env.AlfredTheButlerPlugin = {get_status = function() return {enabled = true, trigger_tasks = true} end}
+    c.tracker.state_t = math.huge   -- SilentRaven's own 8 s receipt timeout does not fire
+    local held = 0
+    for _ = 1, 140 do
+        c.now = c.now + 0.5
+        if c.bridge:tick(c.now, false) then held = held + 1 else break end
+    end
+    eq(c.bridge.running, false, 'the post-accept yield is bounded by the run limit')
+    eq(held <= 121, true, 'held pulses: ' .. held)
+end
+
 -- Live Alfred work stays a hard cancel with the other owner's path preserved.
 do
     local c = fixture(); c:walk()

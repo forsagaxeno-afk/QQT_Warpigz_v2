@@ -158,6 +158,10 @@ local town_salvage_task = {
     last_portal_interaction_time = 0,
 
     shouldExecute = function()
+        -- F-H1: War Plan entry has no town walk-in (Cerrigar teleport,
+        -- blacksmith, walk back through the town portal); an enabled Alfred
+        -- still services the bag.
+        if tracker.entry_mode == 'warplan' then return false end
         local in_cerrigar = utils.player_in_zone("Scos_Cerrigar")
         local gold_chest_exists = utils.get_chest(enums.chest_types["GOLD"]) ~= nil
     
@@ -187,6 +191,7 @@ local town_salvage_task = {
     end,
 
     Execute = function(self)
+        if tracker.entry_mode == 'warplan' then return end -- F-H1 (forced paths too)
         console.print("Executing Town Salvage Task")
         console.print("Current state: " .. self.current_state)
 

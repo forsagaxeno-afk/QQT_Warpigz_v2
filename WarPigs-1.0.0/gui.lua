@@ -26,6 +26,10 @@ gui.elements = {
     run_pit_after_turnin    = create_checkbox(false, 'run_pit_after_turnin'),
     manage_orbwalker        = create_checkbox(false, 'manage_orbwalker'),
     manage_whispers        = create_checkbox(true, 'manage_whispers'),
+    -- Infernal Hordes War Plans: enter through the War Plan teleport and run
+    -- HordeDev in War Plan entry mode (no compass, no Library walk).
+    horde_warplan_entry    = create_checkbox(true, 'horde_warplan_entry'),
+    horde_compass_fallback = create_checkbox(false, 'horde_compass_fallback'),
     verbose_logs  = create_checkbox(false, 'verbose_logs'),
     log_all_quests= create_checkbox(false, 'log_all_quests'),
 }
@@ -59,6 +63,18 @@ gui.render = function()
         'active WarPlans quest by enabling ArkhamAsylumPlugin (pit). The pit\n' ..
         'keeps running until a new WarPlans quest matches, at which point the\n' ..
         'normal preemption / disable_when handoff takes over.')
+
+    gui.elements.horde_warplan_entry:render('Hordes: enter via War Plan teleport (no compass)',
+        'For an Infernal Hordes War Plan, WarPigs calls warplan.teleport_to_activity()\n' ..
+        'itself (also with Use teleport off) and starts HordeDev only inside the Horde,\n' ..
+        'in War Plan entry mode: no Infernal Compass, no Library walk, one run, then\n' ..
+        'the exit. Off: HordeDev farms with compasses as before.')
+    if gui.elements.horde_warplan_entry:get() then
+        gui.elements.horde_compass_fallback:render('Allow compass entry if the War Plan teleport fails',
+            'Only after 3 War Plan teleports did not reach the Horde: start HordeDev in\n' ..
+            'its normal compass mode (spends an Infernal Compass). Off (default): never\n' ..
+            'spend a compass; retry the War Plan teleport after a 60 s pause.')
+    end
 
     gui.elements.manage_whispers:render('Whispers in Temis (SilentRaven)',
         'Check for Whisper rewards on each Temis visit after activity cleanup.\n' ..
