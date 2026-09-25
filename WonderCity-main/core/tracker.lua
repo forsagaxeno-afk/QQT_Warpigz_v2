@@ -74,6 +74,7 @@ tracker.reset_floor_state = function ()
     tracker.chest_items_base = nil
     tracker.chest_loot_recent = nil
     tracker.boss_kill_seen, tracker.boss_alive_at = nil, nil
+    tracker.kill_dismissed_at = nil
     tracker.last_boss_name, tracker.last_boss_health, tracker.last_boss_at = nil, nil, nil
 end
 

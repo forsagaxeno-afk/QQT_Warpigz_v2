@@ -12,6 +12,12 @@ local LOOT_NEAR_RANGE, LOOT_BURST, LOOT_BURST_WINDOW, LOOT_CHECK_INTERVAL = 5, 2
 -- R14: a dead boss counts as an observed kill only if a live boss was seen
 -- at most KILL_LINK_SECONDS earlier (a corpse entering the stream is not).
 local KILL_LINK_SECONDS = 5
+-- Live 2.1.2: WonderCity stood still on floor 1 "waiting for reward chest".
+-- A boss/miniboss corpse on a floor without the reward chest must not park
+-- the run until its timeout: with no reward chest seen for this long after
+-- the death, the reward phase is dropped (logged) and the run continues. The
+-- same corpse never re-arms it; a new live -> dead kill does.
+local NO_CHEST_AFTER_KILL = 30
 
 -- Match only actors already known to this runner. Other bosses can still be
 -- recognized by the documented is_boss() API. Never retain actor handles.
@@ -100,13 +106,25 @@ reward_phase.observe = function ()
     end
     tracker.boss_alive = alive_boss
     if alive_boss then return end
-    if dead_boss and not tracker.boss_kill_time then
+    local dismissed = tracker.kill_dismissed_at ~= nil
+        and (tracker.boss_alive_at == nil or tracker.boss_alive_at <= tracker.kill_dismissed_at)
+    if dead_boss and not tracker.boss_kill_time and not dismissed then
         tracker.boss_kill_time = get_time_since_inject()
-        console.print('[WonderCity:finish] boss death observed; waiting for reward chest')
+        tracker.kill_dismissed_at = nil
+        console.print(string.format('[WonderCity:finish] boss death observed (%s, zone %s); waiting for reward chest',
+            tostring(boss_name), tostring(select(2, pcall(function() return get_current_world():get_current_zone_name() end)))))
+    end
+    if tracker.boss_kill_time and not reward_seen and not tracker.reward_seen and not tracker.done
+        and now - tracker.boss_kill_time >= NO_CHEST_AFTER_KILL then
+        console.print(string.format('[WonderCity:finish] no reward chest %ds after the death of %s — not the district boss; continuing the run',
+            NO_CHEST_AFTER_KILL, tostring(tracker.last_boss_name)))
+        tracker.boss_kill_time, tracker.reward_grace_until = nil, nil
+        tracker.kill_dismissed_at = now
     end
     if reward_seen and not tracker.reward_seen then
         tracker.reward_seen = true
-        console.print('[WonderCity:finish] reward chest observed in all-actor list')
+        local read, chest_name = pcall(function() return chest_actor:get_skin_name() end)
+        console.print('[WonderCity:finish] reward chest observed in all-actor list (' .. tostring(read and chest_name) .. ')')
     end
     -- Complete, readable scans only (every failure path returned above).
     if chest_actor then

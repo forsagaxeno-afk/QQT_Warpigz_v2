@@ -1,4 +1,4 @@
-# SilentRaven 0.2.0 — WarPigs integration build
+# SilentRaven 0.2.1 — WarPigs integration build
 
 Based on magoogle's user-supplied SilentRaven 0.1.3. This build supports the current WarPigs suite directly; Loot Steward is not required. The installation folder retains its original name for replacement compatibility.
 

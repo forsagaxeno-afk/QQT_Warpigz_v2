@@ -237,10 +237,57 @@ local function interact(npc, now)
         tracker.last_interact_t = now
     end
 end
+-- Selection index spaces the host may use for a card at enumerate key
+-- `index` (live 2.1.2 dump: three slots, the first two empty/invalid, the
+-- panel selecting 0 and refusing select(2) — the host counts only the real
+-- cards). 'slot': 0-based over all slots; 'card': 0-based over usable cards
+-- only; 'key': enumerate's own key.
+local function card_rank(entries, base, index)
+    local rank = 0
+    for i = base, index - 1 do
+        if rewards.entry_usable(entries[i]) then rank = rank + 1 end
+    end
+    return rank
+end
+local function index_spaces(entries, base, index)
+    return {
+        {name = 'slot', value = index - base},
+        {name = 'card', value = card_rank(entries, base, index)},
+        {name = 'key', value = index},
+    }
+end
+-- The card a selection index names in one space (nil: no such card).
+local function card_at(entries, base, space, value)
+    if space == 'slot' then return entries[value + base] end
+    if space == 'key' then return entries[value] end
+    local rank = 0
+    for i = base, base + 64 do
+        local entry = entries[i]
+        if entry == nil then return nil end
+        if rewards.entry_usable(entry) then
+            if rank == value then return entry end
+            rank = rank + 1
+        end
+    end
+    return nil
+end
+-- A selection index is ours when at least one space names our card and no
+-- space names a different real card (so an ambiguous convention can never
+-- accept someone else's card).
+local function selection_is_ours(entries, base, selected, sno)
+    if type(selected) ~= 'number' then return false end
+    local hit = false
+    for _, space in ipairs({'slot', 'card', 'key'}) do
+        local entry = card_at(entries, base, space, selected)
+        if rewards.entry_usable(entry) then
+            if rewards.entry_sno(entry) ~= sno then return false end
+            hit = true
+        end
+    end
+    return hit
+end
 -- Before accept the selected card must be ours: re-enumerated, same usable
--- SNO at our key, and selected_index() naming it either in the documented
--- 0-based selection space or in enumerate's own key space (both name our
--- card; the live convention is unverified).
+-- SNO at our key, and selected_index() naming it (see `named` below).
 local function verify_selection(now)
     local pick = tracker.claim_pick
     if not pick or whispers.reward_panel_open() ~= true then retry('panel_closed_before_accept', now); return end
@@ -249,10 +296,19 @@ local function verify_selection(now)
     local list_ok, list = pcall(quest_reward.enumerate)
     local current = list_ok and type(list) == 'table' and list[pick.index] or nil
     local ours = rewards.entry_usable(current) and rewards.entry_sno(current) == pick.sno
-    if not (ours and (selected_index == pick.host_index or selected_index == pick.index)) then
+    -- A slot-space select keeps the original rule (0-based slot or enumerate
+    -- key); a fallback space must report exactly the index it selected and
+    -- must not be readable as another real card.
+    local named
+    if pick.space == 'slot' then
+        named = selected_index == pick.host_index or selected_index == pick.index
+    else
+        named = selected_index == pick.selected and selection_is_ours(list, pick.base, selected_index, pick.sno)
+    end
+    if not (ours and named) then
         if now - tracker.state_t < SELECT_SETTLE then return end
-        diagnose('selection_verification_failed', string.format('selected_index=%s(%s), wanted %d (0-based) or %d (enumerate key)',
-            tostring(raw), type(raw), pick.host_index, pick.index))
+        diagnose('selection_verification_failed', string.format('selected_index=%s(%s), wanted %d (slot), %d (card) or %d (enumerate key)',
+            tostring(raw), type(raw), pick.host_index, pick.card_index, pick.index))
         retry('selection_verification_failed', now); return
     end
     -- Never accept while the owner revoked or paused the request (R15): a
@@ -292,14 +348,28 @@ local function claim(settings, now)
     local before = whispers.cache_count(sno)
     if before == nil then retry('inventory_unavailable', now); return end
     -- select() has no verified return convention (a void binding returns
-    -- nil): only an error or an explicit false is a refusal. The selection
-    -- itself is verified before accept.
-    local selected_ok, selected = pcall(quest_reward.select, host_index)
-    if not selected_ok or selected == false then
-        diagnose('selection_failed', 'select(' .. tostring(host_index) .. ') -> ' .. tostring(selected))
+    -- nil): only an error or an explicit false is a refusal. Each index space
+    -- is tried once in order until one is accepted; the selection itself is
+    -- verified before accept.
+    local spaces, seen, tried, accepted = index_spaces(entries, base, index), {}, {}, nil
+    for _, space in ipairs(spaces) do
+        if not seen[space.value] then
+            seen[space.value] = true
+            local selected_ok, selected = pcall(quest_reward.select, space.value)
+            if selected_ok and selected ~= false then accepted = space; break end
+            tried[#tried + 1] = 'select(' .. tostring(space.value) .. ') -> ' .. tostring(selected)
+        end
+    end
+    if not accepted then
+        diagnose('selection_failed', table.concat(tried, ', '))
         retry('selection_failed', now); return
     end
-    tracker.claim_pick = { index = index, host_index = host_index, sno = sno, before = before, entry = entry }
+    if accepted.name ~= 'slot' and not tracker.select_space_logged then
+        tracker.select_space_logged = true
+        log.info(string.format('reward panel accepted select(%d) (%s index space)', accepted.value, accepted.name))
+    end
+    tracker.claim_pick = { index = index, host_index = host_index, card_index = spaces[2].value, base = base,
+        space = accepted.name, selected = accepted.value, sno = sno, before = before, entry = entry }
     transition('SELECT_VERIFY', now)
     verify_selection(now)
 end

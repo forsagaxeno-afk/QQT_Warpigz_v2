@@ -168,6 +168,14 @@ function task.Execute()
         interact_object(chest)
         last_interact_time = get_time_since_inject()
         tracker.chest_opened_time = os.time()
+        -- Live 2.1.2 (Grigoire): a reward chest means the boss was summoned and
+        -- killed. Until the run is counted (WAIT_COMPLETE) the altar must not
+        -- be summoned again, even if its actor is back and interactable.
+        if not tracker.altar_activated then
+            tracker.altar_activated = true
+            tracker.altar_activate_time = get_time_since_inject()
+            console.print("[Chest] Reward chest opened — boss summon confirmed for this run.")
+        end
         last_chest_pos = chest:get_position()
 
         -- Signal Belial chest UI task

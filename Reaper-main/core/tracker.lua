@@ -8,6 +8,9 @@ local tracker = {
     finished_time       = 0,
     chest_opened_time   = nil,
     altar_activate_time = 0,   -- get_time_since_inject() when altar was activated
+    -- Live 2.1.2 (Grigoire): time of our first altar click this run. From then
+    -- on the summon belongs to interact_altar, never to navigation.
+    altar_interact_time = nil,
 
     -- per-run flags
     altar_activated         = false,
@@ -28,6 +31,7 @@ local tracker = {
 function tracker.reset_run()
     tracker.altar_activated         = false
     tracker.altar_activate_time     = 0
+    tracker.altar_interact_time     = nil
     tracker.boss_killed             = false
     tracker.chest_opened            = false
     tracker.belial_chest_interacted = false

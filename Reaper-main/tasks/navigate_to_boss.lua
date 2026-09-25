@@ -244,6 +244,10 @@ function task.shouldExecute()
     -- so the run can be completed (chest opened, reset_run called).
     if tracker.altar_activated and in_target_zone(boss) then return false end
     if in_target_zone(boss) and chest_visible() then return false end
+    -- Live 2.1.2 (Grigoire): after our altar click the summon is interact_altar's
+    -- to confirm; the altar vanishing as the boss spawns is success, not a
+    -- reason to walk the recorded path again.
+    if in_target_zone(boss) and tracker.altar_interact_time then return false end
     -- Altar visible inside the zone: reset any active navigation and yield to interact_altar.
     -- interact_altar handles both movement to the altar and interaction; no need to navigate.
     local _altar = in_target_zone(boss) and utils.get_altar()

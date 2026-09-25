@@ -2,6 +2,20 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.1.3] — 2026-09-25
+
+Fixes from live reports on v2.1.2 (the Whisper-wall turn-in fix from 2.1.2 is confirmed working).
+
+### Fixed
+
+- Reaper (Grigoire and any lair whose altar vanishes or stops being clickable when the boss spawns): "pathing to the boss worked, but he opened the chest and then looped kill boss → chest". Three defects together: (1) after our altar click, the altar disappearing as the boss spawned let `navigate_to_boss` (higher priority) walk the recorded path again before `interact_altar` could register the summon; (2) an altar that stays listed but is no longer interactable was never counted as a summon; (3) with the summon unregistered, the altar was clicked again 6 s after the reward chest while the Looter still held the run-complete step, so the run was never counted ("Total runs completed this session: 0") and WarPigs had to cancel it. Now the summon belongs to `interact_altar` from our first click, a non-interactable altar after our click is success, and opening the reward chest confirms the summon so the altar can never be re-clicked before the run is counted.
+- SilentRaven: `selection_failed; select(2) -> false` on a reward panel whose first two slots were empty (`sno=0 valid=false`) and only the third held a cache. The host counts only real cards for `select()`. Selection now tries the slot index, then the index among real cards, then the enumerate key, and before accept verifies that the reported selection cannot mean a different real card. The convention that worked is logged once.
+- WonderCity: "stands still right after the start, *finish_undercity (waiting for reward chest)*" (seen twice, floor 1). Any boss/miniboss corpse started the reward wait, which then held the run until its timeout if no reward chest existed on that floor. Without a reward chest 30 s after the death, the reward wait is now dropped (logged with the boss name) and the run continues; the same corpse never re-arms it; a real reward chest always keeps it. The start of the wait now logs the boss name and zone.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: 44 test files × (Lua 5.4 + LuaJIT) = 88 runs pass. New regressions (`test_live_reaper_grigoire.lua`, the empty-slot SilentRaven case, the floor-1 corpse WonderCity case) fail on 2.1.2 and pass now.
+
 ## [2.1.2] — 2026-09-25
 
 ### Fixed

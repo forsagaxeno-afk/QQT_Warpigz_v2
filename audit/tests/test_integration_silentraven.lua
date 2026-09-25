@@ -101,17 +101,31 @@ local function harness(o)
     e.interact_vendor = function() end
     e.teleport_to_waypoint = function() end
     local function base() return c.entries[0] ~= nil and 0 or 1 end
+    -- Live 2.1.2: the host enumerates fixed slots (empty ones sno=0,
+    -- valid=false) but selects over the real cards only.
+    local function real_cards()
+        local out = {}
+        for i = base(), base() + 16 do
+            local entry = c.entries[i]
+            if entry == nil then break end
+            if entry.valid ~= false and tonumber(entry.sno) and tonumber(entry.sno) ~= 0 then out[#out + 1] = entry end
+        end
+        return out
+    end
     e.quest_reward = {
         is_open = function() return c.panel end,
         enumerate = function() return c.entries end,
         select = function(i)
-            c.selects = c.selects + 1; c.select_arg, c.select_t = i, c.time
+            c.selects = c.selects + 1
+            if c.sel_mode == 'card' and (type(i) ~= 'number' or i < 0 or i >= #real_cards()) then return false end
+            c.select_arg, c.select_t = i, c.time
             if c.select_ret == 'nil' then return nil end
             if c.select_ret == nil then return true end
             return c.select_ret
         end,
         selected_index = function()
             local i = c.select_arg
+            if c.sel_mode == 'card' then return i or 0 end              -- panel opens on the first card
             if i == nil then return -1 end
             if c.sel_mode == 'key' then return i + 1 end              -- enumerate key space
             if c.sel_mode == 'late' then return c.time > c.select_t and i or -1 end -- next frame
@@ -121,7 +135,8 @@ local function harness(o)
         end,
         accept = function()
             c.accepts = c.accepts + 1
-            local entry = c.entries[(c.select_arg or 0) + base()]
+            local entry = c.sel_mode == 'card' and real_cards()[(c.select_arg or 0) + 1]
+                or c.entries[(c.select_arg or 0) + base()]
             c.accepted_sno = entry and tonumber(entry.sno)
             if not c.no_delivery then
                 local sno = c.accepted_sno
@@ -283,6 +298,24 @@ for _, mode in ipairs({ 'wrong', 'nil' }) do
         ok(c.escapes >= 1 and c.esc_no_panel == 0, 'ESC only closes the open panel')
     end)
 end
+case('live 2.1.2: empty leading slots, host selects over real cards only', function()
+    local empty = function() return { sno = 0, valid = false, internal_name = '' } end
+    local c = harness({ sel_mode = 'card', entries = { [1] = empty(), [2] = empty(),
+        [3] = { sno = 1087411, valid = true, internal_name = 'BountyMeta_Cache_Helms' } } })
+    c.start(); c.run(5)
+    eq(c.result, 'success', 'claimed (was: selection_failed on select(2))'); eq(c.accepts, 1)
+    eq(c.accepted_sno, 1087411)
+    eq(c.count('card index space'), 1, 'convention logged once')
+end)
+case('live 2.1.2: card-space selection never accepts a different real card', function()
+    local c = harness({ sel_mode = 'card', entries = {
+        [1] = { sno = 0, valid = false, internal_name = '' },
+        [2] = { sno = 1087411, valid = true, internal_name = 'BountyMeta_Cache_Helms' },
+        [3] = { sno = 1087411, valid = true, internal_name = 'BountyMeta_Cache_Helms' } } })
+    c.start(); c.run(5)
+    eq(c.accepts <= 1, true)
+    if c.accepts == 1 then eq(c.accepted_sno, 1087411) end
+end)
 case('SRV-3 explicit select() false is a refusal', function()
     local c = harness({ entries = FOUR_REGULAR(true) })
     c.select_ret = false

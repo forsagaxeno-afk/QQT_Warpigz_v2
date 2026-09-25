@@ -308,6 +308,23 @@ test('fresh dead boss establishes reward wait without inventing opened chest', f
     assert(not tr.done and s.teleports==0,'missing reward was treated as success')
 end)
 
+test('live 2.1.2: a floor-1 miniboss corpse without a reward chest does not park the run', function()
+    local s=session();local mini=actor('X1_Undercity_Ghost_Caster_Miniboss',2,{boss=true});mini.health=0
+    s.all_actors={mini};s.enemies={}
+    local manager=s.load('core.task_manager');local phase=s.load('core.reward_phase');local tr=s.load('core.tracker')
+    manager.execute_tasks()
+    assert(manager.get_current_task().name=='finish_undercity','corpse starts a bounded reward wait')
+    s.now=131;manager.execute_tasks()
+    assert(not phase.active(),'no chest 30s after the death: reward phase dropped (was: waited for the run timeout)')
+    assert(manager.get_current_task().name~='finish_undercity','the run continues')
+    s.now=140;manager.execute_tasks()
+    assert(not tr.boss_kill_time,'the same corpse does not re-arm the wait')
+    mini.health=100;s.now=141;phase.observe();mini.health=0;s.now=142;phase.observe()
+    assert(tr.boss_kill_time==142 and phase.active(),'a new observed kill arms it again')
+    s.all_actors={mini,actor('X1_Undercity_Chest_Attunement',0)};s.now=180;phase.observe()
+    assert(phase.active() and tr.reward_seen,'a reward chest keeps the reward phase')
+end)
+
 test('boss absence, actor read failure and loading do not prove a kill', function()
     local s=session();local tr=s.load('core.tracker');tr.boss_trigger_time=99
     local phase=s.load('core.reward_phase');phase.observe()

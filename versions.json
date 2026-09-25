@@ -1,6 +1,6 @@
 {
   "project": "QQT_Warpigz_v2",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "first_release": "2.0.0",
   "components": {
     "WarPigs-1.0.0": "1.1.1",
@@ -9,8 +9,8 @@
     "ArkhamAsylum-1.0.6": "2.1.0",
     "HelltideRevamped-0.4": "2.1.1",
     "HordeDev-1.3.9": "2.1.0",
-    "Reaper-main": "1.10.0",
-    "WonderCity-main": "2.1.1",
-    "SilentRaven-0.1.3": "0.2.0"
+    "Reaper-main": "1.10.1",
+    "WonderCity-main": "2.1.2",
+    "SilentRaven-0.1.3": "0.2.1"
   }
 }

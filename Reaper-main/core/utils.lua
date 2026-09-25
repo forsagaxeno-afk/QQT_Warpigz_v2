@@ -55,6 +55,13 @@ function utils.get_altar()
     return nil, readable
 end
 
+-- True unless the actor positively reports it cannot be interacted with
+-- (an unreadable state is never evidence).
+function utils.is_interactable(actor)
+    local ok, v = pcall(function() return actor:is_interactable() end)
+    return not ok or v ~= false
+end
+
 function utils.get_dungeon_entrance()
     local actors = actors_manager:get_all_actors() or {}
     local world = get_current_world()

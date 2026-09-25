@@ -52,6 +52,7 @@ function task.Execute()
         console.print("[Reaper] Player died – calling revive_at_checkpoint.")
         -- Reset run state so we re-summon and re-walk path after respawn
         tracker.altar_activated = false
+        tracker.altar_interact_time = nil
         -- Signal navigate_to_boss to re-walk path on respawn
         -- (done via a shared flag read by navigate_to_boss)
         tracker.just_revived = true

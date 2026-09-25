@@ -123,7 +123,7 @@ function task.shouldExecute()
     end
 
     -- Keep running while last_interact_time is set (waiting for altar to disappear)
-    if last_interact_time > 0 then return true end
+    if last_interact_time > 0 or tracker.altar_interact_time then return true end
 
     return utils.get_altar() ~= nil
 end
@@ -135,13 +135,19 @@ function task.Execute()
     local altar, readable = utils.get_altar()
     if readable == false then return end -- unavailable actor stream is not activation
 
-    -- Altar gone after an interact attempt — success
-    if not altar then
-        if last_interact_time > 0 then
-            console.print("[Reaper] Altar gone — activated successfully.")
+    -- Altar gone after an interact attempt — success. Live 2.1.2 (Grigoire):
+    -- the altar can also stay listed but stop being interactable once the
+    -- boss spawns; that is the same success, not a reason to click again.
+    local clicked = last_interact_time > 0 or tracker.altar_interact_time ~= nil
+    local spent = altar and clicked and not utils.is_interactable(altar)
+    if not altar or spent then
+        if clicked then
+            console.print(spent and "[Reaper] Altar no longer interactable — activated successfully."
+                or "[Reaper] Altar gone — activated successfully.")
             if BatmobilePlugin then BatmobilePlugin.stop_long_path(plugin_label) end
             tracker.altar_activated     = true
             tracker.altar_activate_time = t
+            tracker.altar_interact_time = nil
             last_interact_time = 0
         end
         return
@@ -202,6 +208,7 @@ function task.Execute()
     console.print("[Reaper] Interacting with altar.")
     interact_object(altar)
     last_interact_time = t
+    tracker.altar_interact_time = tracker.altar_interact_time or t
 end
 
 return task
