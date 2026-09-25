@@ -400,14 +400,16 @@ case('F-W1 back-to-back War Plan Hordes: a finished run is released; the next Ho
     truthy(f.until_true(function() return horde.enables == 1 end, 10), 'first Horde')
     f.run(10)
     -- The run finishes (6 waves, chests, exit): HordeDev leaves the Horde and
-    -- reports in_run=false; it never starts a second cycle itself.
-    horde.st.in_run, horde.done = false, true
+    -- reports in_run=false with last_result 'completed' (W5-2: the finish
+    -- signal in War Plan mode); it never starts a second cycle itself.
+    horde.st.in_run, horde.done, horde.st.last_result = false, true, 'completed'
     f.to_gate()
     f.quests = {HORDE, 'WarPlans_QST_InfernalHordes_BSK_2'}
     truthy(f.until_true(function() return horde.disables == 1 end, 10), 'finished run released\n' .. f.dump())
-    eq(f.logged('finished its War Plan run'), 1)
+    eq(f.logged('finished its War Plan run (completed)'), 1)
     horde.st.in_run = true
     truthy(f.until_true(function() return horde.enables == 2 end, 20), 'next Horde entered\n' .. f.dump())
+    horde.st.last_result = nil   -- enable() starts a fresh run (HordeDev resets last_result)
     eq(f.teleports, 2, 'a new War Plan teleport for the second Horde')
     eq(horde.args[2], 'warplan')
     -- HordeDev's 'completed' result counts even if stale in-Horde flags keep
@@ -418,13 +420,17 @@ case('F-W1 back-to-back War Plan Hordes: a finished run is released; the next Ho
     eq(horde.disables, 1, 'kept during its own Alfred trip')
     horde.st.alfred_trip, horde.done = false, true
     truthy(f.until_true(function() return horde.disables == 2 end, 10), 'completed run released\n' .. f.dump())
-    -- An adopted run HordeDev reports in compass mode is released right after
-    -- its exit (its own start_dungeon would use a compass 5 s later).
+    -- An adopted run HordeDev still reports in compass mode (W5-1: it refused
+    -- the War Plan retag) is released right after its exit (its own
+    -- start_dungeon would use a compass 5 s later).
     local g = fixture({world = BSK_WORLD, zone = BSK_ZONE, town = false})
     local h2 = g.horde({in_run = true, entry_mode = 'compass'}); h2.enabled = true
+    h2.enable = function() h2.enables = h2.enables + 1 end   -- ignores {entry = 'warplan'}
     g.quests = {HORDE}
     g.tick()
     eq(g.logged('adopted active InfernalHordesPlugin'), 1, 'adopted inside the Horde')
+    g.run(5)
+    eq(h2.enables, 1, 'War Plan retag tried once')
     h2.st.in_run = false
     g.to_gate()
     g.tick()
@@ -446,6 +452,182 @@ case('F-W1 the status line shows the War Plan wait at once', function()
     f.tick()
     local line = f.o.get_status_line()
     truthy(line:find('War Plan teleport', 1, true), 'status line: ' .. line)
+end)
+
+-- ── round 5, part A ─────────────────────────────────────────────────────────
+-- W5-1 (critic r4 regression 2): a HordeDev WarPigs adopts (or finds on and
+-- owns) inside the Horde in compass mode is switched to War Plan mode once.
+case('W5-1 an adopted HordeDev running inside the Horde in compass mode is switched to War Plan mode once', function()
+    for _, tp in ipairs({false, true}) do
+        local label = tp and 'teleport on' or 'teleport off'
+        local f = fixture({teleport = tp, world = BSK_WORLD, zone = BSK_ZONE, town = false})
+        -- A QQT reload mid-horde: HordeDev's toggle was persisted on by WarPigs.
+        local horde = f.horde({in_run = true, entry_mode = 'compass'}); horde.enabled = true
+        f.quests = {HORDE}
+        f.tick()
+        eq(f.logged('adopted active InfernalHordesPlugin'), 1, label .. ': adopted in place')
+        eq(horde.enables, 1, label .. ': one enable (d275b9d/9e01f67: none, compass mode kept)')
+        eq(horde.args[1], 'warplan', label .. ": enable({entry = 'warplan'})")
+        eq(horde.st.entry_mode, 'warplan', label)
+        eq(f.logged('switching it to War Plan entry mode'), 1, label .. ': logged')
+        f.run(30)
+        eq(horde.enables, 1, label .. ': once'); eq(horde.disables, 0, label .. ': the run is kept')
+        eq(f.teleports, 0, label); eq(f.waypoints, 0, label)
+        -- War Plan completion and exit: released after the settle.
+        horde.st.in_run, horde.st.last_result, horde.done = false, 'completed', true
+        f.to_gate()
+        truthy(f.until_true(function() return horde.disables == 1 end, 5), label .. ': released after the War Plan exit')
+    end
+    -- Found on and owned: an owned HordeDev that reports compass mode inside
+    -- the Horde (e.g. enabled by hand meanwhile) is switched back once.
+    local g = fixture()
+    local h2 = g.horde({in_run = true})
+    g.warplan_to(g.to_bsk)
+    g.quests = {HORDE}
+    truthy(g.until_true(function() return h2.enables == 1 end, 10), 'entered in War Plan mode')
+    h2.st.entry_mode = 'compass'
+    g.run(2)
+    eq(h2.enables, 2, 'switched back to War Plan mode'); eq(h2.args[2], 'warplan')
+    h2.st.entry_mode = 'compass'
+    g.run(10)
+    eq(h2.enables, 2, 'once per ownership')
+    -- Not: War Plan entry off, a HordeDev without entry_mode, the explicit
+    -- compass fallback, a HordeDev outside the Horde.
+    local off = fixture({warplan = false, world = BSK_WORLD, zone = BSK_ZONE, town = false})
+    local h3 = off.horde({in_run = true, entry_mode = 'compass'}); h3.enabled = true
+    off.quests = {HORDE}; off.run(5)
+    eq(h3.enables, 0, 'option off: unchanged')
+    local legacy = fixture({world = BSK_WORLD, zone = BSK_ZONE, town = false})
+    local h4 = legacy.horde({in_run = true}); h4.enabled = true
+    legacy.quests = {HORDE}; legacy.run(5)
+    eq(h4.enables, 0, 'no entry_mode published: not switched')
+    local fb = fixture({fallback = true})
+    local h5 = fb.horde()
+    fb.warplan_to(fb.to_gate)
+    fb.quests = {HORDE}
+    truthy(fb.until_true(function() return h5.enables == 1 end, 40), 'compass fallback engaged')
+    h5.st.in_run = true
+    fb.to_bsk()
+    fb.run(10)
+    eq(h5.enables, 1, 'the explicit compass fallback keeps compass mode inside the Horde')
+    local out = fixture({world = 'Sanctuary', zone = 'Kehj_Caldeum'})
+    local h6 = out.horde({in_run = true, entry_mode = 'compass'}); h6.enabled = true
+    out.quests = {HORDE}; out.run(5)
+    eq(h6.enables, 0, 'outside the Horde: not switched')
+end)
+
+-- W5-2 (critic r4 regression 3): in War Plan mode a trip out of the Horde
+-- HordeDev did not start is not the end of the run.
+case('W5-2 a War Plan run out of the Horde without "completed" is kept during Alfred work and a cast; bounded 30 s', function()
+    local f = fixture()
+    local horde = f.horde({in_run = true})
+    f.warplan_to(f.to_bsk)
+    f.quests = {HORDE}
+    truthy(f.until_true(function() return horde.enables == 1 end, 10), 'War Plan horde')
+    f.run(5)
+    -- Alfred's own with-teleport cycle takes the player to Temis mid-wave.
+    f.alfred({enabled = true, trigger_tasks = true, running = true, teleport = true})
+    horde.st.in_run = false
+    f.set_zone('Sanctuary', 'Skov_Temis', true)
+    f.run(60)
+    eq(horde.disables, 0, 'not released during Alfred live work (9e01f67: "finished" after 3 s)\n' .. f.dump())
+    eq(f.logged('finished its War Plan run'), 0, 'no false "finished" line')
+    eq(f.waypoints, 0); eq(f.teleports, 1)
+    -- Alfred's portal returns the player into the same Horde.
+    f.alfred_status = {enabled = true}
+    f.to_bsk(); horde.st.in_run = true
+    f.run(40)
+    eq(horde.disables, 0, 'the same run continues')
+    -- A revive outside the Horde: no Alfred work; a teleport cast restarts the
+    -- window; released after HORDE_LEFT_SETTLE with the real reason.
+    horde.st.in_run = false
+    f.to_gate()
+    f.run(20)
+    f.casting = true; f.run(5); f.casting = false
+    f.run(20)
+    eq(horde.disables, 0, 'the teleport cast restarted the window')
+    truthy(f.until_true(function() return horde.disables == 1 end, 15), 'released after 30 s outside\n' .. f.dump())
+    eq(f.logged('left the Horde without a completed run'), 1, 'the real reason is logged')
+    eq(f.logged('finished its War Plan run'), 0)
+    -- 'completed' is the finish signal: released after the 3 s settle.
+    local g = fixture()
+    local h2 = g.horde({in_run = true})
+    g.warplan_to(g.to_bsk)
+    g.quests = {HORDE}
+    truthy(g.until_true(function() return h2.enables == 1 end, 10), 'War Plan horde')
+    h2.st.in_run, h2.st.last_result, h2.done = false, 'completed', true
+    g.to_gate()
+    g.run(2)
+    eq(h2.disables, 0, 'settle')
+    truthy(g.until_true(function() return h2.disables == 1 end, 3), 'released ~3 s after "completed"')
+    eq(g.logged('finished its War Plan run (completed)'), 1)
+end)
+
+case('W5-2 Use teleport on: the via-Temis preamble never teleports out of a Horde the War Plan flow wants', function()
+    -- (a) The transition is armed (a foreign HordeDev stopped in Temis) and
+    -- the player stands in the Horde when the preamble would start.
+    local f = fixture({teleport = true})
+    local horde = f.horde({in_run = false}); horde.enabled = true
+    f.quests = {HORDE}
+    f.tick()
+    eq(horde.disables, 1, 'the foreign HordeDev is stopped (arms the transition)')
+    f.to_bsk()
+    f.run(15)
+    eq(f.waypoints, 0, 'no teleport_to_waypoint(Temis) from inside the Horde (9e01f67: sent)\n' .. f.dump())
+    eq(f.teleports, 0, 'no War Plan teleport from inside the Horde')
+    eq(f.logged('already inside the incoming activity (InfernalHordesPlugin)'), 1, 'in place')
+    eq(horde.enables, 1, 'started in place'); eq(horde.args[1], 'warplan')
+    -- (b) The preamble's Alfred step runs in Temis and Alfred's portal puts the
+    -- player back into the Horde before the warplan teleport would fire.
+    local g = fixture({teleport = true})
+    local h2 = g.horde()
+    g.alfred({enabled = true})
+    g.quests = {HORDE}
+    truthy(g.until_true(function() return #g.alfred_triggers == 1 end, 10), 'preamble Alfred step\n' .. g.dump())
+    g.alfred_status = {enabled = true, trigger_tasks = true, running = true}
+    g.run(2)
+    g.to_bsk()
+    g.alfred_status = {enabled = true}
+    g.run(20)
+    eq(g.teleports, 0, 'no warplan teleport from inside the Horde (9e01f67: fired from BSK)\n' .. g.dump())
+    eq(g.waypoints, 0)
+    eq(h2.enables, 1, 'started in place'); eq(h2.args[1], 'warplan')
+end)
+
+-- W5-3 (critic r4 new low item): a War Plan landing in a BSK world/zone that
+-- is not the Horde never engages the compass fallback.
+case('W5-3 a landing in a BSK zone HordeDev does not know keeps the backoff; the fallback stays for other landings', function()
+    for _, v in ipairs({{'S05_BSK_Prototype02', 'S05_BSK_Lobby'}, {'WarPlan_Hordes', BSK_ZONE}}) do
+        for _, fallback in ipairs({true, false}) do
+            local label = v[2] .. '/' .. v[1] .. (fallback and ', fallback on' or ', fallback off')
+            local f = fixture({fallback = fallback})
+            local horde = f.horde()
+            f.warplan_to(function() f.set_zone(v[1], v[2], false) end)
+            f.quests = {HORDE}
+            f.run(40)
+            eq(f.teleports, 3, label .. ': three War Plan teleports')
+            eq(horde.enables, 0, label .. ': no compass entry (9e01f67 with the fallback: enable() after the third miss)')
+            eq(f.logged('compass fallback is on'), 0, label)
+            eq(f.logged('landed in a BSK zone HordeDev does not know (zone=' .. v[2] .. ', world=' .. v[1] .. ') — please report'),
+                1, label .. ': reason logged once\n' .. f.dump())
+            local line = f.o.get_status_line()
+            truthy(line:find('landed in a BSK zone HordeDev does not know (zone=' .. v[2], 1, true)
+                and line:find('please report', 1, true) and line:find('retrying the War Plan teleport in', 1, true),
+                label .. ': status line: ' .. line)
+            f.run(30)
+            eq(f.teleports, 3, label .. ': 60 s backoff')
+            truthy(f.until_true(function() return f.teleports == 4 end, 20), label .. ': retried after the backoff')
+            eq(horde.enables, 0, label .. ': still no compass')
+        end
+    end
+    -- A landing outside the BSK family (the Caldeum gate) still engages the
+    -- ticked fallback (unchanged).
+    local g = fixture({fallback = true})
+    local h2 = g.horde()
+    g.warplan_to(g.to_gate)
+    g.quests = {HORDE}
+    truthy(g.until_true(function() return h2.enables == 1 end, 40), 'fallback at the gate')
+    eq(h2.args[1], 'none'); eq(g.logged('landed in a BSK zone'), 0)
 end)
 
 -- ── part B: the joint host (all nine real plugins) ──────────────────────────
@@ -509,6 +691,139 @@ case('F-W1 joint: the War Plan teleport lands at the gate three times -> no comp
     local line = h.as(WP, function() return h.mod(WP, 'core.orchestrator').get_status_line() end)
     truthy(line:find('did not reach the Horde', 1, true), 'status line: ' .. line)
     h.assert_clean('gate x3')
+end)
+
+-- ── round 5, part B (the critic's round-4 probes as joint regressions) ──────
+local LIBRARY_WP = 0x10D63D
+local function wp_horde_calls(h, name)
+    local out = {}
+    for _, c in ipairs(h.api_calls) do
+        if c.export == 'InfernalHordesPlugin' and c.name == name and c.context == WP then out[#out + 1] = c end
+    end
+    return out
+end
+local function log_at(h, text)
+    for _, line in ipairs(h.log) do
+        if line:find(text, 1, true) then return tonumber(line:match('^(%-?[%d%.]+)')) end
+    end
+    return nil
+end
+local function horde_status(h) return h.as(WP, function() return h.G.InfernalHordesPlugin.status() end) end
+local function first_arrival_after(h, t, place)
+    for _, a in ipairs(h.arrivals) do if a.t >= t and a.place == place then return a end end
+    return nil
+end
+
+-- probe_reload_midhorde: a QQT reload in the middle of a War Plan horde. The
+-- toggles were persisted on (WarPigs sets HordeDev's main_toggle); WarPigs
+-- adopts the running HordeDev. 9e01f67: compass mode stays, a horde without a
+-- chest room never exits ('cleanup still pending', 600 s in BSK).
+case('W5-1 joint: reload mid-horde (persisted toggles, place=bsk): War Plan mode at once, the run completes and exits', function()
+    local PERSISTED = {infernal_horde_main_toggle = true, war_pigs_main_toggle = true, war_pug_main_toggle = true,
+        silent_raven_main_toggle = true}
+    for _, v in ipairs({{'chest room', true, true}, {'no chest room, no stash', false, false},
+        {'no chest room, stash', false, true}, {'no chest room, Use teleport on', false, false, true}}) do
+        local label = 'W5-1 ' .. v[1]
+        local persisted = J.copy(PERSISTED)
+        if v[4] then persisted.war_pigs_use_teleport_transition = true end
+        local h = J.new({place = 'bsk', persisted = persisted})
+        h.assert_clean('load')
+        h.instrument_exports()
+        h.give_compasses(3)
+        local A = h.setup_horde({chest_room = v[2], stash = v[3]})
+        h.warplan_dest = 'bsk'
+        h.set_quests({HORDE})
+        local mode_at
+        local done = h.run_until(function()
+            if not mode_at and horde_status(h).entry_mode == 'warplan' then mode_at = h.now end
+            return #h.quests == 0
+        end, 300)
+        truthy(done, label .. ': the horde and the turn-in complete (9e01f67: stuck in BSK)\n' .. h.tail())
+        h.run(3)
+        h.assert_clean(label)
+        truthy(mode_at and mode_at <= 1001.0 + 1e-6, label .. ': War Plan mode within 1 s: ' .. tostring(mode_at))
+        eq(h.logged('adopted active InfernalHordesPlugin'), 1, label .. ': adopted')
+        eq(h.logged('switching it to War Plan entry mode'), 1, label .. ': retag logged once')
+        local enables = wp_horde_calls(h, 'enable')
+        eq(#enables, 1, label .. ': one enable'); eq(enables[1].entry, 'warplan', label); eq(enables[1].place, 'bsk', label)
+        eq(h.logged('No enable/disable from WarPigs within 5s'), 0, label .. ': the F-H2 wait ends at once')
+        eq(A.runs, 1, label .. ': one horde'); eq(A.wave, 6, label); truthy(A.council_dead_at, label .. ': Council dead')
+        eq(h.leaves, 1, label .. ': Leave Dungeon')
+        eq(h.logged('War Plan horde complete; no new cycle'), 1, label .. ': completed')
+        eq(h.logged('cleanup still pending'), 0, label)
+        eq(#h.items, 0, label .. ': no compass')
+        eq(h.count(h.waypoints, function(w) return w.sno == LIBRARY_WP end), 0, label .. ': no Library teleport')
+        eq(h.logged('turn-in cycle completed'), 1, label .. ': turn-in')
+    end
+end)
+
+-- probe_alfred_selfstart_trace: Alfred's own with-teleport cycle mid-wave
+-- (another caller) takes the player to Temis and its portal returns him into
+-- the same horde. 9e01f67: WarPigs released HordeDev as 'finished'; with
+-- 'Use teleport' on its preamble then sent teleport_to_waypoint(Temis) from
+-- inside BSK and a second horde started.
+case('W5-2 joint: Alfred\'s own teleport trip mid-wave: HordeDev kept, no Temis teleport from BSK, one horde', function()
+    for _, tp in ipairs({false, true}) do
+        local label = 'W5-2 ' .. (tp and 'teleport on' or 'teleport off')
+        local h = joint({teleport = tp})
+        local A = h.setup_horde({})
+        h.warplan_dest = 'bsk'
+        h.set_quests({HORDE})
+        truthy(h.run_until(function() return A.wave >= 3 end, 300), label .. ': wave 3\n' .. h.tail())
+        local mark = h.now
+        h.as(h.alfred_ctx, function() h.G.AlfredTheButlerPlugin.trigger_tasks_with_teleport('AlfredTheButler', nil) end)
+        h.alfred.work = 20
+        truthy(h.run_until(function() return #h.quests == 0 end, 400), label .. ': horde and turn-in\n' .. h.tail())
+        h.run(3)
+        h.assert_clean(label)
+        truthy(first_arrival_after(h, mark, 'temis'), label .. ': Alfred took the player to Temis')
+        eq(A.runs, 1, label .. ': one horde (9e01f67 teleport on: 2)'); eq(A.wave, 6, label)
+        truthy(A.council_dead_at, label .. ': Council dead')
+        local completed = log_at(h, 'War Plan horde complete; no new cycle')
+        truthy(completed, label .. ': completed')
+        for _, c in ipairs(wp_horde_calls(h, 'disable')) do
+            truthy(c.t >= completed, string.format('%s: HordeDev released only after its completion (disable at %.1f, '
+                .. 'completed %.1f)', label, c.t, completed))
+        end
+        eq(#wp_horde_calls(h, 'enable'), 1, label .. ': one enable')
+        eq(h.count(h.waypoints, function(w) return w.from == 'bsk' end), 0, label .. ': no teleport_to_waypoint from BSK')
+        eq(h.count(h.warplans, function(w) return w.kind == 'teleport' and w.from == 'bsk' end), 0,
+            label .. ': no War Plan teleport from BSK')
+        eq(h.logged('finished its War Plan run'), 0, label .. ': no false "finished" line')
+        eq(h.logged('left the Horde without a completed run'), 0, label)
+        eq(#h.items, 0, label .. ': no compass')
+        eq(h.logged('turn-in cycle completed'), 1, label .. ': turn-in')
+    end
+end)
+
+-- probe_landing_variants: the War Plan teleport lands in a BSK lobby (a BSK
+-- world, another zone) with the compass fallback ticked. 9e01f67: enable()
+-- in the lobby, then a Library teleport and a compass.
+case('W5-3 joint: War Plan landings in a BSK lobby with the fallback ticked: no compass, reason and report shown', function()
+    local h = joint({})
+    el(h, WP).horde_compass_fallback:set(true)
+    local lobby = {key = 'lobby', name = 'S05_BSK_Prototype02', zone = 'S05_BSK_Lobby', id = 6, town = false,
+        spawn = h.v(0, 0), box = {-80, 80, -80, 80}, actors = {}}
+    h.P.lobby = lobby
+    h.give_compasses(2)
+    h.warplan_dest = lobby
+    h.set_quests({HORDE})
+    local seen
+    h.run(100, function()
+        local line = h.as(WP, function() return h.mod(WP, 'core.orchestrator').get_status_line() end)
+        if line:find('landed in a BSK zone HordeDev does not know (zone=S05_BSK_Lobby', 1, true)
+            and line:find('please report', 1, true) then seen = line end
+    end)
+    h.assert_clean('W5-3')
+    eq(#h.horde_args, 0, 'HordeDev never enabled (9e01f67: enable() in the lobby at +19 s)')
+    eq(#h.items, 0, 'no compass')
+    eq(h.count(h.waypoints, function(w) return w.sno == LIBRARY_WP end), 0, 'no Library teleport')
+    local tps = h.count(h.warplans, function(w) return w.kind == 'teleport' end)
+    truthy(tps >= 3 and tps <= 6, 'War Plan teleports with the backoff: ' .. tps)
+    eq(h.logged('compass fallback is on'), 0)
+    truthy(h.logged('landed in a BSK zone HordeDev does not know (zone=S05_BSK_Lobby, world=S05_BSK_Prototype02) — please report') >= 1,
+        'reported in the log')
+    truthy(seen, 'status line shows the BSK landing and asks for a report')
 end)
 
 if #failures > 0 then error(#failures .. ' War Plan Horde (WarPigs) regressions failed:\n' .. table.concat(failures, '\n\n')) end

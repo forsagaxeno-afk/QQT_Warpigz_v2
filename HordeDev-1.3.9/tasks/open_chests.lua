@@ -94,6 +94,26 @@ local function alfred_pause_expired(status)
     return status.paused == true and tracker.alfred_pause_expired == true
 end
 
+-- H5-4 (suite policy): while WarPigs is loaded and enabled, an advisory-only
+-- Alfred flag (restock/stash: need_trigger without inventory_full or
+-- need_repair) never pauses the chests for a HordeDev Alfred trip; WarPigs
+-- services advisory flags once per Temis visit. Hard needs still pause the
+-- chests; standalone (WarPigs absent or off) is unchanged. Logged once per run.
+local advisory = {logged = false}
+local function advisory_left_to_warpigs(status)
+    if utils.alfred_hard_need(status) then return false end
+    local wp = WarPigsPlugin
+    if type(wp) ~= 'table' or type(wp.status) ~= 'function' then return false end
+    local ok, st = pcall(wp.status)
+    if not (ok and type(st) == 'table' and st.enabled == true) then return false end
+    if not advisory.logged then
+        advisory.logged = true
+        console.print("[open_chests] Advisory Alfred flag left to WarPigs (restock/stash, no full bag or repair);"
+            .. " chests continue.")
+    end
+    return true
+end
+
 local function clear_chest_timers()
     for _, key in ipairs({"request_move_to_chest", "chest_opening_time", "chest_vfx_wait", "chest_loot_wait",
         "wait_for_talisman_loot_delay", "wait_for_ga_loot_delay", "wait_for_normal_loot_delay", "gold_chest_timer"}) do
@@ -363,8 +383,10 @@ open_chests_task = {
                     -- C1: need_trigger alone cannot re-pause within the sticky
                     -- grace after HordeDev's own completed cycle.
                     -- C1/C6: no re-pause for an Alfred paused past its bound.
+                    -- H5-4: an advisory-only flag under WarPigs does not.
                     if utils.alfred_trip_wanted(status, tracker.alfred_completed_at)
                         and not alfred_pause_expired(status)
+                        and not advisory_left_to_warpigs(status)
                     then
                         self.state_before_pause = self.current_state
                         self.current_state = chest_state.PAUSED_FOR_SALVAGE
@@ -536,6 +558,7 @@ open_chests_task = {
         clear_chest_timers()
         tracker.clear_key("aether_drop_wait")
         tracker.clear_key("salvage_return_time")
+        advisory.logged = false
         tracker.finished_chest_looting = false
         tracker.chest_fault = nil
         tracker.chests_skipped = nil

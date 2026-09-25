@@ -1,4 +1,4 @@
--- ArkhamAsylum integration regressions (ARK-1/3/4/5/7/8/9, C1-C5).
+-- ArkhamAsylum integration regressions (ARK-1/3/4/5/7/8/9, C1-C5, A5-1).
 -- Loads the REAL ArkhamAsylum main.lua -> gui/settings/external/task_manager
 -- and every task with a per-plugin module cache. Only QQT host bindings,
 -- Batmobile, AlfredTheButler and Looteer are behaviour-level mocks.
@@ -547,6 +547,89 @@ test('C5 a Looter yield mid-upgrade does not finish the glyph as "no glyphs avai
     s.run_for(1)
     assert(not s.tracker.glyph_done, 'Looter yield consumed the empty-list window')
     assert(#s.interactions > first, 'glyphstone re-interacted after the yield')
+end)
+
+-------------------------------------------------------------------------------
+-- A5-1 (round-5 policy): while WarPigs is loaded and enabled it services
+-- advisory-only flags once per Temis visit, and Arkham never starts an
+-- Alfred trip for them, whatever alfred_idle says (9e01f67 started one in
+-- town as soon as WarPigs' 20 s alfred_idle grace lapsed, e.g. every pit
+-- start from Kurast with 'Use teleport' off). Hard needs and standalone
+-- Arkham are unchanged.
+local function warpigs(s, st)
+    s.wp = st
+    s.env.WarPigsPlugin = {status = function()
+        if s.wp_error then error('status unavailable') end
+        return s.wp
+    end}
+end
+local function count_log(s, text)
+    local n = 0
+    for _, l in ipairs(s.log) do if l:find(text, 1, true) then n = n + 1 end end
+    return n
+end
+local ARK_SKIP = 'advisory Alfred restock skipped: WarPigs is enabled'
+
+test('A5-1 WarPigs enabled: a sticky advisory flag starts no Arkham trip in town or in the pit (any alfred_idle)', function()
+    for _, idle in ipairs({false, true, 'missing'}) do
+        local label = 'alfred_idle=' .. tostring(idle)
+        local s = session({town = true})
+        s.actors = {actor('TWN_Kehj_IronWolves_PitKey_Crafter', 30)}
+        warpigs(s, {enabled = true, alfred_idle = idle ~= 'missing' and idle or nil})
+        s.alfred.need_trigger = true; s.alfred.restock_count = 1 -- advisory, never clears
+        s.api.enable()
+        local walks = 0
+        for _ = 1, 600 do -- 60 s in town: past every grace
+            s.frame()
+            if s.task() == 'enter_pit' then walks = walks + 1 end
+        end
+        assert(#s.alfred.triggers == 0, label .. ': advisory trip in town under an enabled WarPigs (9e01f67: 1 when not idle)')
+        assert(walks > 550, label .. ': enter_pit made no progress: ' .. walks)
+        assert(s.api.get_status().alfred_trip == false, label .. ': C2 alfred_trip stays false')
+        assert(count_log(s, ARK_SKIP) == 1, label .. ': one diagnostic line a minute, got ' .. count_log(s, ARK_SKIP))
+        -- Inside the pit: still none; a hard need still triggers at once.
+        s.go(PIT); s.run_for(30)
+        assert(#s.alfred.triggers == 0, label .. ': advisory trip from inside the pit')
+        s.alfred.inventory_full = true
+        s.run_for(1)
+        assert(#s.alfred.triggers == 1, label .. ': inventory_full must still start a trip')
+    end
+    -- need_repair in town is a hard need under WarPigs too.
+    local r = session({town = true})
+    r.actors = {actor('TWN_Kehj_IronWolves_PitKey_Crafter', 30)}
+    warpigs(r, {enabled = true, alfred_idle = false})
+    r.alfred.need_trigger = true; r.alfred.restock_count = 1; r.alfred.need_repair = true
+    r.api.enable(); r.run_for(1)
+    assert(#r.alfred.triggers == 1, 'need_repair must still start a trip under WarPigs')
+end)
+
+test('A5-1 WarPigs disabled, unreadable or absent: the standalone advisory trip in town is unchanged', function()
+    local variants = {
+        {'WarPigs disabled', function(s) warpigs(s, {enabled = false, alfred_idle = true}) end},
+        {'WarPigs status throws', function(s) warpigs(s, {enabled = true}); s.wp_error = true end},
+        {'WarPigs status not a table', function(s) warpigs(s, 'on') end},
+        {'WarPigs without status()', function(s) s.env.WarPigsPlugin = {enabled = true} end},
+        {'standalone (no WarPigs)', function() end},
+    }
+    for _, variant in ipairs(variants) do
+        local s = session({town = true})
+        s.actors = {actor('TWN_Kehj_IronWolves_PitKey_Crafter', 30)}
+        variant[2](s)
+        s.alfred.need_trigger = true; s.alfred.restock_count = 1
+        s.api.enable(); s.run_for(1)
+        assert(#s.alfred.triggers == 1, variant[1] .. ': advisory trip in town as before, got ' .. #s.alfred.triggers)
+        assert(count_log(s, 'advisory Alfred restock skipped') == 0, variant[1] .. ': no skip line')
+    end
+    -- Switching WarPigs off restores the standalone rule at once.
+    local s = session({town = true})
+    s.actors = {actor('TWN_Kehj_IronWolves_PitKey_Crafter', 30)}
+    warpigs(s, {enabled = true, alfred_idle = false})
+    s.alfred.need_trigger = true; s.alfred.restock_count = 1
+    s.api.enable(); s.run_for(10)
+    assert(#s.alfred.triggers == 0, 'no advisory trip while WarPigs is enabled')
+    s.wp.enabled = false
+    s.run_for(1)
+    assert(#s.alfred.triggers == 1, 'advisory trip once WarPigs is switched off')
 end)
 
 -------------------------------------------------------------------------------

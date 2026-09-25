@@ -61,13 +61,40 @@ end
 -- sigil_used / has_entered with the player outside BSK and nothing pending
 -- take the full reset (as at 86340d4). A switch to War Plan entry never keeps
 -- a compass/portal transaction.
+-- H5-3: HordeDev's own built-in Cerrigar salvage (compass mode; not
+-- delegated to an enabled Alfred) is under way for an unfinished chest phase:
+-- the chests are paused for it (PAUSED_FOR_SALVAGE), or its has_salvaged /
+-- needs_salvage flags are set while the chest phase is started. A War Plan
+-- run has no built-in salvage.
+local SALVAGE_ZONE = "Scos_Cerrigar"
+local function builtin_salvage_pending()
+    if warplan.active() or tracker.finished_chest_looting then return false end
+    local chest_state = open_chests_task.current_state
+    if chest_state == nil or chest_state == "INIT" then return false end
+    if chest_state ~= "PAUSED_FOR_SALVAGE" and not (tracker.has_salvaged or tracker.needs_salvage) then return false end
+    if settings.use_alfred and utils.get_alfred() then
+        local status = utils.read_alfred_status()
+        if not status or status.enabled then return false end
+    end
+    return true
+end
+
+-- H5-3: ... with the player in Cerrigar, on that trip. Like HordeDev's own
+-- Alfred trip, that is where the run is. A switch to War Plan entry never
+-- keeps it (the War Plan teleport lands in a new horde).
+local function own_salvage_trip(mode)
+    return mode ~= 'warplan' and builtin_salvage_pending() and utils.player_in_zone(SALVAGE_ZONE)
+end
+
 local function keep_run_on_enable(mode)
     if not gui.elements.main_toggle:get() then return false end
     -- A finished War Plan run is never kept (its chest/exit flags would skip
     -- the next horde's chests).
     if warplan.completed then return false end
     local own_trip = alfred_task.trip_in_progress ~= nil and alfred_task.trip_in_progress()
-    if not (transaction_pending() or own_trip or utils.player_in_zone(HORDE_ZONE)) then return false end
+    if not (transaction_pending() or own_trip or utils.player_in_zone(HORDE_ZONE) or own_salvage_trip(mode)) then
+        return false
+    end
     if mode == 'warplan' and (tracker.sigil_activation_pending or tracker.horde_entry_pending) then return false end
     return current_fault(transaction_pending()) == nil
 end
@@ -85,11 +112,37 @@ end
 -- F-H2: a HordeDev whose main toggle was on at load must not start the
 -- compass / Library chain before WarPigs decides (enable() or disable()) when
 -- WarPigs is loaded and enabled. Bounded: after WARPIGS_DECIDE_S without a
--- decision (WarPigs adopted the running plugin) it runs as configured.
+-- decision (WarPigs adopted the running plugin) it runs as configured; only
+-- loaded-world time counts toward that bound (H5-2). The wait is visible and
+-- logged from its first pulse, a loading screen included.
 -- Standalone (no WarPigs, or WarPigs off) is unchanged.
 local WARPIGS_DECIDE_S = 5
 local WARPIGS_WAIT_TASK, WARPIGS_WAIT_TEXT = "Waiting for WarPigs", "waiting for WarPigs to take over (up to 5 s)"
-local session = {enabled_by_api = false, gate_done = false, gate_since = nil}
+-- waited: loaded-world seconds of the wait so far (nil before its first
+-- pulse); was_loaded: the previous pulse of the wait saw a loaded world.
+local session = {enabled_by_api = false, gate_done = false, waited = nil, last_at = nil, was_loaded = false}
+
+-- No world, no player position, or a Limbo / loading world: HordeDev does
+-- nothing there (main_pulse).
+local function world_unloaded()
+    local world = get_current_world()
+    local name = world and world:get_name()
+    if not world or not player_position or type(name) ~= 'string' then return true end
+    local lower = name:lower()
+    return lower:find("limbo", 1, true) ~= nil or lower:find("loading", 1, true) ~= nil
+end
+
+-- H5-2: WarPigs' orchestrator skips its tick (and so makes no decision) in
+-- an unloaded world, which it also reads from an empty or '[sno none]' zone.
+local function warpigs_can_decide()
+    if world_unloaded() then return false end
+    local ok, loaded = pcall(function()
+        local world = get_current_world()
+        local zone = world:get_current_zone_name()
+        return world:get_name() ~= '' and type(zone) == 'string' and zone ~= '' and zone ~= '[sno none]'
+    end)
+    return ok and loaded == true
+end
 
 local function warpigs_enabled()
     local wp = WarPigsPlugin
@@ -104,14 +157,20 @@ local function waiting_for_warpigs()
         session.gate_done = true
         return false
     end
-    local now = get_time_since_inject()
-    if not session.gate_since then
-        session.gate_since = now
+    local now, loaded = get_time_since_inject(), warpigs_can_decide()
+    if not session.waited then
+        session.waited = 0
         console.print(string.format(
             "[HordeDev] Main toggle on at load with WarPigs enabled; waiting up to %ds for WarPigs before acting",
             WARPIGS_DECIDE_S))
+    elseif loaded and session.was_loaded then
+        -- H5-2: only loaded-world time counts toward the bound. WarPigs makes
+        -- no decision during a loading screen, so a long initial load must not
+        -- use up the wait (a Library teleport right after the load).
+        session.waited = session.waited + (now - session.last_at)
     end
-    if now - session.gate_since < WARPIGS_DECIDE_S then return true end
+    session.last_at, session.was_loaded = now, loaded
+    if session.waited < WARPIGS_DECIDE_S then return true end
     session.gate_done = true
     console.print(string.format("[HordeDev] No enable/disable from WarPigs within %ds; running as configured",
         WARPIGS_DECIDE_S))
@@ -130,12 +189,20 @@ end
 -- toggle / keybind off edge and disable(). A healthy pending transaction
 -- survives a pause and resumes when re-activated; a chest fault is restarted
 -- too unless its exit transaction is already running.
+-- H5-3: the built-in Cerrigar salvage trip is such a transaction too. Its
+-- has_salvaged / needs_salvage flags (cleared by tasks/alfred.lua's cancel)
+-- survive the pause, so a resume or a kept re-enable in Cerrigar finishes the
+-- salvage and walks back into the Horde instead of starting a new cycle.
 local function stop_run()
     local fault = current_fault(transaction_pending())
+    local salvage = builtin_salvage_pending()
+    local has_salvaged, needs_salvage = tracker.has_salvaged, tracker.needs_salvage
     if task_manager.stop then task_manager.stop() end
     if fault then
         console.print("[HordeDev] Clearing latched fault on stop: " .. fault)
         reset_run_state()
+    elseif salvage then
+        tracker.has_salvaged, tracker.needs_salvage = has_salvaged, needs_salvage
     end
 end
 
@@ -178,10 +245,7 @@ local function main_pulse()
     local pending = transaction_pending()
     if not pending then
         dead_since = nil
-        local world = get_current_world()
-        local name = world and world:get_name()
-        if not world or not player_position or type(name) ~= 'string'
-            or name:lower():find("limbo", 1, true) or name:lower():find("loading", 1, true) then
+        if world_unloaded() then
             movement.stop()
             return
         end

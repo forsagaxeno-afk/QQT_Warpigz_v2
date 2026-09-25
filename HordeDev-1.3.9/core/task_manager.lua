@@ -4,7 +4,7 @@ local tasks = {}
 local tracker = require "core.tracker"
 local movement = require "core.movement"
 local warplan = require "core.warplan"
-local exit_task, start_task, enter_task
+local exit_task, start_task, enter_task, wave_task
 local current_task = { name = "Idle" } -- Default state when no task is active
 -- F-H1/F-H2: named idle states (no movement, teleport or item use); `hold`
 -- is published as InfernalHordesPlugin.status().hold.
@@ -31,8 +31,14 @@ function task_manager.register_task(task)
     table.insert(tasks, task)
 end
 
+-- H5-1: tracker.horde_idle_since (War Plan completion evidence, core/warplan.lua)
+-- means "the wave task is idle in the boss room". Only the wave task's own
+-- pulse refreshes it, so any other task (an Alfred hold, the exit) or no task
+-- clears it instead of leaving the last idle reading standing while the
+-- Council may already be up.
 local function activate(task)
     if current_task ~= task and movement.stop then movement.stop() end
+    if task ~= wave_task then tracker.horde_idle_since = nil end
     current_task = task or { name = "Idle" }
     if task then task:Execute() end
 end
@@ -97,6 +103,7 @@ function task_manager.stop()
     for _, task in ipairs(tasks) do
         if task.cancel_pending then task:cancel_pending() end
     end
+    tracker.horde_idle_since = nil -- H5-1: no wave task pulse while stopped
     current_task = { name = "Idle" }
 end
 
@@ -110,6 +117,7 @@ for _, file in ipairs(task_files) do
     if file == "exit_horde" then exit_task = task end
     if file == "start_dungeon" then start_task = task end
     if file == "enter_horde" then enter_task = task end
+    if file == "horde" then wave_task = task end
     task_manager.register_task(task)
 end
 

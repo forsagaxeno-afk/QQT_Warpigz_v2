@@ -59,7 +59,7 @@ local RETURN_WINDOW = 30
 local HOLD_LOG_AFTER = 60
 local trip = {teleport = false, return_until = nil, live_seen = false,
     paused_since = nil, paused_logged = false, glyph_since = nil,
-    hold = nil, hold_since = nil, hold_logged = -math.huge, return_logged = false}
+    hold = nil, hold_since = nil, hold_logged = -math.huge, return_logged = false, advisory_logged = -math.huge}
 
 -- C1 canonical live-work predicate (a latched teleport after a finished or
 -- failed trip is not live work).
@@ -76,16 +76,19 @@ end
 local function in_pit()
     return type(utils.player_in_pit) == 'function' and utils.player_in_pit() or false
 end
--- Under an enabled WarPigs, an advisory-only flag (need_trigger without
--- inventory_full/need_repair) that WarPigs reports idle was just serviced by
--- WarPigs' own Temis cycle, which this plugin did not observe while it was
--- off (C1 via WarPigsPlugin.status().alfred_idle, the rule WarPug uses).
--- Starting another trip for it repeated the cycle (joint suite).
+-- Suite policy (round 5): while WarPigs is loaded and its status() reports
+-- enabled == true, WarPigs services advisory-only flags (need_trigger without
+-- inventory_full/need_repair: restock/stash extras) once per Temis visit, and
+-- Arkham never starts an Alfred trip for them, whatever alfred_idle says.
+-- Waiting only for alfred_idle (its 20 s grace) still cost one extra trip at
+-- every activity start with a sticky flag. Hard needs are unchanged. WarPigs
+-- absent, disabled, without status(), throwing or returning a non-table:
+-- standalone rules.
 local function warpigs_advisory_idle()
     local wp = WarPigsPlugin
     if type(wp) ~= 'table' or type(wp.status) ~= 'function' then return false end
     local ok, st = pcall(wp.status)
-    return ok and type(st) == 'table' and st.enabled == true and st.alfred_idle == true
+    return ok and type(st) == 'table' and st.enabled == true
 end
 -- Status text + one rate-limited log line for any hold longer than a minute.
 local function note_hold(reason)
@@ -279,7 +282,13 @@ local function wants_new_request(status)
         if last_completion_at and (now - last_completion_at) < STUCK_NEED_TRIGGER_GRACE then
             return false -- stuck need_trigger — skip
         end
-        return not warpigs_advisory_idle()
+        if not warpigs_advisory_idle() then return true end
+        -- Not a hold (the route continues); one line per minute at most.
+        if now - trip.advisory_logged >= HOLD_LOG_AFTER then
+            trip.advisory_logged = now
+            console.print('[alfred] advisory Alfred restock skipped: WarPigs is enabled and services it in Temis')
+        end
+        return false
     end
     if status.paused then return paused_hold(status) end
     if glyph_pending() then return false end

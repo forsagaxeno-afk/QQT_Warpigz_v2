@@ -1,6 +1,6 @@
 -- WonderCity integration regressions: CRT-1/L9 (bounded reward-chest
--- completion, resume after an Alfred round trip), WCY-1/2/5/6/7/8/9, F-C1
--- (advisory flag WarPigs reports serviced) and the cross-plugin contract
+-- completion, resume after an Alfred round trip), WCY-1/2/5/6/7/8/9, F-C1/A5-1
+-- (advisory-only flags under an enabled WarPigs) and the cross-plugin contract
 -- items C1-C5. Loads the real WonderCity main.lua ->
 -- gui/settings -> external -> scheduler -> tasks with QQT-shaped host mocks
 -- (Alfred/Batmobile/Looter are the synthetic boundaries). Runs under Lua 5.4
@@ -699,11 +699,15 @@ case('WCY-1: a lost legacy callback gets the same sticky grace', function()
     eq(#s.triggers, 2, 'the grace expires by itself')
 end)
 
--- ── F-C1: WarPigs already serviced the advisory flag ────────────────────────
+-- ── F-C1 / A5-1: advisory-only flags under an enabled WarPigs ───────────────
 -- Joint round-3 OPEN item: with a sticky restock flag (need_trigger alone)
--- WonderCity started its own advisory Alfred trip at every activity start
--- although WarPigs had just serviced the flag and reported alfred_idle. The
--- same reading as ArkhamAsylum's warpigs_advisory_idle().
+-- WonderCity started its own advisory Alfred trip at every activity start.
+-- F-C1 (round 4) skipped it only while WarPigs reported alfred_idle (its 20 s
+-- grace), so the trip came once that lapsed. A5-1 (round-5 policy): while
+-- WarPigs is loaded and enabled, WonderCity never starts an advisory-only
+-- trip; WarPigs services those flags once per Temis visit. Hard needs and
+-- standalone WonderCity are unchanged. The same reading as ArkhamAsylum's
+-- and Reaper's warpigs_advisory_idle().
 
 -- WarPigs mock: status() returns s.wp (s.wp_error makes it throw).
 local function warpigs(s, st)
@@ -720,40 +724,63 @@ local function count_logs(s, pattern)
 end
 local STICKY = {enabled = true, need_trigger = true, inventory_full = false, need_repair = false, restock_count = 2}
 local function sticky() local t = {}; for k, val in pairs(STICKY) do t[k] = val end; return t end
+local SKIP_LINE = 'advisory Alfred restock skipped: WarPigs is enabled'
 
-case('F-C1: an advisory-only flag WarPigs reports serviced starts no trip at activity start', function()
-    local s = session({town = true})
-    s.player.pos = v(1035, 151)
-    alfred(s, sticky())
-    warpigs(s, {enabled = true, alfred_idle = true})
-    s:enable()
-    local walk = 0
-    for _ = 1, 400 do
-        s:tick()
-        if s:task().name == 'walk_kurast' then walk = walk + 1 end
+case('A5-1: WarPigs enabled: a sticky advisory flag starts no trip at activity start, whatever alfred_idle says', function()
+    -- alfred_idle true (inside WarPigs' grace), false (grace lapsed: the
+    -- 9e01f67 trip), missing (older WarPigs).
+    for _, idle in ipairs({true, false, 'missing'}) do
+        local label = 'alfred_idle=' .. tostring(idle)
+        local s = session({town = true})
+        s.player.pos = v(1035, 151)
+        alfred(s, sticky())
+        warpigs(s, {enabled = true, alfred_idle = idle ~= 'missing' and idle or nil})
+        s:enable()
+        local walk = 0
+        for _ = 1, 400 do
+            s:tick()
+            if s:task().name == 'walk_kurast' then walk = walk + 1 end
+        end
+        eq(#s.triggers, 0, label .. ': no advisory Alfred trip under an enabled WarPigs (9e01f67: 1 when not idle)')
+        ok(walk > 350, label .. ': the town route runs from the first frame: ' .. walk)
+        eq(s:task().note, nil, label .. ': not a hold')
+        eq(count_logs(s, SKIP_LINE), 1, label .. ': one diagnostic line, rate-limited')
+        s:run(25)
+        eq(count_logs(s, SKIP_LINE), 2, label .. ': at most one line a minute')
+        -- Hard needs are unchanged: they trigger at once under WarPigs.
+        s.alfred.inventory_full = true
+        s:run(0.5)
+        eq(#s.triggers, 1, label .. ': inventory_full still triggers')
     end
-    eq(#s.triggers, 0, 'no advisory Alfred trip while WarPigs reports the flag serviced (d275b9d: 1 at the start)')
-    ok(walk > 350, 'the town route runs from the first frame: ' .. walk)
-    eq(s:task().note, nil, 'not a hold')
-    eq(count_logs(s, 'advisory Alfred restock skipped'), 1, 'one diagnostic line, rate-limited')
-    s:run(25)
-    eq(count_logs(s, 'advisory Alfred restock skipped'), 2, 'at most one line a minute')
-    -- Hard needs are unchanged: they trigger at once under WarPigs.
-    s.alfred.inventory_full = true
-    s:run(0.5)
-    eq(#s.triggers, 1, 'inventory_full still triggers')
 end)
 
-case('F-C1: need_repair triggers; WarPigs no longer idle, disabled or unreadable restores the advisory trip', function()
+case('A5-1: the joint hand-off shape: alfred_idle lapses 20 s after WarPigs\' cycle, still no WonderCity trip', function()
+    -- probe_wc_sticky_joint: WarPigs reports alfred_idle for its 20 s grace,
+    -- then false; 9e01f67 WonderCity triggered in Kurast once it lapsed and
+    -- again after its own 30 s grace (1026.4, 1063.0).
     local s = session({town = true})
     s.player.pos = v(1035, 151)
     alfred(s, sticky())
-    s.alfred.need_repair = true
     warpigs(s, {enabled = true, alfred_idle = true})
-    s:enable(); s:run(0.5)
-    eq(#s.triggers, 1, 'need_repair is a hard need')
+    s.on_trigger = function() s.alfred.trigger_tasks = true end
+    s:enable()
+    s:run(5)
+    s.wp.alfred_idle = false
+    s:run(115)
+    eq(#s.triggers, 0, 'no advisory trip over 120 s in Kurast (9e01f67: 2)')
+    -- need_repair is a hard need: one trip, then the sticky flag alone
+    -- starts nothing more after that cycle.
+    s.alfred.need_repair = true
+    s:run(0.5)
+    eq(#s.triggers, 1, 'need_repair triggers under WarPigs')
+    s.alfred.need_repair, s.alfred.trigger_tasks = false, false
+    s.alfred_cb()
+    s:run(60)
+    eq(#s.triggers, 1, 'no advisory trip after the hard-need cycle')
+end)
+
+case('A5-1: WarPigs disabled, unreadable or absent keeps the standalone advisory trip', function()
     local variants = {
-        {'WarPigs reports Alfred not idle', function(x) warpigs(x, {enabled = true, alfred_idle = false}) end},
         {'WarPigs disabled', function(x) warpigs(x, {enabled = false, alfred_idle = true}) end},
         {'WarPigs status throws', function(x) warpigs(x, {enabled = true, alfred_idle = true}); x.wp_error = true end},
         {'WarPigs status not a table', function(x) warpigs(x, 'on') end},
@@ -766,29 +793,29 @@ case('F-C1: need_repair triggers; WarPigs no longer idle, disabled or unreadable
         alfred(w, sticky())
         variant[2](w)
         w:enable(); w:run(0.5)
-        eq(#w.triggers, 1, variant[1] .. ': advisory trip at the start as on d275b9d')
+        eq(#w.triggers, 1, variant[1] .. ': advisory trip at the start as before')
         eq(count_logs(w, 'advisory Alfred restock skipped'), 0, variant[1] .. ': no skip line')
     end
-    -- The rule follows the WarPigs signal: once it stops reporting idle, the
+    -- The rule follows the WarPigs switch: once WarPigs is turned off the
     -- standalone rules apply again (own grace after its own cycles).
     local x = session({town = true})
     x.player.pos = v(1035, 151)
     alfred(x, sticky())
-    warpigs(x, {enabled = true, alfred_idle = true})
+    warpigs(x, {enabled = true, alfred_idle = false})
     x:enable(); x:run(10)
     eq(#x.triggers, 0)
-    x.wp.alfred_idle = false
+    x.wp.enabled = false
     x:run(0.5)
-    eq(#x.triggers, 1, 'advisory trip once WarPigs no longer reports the flag serviced')
+    eq(#x.triggers, 1, 'advisory trip once WarPigs is switched off')
     x.alfred_cb()
     x:run(20)
     eq(#x.triggers, 1, 'own sticky grace after its own completed cycle is unchanged')
 end)
 
-case('F-C1: inside an Undercity the rules are unchanged under WarPigs', function()
+case('F-C1/A5-1: inside an Undercity the rules are unchanged under WarPigs', function()
     local s = session()
     alfred(s, sticky())
-    warpigs(s, {enabled = true, alfred_idle = true})
+    warpigs(s, {enabled = true, alfred_idle = false})
     s:enable(); s:run(2)
     eq(#s.triggers, 0, 'advisory flag never leaves a run')
     eq(count_logs(s, 'advisory Alfred restock skipped'), 0, 'WarPigs is not consulted inside a run')

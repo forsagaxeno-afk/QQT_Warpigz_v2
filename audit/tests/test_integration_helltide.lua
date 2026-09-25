@@ -1,7 +1,8 @@
 -- HelltideRevamped integration regressions: CRT-4/L11 (a Looter/Alfred yield
 -- never counts toward the chest and chest-recall stuck windows), HLT-1..HLT-9
 -- and the suite contract items C1 (canonical Alfred reading), C3 (Batmobile
--- release), C4 (orbwalker release), C5 (yield accounting) and C6 (bounded,
+-- release), C4 (orbwalker release), C5 (yield accounting), A5-2 (advisory
+-- flags under WarPigs, guard) and C6 (bounded,
 -- published holds). Loads the real HelltideRevamped main.lua, task_manager,
 -- tasks and core modules with QQT-shaped host mocks; Alfred, Batmobile,
 -- Looteer and the orbwalker are the synthetic boundaries. Runs under Lua 5.4
@@ -509,6 +510,35 @@ case('HLT-4 minute 55-59: HR teleports first; salvage only after arrival and onl
     alfred(a, function() return {enabled = true, need_trigger = true, inventory_full = false, need_repair = false} end)
     a.tick(10)
     eq(#a.triggers, 0, 'advisory restock cost an off-window trip')
+end)
+
+-- A5-2 (round-5 policy check, guard): HelltideRevamped never starts an
+-- advisory-only Alfred trip anywhere. In town at activity start only
+-- tracker.needs_salvage (set for hard needs) triggers; inside a helltide
+-- advisory flags never do (R12). The policy "WarPigs enabled => advisory
+-- idle" therefore needs no HR change. Pinned with WarPigs enabled (alfred_idle
+-- false) and standalone.
+case('A5-2 guard: a sticky advisory flag starts no HR trip in town or in the helltide, with or without WarPigs', function()
+    for _, with_wp in ipairs({true, false}) do
+        local label = with_wp and 'WarPigs enabled' or 'standalone'
+        local s = session({salvage = true, in_helltide = false, zone = TOWN_ZONE})
+        if with_wp then
+            s.env.WarPigsPlugin = {status = function() return {enabled = true, alfred_idle = false} end}
+        end
+        alfred(s, function(st)
+            return {enabled = true, need_trigger = true, inventory_full = st.full == true, need_repair = false,
+                trigger_tasks = st.alfred_busy == true, restock_count = 2}
+        end)
+        s.tick(30)                                   -- activity start in town
+        eq(#s.triggers, 0, label .. ': advisory trip in town')
+        eq(s.tracker.needs_salvage, false, label .. ': an advisory need never sets the town request')
+        s.in_helltide, s.zone = true, 'Scos_Coast'
+        s.tick(60)
+        eq(#s.triggers, 0, label .. ': advisory trip from inside the helltide')
+        s.full = true
+        s.tick(0.5)
+        eq(#s.triggers, 1, label .. ': a hard need still triggers at once')
+    end
 end)
 
 case('HLT-8 search teleports wait for the Looter (bounded 20 s)', function()

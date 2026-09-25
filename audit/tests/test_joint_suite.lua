@@ -34,7 +34,11 @@ local function eq(actual, expected, message)
     end
     checks = checks + 1
 end
+-- JOINT_ONLY=<text> (developer convenience) runs only the scenarios whose
+-- name contains <text>; run_tests.py never sets it.
+local ONLY = os.getenv('JOINT_ONLY')
 local function case(name, fn)
+    if ONLY and ONLY ~= '' and not name:find(ONLY, 1, true) then return end
     cases = cases + 1
     local started = os.clock()
     local passed, err = xpcall(fn, debug.traceback)
@@ -1178,83 +1182,81 @@ case('J4 HordeDev toggle persisted on at load with WarPigs on: nothing before Wa
     end
 end)
 
-case('J5 HordeDev hotkey pressed mid-horde under WarPigs: no silent stall; compass restarts, War Plan waits visibly', function()
+-- Round 5 (W5-4): a hotkey pause with C2 in_run is a user pause, not a
+-- self-disable. d275b9d/9e01f67 treated it as a self-disable: with 'Use
+-- teleport' on WarPigs left the horde via Temis, with it off it re-enabled
+-- HordeDev after the 5 s gap (the round-4 J5 asserted exactly that, as a
+-- recorded pre-existing behaviour). Now WarPigs waits, visibly, and the same
+-- horde continues when the user resumes; still no silent Idle+in_run stall.
+local PAUSED = 'paused by its hotkey — WarPigs waiting'
+local function status_line(h)
+    return h.as(WP, function() return h.mod(WP, 'core.orchestrator').get_status_line() end)
+end
+local function count_since(list, t)
+    local n = 0
+    for _, rec in ipairs(list) do if rec.t >= t then n = n + 1 end end
+    return n
+end
+case('J5 HordeDev hotkey pressed mid-horde under WarPigs: a user pause (W5-4), WarPigs waits visibly, horde resumes',
+    function()
     local function paused_horde(opts)
         local h = setup({quests = {HORDE_Q}, teleport = opts.teleport})
-        -- (absent at d275b9d, where the compass entry is the only one)
-        local option = el(h, WP).horde_warplan_entry
-        if option then option:set(opts.warplan) end
+        el(h, WP).horde_warplan_entry:set(opts.warplan)
         el(h, HD).use_keybind:set(true); el(h, HD).keybind_toggle:set_key(0x70)
         h.give_compasses(3)
         local A = h.setup_horde({})
         h.warplan_dest = opts.warplan and 'bsk' or 'caldeum'
         local w = horde_watch(h)
         ok(h.run_until(function() return A.wave >= 3 end, 240, w.each), 'horde reached wave 3\n' .. h.tail())
-        h.warplan_dest = opts.dest_after or h.warplan_dest
         el(h, HD).keybind_toggle.state = 0 -- the user presses HordeDev's bound hotkey
         w.paused_at = h.now
         return h, A, w
     end
-    -- (a) compass mode (War Plan entry off) with Use teleport on: the round-3
-    -- critic's regression. WarPigs detours via Temis, the warplan lands at the
-    -- gate and WPD-3 re-enables HordeDev there: it must restart the compass
-    -- chain, not sit 'Idle' with in_run=true.
-    local h, A, w = paused_horde({warplan = false, teleport = true})
-    local restarted
-    ok(h.run_until(function()
-        w.each()
-        local st = status(h, 'InfernalHordesPlugin')
-        if not restarted and st.task and st.task.name == 'Start Dungeon' then restarted = h.now end
-        return A.runs >= 2 and A.wave >= 1
-    end, 240), 'J5 compass: the next horde started\n' .. h.tail())
-    h.assert_clean('J5 compass')
-    ok(restarted ~= nil, 'J5 compass: Start Dungeon after the re-enable at the gate')
-    eq(h.logged('keeping the current run'), 0, 'J5 compass: stale in-Horde flags at the gate are not kept')
-    ok(w.max_stall <= 3, string.format('J5 compass: no silent idle stall (%.1fs)', w.max_stall))
-    eq(#h.items, 2, 'J5 compass: one compass per horde')
-    local reenable = first(hd_calls(h, 'enable'), function(c) return c.t > w.paused_at end)
-    ok(reenable and reenable.place == 'caldeum' and not reenable.with_args, 'J5 compass: re-enabled at the gate, compass mode')
-    eq(status(h, 'InfernalHordesPlugin').entry_mode, 'compass')
-
-    -- (b) War Plan mode, Use teleport on: the pause makes WarPigs detour via
-    -- Temis; the War Plan teleport lands at the gate and the user resumes
-    -- HordeDev there: a visible War Plan wait, never a compass.
-    h, A, w = paused_horde({warplan = true, teleport = true, dest_after = 'caldeum'})
-    local resumed
-    ok(h.run_until(function()
-        w.each()
-        if not resumed and h.place == h.P.caldeum and not h.travel then
-            resumed = h.now
-            el(h, HD).keybind_toggle.state = 1 -- the user resumes HordeDev at the gate
+    for _, v in ipairs({{'compass mode, Use teleport on', false, true}, {'War Plan, Use teleport on', true, true},
+        {'War Plan, Use teleport off', true, false}}) do
+        local label = 'J5 ' .. v[1]
+        local h, A, w = paused_horde({warplan = v[2], teleport = v[3]})
+        local items, shown = #h.items, 0
+        h.run(20, function()
+            w.each()
+            if status_line(h):find('InfernalHordesPlugin ' .. PAUSED, 1, true) then shown = shown + 1 end
+        end)
+        eq(enabled(h, 'InfernalHordesPlugin'), false,
+            label .. ': still paused after 20 s (9e01f67: re-enabled or left)')
+        eq(status(h, 'InfernalHordesPlugin').in_run, true, label .. ': C2 in_run while paused in the Horde')
+        eq(h.logged('detected self-disable of InfernalHordesPlugin'), 0, label .. ': not a self-disable')
+        local function calls_since(name)
+            return h.count(hd_calls(h, name), function(c) return c.t >= w.paused_at end)
         end
-        if resumed and h.now > resumed + 10 then h.warplan_dest = 'bsk' end
-        return A.runs >= 2 and A.wave >= 1
-    end, 300), 'J5 War Plan: the next War Plan horde started\n' .. h.tail())
-    h.assert_clean('J5 War Plan')
-    no_compass(h, 'J5 War Plan')
-    ok(w.waiting ~= nil, 'J5 War Plan: visible "waiting for War Plan teleport" after the resume')
-    eq(w.waiting.task, 'Waiting for War Plan teleport', 'J5 War Plan: task text')
-    eq(w.waiting.in_run, false, 'J5 War Plan: stale run flags outside the Horde are not a run')
-    eq(w.waiting.place, 'caldeum')
-    outside_only(w, {['warplan:Waiting for War Plan teleport'] = true}, 'J5 War Plan')
-    ok(w.max_stall <= 3, string.format('J5 War Plan: no silent idle stall (%.1fs)', w.max_stall))
-    for _, c in ipairs(hd_calls(h, 'enable')) do
-        eq(c.entry, 'warplan', 'J5 War Plan: every enable in War Plan mode'); eq(c.place, 'bsk', 'J5 War Plan: inside')
+        eq(calls_since('enable'), 0, label .. ': no re-enable over the pause')
+        eq(calls_since('disable'), 0, label .. ': no disable')
+        eq(count_since(h.waypoints, w.paused_at), 0, label .. ': no teleport_to_waypoint (9e01f67 teleport on: Temis)')
+        eq(count_since(h.warplans, w.paused_at), 0, label .. ': no War Plan call')
+        eq(h.place, h.P.bsk, label .. ': the player stays in the Horde')
+        eq(h.logged('[WarPigs] InfernalHordesPlugin ' .. PAUSED .. ' (it reports a run in progress'), 1,
+            label .. ': the wait logged once')
+        ok(shown >= 190, label .. ': the wait is visible in the status line (' .. shown .. ' of 200 frames)')
+        el(h, HD).keybind_toggle.state = 1 -- the user resumes HordeDev
+        ok(h.run_until(function() w.each(); return #h.quests == 0 end, 300), label .. ': the horde and the turn-in\n'
+            .. h.tail())
+        h.run(2, w.each)
+        h.assert_clean(label)
+        eq(h.logged('InfernalHordesPlugin reports enabled again'), 1, label .. ': resume logged')
+        eq(calls_since('enable'), 0, label .. ': resumed without an enable()')
+        eq(A.runs, 1, label .. ': the same horde'); eq(A.wave, 6, label)
+        ok(A.council_dead_at ~= nil, label .. ': Council dead')
+        eq(#h.items, items, label .. ': no compass after the pause')
+        if v[2] then
+            no_compass(h, label)
+            eq(h.logged('War Plan horde complete; no new cycle'), 1, label .. ': completed')
+        else
+            eq(#h.items, 1, label .. ': one compass for the one horde')
+            eq(h.count(h.waypoints, function(x) return x.sno == LIBRARY_WP and x.t >= w.paused_at end), 0,
+                label .. ': no Library teleport (new compass cycle) after the pause')
+        end
+        ok(w.max_stall <= 3, string.format('%s: no silent idle stall (%.1fs)', label, w.max_stall))
+        eq(h.logged('turn-in cycle completed'), 1, label .. ': turn-in')
     end
-    eq(status(h, 'InfernalHordesPlugin').entry_mode, 'warplan', 'J5 War Plan: the next horde runs in War Plan mode')
-
-    -- (c) War Plan mode, Use teleport off: WarPigs re-enables HordeDev in the
-    -- Horde after the gap and the same run continues to the exit.
-    h, A, w = paused_horde({warplan = true, teleport = false})
-    ok(h.run_until(function() w.each(); return #h.quests == 0 end, 300), 'J5 teleport off: horde and turn-in\n' .. h.tail())
-    h.assert_clean('J5 teleport off')
-    no_compass(h, 'J5 teleport off')
-    eq(A.runs, 1, 'J5 teleport off: the same horde'); eq(A.wave, 6)
-    eq(h.logged('keeping the current run'), 1, 'J5 teleport off: re-enable in the Horde keeps the run')
-    ok(w.completed and w.completed.chests_done, 'J5 teleport off: completed')
-    ok(w.max_stall <= 3, 'J5 teleport off: no silent idle stall')
-    note('J5: a HordeDev hotkey pause mid-horde is still treated by WarPigs as a self-disable (pre-existing): with '
-        .. "'Use teleport' off it re-enables HordeDev after the 5 s gap, with it on it leaves the horde via Temis")
 end)
 
 case('J6 Horde -> turn-in -> next Pit plan in one Temis visit (Use teleport on): one WarPigs Alfred cycle', function()
@@ -1323,6 +1325,543 @@ case('J7 standalone HordeDev (WarPigs off): compass farming unchanged', function
     ok(w.tasks['Start Dungeon'] and w.tasks['Enter Horde'] and w.tasks['Open Chests'], 'J7: the full compass cycle')
     ok(h.logged('Dungeon Sigil not found in inventory') >= 1, 'J7: out of compasses on the third cycle')
     eq(enabled(h, 'InfernalHordesPlugin'), true, 'J7: still farming')
+end)
+
+-- ═══ 7. Round 5: the round-4 critic/auditor probes as joint regressions ═════
+-- K1 reload mid War Plan horde (critic probe_reload_midhorde), K2 Alfred's own
+-- teleport trip mid-horde (probe_alfred_selfstart_trace), K3 BSK lobby
+-- landings (probe_landing_variants), K4 a Stash visible from arrival
+-- (probe_static_stash_loop / auditor probe_completion_edges), K5 user hotkey
+-- pauses (probe_horde_hotkey_joint), K6 a sticky advisory restock flag across
+-- a whole plan (round-5 policy). Each fails on 9e01f67 in at least one
+-- variant; K1 'after the Council' and K2 'after the Council' also failed on
+-- the round-5 tree before the joint-suite fixes (Found by this suite).
+local PERSISTED_ON = {infernal_horde_main_toggle = true, war_pigs_main_toggle = true, war_pug_main_toggle = true,
+    silent_raven_main_toggle = true}
+local function wp_calls(h, export, name, t0)
+    local out = {}
+    for _, c in ipairs(h.api_calls) do
+        if c.export == export and c.name == name and c.context == WP and c.t >= (t0 or 0) then out[#out + 1] = c end
+    end
+    return out
+end
+local function leave_time(h)
+    local a = first(h.arrivals, function(x) return x.why == 'leave' end)
+    return a and a.t
+end
+
+-- Found by this suite (K1 after the Council): the Horde quest is already gone
+-- then, so nobody adopted the persisted HordeDev; it ran in compass mode and,
+-- with no chest room, never exited (its fresh tracker never sees the door or
+-- the Council): 'cleanup still pending', the turn-in never ran (also on
+-- 9e01f67, and on 9e01f67 at wave 3 / at the door too).
+case('K1 QQT reload mid War Plan horde (persisted toggles, place=bsk): War Plan mode, the run completes, exit, turn-in',
+    function()
+    local ARENAS = {{'chest room', true, true}, {'no chest room, stash', false, true},
+        {'no chest room, no stash', false, false}}
+    local variants = {}
+    for _, at in ipairs({3, 'door', 'council_dead'}) do
+        for _, arena in ipairs(ARENAS) do variants[#variants + 1] = {at = at, arena = arena, teleport = false} end
+    end
+    variants[#variants + 1] = {at = 3, arena = ARENAS[3], teleport = true}
+    variants[#variants + 1] = {at = 'council_dead', arena = ARENAS[1], teleport = true}
+    variants[#variants + 1] = {at = 'council_dead', arena = ARENAS[2], teleport = true}
+    for _, v in ipairs(variants) do
+        local label = string.format('K1 reload %s, %s, Use teleport %s', v.at == 3 and 'at wave 3'
+            or v.at == 'door' and 'at the locked door' or 'after the Council', v.arena[1], v.teleport and 'on' or 'off')
+        local persisted = J.copy(PERSISTED_ON)
+        persisted.war_pigs_use_teleport_transition = v.teleport
+        local h = J.new({place = 'bsk', persisted = persisted})
+        h.assert_clean('load')
+        h.instrument_exports()
+        eq(el(h, HD).main_toggle:get(), true, label .. ': HordeDev toggle persisted on')
+        h.give_compasses(3)
+        h.set_quests({HORDE_Q})
+        local A = h.setup_horde({chest_room = v.arena[2], stash = v.arena[3], resume_at = v.at})
+        if v.at == 'council_dead' then
+            eq(h.quests[1], 'WarPlans_QST_TurnIn_Rewards', label .. ': objective already done')
+        end
+        h.warplan_dest = 'bsk'
+        local w = horde_watch(h)
+        local mode_at
+        ok(h.run_until(function()
+            w.each()
+            if not mode_at and status(h, 'InfernalHordesPlugin').entry_mode == 'warplan' then mode_at = h.now end
+            return #h.quests == 0
+        end, 300), label .. ': the horde and the turn-in complete (9e01f67 without a chest room: stuck in BSK)\n'
+            .. h.tail())
+        h.run(3, w.each)
+        h.assert_clean(label)
+        ok(mode_at and mode_at <= 1001 + 1e-6, label .. ': War Plan entry mode within 1 s: ' .. tostring(mode_at))
+        eq(h.logged('switching it to War Plan entry mode'), 1, label .. ': the retag logged once')
+        local enables = hd_calls(h, 'enable')
+        eq(#enables, 1, label .. ': one enable')
+        eq(enables[1].entry, 'warplan', label .. ': enable({entry = "warplan"})'); eq(enables[1].place, 'bsk', label)
+        eq(h.logged('No enable/disable from WarPigs within 5s'), 0, label .. ': the F-H2 wait ended at once')
+        eq(A.runs, 1, label .. ': the same horde'); eq(A.wave, 6, label)
+        ok(A.council_dead_at ~= nil, label .. ': Council dead')
+        if v.arena[2] then
+            eq(#A.opened, 3, label .. ': the chest room was opened')
+            eq(h.logged('Chest sequence finished'), 1, label .. ': chest phase finished')
+        else
+            eq(#A.opened, 0, label)
+            eq(h.logged('no chest room; leaving without chests'), 1, label .. ': bounded completion without chests')
+            if v.at == 'council_dead' then
+                eq(h.logged('War Plan objective already complete for 20s and no chest room'), 1,
+                    label .. ': evidence of a run started after the Council')
+            end
+        end
+        local left = leave_time(h)
+        ok(left and left - A.council_dead_at <= 75, string.format('%s: left %.1fs after the Council (bounded)', label,
+            (left or math.huge) - A.council_dead_at))
+        eq(h.leaves, 1, label .. ': Leave Dungeon'); eq(h.resets, 1, label .. ': reset')
+        ok(w.completed and w.completed.chests_done, label .. ': last_result completed, chests_done()')
+        eq(h.logged('War Plan horde complete; no new cycle'), 1, label .. ': completed')
+        local released = first(hd_calls(h, 'disable'), function(c) return c.t >= w.completed.t end)
+        ok(released and released.t - w.completed.t <= 4, label .. ': released right after the exit')
+        eq(h.logged('cleanup still pending'), 0, label .. ': no endless handoff hold')
+        no_compass(h, label)
+        eq(warplan_tps(h), 0, label .. ': no War Plan teleport (already inside)')
+        eq(h.count(h.waypoints, function(x) return x.from == 'bsk' end), 0, label .. ': nothing teleported out of BSK')
+        outside_only(w, {['warplan:Exit Horde'] = true, ['warplan:War Plan horde complete'] = true}, label)
+        ok(w.max_stall <= 3, label .. ': no silent idle stall')
+        eq(h.logged('turn-in cycle completed'), 1, label .. ': turn-in')
+    end
+    -- Guard for the fix: a HordeDev left on in a compass horde while the War
+    -- Plan is at another step (not a reload after the Council) is retagged
+    -- too, but the 'objective already complete' evidence needs a quiet arena
+    -- and a run that has not seen the door or the Council itself: it still
+    -- plays every wave, the Council and the chests before leaving.
+    for _, at in ipairs({0, 3}) do
+        local label = 'K1 guard: compass horde left on while the plan is at the Pit, from wave ' .. at
+        local h = J.new({place = 'bsk', persisted = J.copy(PERSISTED_ON)})
+        h.assert_clean('load')
+        h.instrument_exports()
+        h.set_quests({'WarPlans_QST_ThePit'})
+        local A = h.setup_horde({waves = 10, resume_at = at > 0 and at or nil})
+        ok(h.run_until(function() return h.leaves >= 1 end, 400), label .. ': the horde ends\n' .. h.tail())
+        local left = h.now
+        ok(h.run_until(function() return enabled(h, 'ArkhamAsylumPlugin') end, 90), label .. ': the Pit next\n' .. h.tail())
+        h.assert_clean(label)
+        eq(h.logged('switching it to War Plan entry mode'), 1, label .. ': retagged once')
+        eq(A.wave, 10, label .. ': every wave played'); ok(A.council_dead_at ~= nil, label .. ': Council killed')
+        ok(left > A.council_dead_at, label .. ': left after the Council')
+        ok(#A.opened >= 3, label .. ': chests opened: ' .. #A.opened)
+        eq(h.logged('leaving without chests'), 0, label .. ': no early exit')
+        eq(h.leaves, 1, label .. ': one Leave Dungeon'); eq(#h.items, 0, label .. ': no compass')
+        ok(first(hd_calls(h, 'disable'), function(c) return c.t >= left - 1 end), label .. ': HordeDev released after its exit')
+    end
+end)
+
+-- Found by this suite (K2 after the Council): with the Horde quest already
+-- gone, WarPigs' disable_when released the War Plan HordeDev in Temis during
+-- Alfred's trip (in_run == false outside the Horde); Alfred's portal then put
+-- the player back into BSK and the turn-in teleported out of it: chests and
+-- Leave Dungeon lost (also on 9e01f67). At wave 3 with 'Use teleport' on,
+-- 9e01f67 released HordeDev and its preamble teleported out of BSK (2 hordes).
+case("K2 Alfred's own teleport trip mid War Plan horde, back into the same horde: HordeDev kept, nothing leaves BSK",
+    function()
+    for _, v in ipairs({
+        {'wave 3', 'wave3', true, false}, {'wave 3', 'wave3', true, true},
+        {'the locked door', 'door', true, false}, {'the locked door', 'door', true, true},
+        {'the chest room (after the Council)', 'council', true, false},
+        {'the chest room (after the Council)', 'council', true, true},
+        {'the boss room without a chest room (after the Council)', 'council', false, false},
+        {'wave 3 with 45 s of Alfred work', 'wave3', true, true, 45},
+    }) do
+        local label = string.format('K2 at %s, Use teleport %s', v[1], v[4] and 'on' or 'off')
+        local h = setup({quests = {HORDE_Q}, teleport = v[4]})
+        local A = h.setup_horde({chest_room = v[3]})
+        h.warplan_dest = 'bsk'
+        local reached = ({
+            wave3 = function() return A.wave >= 3 end,
+            door = function() local e = A.events[#A.events]; return e ~= nil and e.what == 'locked door' end,
+            council = function() return A.council_dead_at ~= nil end,
+        })[v[2]]
+        ok(h.run_until(reached, 400), label .. ': reached\n' .. h.tail())
+        local mark = h.now
+        -- Alfred starts its own with-teleport cycle (another caller).
+        h.as(h.alfred_ctx, function() h.G.AlfredTheButlerPlugin.trigger_tasks_with_teleport('AlfredTheButler', nil) end)
+        h.alfred.work = v[5] or 20
+        local w = horde_watch(h)
+        local town_frames, dropped = 0, false
+        ok(h.run_until(function()
+            w.each()
+            local job = h.alfred.job -- Alfred's own trip out of the Horde (not a WarPigs cycle)
+            if h.place == h.P.temis and job and job.teleport and job.exit == h.P.bsk then
+                town_frames = town_frames + 1
+                if not enabled(h, 'InfernalHordesPlugin') then dropped = true end
+            end
+            return #h.quests == 0
+        end, 500), label .. ': the horde and the turn-in\n' .. h.tail())
+        h.run(3)
+        h.assert_clean(label)
+        ok(first(h.arrivals, function(a) return a.t >= mark and a.place == 'temis' and a.why == 'alfred' end)
+            and first(h.arrivals, function(a) return a.t >= mark and a.place == 'bsk' and a.why == 'alfred_return' end),
+            label .. ': Alfred took the player to Temis and back into the same horde')
+        ok(town_frames > 50 and not dropped, label .. ': HordeDev kept over the town leg (9e01f67 after the Council: '
+            .. 'released in Temis)')
+        eq(A.runs, 1, label .. ': one horde (9e01f67 wave 3, teleport on: 2)'); eq(A.wave, 6, label)
+        ok(A.council_dead_at ~= nil, label .. ': Council dead')
+        if v[3] then
+            eq(#A.opened, 3, label .. ': the chests were opened (9e01f67 after the Council: 0)')
+        else
+            eq(h.logged('no chest room; leaving without chests'), 1, label .. ': bounded completion without chests')
+        end
+        eq(h.leaves, 1, label .. ': Leave Dungeon (9e01f67 after the Council: the turn-in teleported out of BSK)')
+        local completed = log_time(h, 'War Plan horde complete; no new cycle')
+        ok(completed, label .. ': completed')
+        for _, c in ipairs(hd_calls(h, 'disable')) do
+            -- log times carry one decimal
+            ok(c.t >= completed - 0.05, string.format('%s: released only after its completion (%.1f < %.1f)', label,
+                c.t, completed))
+        end
+        eq(#hd_calls(h, 'enable'), 1, label .. ': one enable')
+        eq(h.count(h.waypoints, function(x) return x.from == 'bsk' end), 0,
+            label .. ': no teleport_to_waypoint from BSK')
+        eq(h.count(h.warplans, function(x) return x.kind == 'teleport' and x.from == 'bsk' end), 0,
+            label .. ': no War Plan teleport from BSK')
+        eq(warplan_tps(h), 1, label .. ': one War Plan teleport')
+        eq(h.logged('finished its War Plan run'), 0, label .. ': no false "finished" release')
+        eq(h.logged('left the Horde without a completed run'), 0, label)
+        no_compass(h, label)
+        local turned = log_time(h, 'turn-in cycle completed')
+        ok(turned and turned > leave_time(h), label .. ': the turn-in after the exit')
+        if v[2] == 'council' then
+            ok(h.logged('HordeDev War Plan run is out of the Horde during an Alfred trip or a teleport') >= 1,
+                label .. ': the hold is logged (C6)')
+        end
+    end
+end)
+
+case('K3 War Plan teleport lands in a BSK lobby zone: no compass, the reason and a report request (fallback on/off)',
+    function()
+    local function odd_place(h, world, zone)
+        local place = {key = 'lobby', name = world, zone = zone, id = 6, town = false, spawn = h.v(0, 0),
+            box = {-80, 80, -80, 80}, actors = {}}
+        h.P.lobby = place
+        return place
+    end
+    local LOBBY_W, LOBBY_Z = 'S05_BSK_Prototype02', 'S05_BSK_Lobby'
+    for _, v in ipairs({
+        {'lobby, fallback off, Use teleport off', LOBBY_W, LOBBY_Z, false, false},
+        {'lobby, fallback on, Use teleport off', LOBBY_W, LOBBY_Z, true, false},
+        {'lobby, fallback off, Use teleport on', LOBBY_W, LOBBY_Z, false, true},
+        {'lobby, fallback on, Use teleport on', LOBBY_W, LOBBY_Z, true, true},
+        {'the Horde zone in a world without BSK, fallback on', 'WarPlan_Hordes', 'S05_BSK_Prototype02', true, false},
+    }) do
+        local label = 'K3 ' .. v[1]
+        local h = setup({quests = {HORDE_Q}, teleport = v[5]})
+        if v[4] then el(h, WP).horde_compass_fallback:set(true) end
+        h.give_compasses(2)
+        h.warplan_dest = odd_place(h, v[2], v[3])
+        local report_text = string.format('landed in a BSK zone HordeDev does not know (zone=%s, world=%s) — '
+            .. 'please report; not using a compass', v[3], v[2])
+        local shown, hd_on = 0, false
+        h.run(150, function()
+            if status_line(h):find(report_text .. ' — retrying the War Plan teleport in', 1, true) then
+                shown = shown + 1
+            end
+            if enabled(h, 'InfernalHordesPlugin') then hd_on = true end
+        end)
+        h.assert_clean(label)
+        eq(#hd_calls(h, 'enable'), 0, label .. ': HordeDev never enabled (9e01f67 fallback on: enable() in the lobby)')
+        eq(hd_on, false, label .. ': HordeDev stays off')
+        no_compass(h, label)
+        local tps = {}
+        for _, x in ipairs(h.warplans) do if x.kind == 'teleport' then tps[#tps + 1] = x end end
+        ok(#tps >= 4 and #tps <= 6, label .. ': three War Plan teleports per round, then round 2: ' .. #tps)
+        ok(tps[4].t - tps[3].t >= 60 - 1e-6, string.format('%s: 60 s backoff (%.1fs)', label, tps[4].t - tps[3].t))
+        eq(h.logged('War Plan Horde entry: 3 War Plan teleports did not reach the Horde: ' .. report_text
+            .. (v[4] and ' (compass fallback not used in a BSK zone)' or '') .. '; retrying in 60s'), 2,
+            label .. ': the reason logged once per round')
+        eq(h.logged('compass fallback is on'), 0, label .. ': the compass fallback never engages in a BSK zone')
+        eq(h.logged('enabling it to navigate itself'), 0, label .. ': no WPD-3 bypass')
+        ok(shown >= 300, label .. ': the report request is in the status line during the backoff ('
+            .. shown .. ' frames)')
+    end
+    -- The landing recovers in round 2: the normal War Plan horde follows.
+    for _, tp in ipairs({false, true}) do
+        local label = 'K3 recovery in round 2, Use teleport ' .. (tp and 'on' or 'off')
+        local h = setup({quests = {HORDE_Q}, teleport = tp})
+        el(h, WP).horde_compass_fallback:set(true)
+        local lobby = odd_place(h, LOBBY_W, LOBBY_Z)
+        h.give_compasses(2)
+        local A = h.setup_horde({})
+        local n = 0
+        h.warplan_dest = function() n = n + 1; return n > 3 and 'bsk' or lobby end
+        ok(h.run_until(function() return #h.quests == 0 end, 420), label .. ': the horde and the turn-in\n' .. h.tail())
+        h.assert_clean(label)
+        eq(warplan_tps(h), 4, label .. ': three misses, then the Horde')
+        local enables = hd_calls(h, 'enable')
+        eq(#enables, 1, label .. ': one enable')
+        eq(enables[1].entry, 'warplan', label); eq(enables[1].place, 'bsk', label)
+        eq(A.runs, 1, label); eq(A.wave, 6, label); eq(#A.opened, 3, label .. ': chests')
+        no_compass(h, label)
+        eq(h.logged('turn-in cycle completed'), 1, label .. ': turn-in')
+    end
+end)
+
+-- The lead's round-4 gate (completion evidence only while the wave task is
+-- idle in the boss room) and H5-1 (a stale idle reading while another task
+-- holds the queue). 9e01f67 has the gate but not H5-1: with another caller's
+-- Alfred work in the boss room the horde was left at the door and a second
+-- horde followed.
+case('K4 Stash visible from arrival: the Council is killed and the chests opened before the exit', function()
+    for _, v in ipairs({
+        {'chest room, 75 s Council fight', true, 3000, false, false},
+        {'chest room, 75 s Council fight', true, 3000, true, false},
+        {'chest room, 10 s Council fight', true, 400, false, false},
+        {'no chest room, 75 s Council fight', false, 3000, false, false},
+        {"chest room, another caller's Alfred work in the boss room", true, 3000, false, true},
+        {"chest room, another caller's Alfred work in the boss room", true, 3000, true, true},
+        {"no chest room, another caller's Alfred work in the boss room", false, 3000, false, true},
+    }) do
+        local label = string.format('K4 %s, Use teleport %s', v[1], v[4] and 'on' or 'off')
+        local h = setup({quests = {HORDE_Q}, teleport = v[4]})
+        local A = h.setup_horde({boss_health = v[3], chest_room = v[2], stash = false})
+        local arrive = h.P.bsk.on_arrive
+        h.P.bsk.on_arrive = function(a, trip) -- the Stash is part of the arena
+            arrive(a, trip)
+            if not (trip and trip.why == 'alfred_return') then h.actor('bsk', 'Stash', -40, -38) end
+        end
+        h.warplan_dest = 'bsk'
+        local tracker = h.mod(HD, 'core.tracker')
+        local held, left_at
+        ok(h.run_until(function()
+            if v[5] and not held and tracker.locked_door_found and tracker.horde_idle_since ~= nil
+                and not A.council_dead_at then
+                -- Another caller's Alfred cycle (no teleport) while the wave
+                -- task was idle in the boss room: the player stays in BSK.
+                held = h.now
+                h.as(h.alfred_ctx, function() h.G.AlfredTheButlerPlugin.trigger_tasks('AlfredTheButler', nil) end)
+                h.alfred.work = 30
+            end
+            if not left_at and h.leaves >= 1 then left_at = h.now end
+            return #h.quests == 0 or A.runs >= 3
+        end, 900), label .. ': the turn-in\n' .. h.tail())
+        h.run(2)
+        h.assert_clean(label)
+        eq(A.runs, 1, label .. ': one horde (9e01f67 with the boss-room hold: 2)')
+        local door, opened, dead = arena_event(A, 'locked door', 1), arena_event(A, 'door opened', 1),
+            arena_event(A, 'council dead', 1)
+        ok(door and opened and dead, label .. ': door opened and Council killed\n' .. h.tail())
+        ok(opened.t - door.t > 20, string.format(
+            '%s: the door approach (%.1fs) outlasts CHEST_WAIT with the Stash in sight', label, opened.t - door.t))
+        ok(left_at and left_at > dead.t, label .. ': left only after the Council died')
+        if v[5] then
+            local pylon = arena_event(A, 'council pylon', 1)
+            ok(held and pylon.t - held >= 25, label .. ': the Alfred hold ran in the boss room')
+        end
+        if v[2] then
+            eq(#A.opened, 3, label .. ': the chests were opened')
+            eq(h.logged('no chest room'), 0, label .. ': no chest skip')
+        else
+            local skip = log_time(h, 'stash visible for 20s and no chest room; leaving without chests')
+            ok(skip and skip >= dead.t + 20 - 0.5, string.format(
+                '%s: the bounded skip only after the boss room is idle (skip %s, Council dead %.1f)', label,
+                tostring(skip), dead.t))
+        end
+        eq(h.leaves, 1, label .. ': one Leave Dungeon')
+        eq(h.logged('War Plan horde complete; no new cycle'), 1, label .. ': completed once')
+        no_compass(h, label)
+        eq(h.logged('turn-in cycle completed'), 1, label .. ': turn-in')
+    end
+end)
+
+-- W5-4 beyond J5: a pause that holds the handoff (the quest is gone while the
+-- plugin is paused) and a pause long enough for the C6 watchdog.
+case('K5 user hotkey pause under WarPigs: HordeDev in the chest room, Arkham while the plan moves on; WarPigs waits',
+    function()
+    for _, v in ipairs({{true, false}, {false, false}, {true, true}, {false, true}}) do
+        local chest, tp = v[1], v[2]
+        local label = string.format('K5 HordeDev paused after the Council, %s, Use teleport %s',
+            chest and 'chest room' or 'no chest room', tp and 'on' or 'off')
+        local h = setup({quests = {HORDE_Q}, teleport = tp})
+        el(h, HD).use_keybind:set(true); el(h, HD).keybind_toggle:set_key(0x70)
+        local A = h.setup_horde({chest_room = chest})
+        h.warplan_dest = 'bsk'
+        ok(h.run_until(function() return A.council_dead_at ~= nil end, 400), label .. ': Council dead\n' .. h.tail())
+        h.run(1)
+        el(h, HD).keybind_toggle.state = 0 -- the user presses HordeDev's hotkey in the chest room
+        local p = h.now
+        local shown = 0
+        h.run(60, function()
+            if status_line(h):find('InfernalHordesPlugin ' .. PAUSED, 1, true) then shown = shown + 1 end
+        end)
+        local st = status(h, 'InfernalHordesPlugin')
+        eq(st.enabled, false, label .. ': still paused'); eq(st.in_run, true, label .. ': C2 in_run')
+        eq(count_since(h.waypoints, p), 0, label .. ': no teleport (the turn-in waits for the paused HordeDev)')
+        eq(count_since(h.warplans, p), 0, label)
+        eq(h.place, h.P.bsk, label .. ': still in the Horde')
+        eq(h.logged('turn-in cycle completed'), 0, label .. ': the turn-in is held')
+        eq(#hd_calls(h, 'enable') + #hd_calls(h, 'disable'), 1, label .. ': no WarPigs enable/disable over the pause')
+        eq(h.logged('[WarPigs] InfernalHordesPlugin ' .. PAUSED .. ' (it reports a run in progress'), 1,
+            label .. ': the wait logged once')
+        ok(shown >= 590, label .. ': the wait is visible (' .. shown .. ' of 600 frames)')
+        el(h, HD).keybind_toggle.state = 1
+        ok(h.run_until(function() return #h.quests == 0 end, 300),
+            label .. ': chests/exit and the turn-in\n' .. h.tail())
+        h.run(2)
+        h.assert_clean(label)
+        eq(h.logged('InfernalHordesPlugin reports enabled again'), 1, label .. ': resume logged')
+        eq(#hd_calls(h, 'enable'), 1, label .. ': resumed without an enable()')
+        eq(A.runs, 1, label .. ': the same horde')
+        if chest then eq(#A.opened, 3, label .. ': the chests')
+        else eq(h.logged('no chest room; leaving without chests'), 1, label .. ': bounded completion') end
+        eq(h.leaves, 1, label .. ': Leave Dungeon'); eq(h.logged('War Plan horde complete; no new cycle'), 1, label)
+        local released = first(hd_calls(h, 'disable'), function(c) return c.t >= p end)
+        ok(released and released.place ~= 'bsk', label .. ': released outside the Horde, after the exit')
+        no_compass(h, label)
+        eq(h.logged('turn-in cycle completed'), 1, label .. ': turn-in')
+    end
+    for _, tp in ipairs({false, true}) do
+        local label = 'K5 Arkham paused in the Pit while the plan moves on to an Undercity, Use teleport '
+            .. (tp and 'on' or 'off')
+        local h = setup({place = 'pit', quests = {'WarPlans_QST_ThePit'}, teleport = tp})
+        el(h, ARK).use_keybind:set(true); el(h, ARK).keybind_toggle:set_key(0x70)
+        for i = 1, 4 do h.actor('pit', 'Pit_Monster_' .. i, 20 + i * 15, (i % 2) * 6, {enemy = true}) end
+        ok(h.run_until(function() return enabled(h, 'ArkhamAsylumPlugin') end, 10), label .. ': Arkham started')
+        h.run(5)
+        el(h, ARK).keybind_toggle.state = 0 -- the user presses Arkham's hotkey
+        local p = h.now
+        h.run(3)
+        h.set_quests({'WarPlans_QST_Undercity'})
+        h.warplan_dest = 'kurast'
+        local wc_on = false
+        h.run(125, function() if enabled(h, 'WonderCityPlugin') then wc_on = true end end)
+        local st = status(h, 'ArkhamAsylumPlugin')
+        eq(st.enabled, false, label .. ': still paused'); eq(st.in_run, true, label .. ': C2 in_run in the Pit')
+        eq(wc_on, false, label .. ': WonderCity not started over the paused Arkham (handoff held)')
+        eq(count_since(h.waypoints, p), 0, label .. ': no teleport'); eq(count_since(h.warplans, p), 0, label)
+        eq(h.place, h.P.pit, label .. ': still in the Pit')
+        eq(#wp_calls(h, 'ArkhamAsylumPlugin', 'enable', p) + #wp_calls(h, 'ArkhamAsylumPlugin', 'disable', p), 0,
+            label .. ': no enable/disable over the pause')
+        eq(h.logged('[WarPigs] ArkhamAsylumPlugin ' .. PAUSED .. ' (it reports a run in progress'), 1,
+            label .. ': the wait logged once')
+        local line = status_line(h)
+        ok(line:find('pending disable: ArkhamAsylumPlugin (ArkhamAsylumPlugin ' .. PAUSED .. ')', 1, true),
+            label .. ': the held handoff names the pause: ' .. line)
+        ok(h.logged('watchdog: handoff gate held for') >= 1, label .. ': the C6 watchdog reports the long hold')
+        el(h, ARK).keybind_toggle.state = 1 -- the user resumes Arkham
+        local r = h.now
+        h.run(6)
+        eq(enabled(h, 'ArkhamAsylumPlugin'), true, label .. ': resumed')
+        eq(h.logged('ArkhamAsylumPlugin reports enabled again'), 1, label .. ': resume logged')
+        eq(#wp_calls(h, 'ArkhamAsylumPlugin', 'enable', p), 0, label .. ': resumed without an enable()')
+        ok(first(h.bm_calls, function(c) return c.context == ARK and c.t > r end), label .. ': Arkham drives again')
+        eq(h.place, h.P.pit, label .. ': the same Pit run')
+        -- Arkham's run ends in town; the Undercity follows.
+        h.travel_to('temis', 1.0, 'pit_exit')
+        ok(h.run_until(function() return enabled(h, 'WonderCityPlugin') end, 90),
+            label .. ': WonderCity next\n' .. h.tail())
+        h.assert_clean(label)
+        local released = first(wp_calls(h, 'ArkhamAsylumPlugin', 'disable', r), function() return true end)
+        ok(released and released.place == 'temis', label .. ': Arkham released in town after the resume')
+        local wc = first(wp_calls(h, 'WonderCityPlugin', 'enable', r), function() return true end)
+        ok(wc and wc.t >= released.t + 5 - 1e-6, label .. ': WonderCity after the post-disable gap')
+    end
+end)
+
+-- The round-5 policy across one War Plan: Pit -> Undercity -> Horde -> Reaper
+-- -> Helltide -> turn-in with Steroid's sticky restock flag. Advisory Alfred
+-- trips come only from WarPigs, in Temis, at most once per Temis visit; a
+-- hard need (a full bag in the Pit and in the Undercity) still sends the
+-- activity plugin's own trip at once. 9e01f67: WonderCity, HordeDev and Reaper
+-- each made advisory trips of their own.
+case('K6 sticky advisory restock flag across a full plan: advisory Alfred only from WarPigs in Temis, once per visit',
+    function()
+    local Q = {pit = 'WarPlans_QST_ThePit', uc = 'WarPlans_QST_Undercity', boss = 'WarPlans_QST_BossLair_Andariel',
+        ht = 'WarPlans_QST_Helltide_TorturedGifts', turn = 'WarPlans_QST_TurnIn_Rewards'}
+    local DEST = {[Q.uc] = 'kurast', [HORDE_Q] = 'bsk', [Q.boss] = 'lair', [Q.ht] = 'helltide'}
+    for _, tp in ipairs({false, true}) do
+        local label = 'K6 Use teleport ' .. (tp and 'on' or 'off')
+        local h = setup({quests = {Q.pit}, teleport = tp, virtual_os_time = true})
+        h.alfred.need_trigger, h.alfred.sticky_need, h.alfred.restock_count = true, true, 2
+        h.setup_undercity()
+        local A = h.setup_horde({next_quest = Q.boss})
+        h.setup_lair(function(hh) hh.at(3, function() hh.set_quests({Q.ht}) end) end, {altar_stays = true})
+        for i = 1, 4 do h.actor('pit', 'Pit_Monster_' .. i, 20 + i * 15, (i % 2) * 6, {enemy = true}) end
+        for i = 1, 3 do h.actor('undercity', 'Undercity_Monster_' .. i, 25 + i * 20, 0, {enemy = true}) end
+        h.warplan_dest = function(hh) return DEST[hh.quests[1]] end
+        h.P.helltide.helltide = true
+        local phase, since, visit, in_temis = 'pit', nil, 1, true
+        local trips, seen, hard = {}, 0, {}
+        ok(h.run_until(function()
+            local here = h.place == h.P.temis
+            if here and not in_temis then visit = visit + 1 end
+            in_temis = here
+            while seen < #h.alfred.triggers do
+                seen = seen + 1
+                local t = h.alfred.triggers[seen]
+                trips[#trips + 1] = {t = t.t, context = t.context, place = t.place, visit = here and visit or nil}
+            end
+            if phase == 'pit' and h.place == h.P.pit then
+                since = since or h.now
+                if not hard.full and h.now - since > 6 then hard.full = h.now; h.alfred.inventory_full = true end
+                if h.now - since > 25 and not h.travel then
+                    h.set_quests({Q.uc}); h.travel_to('temis', 1.0, 'pit_exit'); phase, since = 'uc', nil
+                end
+            elseif phase == 'uc' and h.place == h.P.undercity then
+                since = since or h.now
+                -- WonderCity services only a full bag inside an Undercity
+                -- (repairs wait for the end of the run: its unchanged rule).
+                if not hard.bag and h.now - since > 6 then hard.bag = h.now; h.alfred.inventory_full = true end
+                if h.now - since > 30 and not h.travel and not h.alfred.job then
+                    h.set_quests({HORDE_Q}); h.travel_to('kurast', 1.0, 'undercity_exit'); phase, since = 'rest', nil
+                end
+            elseif phase == 'rest' and h.quests[1] == Q.ht and h.place == h.P.helltide then
+                since = since or h.now
+                if h.now - since > 30 then h.set_quests({Q.turn}); phase = 'turn' end
+            elseif phase == 'turn' and #h.quests == 0 then
+                return true
+            end
+            return false
+        end, 1500), label .. ': the whole plan and the turn-in (phase ' .. phase .. ')\n' .. h.tail())
+        h.run(2)
+        h.assert_clean(label)
+        -- every activity ran
+        for _, want in ipairs({{'pit', 'pit_portal'}, {'undercity', 'undercity_portal'}, {'bsk', 'warplan'},
+            {'helltide'}}) do
+            ok(first(h.arrivals, function(a) return a.place == want[1] and (want[2] == nil or a.why == want[2]) end),
+                label .. ': reached ' .. want[1])
+        end
+        eq(A.runs, 1, label .. ': one horde'); eq(A.wave, 6, label); eq(#A.opened, 3, label .. ': Horde chests')
+        ok(h.chest_opened_at ~= nil, label .. ': the boss chest')
+        eq(status(h, 'ReaperPlugin').last_result, 'success', label .. ': Reaper run_once success')
+        no_compass(h, label)
+        eq(h.logged('turn-in cycle completed'), 1, label .. ': turn-in')
+        -- Alfred: the two hard needs at once, everything else WarPigs in Temis.
+        local listing = {}
+        for _, t in ipairs(trips) do
+            listing[#listing + 1] = string.format('%.1f %s %s v%s', t.t, t.context, t.place, tostring(t.visit))
+        end
+        listing = table.concat(listing, '; ')
+        local per_visit, wp_trips, own = {}, 0, {}
+        for _, t in ipairs(trips) do
+            if t.context == WP then
+                wp_trips = wp_trips + 1
+                eq(t.place, 'temis', label .. ': WarPigs services Alfred in Temis [' .. listing .. ']')
+                ok(t.visit ~= nil, label .. ': during a Temis visit')
+                per_visit[t.visit] = (per_visit[t.visit] or 0) + 1
+                ok(per_visit[t.visit] <= 1, label .. ': at most one Alfred cycle per Temis visit [' .. listing .. ']')
+            else
+                own[#own + 1] = t
+            end
+        end
+        ok(wp_trips >= 1, label .. ': WarPigs serviced the advisory flag [' .. listing .. ']')
+        eq(#own, 2, label .. ': only the two hard-need trips by activity plugins '
+            .. '(9e01f67: WonderCity, HordeDev, Reaper advisory trips) [' .. listing .. ']')
+        eq(own[1].context, ARK, label .. ': full bag in the Pit -> Arkham [' .. listing .. ']')
+        eq(own[1].place, 'pit', label)
+        ok(own[1].t - hard.full <= 1.0, string.format('%s: at once (%.1fs)', label, own[1].t - hard.full))
+        eq(own[2].context, WC, label .. ': full bag in the Undercity -> WonderCity [' .. listing .. ']')
+        eq(own[2].place, 'undercity', label)
+        ok(own[2].t - hard.bag <= 1.0, string.format('%s: at once (%.1fs)', label, own[2].t - hard.bag))
+        ok(h.logged('advisory Alfred restock skipped: WarPigs is enabled and services it in Temis') >= 1,
+            label .. ': the activity plugins log the skip')
+        eq(h.logged('Advisory Alfred flag left to WarPigs'), 1, label .. ': HordeDev chest-room skip logged once')
+    end
 end)
 
 for _, line in ipairs(report) do print('NOTE joint: ' .. line) end

@@ -189,13 +189,24 @@ function J.new(opts)
 
     -- Boss lair script: the altar summons the boss; its death drops the chest;
     -- opening the chest empties it. `on_kill` runs when the boss dies.
-    function h.setup_lair(on_kill)
+    -- Round 5: o.altar_stays keeps the altar (no longer interactable) after
+    -- the summon and spawns the boss next to it, as in the game; Reaper then
+    -- fights at the altar and finishes its run (with opts.virtual_os_time for
+    -- its os.time chest phases). Default: the round-2 script (altar removed).
+    function h.setup_lair(on_kill, o)
+        o = o or {}
         local lair = P.lair
         h.altar = h.actor(lair, 'Boss_WT4_Andariel', -12, -11)
         h.altar.on_interact = function()
+            if o.altar_stays then
+                if h.altar.summoned then return end
+                h.altar.summoned, h.altar.interactable = true, false
+            end
             h.at(1.0, function()
-                h.remove_actor(h.altar)
-                h.boss = h.actor(lair, 'Boss_WT4_Andariel_Boss', -15, -14, {enemy = true, boss = true, health = 300})
+                if not o.altar_stays then h.remove_actor(h.altar) end
+                local bx, by = -15, -14
+                if o.altar_stays then bx, by = -12, -13 end
+                h.boss = h.actor(lair, 'Boss_WT4_Andariel_Boss', bx, by, {enemy = true, boss = true, health = 300})
                 h.boss.on_death = function()
                     h.boss_killed_at = h.now
                     h.boss_chest = h.actor(lair, 'EGB_Chest_Andariel', -13, -16)
@@ -205,6 +216,28 @@ function J.new(opts)
                     if on_kill then on_kill(h) end
                 end
             end)
+        end
+    end
+
+    -- Round 5: the Undercity entry at the Kurast brazier (WonderCity's
+    -- tasks/enter_undercity.lua): interacting opens the tribute vendor; the
+    -- ACCEPT click (WonderCity logs 'left-click ACCEPT') closes it and spawns
+    -- Portal_Dungeon_Undercity next to the brazier; the portal enters the
+    -- Undercity. Opt-in (older scenarios keep the inert brazier).
+    function h.setup_undercity()
+        h.brazier.on_interact = function() h.vendor_screen = true end
+        local accepts = 0
+        h.on_click = function()
+            if not h.vendor_screen then return end
+            local n = h.logged('left-click ACCEPT')
+            if n <= accepts then return end
+            accepts = n
+            h.vendor_screen = false
+            local portal = h.actor('kurast', 'Portal_Dungeon_Undercity', -1455, -215)
+            portal.on_interact = function()
+                h.remove_actor(portal)
+                h.travel_to('undercity', 0.5, 'undercity_portal')
+            end
         end
     end
 
@@ -219,6 +252,8 @@ function J.new(opts)
     -- (stash, greater-affix / materials chests at 10 aether, gold chest takes
     -- the rest). `stash` defaults to `chest_room`. Aether starts at 0 in
     -- every new horde; Alfred's return portal re-enters the same horde.
+    -- `next_quest` (round 5) is the War Plan step that replaces the Horde
+    -- quest at the Council's death (default: the TurnIn quest).
     function h.setup_horde(o)
         o = o or {}
         local bsk = P.bsk
@@ -298,7 +333,7 @@ function J.new(opts)
                     local name = type(q) == 'table' and q.name or q
                     if not tostring(name):find('WarPlans_QST_InfernalHordes', 1, true) then keep[#keep + 1] = q end
                 end
-                keep[#keep + 1] = 'WarPlans_QST_TurnIn_Rewards'
+                keep[#keep + 1] = o.next_quest or 'WarPlans_QST_TurnIn_Rewards'
                 h.quests = keep
             end
             if A.stash then h.actor(bsk, 'Stash', -40, -38) end
@@ -318,6 +353,12 @@ function J.new(opts)
             chest('BSK_UniqueOpChest_Materials', -34, -42, 10, false)
             chest('BSK_UniqueOpChest_Gold', -36, -45, nil, false)
         end
+        -- Round 5: `resume_at` puts the FIRST horde mid-way, as after a QQT
+        -- reload inside it: a wave number N (N waves cleared, their aether
+        -- earned, the next offering or the door follows), 'door' (all waves
+        -- cleared, the locked door is up) or 'council_dead' (the Council has
+        -- just died: quest swap, stash and chest room as above).
+        local resume = o.resume_at
         bsk.on_arrive = function(_, trip)
             -- Alfred's return portal goes back into the same horde.
             if trip and trip.why == 'alfred_return' then return end
@@ -325,7 +366,15 @@ function J.new(opts)
             A.runs, A.wave, A.council_dead_at = A.runs + 1, 0, nil
             event('arrived in the Horde')
             h.aether = 0 -- aether is a per-horde currency
-            later(1.0, spawn_pylon)
+            local r = resume
+            resume = nil
+            if r == nil then later(1.0, spawn_pylon); return end
+            A.wave = type(r) == 'number' and math.min(r, A.waves) or A.waves
+            h.aether = A.wave * A.per_wave
+            event('resumed at ' .. tostring(r))
+            if r == 'council_dead' then boss_dead()
+            elseif r == 'door' or A.wave >= A.waves then spawn_door()
+            else later(1.0, spawn_pylon) end
         end
         if h.place == bsk then bsk.on_arrive(h) end
         return A
@@ -382,10 +431,22 @@ function J.new(opts)
         for i = 1, select('#', ...) do parts[#parts + 1] = tostring((select(i, ...))) end
         h.log[#h.log + 1] = string.format('%.1f [print] %s', h.now, table.concat(parts, ' '))
     end
+    -- Round 5: opts.virtual_os_time makes os.time() (no arguments) follow the
+    -- simulated clock, so wall-clock phases (Reaper's chest WAIT_GONE /
+    -- WAIT_COMPLETE, os.time based) finish in simulated time. Off by default:
+    -- every older scenario keeps the real clock.
+    local os_time = os.time
+    if opts.virtual_os_time then
+        local epoch = os.time()
+        os_time = function(t)
+            if t ~= nil then return os.time(t) end
+            return epoch + math.floor(h.now)
+        end
+    end
     BASE.os = setmetatable({date = function(fmt, ...)
         if fmt == '%M' then return string.format('%02d', h.minute) end
         return os.date(fmt, ...)
-    end, time = os.time, clock = os.clock, getenv = function() return nil end}, {__index = function(_, k)
+    end, time = os_time, clock = os.clock, getenv = function() return nil end}, {__index = function(_, k)
         h.missing['os.' .. tostring(k)] = (h.missing['os.' .. tostring(k)] or 0) + 1
     end})
     -- Plugins may read their own data files; writes stay in memory.
@@ -754,7 +815,10 @@ function J.new(opts)
         end,
         send_key_press = function(key) h.keys[#h.keys + 1] = {key = key, t = h.now}
             if key == 0x1B then h.panel = false end end,
-        send_mouse_click = function(x, y) h.clicks[#h.clicks + 1] = {x = x, y = y, t = h.now} end,
+        send_mouse_click = function(x, y)
+            h.clicks[#h.clicks + 1] = {x = x, y = y, t = h.now}
+            if h.on_click then h.on_click(x, y) end
+        end,
         send_mouse_right_click = function(x, y) h.clicks[#h.clicks + 1] = {x = x, y = y, t = h.now, right = true} end,
         send_mouse_move = function() end,
         send_mouse_wheel = function() end,

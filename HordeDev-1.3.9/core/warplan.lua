@@ -30,7 +30,7 @@ local M = {
     last_result = nil,   -- 'completed' after a War Plan exit (C2 status)
 }
 local run = {evidence_since = nil, finished_since = nil, quest_seen = false, quest_gone = false,
-    quest_checked = nil, checked_at = nil}
+    quest_moved_on = false, quest_checked = nil, checked_at = nil}
 local idle_log = {since = nil, seen = nil, logged_at = nil}
 local IDLE_LOG_EVERY = 60
 
@@ -70,6 +70,7 @@ function M.reset_run()
     M.completed, M.last_result = false, nil
     run.evidence_since, run.finished_since = nil, nil
     run.quest_seen, run.quest_gone, run.quest_checked, run.checked_at = false, false, nil, nil
+    run.quest_moved_on = false
 end
 
 -- The War Plan exit finished outside the Horde: no new cycle follows.
@@ -104,21 +105,28 @@ end
 -- The War Plan objective disappears when the horde is beaten. Only a quest
 -- seen during this run and then gone counts; an unreadable list is no
 -- evidence either way. Rate-limited to once a second.
+-- Joint K1: a run that has never seen its objective while the readable list
+-- already shows another War Plan step (the TurnIn or the next activity) was
+-- started after the horde was beaten (a QQT reload after the Council; the
+-- fresh tracker never sees the door or the Council): quest_moved_on.
 local function track_quest(now)
     if run.quest_checked and now - run.quest_checked < 1 then return end
     run.quest_checked = now
     if type(get_quests) ~= 'function' then return end
     local ok, quests = pcall(get_quests)
     if not ok or type(quests) ~= 'table' then return end
+    local other_step = false
     for _, quest in pairs(quests) do
         local ok_n, name = pcall(function() return quest:get_name() end)
         if not ok_n or type(name) ~= 'string' then return end
         if name:find(QUEST, 1, true) then
-            run.quest_seen, run.quest_gone = true, false
+            run.quest_seen, run.quest_gone, run.quest_moved_on = true, false, false
             return
         end
+        if name:find('WarPlans_', 1, true) then other_step = true end
     end
-    if run.quest_seen then run.quest_gone = true end
+    if run.quest_seen then run.quest_gone = true
+    elseif other_step then run.quest_moved_on = true end
 end
 
 -- Only after the waves (the locked door was seen, or a Council/Bartuc
@@ -126,9 +134,35 @@ end
 -- from the start, the door approach, a pylon or a Council fight, or a
 -- transient empty quest list mid-wave is no evidence. horde_idle_since is
 -- cleared by every horde pulse that targets, moves to the door or uses a
--- pylon, so the CHEST_WAIT window restarts after each of them.
+-- pylon, so the CHEST_WAIT window restarts after each of them; task_manager
+-- also clears it whenever another task (an Alfred hold, the exit) or no task
+-- runs, so a stale idle reading never counts while the wave task is not
+-- looking (H5-1).
+-- Joint K1: nothing of a wave in sight — no offering pylon (the wave task's
+-- last pulse) and no living enemy (the same actor scan as its get_target).
+-- An unreadable actor list is not quiet.
+local function arena_quiet()
+    if tracker.interacting_pylon then return false end
+    local ok, busy = pcall(function()
+        for _, actor in pairs(actors_manager:get_all_actors()) do
+            if actor:is_enemy() and actor:get_current_health() > 1 then return true end
+        end
+        return false
+    end)
+    return ok and busy == false
+end
+
 local function completion_evidence(now)
-    if not (tracker.locked_door_found or tracker.council_seen) then return nil end
+    local waves_over = tracker.locked_door_found or tracker.council_seen
+    -- Joint K1: the objective was already complete before this run started
+    -- (see track_quest; a reload after the Council, where the fresh tracker
+    -- never sees the door or the Council) and no wave is in sight. A run that
+    -- sees the door or a Council pylon itself takes the gate below instead;
+    -- a chest room still owns completion (M.update).
+    if run.quest_moved_on and not run.quest_seen and not waves_over then
+        return arena_quiet() and 'War Plan objective already complete' or nil
+    end
+    if not waves_over then return nil end
     local idle = tracker.horde_idle_since
     if not idle then return nil end
     local ok, stash = pcall(utils.get_stash)

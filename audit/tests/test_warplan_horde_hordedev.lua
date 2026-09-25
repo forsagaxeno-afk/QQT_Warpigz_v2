@@ -12,7 +12,14 @@
 --     in_run == false, last_result == 'completed', chests_done() == true and
 --     no second cycle;
 --   * a HordeDev whose main toggle was on at load waits (bounded, visible)
---     for WarPigs' first decision while WarPigs is enabled (F-H2).
+--     for WarPigs' first decision while WarPigs is enabled (F-H2), and only
+--     loaded-world time counts toward that bound (H5-2);
+--   * round 5: the no-chest-room evidence counts only while the wave task is
+--     idle in the boss room and actually running: a Stash in sight from
+--     arrival, the door approach, the Council fight, the objective vanishing
+--     mid-fight or an Alfred hold never end a horde before the Council (H5-1);
+--     under WarPigs an advisory-only Alfred flag never pauses the chests for a
+--     HordeDev Alfred trip (H5-4).
 -- The real HordeDev plugin runs in an isolated environment with QQT-shaped
 -- host mocks. Every case fails on d275b9d (no entry modes, first-frame
 -- Library teleport) and passes now; the compass cases prove standalone
@@ -256,37 +263,65 @@ end
 -- A scripted 6-wave War Plan horde around the (unmoving) player: each wave a
 -- pylon, then monsters; after wave 6 the locked door, the council pylon, the
 -- council boss, then (unless opts.no_chest_room) the chest room with stash.
+-- Round 5 options (all off by default): opts.static_stash (a Stash in sight
+-- from arrival to the end), opts.door_time (the locked door opens only this
+-- long after it appeared: the door approach), opts.council_delay (the council
+-- pylon appears this long after the door opened), opts.boss_time (length of
+-- the Council fight, default 4 s), opts.on_door / opts.on_council hooks.
+-- a.t records when the door appeared/opened, the council pylon was used and
+-- the boss died.
 local function war_plan_arena(s, opts)
     opts = opts or {}
-    local a = {wave = 0, log = {}}
+    local a = {wave = 0, log = {}, t = {}}
+    local stash = opts.static_stash and actor('Stash', 1.5, 0) or nil
+    local function set(list)
+        if stash then list[#list + 1] = stash end
+        s.actors = list
+    end
     local function spawn_wave()
         a.wave = a.wave + 1
         local pylon = actor('BSK_Pyl_ChaoticOffering', 1, 0)
         pylon.on_interact = function(p)
             p.interactable = false
             a.log[#a.log + 1] = 'pylon ' .. a.wave
-            s.actors = {actor('BSK_Wave_Monster', 1, 0, {enemy = true, health = 100})}
+            set({actor('BSK_Wave_Monster', 1, 0, {enemy = true, health = 100})})
             a.kill_at = s.now + (opts.wave_time or 3)
         end
-        s.actors = {pylon}
+        set({pylon})
+    end
+    local function council_pylon()
+        local pyl = actor('BSK_PylChoiceGizmo_SelectCouncil', 1, 0)
+        pyl.on_interact = function(p)
+            p.interactable = false
+            a.log[#a.log + 1] = 'council'
+            a.t.council = s.now
+            set({actor('BSK_Council_Boss', 1, 0, {enemy = true, health = 500})})
+            a.boss_at = s.now + (opts.boss_time or 4)
+            if opts.on_council then opts.on_council(s) end
+        end
+        set({pyl})
     end
     local function council()
-        s.actors = {actor('BSK_MapIcon_LockedDoor', 30, 30), actor('Hell_Fort_BSK_Door_A_01_Dyn', 1, 0)}
-        s.actors[2].on_interact = function()
-            local pyl = actor('BSK_PylChoiceGizmo_SelectCouncil', 1, 0)
-            pyl.on_interact = function(p)
-                p.interactable = false
-                a.log[#a.log + 1] = 'council'
-                s.actors = {actor('BSK_Council_Boss', 1, 0, {enemy = true, health = 500})}
-                a.boss_at = s.now + 4
+        a.t.door = s.now
+        local door = actor('Hell_Fort_BSK_Door_A_01_Dyn', 1, 0)
+        set({actor('BSK_MapIcon_LockedDoor', 30, 30), door})
+        door.on_interact = function()
+            if a.t.door_opened or s.now - a.t.door < (opts.door_time or 0) then return end
+            a.t.door_opened = s.now
+            if opts.council_delay then
+                set({})
+                a.council_at = s.now + opts.council_delay
+            else
+                council_pylon()
             end
-            s.actors = {pyl}
         end
+        if opts.on_door then opts.on_door(s) end
     end
     local function chest_room()
         a.log[#a.log + 1] = 'boss dead'
+        a.t.boss_dead = s.now
         s.actors = {}
-        if opts.stash ~= false then s.actors[#s.actors + 1] = actor('Stash', 1.5, 0) end
+        if stash or opts.stash ~= false then s.actors[#s.actors + 1] = stash or actor('Stash', 1.5, 0) end
         if not opts.no_chest_room then
             local materials = actor('BSK_UniqueOpChest_Materials', 0.5, 0)
             materials.on_interact = function()
@@ -306,6 +341,7 @@ local function war_plan_arena(s, opts)
             a.kill_at = nil
             if a.wave < 6 then spawn_wave() else council() end
         end
+        if a.council_at and s.now >= a.council_at then a.council_at = nil; council_pylon() end
         if a.boss_at and s.now >= a.boss_at then a.boss_at = nil; chest_room() end
     end
     return a
@@ -655,6 +691,207 @@ case('persisted-on HordeDev waits for WarPigs before any Library teleport or com
         d:run(0.4)
         eq(#d.teleports, 1, 'standalone: first frames act as before')
         eq(d:logged('waiting up to'), 0)
+    end
+end)
+
+-- ── Round 5 ────────────────────────────────────────────────────────────────
+-- H5-1: the no-chest-room completion evidence (stash visible, War Plan
+-- objective gone, quiet boss room) counts only while the wave task is idle in
+-- the boss room (tracker.horde_idle_since, the round-4 critic's gate), and
+-- only while the wave task is the task that runs: an Alfred hold in the boss
+-- room leaves no stale idle reading behind.
+local CHEST_WAIT = 20
+local function council_run(s, arena, seconds)
+    local skipped_at
+    local left = s:until_true(function()
+        if not skipped_at and s.tr.chests_skipped then skipped_at = s.now end
+        return s.leaves >= 1
+    end, seconds or 400)
+    return left, skipped_at
+end
+local function saw(arena, what)
+    for _, entry in ipairs(arena.log) do if entry == what then return true end end
+    return false
+end
+
+case('H5-1 stash visible from arrival, door approach and Council fight longer than CHEST_WAIT: the Council is killed first', function()
+    for _, chest_room in ipairs({true, false}) do
+        local label = chest_room and 'chest room' or 'no chest room'
+        local s = horde()
+        s.gui.elements.merry_go_round:set(false)
+        s.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+        local arena = war_plan_arena(s, {static_stash = true, door_time = CHEST_WAIT + 5, boss_time = CHEST_WAIT + 10,
+            no_chest_room = not chest_room, aether = 20})
+        s.P.enable({entry = 'warplan'})
+        s:leave_to()
+        local left, skipped_at = council_run(s, arena)
+        truthy(left, label .. ': left the Horde\n' .. s:tail())
+        truthy(saw(arena, 'council') and saw(arena, 'boss dead'), string.format(
+            '%s: the Council was fought and killed before leaving (skip at %s)\n%s', label, tostring(skipped_at), s:tail()))
+        -- the scenario really has a stash in sight for longer than CHEST_WAIT
+        -- at the door and during the fight
+        truthy(arena.t.door_opened - arena.t.door > CHEST_WAIT, label .. ': door approach longer than CHEST_WAIT')
+        truthy(arena.t.boss_dead - arena.t.council > CHEST_WAIT, label .. ': Council fight longer than CHEST_WAIT')
+        eq(arena.wave, 6, label .. ': 6 waves')
+        if chest_room then
+            eq(arena.opened, 2, 'chest room: the chests were opened')
+            eq(s:logged('no chest room'), 0, 'chest room: no skip')
+            eq(s.tr.chests_skipped, nil)
+        else
+            eq(s:logged('stash visible for 20s and no chest room'), 1, 'no chest room: bounded skip, logged once')
+            truthy(skipped_at and skipped_at >= arena.t.boss_dead + CHEST_WAIT - 0.5, string.format(
+                'no chest room: skip only after the boss room is idle (skip %.1f, boss dead %.1f)',
+                skipped_at or -1, arena.t.boss_dead))
+        end
+        truthy(s:until_true(function() return s.P.status().last_result == 'completed' end, 30), label .. ': completed')
+        no_compass_chain(s, label)
+    end
+end)
+
+case('H5-1 the War Plan objective gone mid-fight (or a blank quest list at the door) is no evidence before the boss room is idle', function()
+    for _, chest_room in ipairs({true, false}) do
+        local label = chest_room and 'chest room' or 'no chest room'
+        local s = horde()
+        s.gui.elements.merry_go_round:set(false)
+        s.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+        local arena = war_plan_arena(s, {stash = false, door_time = CHEST_WAIT + 5, boss_time = CHEST_WAIT + 10,
+            no_chest_room = not chest_room, aether = chest_room and 20 or 0,
+            on_door = function(x) x.quests = {} end,                                -- blank list at the door
+            on_council = function(x) x.quests = {'WarPlans_QST_TurnIn_Rewards'} end}) -- gone mid-fight
+        s.P.enable({entry = 'warplan'})
+        s:leave_to()
+        local left, skipped_at = council_run(s, arena)
+        truthy(left, label .. ': left the Horde\n' .. s:tail())
+        truthy(saw(arena, 'council') and saw(arena, 'boss dead'), label .. ': the Council was fought and killed\n' .. s:tail())
+        if chest_room then
+            eq(arena.opened, 2, 'chest room: the chests were opened')
+            eq(s:logged('no chest room'), 0, 'chest room: no skip')
+        else
+            eq(s:logged('War Plan objective complete for 20s and no chest room'), 1, 'no chest room: bounded skip')
+            truthy(skipped_at and skipped_at >= arena.t.boss_dead + CHEST_WAIT - 0.5, string.format(
+                'no chest room: skip only after the boss room is idle (skip %.1f, boss dead %.1f)',
+                skipped_at or -1, arena.t.boss_dead))
+        end
+        truthy(s:until_true(function() return s.P.status().last_result == 'completed' end, 30), label .. ': completed')
+    end
+end)
+
+case('H5-1 an Alfred hold in the boss room is not idle time: no stale evidence while the wave task does not run', function()
+    -- Alfred works for another caller for 30 s right after the door opened,
+    -- while the player stays in the Horde and the Council pylon appears.
+    local st = {enabled = true, need_trigger = false, running = false}
+    local triggers = 0
+    local s = horde({globals = {AlfredTheButlerPlugin = {get_status = function() return st end,
+        trigger_tasks_with_teleport = function() triggers = triggers + 1; return true end}}})
+    s.gui.elements.merry_go_round:set(false)
+    local arena = war_plan_arena(s, {static_stash = true, council_delay = 4, aether = 20})
+    local prior = s.step
+    local held = 0
+    s.step = function()
+        prior()
+        local opened = arena.t.door_opened
+        st.running = opened ~= nil and s.now >= opened + 1 and s.now < opened + 1 + CHEST_WAIT + 10
+        if st.running and s.P.status().hold == 'Alfred busy' then held = held + 1 end
+    end
+    s.P.enable({entry = 'warplan'})
+    s:leave_to()
+    local left = council_run(s, arena)
+    truthy(left, 'left the Horde\n' .. s:tail())
+    truthy(held * 0.2 > CHEST_WAIT, string.format('the Alfred hold lasted longer than CHEST_WAIT (%.1fs)', held * 0.2))
+    eq(s:logged('no chest room'), 0, 'no chest skip from a stale idle reading')
+    truthy(saw(arena, 'council') and saw(arena, 'boss dead'), 'the Council was fought after the hold\n' .. s:tail())
+    eq(arena.opened, 2, 'the chests were opened')
+    eq(triggers, 0, 'HordeDev never triggered Alfred')
+end)
+
+-- H5-2: F-H2's bound counts loaded-world time only (WarPigs does not tick
+-- during a loading screen, so it cannot decide there).
+case('H5-2 F-H2 wait: Limbo / loading time does not count; the bound runs in the loaded world only', function()
+    -- 6 s of Limbo at load, then Temis: nothing in the first 0.5 s (WarPigs'
+    -- first loaded tick), nothing for 4.7 s, then it runs as configured.
+    local s = horde({persisted_on = true, globals = {WarPigsPlugin = warpigs(true)}})
+    s.world, s.zone = 'Limbo', '[sno none]'
+    s:run(6)
+    eq(s:task_name(), 'Waiting for WarPigs', 'the wait is visible during the loading screen')
+    eq(s:logged('waiting up to 5s for WarPigs'), 1, 'logged once, at the first pulse')
+    s:town('Skov_Temis')
+    s:run(0.5)
+    eq(#s.teleports, 0, 'no HordeDev teleport in the first 0.5 s after the load')
+    eq(s:task_name(), 'Waiting for WarPigs')
+    s:run(4.2)
+    eq(#s.teleports, 0, 'held for 4.7 s of loaded time')
+    s:run(1)
+    eq(#s.teleports, 1, 'bounded: runs after 5 s of loaded time without a decision'); eq(s.teleports[1].id, LIBRARY)
+    eq(s:logged('No enable/disable from WarPigs within 5s'), 1)
+    -- WarPigs decides on its first loaded tick: HordeDev never acted
+    local d = horde({persisted_on = true, globals = {WarPigsPlugin = warpigs(true)}})
+    d.world, d.zone = 'Limbo', '[sno none]'
+    d:run(8)
+    d:town('Skov_Temis'); d:run(0.4)
+    d.P.disable(); d:run(30)
+    eq(#d.teleports, 0, 'decided after the load: no teleport'); eq(d.used, 0)
+    -- a loading screen in the middle of the wait pauses it; so does an
+    -- unloaded zone reading ('[sno none]') in a named world
+    local m = horde({persisted_on = true, globals = {WarPigsPlugin = warpigs(true)}})
+    m:town('Skov_Temis'); m:run(2)
+    m.world, m.zone = 'Limbo', '[sno none]'; m:run(4)
+    m.world, m.zone = 'Sanctuary_Eastern_Continent', '[sno none]'; m:run(3)
+    m:town('Skov_Temis'); m:run(2.4)
+    eq(#m.teleports, 0, 'about 4 s of loaded time so far (the loading screen and the unloaded zone did not count)')
+    m:run(1)
+    eq(#m.teleports, 1, 'runs once 5 s of loaded time have passed')
+end)
+
+-- H5-4 (suite policy): while WarPigs is enabled an advisory-only Alfred flag
+-- (restock/stash without inventory_full or need_repair) never pauses the
+-- chests for a HordeDev Alfred trip, in War Plan and compass mode alike;
+-- WarPigs services advisory flags once per Temis visit. Hard needs and
+-- standalone HordeDev are unchanged.
+local function chest_room_trip(status, wp, mode)
+    local triggers = 0
+    local alfred = {get_status = function() return status end,
+        trigger_tasks_with_teleport = function() triggers = triggers + 1; return true end}
+    local s = horde({globals = {AlfredTheButlerPlugin = alfred, WarPigsPlugin = wp}})
+    s.gui.elements.merry_go_round:set(false)
+    local arena = war_plan_arena(s, {aether = 20})
+    s.P.enable(mode ~= 'compass' and {entry = 'warplan'} or nil)
+    s:leave_to()
+    local paused = false
+    s:until_true(function()
+        if s.loaded['tasks.open_chests'].current_state == 'PAUSED_FOR_SALVAGE' then paused = true end
+        return s.leaves >= 1 or (arena.t.boss_dead ~= nil and s.now - arena.t.boss_dead > 60)
+    end, 300)
+    return s, arena, triggers, paused
+end
+case('H5-4 chest room under WarPigs: an advisory-only flag starts no HordeDev Alfred trip; hard needs and standalone unchanged', function()
+    local advisory = function() return {enabled = true, need_trigger = true, restock_count = 2} end
+    for _, v in ipairs({
+        {'War Plan, WarPigs idle', 'warplan', {enabled = true, alfred_idle = true}},
+        {'War Plan, WarPigs not idle', 'warplan', {enabled = true, alfred_idle = false}},
+        {'War Plan, WarPigs without alfred_idle', 'warplan', {enabled = true}},
+        {'compass, WarPigs enabled', 'compass', {enabled = true, alfred_idle = false}},
+    }) do
+        local reading = v[3]
+        local s, arena, triggers, paused = chest_room_trip(advisory(), {status = function() return reading end}, v[2])
+        eq(triggers, 0, v[1] .. ': no HordeDev Alfred trip for an advisory-only flag')
+        eq(paused, false, v[1] .. ': the chests never paused for it')
+        eq(arena.opened, 2, v[1] .. ': the chests were opened')
+        eq(s.leaves, 1, v[1] .. ': left the Horde')
+        eq(s:logged('Advisory Alfred flag left to WarPigs'), 1, v[1] .. ': logged once')
+        eq(s.loaded['core.tracker'].needs_salvage, false, v[1])
+    end
+    local idle_wp = {status = function() return {enabled = true, alfred_idle = true} end}
+    for _, hard in ipairs({'inventory_full', 'need_repair'}) do
+        local status = advisory(); status[hard] = true
+        local s, _, triggers, paused = chest_room_trip(status, idle_wp, 'warplan')
+        truthy(paused and triggers >= 1, hard .. ' under WarPigs: the chests pause for a HordeDev Alfred trip')
+        eq(s:logged('Advisory Alfred flag left to WarPigs'), 0, hard .. ': not an advisory flag')
+    end
+    for _, v in ipairs({{'WarPigs off', {status = function() return {enabled = false, alfred_idle = true} end}},
+        {'no WarPigs', nil}}) do
+        local s, _, triggers, paused = chest_room_trip(advisory(), v[2], 'warplan')
+        truthy(paused and triggers >= 1, v[1] .. ': standalone rule, the advisory trip starts as before')
+        eq(s:logged('Advisory Alfred flag left to WarPigs'), 0, v[1])
     end
 end)
 

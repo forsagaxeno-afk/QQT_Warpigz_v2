@@ -42,7 +42,7 @@ local RETRY_DELAY, PICKUP_WINDOW, QUIET_WINDOW = 5, 8, 2
 local UNKNOWN_HOLD, PAUSED_HOLD_MAX, HOLD_LOG_SECS = 10, 60, 60
 local watch = { unknown_since = nil, unknown_logged = false, live_seen = false,
     paused_since = nil, paused_logged = false,
-    hold = nil, hold_since = nil, hold_logged = false, yield_at = nil }
+    hold = nil, hold_since = nil, hold_logged = false, yield_at = nil, advisory_logged = -math.huge }
 
 -- C1 canonical live-work predicate (a teleport latched after a finished or
 -- failed trip is not live work).
@@ -55,6 +55,21 @@ end
 -- is advisory.
 local function hard_need(s)
     return s.inventory_full == true or s.need_repair == true
+end
+
+-- Suite policy (round 5; the same reading as ArkhamAsylum and WonderCity):
+-- while WarPigs is loaded and its status() reports enabled == true, WarPigs
+-- services advisory-only flags once per Temis visit, and Reaper never starts
+-- an Alfred trip for them. Before, a run_once started in town (the
+-- boss-zone rule covers only the lair) with a sticky restock flag cost one
+-- Alfred trip per boss run. Hard needs are unchanged. WarPigs absent,
+-- disabled, without status(), throwing or returning a non-table: standalone
+-- rules.
+local function warpigs_advisory_idle()
+    local wp = WarPigsPlugin
+    if type(wp) ~= "table" or type(wp.status) ~= "function" then return false end
+    local ok, st = pcall(wp.status)
+    return ok and type(st) == "table" and st.enabled == true
 end
 
 -- Any observed live -> idle edge is a finished cycle (ours or a foreign
@@ -240,7 +255,13 @@ local function evaluate()
     -- cycle and never pull the player out of a boss lair before the altar.
     if last_completion_at and now - last_completion_at < STUCK_NEED_TRIGGER_GRACE then return false end
     if type(utils.in_any_boss_zone) == "function" and utils.in_any_boss_zone() then return false end
-    return true
+    if not warpigs_advisory_idle() then return true end
+    -- Not a hold (the run continues); one line per minute at most.
+    if now - watch.advisory_logged >= HOLD_LOG_SECS then
+        watch.advisory_logged = now
+        console.print("[Reaper] advisory Alfred restock skipped: WarPigs is enabled and services it in Temis")
+    end
+    return false
 end
 
 function task.shouldExecute()

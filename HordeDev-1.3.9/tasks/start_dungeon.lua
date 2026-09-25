@@ -189,10 +189,10 @@ local function use_dungeon_sigil(task, now, snapshot)
         -- add additional conditions to trigger if required
         -- C1: advisory need_trigger alone cannot re-trigger within the sticky
         -- grace after HordeDev's own completed Alfred cycle.
-        -- F-H4 (as Arkham's warpigs_advisory_idle): under WarPigs, an
-        -- advisory-only flag (restock, no inventory_full/need_repair) that
-        -- WarPigs reports serviced (alfred_idle) starts no trip here; the
-        -- via-Temis preamble covers restocking. Hard needs are unchanged.
+        -- F-H4 / H5-4 (suite policy): while WarPigs is enabled an
+        -- advisory-only flag (restock/stash, no inventory_full/need_repair)
+        -- never starts a HordeDev Alfred trip here; WarPigs services advisory
+        -- flags once per Temis visit. Hard needs and standalone are unchanged.
         if utils.alfred_trip_wanted(status, tracker.alfred_completed_at) then
             if utils.alfred_hard_need(status) or not task.warpigs_advisory_idle() then
                 tracker.start_dungeon_time = nil
@@ -202,7 +202,7 @@ local function use_dungeon_sigil(task, now, snapshot)
             if not task.advisory_skip_logged then
                 task.advisory_skip_logged = true
                 console.print("[start_dungeon] Advisory Alfred restock skipped:"
-                    .. " WarPigs reports it serviced for this visit.")
+                    .. " WarPigs is enabled and services advisory flags once per Temis visit.")
             end
         end
     end
@@ -225,12 +225,11 @@ local function warpigs_on()
     return ok and type(st) == 'table' and st.enabled == true
 end
 
--- F-H4: the same reading as ArkhamAsylum's warpigs_advisory_idle().
+-- F-H4 / H5-4 (suite policy): WarPigs enabled => advisory flags are left to
+-- WarPigs (no longer conditional on its alfred_idle), as in every activity
+-- plugin's warpigs_advisory_idle().
 function task.warpigs_advisory_idle()
-    local wp = WarPigsPlugin
-    if type(wp) ~= 'table' or type(wp.status) ~= 'function' then return false end
-    local ok, st = pcall(wp.status)
-    return ok and type(st) == 'table' and st.enabled == true and st.alfred_idle == true
+    return warpigs_on()
 end
 
 function task:start_pit()

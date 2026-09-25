@@ -10,9 +10,14 @@
 -- keep_run_on_enable keeps a run only where it is (F-H3, the round-3 critic's
 -- hotkey probe as a joint regression, War Plan entry off and on), no
 -- advisory-only Alfred trip at activity start under WarPigs (F-H4) and the
--- War Plan entry end to end with the real WarPigs (R4 joint). The real HordeDev
--- plugin is loaded in an isolated environment with QQT-shaped host mocks;
--- the joint cases also load the real WarPigs orchestrator.
+-- War Plan entry end to end with the real WarPigs (R4 joint); round 5: the
+-- keep rule also keeps HordeDev's own built-in Cerrigar salvage trip and a
+-- pause keeps its flags (H5-3), under WarPigs an advisory-only flag never
+-- starts a HordeDev Alfred trip at the gate whatever WarPigs' alfred_idle
+-- (H5-4), and the hotkey-pause joint cases hold whether WarPigs treats the
+-- pause as a pause or as a self-disable. The real HordeDev plugin is loaded
+-- in an isolated environment with QQT-shaped host mocks; the joint cases
+-- also load the real WarPigs orchestrator.
 local ROOT = assert(SUITE_ROOT) .. '/HordeDev-1.3.9/'
 local WROOT = SUITE_ROOT .. '/WarPigs-1.0.0/'
 local checks, failures = 0, {}
@@ -890,18 +895,52 @@ local function hordedev_teleports(s)
     return n
 end
 
-case('F-H3 joint: hotkey pause mid-horde, warplan lands at the gate, the re-enable restarts with Start Dungeon', function()
+-- Round 5: WarPigs may treat the hotkey pause of a HordeDev in a run as a
+-- pause (W5-4: no detour, no re-enable until the user resumes) instead of a
+-- self-disable (detour via Temis; the warplan lands at the gate and WarPigs
+-- re-enables HordeDev there). Either way HordeDev must not stall silently
+-- (task Idle with in_run == true outside BSK, the round-3 symptom): after
+-- the user resumes it runs the horde in BSK or restarts cleanly at the gate.
+local function after_hotkey_pause(f, host, each)
+    local s = f.s
+    local w = {stall = 0, max_stall = 0, last = s.now, started = false, resumed_in_bsk = false}
+    local function sample()
+        host()
+        local st = s.P.status()
+        local dt = s.now - w.last
+        w.last = s.now
+        if st.enabled and st.in_run and st.task.name == 'Idle' and s.zone ~= 'S05_BSK_Prototype02' then
+            w.stall = w.stall + dt
+            w.max_stall = math.max(w.max_stall, w.stall)
+        else
+            w.stall = 0
+        end
+        if st.enabled and st.task.name == 'Start Dungeon' then w.started = true end
+        if w.resumed and st.enabled and st.task.name == 'Infernal Horde' and s.zone == 'S05_BSK_Prototype02' then
+            w.resumed_in_bsk = true
+        end
+        if each then each(st) end
+    end
+    f.run(30, sample)                            -- WarPigs handles the pause
+    s.gui.elements.keybind_toggle.state = 1      -- the user resumes with the hotkey
+    w.resumed = true
+    f.run(210, sample)
+    return w
+end
+
+case('F-H3 joint: hotkey pause mid-horde: no silent stall; at the gate the re-enable restarts with Start Dungeon', function()
     local f = joint({aether = 0})
     local s = f.s
     local host = hotkey_pause_to_gate(f)
-    local started = false
-    f.run(240, function()
-        host()
-        if s:task_name() == 'Start Dungeon' then started = true end
-    end)
-    truthy(started, string.format('Start Dungeon after the re-enable at the gate (task=%s in_run=%s zone=%s)',
+    local w = after_hotkey_pause(f, host)
+    truthy(w.max_stall <= 3, string.format('no silent Idle+in_run stall outside BSK (%.1fs)', w.max_stall))
+    truthy(w.started or w.resumed_in_bsk, string.format(
+        'Start Dungeon at the gate or the same horde resumed in BSK (task=%s in_run=%s zone=%s)',
         s:task_name(), tostring(s.P.status().in_run), s.zone))
-    eq(s:logged('keeping the current run'), 0, 'stale in-Horde flags at the gate are not a run')
+    if s.zone ~= 'S05_BSK_Prototype02' then
+        truthy(w.started, 'at the gate: the compass chain restarts')
+        eq(s:logged('keeping the current run'), 0, 'stale in-Horde flags at the gate are not a run')
+    end
     eq(s.P.status().enabled, true)
     eq(s.P.status().entry_mode, 'compass', 'War Plan entry off: compass mode as at d275b9d')
 end)
@@ -953,33 +992,29 @@ case('F-H3 joint (War Plan entry on): the same hotkey pause never leads to a com
     local s = f.s
     local host = hotkey_pause_to_gate(f)
     s.keys = {{get_name = function() return 'S05_DungeonSigil_BSK_Wave6' end}}
-    local outside_modes = {}
-    f.run(240, function()
-        host()
-        local st = s.P.status()
-        if st.enabled and s.zone ~= 'S05_BSK_Prototype02' then outside_modes[st.entry_mode .. ':' .. st.task.name] = true end
-    end)
-    -- the user resumes HordeDev with its hotkey at the gate: a visible War
-    -- Plan wait, not a run (stale compass flags are not in_run), no compass
-    eq(s.P.status().entry_mode, 'warplan', 'entered in War Plan mode inside BSK')
-    s.gui.elements.keybind_toggle.state = 1
-    local waited, in_run = false, false
-    f.run(30, function()
-        host()
-        local st = s.P.status()
-        if st.enabled and st.task.name == 'Waiting for War Plan teleport' and st.hold == 'waiting for War Plan teleport' then
-            waited = true
+    local outside_modes, outside_in_run = {}, false
+    local w = after_hotkey_pause(f, host, function(st)
+        if st.enabled and s.zone ~= 'S05_BSK_Prototype02' then
+            outside_modes[st.entry_mode .. ':' .. st.task.name] = true
+            if st.in_run then outside_in_run = true end
         end
-        if st.enabled and st.in_run then in_run = true end
     end)
-    truthy(waited, 'visible War Plan wait after the resume (task=' .. s:task_name() .. ')')
-    eq(in_run, false, 'stale compass flags outside BSK are not a War Plan run')
+    truthy(w.max_stall <= 3, string.format('no silent Idle+in_run stall outside BSK (%.1fs)', w.max_stall))
+    eq(w.started, false, 'never Start Dungeon')
     eq(s.used, nil, 'no compass used')
     eq(hordedev_teleports(s), 0, 'no HordeDev Library teleport')
     eq(s.loaded['core.tracker'].sigil_activation_pending, false)
+    eq(outside_in_run, false, 'stale compass flags outside BSK are not a War Plan run')
     for key in pairs(outside_modes) do
         truthy(key == 'warplan:Waiting for War Plan teleport' or key == 'warplan:Idle',
             'HordeDev on outside the Horde only as a visible War Plan wait: ' .. key)
+    end
+    if s.zone == 'S05_BSK_Prototype02' then
+        truthy(w.resumed_in_bsk, 'the resumed run plays the horde in BSK (task=' .. s:task_name() .. ')')
+        eq(s.P.status().entry_mode, 'warplan', 'the resumed run stays in War Plan mode')
+    elseif s.P.status().enabled then
+        eq(s:task_name(), 'Waiting for War Plan teleport', 'outside BSK: the visible War Plan wait')
+        eq(s.P.status().hold, 'waiting for War Plan teleport')
     end
 end)
 
@@ -1019,7 +1054,9 @@ case('R4 joint: War Plan entry, HordeDev runs in War Plan mode inside BSK, exits
 end)
 
 -- F-H4 (joint OPEN item): no advisory-only Alfred trip at activity start while
--- WarPigs is enabled and reports alfred_idle (Arkham's warpigs_advisory_idle).
+-- WarPigs is enabled. H5-4 (round-5 suite policy): WarPigs enabled => the
+-- advisory flag is WarPigs' to service (once per Temis visit), whatever its
+-- alfred_idle reading; hard needs and standalone HordeDev are unchanged.
 local function advisory_at_gate(st, wp)
     local triggers = 0
     local alfred = {get_status = function() return st end,
@@ -1030,10 +1067,10 @@ local function advisory_at_gate(st, wp)
     s:run(40)
     return s, triggers
 end
-case('F-H4 advisory restock at the gate under WarPigs (alfred_idle): no Alfred trip; hard needs and standalone unchanged', function()
+case('F-H4/H5-4 advisory restock at the gate under WarPigs: no Alfred trip; hard needs and standalone unchanged', function()
     local idle_wp = {status = function() return {enabled = true, alfred_idle = true} end}
     local s, n = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, idle_wp)
-    eq(n, 0, 'no advisory Alfred trip while WarPigs serviced the flag')
+    eq(n, 0, 'no advisory Alfred trip while WarPigs is enabled')
     eq(s.loaded['core.tracker'].needs_salvage, false)
     eq(s:logged('Advisory Alfred restock skipped'), 1, 'logged once')
     eq(s:task_name(), 'Start Dungeon')
@@ -1041,14 +1078,123 @@ case('F-H4 advisory restock at the gate under WarPigs (alfred_idle): no Alfred t
     truthy(hard >= 1, 'inventory_full still triggers')
     local _, repair = advisory_at_gate({enabled = true, need_trigger = true, need_repair = true}, idle_wp)
     truthy(repair >= 1, 'need_repair still triggers')
-    local busy_wp = {status = function() return {enabled = true, alfred_idle = false} end}
-    local _, not_idle = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, busy_wp)
-    truthy(not_idle >= 1, 'WarPigs has not serviced it: trip as before')
+    -- H5-4: no longer conditional on alfred_idle
+    for _, reading in ipairs({{enabled = true, alfred_idle = false}, {enabled = true}}) do
+        local wp = {status = function() return reading end}
+        local t, busy = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, wp)
+        eq(busy, 0, 'WarPigs enabled (alfred_idle=' .. tostring(reading.alfred_idle) .. '): no advisory trip')
+        eq(t.loaded['core.tracker'].needs_salvage, false)
+        eq(t:logged('Advisory Alfred restock skipped'), 1)
+        local _, full = advisory_at_gate({enabled = true, need_trigger = true, inventory_full = true}, wp)
+        truthy(full >= 1, 'WarPigs not idle: inventory_full still triggers')
+    end
     local off_wp = {status = function() return {enabled = false, alfred_idle = true} end}
     local _, off = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, off_wp)
     truthy(off >= 1, 'WarPigs off: standalone rule')
     local _, alone = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, nil)
     truthy(alone >= 1, 'no WarPigs: standalone rule')
+end)
+
+-- ── Round 5 ────────────────────────────────────────────────────────────────
+-- H5-3: F-H3's keep rule also keeps HordeDev's own built-in Cerrigar salvage
+-- trip (compass mode, no Alfred): the chest phase is paused for it and the
+-- player is in Cerrigar. The pause keeps the salvage flags, so the resumed or
+-- re-enabled run finishes the salvage instead of taking the Library/compass
+-- path. Stale flags at the gate still take the full reset.
+local CERRIGAR, LIBRARY_WP = 0x76D58, 0x10D63D
+local function salvage_trip_in_cerrigar(opts)
+    opts = opts or {}
+    local s = horde({aether = 40})   -- no Alfred: the built-in salvage services a full bag
+    s.gui.elements.use_keybind:set(true); s.gui.elements.keybind_toggle.key = 0x70
+    s.P.enable()
+    s.item_count = 40
+    chest_room(s, true, true)
+    local oc, tr = s.loaded['tasks.open_chests'], s.loaded['core.tracker']
+    local reached = false
+    for _ = 1, 300 do
+        s:tick(0.2)
+        if #s.teleports > 0 then reached = true; break end
+    end
+    assert(reached and s.teleports[1] == CERRIGAR, 'the built-in salvage teleports to Cerrigar')
+    assert(oc.current_state == 'PAUSED_FOR_SALVAGE' and tr.needs_salvage == true, 'the chest phase is paused for it')
+    tr.ga_chest_opened = true -- a chest of this horde was already opened
+    s:town('Scos_Cerrigar'); s.in_town = false; s.actors = {}
+    s:run(2)
+    if opts.salvaged then tr.has_salvaged, tr.needs_salvage = true, false end -- blacksmith done, walking to the portal
+    return s, oc, tr
+end
+local function library_teleports(s)
+    local n = 0
+    for _, id in ipairs(s.teleports) do if id == LIBRARY_WP then n = n + 1 end end
+    return n
+end
+
+case('H5-3 hotkey pause during the built-in Cerrigar salvage: the re-enable keeps the chest phase and the salvage goes on', function()
+    for _, salvaged in ipairs({false, true}) do
+        local label = salvaged and 'salvage done, walking to the portal' or 'salvage pending'
+        local s, oc, tr = salvage_trip_in_cerrigar({salvaged = salvaged})
+        eq(s:task_name(), 'Town Salvage', label .. ': on the built-in salvage trip')
+        eq(s.P.status().in_run, true, label)
+        s.gui.elements.keybind_toggle.state = 0 -- the user presses HordeDev's hotkey
+        s:run(2)
+        s.P.enable() -- WarPigs re-enables it after its post-disable gap
+        eq(s:logged('keeping the current run'), 1, label .. ': the salvage trip keeps the run')
+        eq(oc.current_state, 'PAUSED_FOR_SALVAGE', label .. ': chest phase kept')
+        eq(tr.ga_chest_opened, true, label .. ': opened chests kept')
+        eq(tr.needs_salvage, not salvaged, label .. ': needs_salvage survives the pause')
+        eq(tr.has_salvaged, salvaged, label .. ': has_salvaged survives the pause')
+        eq(s.P.status().in_run, true, label)
+        local names = {}
+        s:run(10, 0.2, function() names[s:task_name()] = true end)
+        eq(library_teleports(s), 0, label .. ': no Library teleport (no new compass cycle)')
+        eq(names['Walking to Horde'], nil, label .. ': never walking to the Horde')
+        eq(s:task_name(), 'Town Salvage', label .. ': the salvage goes on')
+        eq(s.P.status().fault, nil)
+    end
+    -- the same pause resumed with the hotkey (no enable()): the salvage goes on
+    local r = salvage_trip_in_cerrigar()
+    r.gui.elements.keybind_toggle.state = 0; r:run(2)
+    r.gui.elements.keybind_toggle.state = 1; r:run(10)
+    eq(library_teleports(r), 0, 'hotkey resume: no Library teleport')
+    eq(r:task_name(), 'Town Salvage', 'hotkey resume: the salvage goes on')
+end)
+
+case('H5-3 stale salvage / run flags outside Cerrigar, or a switch to War Plan entry, still take the full reset', function()
+    -- the chest phase paused for the salvage, but the player is at the gate
+    local g = salvage_trip_in_cerrigar()
+    g:outside(); g.in_town = false; g.actors = {actor('QST_Caldeum_GatesToHell_Seal', 3, 0)}
+    local gtr = g.loaded['core.tracker']
+    gtr.horde_opened, gtr.has_entered, gtr.sigil_used = true, true, true
+    g:run(1)
+    g.P.enable()
+    eq(g:logged('keeping the current run'), 0, 'gate: not where the run is')
+    eq(g.loaded['tasks.open_chests'].current_state, 'INIT', 'gate: full reset')
+    eq(gtr.needs_salvage, false); eq(gtr.horde_opened, false)
+    g:run(2)
+    eq(g:task_name(), 'Start Dungeon', 'gate: restarts the compass chain')
+    -- a salvage flag without a started chest phase (e.g. the gate's restock flag) in Cerrigar
+    local c = horde({aether = 0})
+    c.P.enable()
+    c:town('Scos_Cerrigar'); c.in_town = false
+    c.loaded['core.tracker'].needs_salvage = true
+    c:run(0.4)
+    c.P.enable()
+    eq(c:logged('keeping the current run'), 0, 'no chest phase: not a salvage trip')
+    eq(c.loaded['core.tracker'].needs_salvage, false, 'full reset')
+    -- a switch to War Plan entry in Cerrigar never keeps the compass salvage
+    local w = salvage_trip_in_cerrigar()
+    w.P.enable({entry = 'warplan'})
+    eq(w:logged('keeping the current run'), 0, 'War Plan switch: not kept')
+    eq(w.loaded['tasks.open_chests'].current_state, 'INIT', 'War Plan switch: full reset')
+    local before = #w.teleports
+    w:run(20)
+    eq(#w.teleports, before, 'War Plan switch: no teleport')
+    eq(w:task_name(), 'Waiting for War Plan teleport')
+    -- a latched fault is still restarted
+    local f = salvage_trip_in_cerrigar()
+    f.loaded['tasks.exit_horde'].reset_phase, f.loaded['tasks.exit_horde'].reset_error = 'FAULT', 'test'
+    f.P.enable()
+    eq(f:logged('keeping the current run'), 0, 'latched fault: full restart')
 end)
 
 for _, failure in ipairs(failures) do print('FAIL ' .. failure) end

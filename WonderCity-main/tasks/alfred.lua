@@ -66,18 +66,20 @@ end
 local function hard_need(s)
     return s.inventory_full == true or s.need_repair == true
 end
--- F-C1 (the same reading as ArkhamAsylum's warpigs_advisory_idle): under an
--- enabled WarPigs, an advisory-only flag (need_trigger without
--- inventory_full/need_repair) that WarPigs reports idle was just serviced by
--- WarPigs' own Temis cycle, which WonderCity did not observe while it was
--- off (C1 via WarPigsPlugin.status().alfred_idle, the rule WarPug uses).
--- Starting another trip for it repeated the cycle at every activity start
--- (joint suite). Hard needs and standalone WonderCity are unchanged.
+-- Suite policy (round 5; the same reading as ArkhamAsylum's
+-- warpigs_advisory_idle): while WarPigs is loaded and its status() reports
+-- enabled == true, WarPigs services advisory-only flags (need_trigger without
+-- inventory_full/need_repair: restock/stash extras) once per Temis visit, and
+-- WonderCity never starts an Alfred trip for them, whatever alfred_idle says.
+-- F-C1 waited only for alfred_idle (WarPigs' 20 s grace), so a sticky flag
+-- still cost a Kurast trip at every Undercity start. Hard needs are
+-- unchanged. WarPigs absent, disabled, without status(), throwing or
+-- returning a non-table: standalone rules.
 local function warpigs_advisory_idle()
     local wp = WarPigsPlugin
     if type(wp) ~= 'table' or type(wp.status) ~= 'function' then return false end
     local ok, st = pcall(wp.status)
-    return ok and type(st) == 'table' and st.enabled == true and st.alfred_idle == true
+    return ok and type(st) == 'table' and st.enabled == true
 end
 -- Status text + one rate-limited log line for any hold longer than a minute.
 local function note_hold(reason)
@@ -274,7 +276,7 @@ local function wants_trigger(status)
         -- F-C1: not a hold (the route continues); one line per minute at most.
         if now - trip.advisory_logged >= HOLD_LOG_AFTER then
             trip.advisory_logged = now
-            console.print('[WonderCity:alfred] advisory Alfred restock skipped: WarPigs reports it serviced')
+            console.print('[WonderCity:alfred] advisory Alfred restock skipped: WarPigs is enabled and services it in Temis')
         end
         return false
     end

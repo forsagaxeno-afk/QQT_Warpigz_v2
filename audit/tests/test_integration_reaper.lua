@@ -2,7 +2,8 @@
 -- RPR-2 run phase), RPR-3/RPR-4 (C1 Alfred reading), RPR-5 (C3 Batmobile
 -- release), RPR-6 (Looter before the lair exit), RPR-8 (Belial refusal),
 -- RPR-10 (C4 orbwalker), RPR-11 (periodic reset under WarPigs), C5 (yield
--- accounting) and C6 (visible holds). Loads the real Reaper main.lua and
+-- accounting), C6 (visible holds) and A5-2 (advisory flags under an enabled
+-- WarPigs). Loads the real Reaper main.lua and
 -- tasks with the QQT-shaped harness of test_reaper.lua; the joint cases also
 -- load the real WarPigs orchestrator and the real Batmobile. Lua 5.4 + LuaJIT.
 local SUITE = assert(SUITE_ROOT, 'SUITE_ROOT is required')
@@ -221,6 +222,83 @@ case('RPR-3 a hard need still triggers between runs inside the lair', function()
         trigger_tasks_with_teleport = function(_, cb) t.n = t.n + 1; cb() end}
     local task = e.require('tasks.alfred')
     eq(task.shouldExecute(), true); task.Execute(); eq(t.n, 1)
+end)
+
+-- ── A5-2: advisory-only flags under an enabled WarPigs ──────────────────────
+-- Round-5 policy: while WarPigs is loaded and enabled it services advisory
+-- flags once per Temis visit, and Reaper never starts an Alfred trip for
+-- them. The boss-zone rule (RPR-3) covered only the lair: a run_once that
+-- WarPigs started in town with a sticky restock flag cost one with-teleport
+-- Alfred trip before the boss teleport (9e01f67; joint probe: Reaper trip in
+-- Temis 0.8 s after its enable with 'Use teleport' on). Hard needs and
+-- standalone Reaper are unchanged.
+local function warpigs(e, st, throws)
+    e.WarPigsPlugin = {status = function()
+        if throws then error('status unavailable') end
+        return st
+    end}
+end
+
+case('A5-2 WarPigs enabled: run_once from town with a sticky advisory flag starts no Alfred trip', function()
+    for _, variant in ipairs({{'need_trigger', false, false}, {'need_trigger, alfred_idle=true', false, true},
+        {'legacy restock_count', true, false}}) do
+        local label, legacy, idle = variant[1], variant[2], variant[3]
+        local e, c, s = boot()
+        s.use_alfred = true; c.zone('Town')
+        local t = {n = 0}; sticky_alfred(e, t, legacy)
+        warpigs(e, {enabled = true, alfred_idle = idle})
+        eq(e.ReaperPlugin.run_once('duriel', nil, function() end), true)
+        c.run(3)
+        eq(t.n, 0, label .. ': no advisory trip in town under an enabled WarPigs (9e01f67: 1)')
+        ok(c.boss_tps >= 1, label .. ': the boss teleport is not held')
+        local task = e.ReaperPlugin.status().task
+        ok(task and task.name ~= 'alfred_running', label .. ': not the Alfred task (task=' .. tostring(task and task.name) .. ')')
+        eq(e.ReaperPlugin.status().hold_reason, nil, label .. ': not a hold')
+        eq(c.count('advisory Alfred restock skipped: WarPigs is enabled'), 1, label .. ': one diagnostic line')
+        c.run(60)
+        eq(t.n, 0, label .. ': still none after every grace')
+        ok(c.count('advisory Alfred restock skipped: WarPigs is enabled') <= 2, label .. ': at most one line a minute')
+    end
+end)
+
+case('A5-2 WarPigs enabled: a hard need still triggers in town; the lair rule is unchanged', function()
+    local e, c, s = boot()
+    s.use_alfred = true; c.zone('Town')
+    local t = {n = 0}
+    local st = {enabled = true, need_trigger = true, inventory_full = false, need_repair = true, restock_count = 1}
+    e.AlfredTheButlerPlugin = {get_status = function() return st end,
+        trigger_tasks_with_teleport = function(_, cb)
+            t.n = t.n + 1; st.inventory_full, st.need_repair = false, false; cb() -- restock stays sticky
+        end}
+    warpigs(e, {enabled = true, alfred_idle = false})
+    eq(e.ReaperPlugin.run_once('duriel', nil, function() end), true)
+    c.run(1)
+    eq(t.n, 1, 'need_repair is a hard need under WarPigs')
+    c.zone('Boss_WT4_Duriel'); c.run(60)
+    eq(t.n, 1, 'no advisory trip from inside the lair')
+    st.inventory_full = true
+    c.run(1)
+    eq(t.n, 2, 'inventory_full still triggers between runs inside the lair')
+end)
+
+case('A5-2 WarPigs disabled, unreadable or absent: the standalone advisory trip in town is unchanged', function()
+    local variants = {
+        {'WarPigs disabled', function(e) warpigs(e, {enabled = false, alfred_idle = true}) end},
+        {'WarPigs status throws', function(e) warpigs(e, {enabled = true}, true) end},
+        {'WarPigs status not a table', function(e) warpigs(e, 'on') end},
+        {'WarPigs without status()', function(e) e.WarPigsPlugin = {enabled = true} end},
+        {'standalone (no WarPigs)', function() end},
+    }
+    for _, variant in ipairs(variants) do
+        local e, c, s = boot()
+        s.use_alfred = true; c.zone('Town')
+        local t = {n = 0}; sticky_alfred(e, t)
+        variant[2](e)
+        eq(e.ReaperPlugin.run_once('duriel', nil, function() end), true)
+        c.run(3)
+        eq(t.n, 1, variant[1] .. ': one maintenance trip in town as before')
+        eq(c.count('advisory Alfred restock skipped'), 0, variant[1] .. ': no skip line')
+    end
 end)
 
 -- ── RPR-4: paused / unreadable Alfred per C1 ───────────────────────────────
