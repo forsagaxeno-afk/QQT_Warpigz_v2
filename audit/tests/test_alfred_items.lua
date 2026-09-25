@@ -324,6 +324,20 @@ check('mythics follow the rules only when "Always keep mythics" is turned off', 
     eq((h.decide(item({sno = 223271, rarity = 8, skin = 'Sword2H_Unique_x', ancestral = true}))), 'keep', 'listed mythic kept')
 end)
 
+check('Season 15: the Mythic form of a Unique on the unique keep list is kept (Always keep off)', function()
+    local w = {[L .. 'mythic_always_keep'] = false, [L .. 'ancestral_item_mythic'] = 1}
+    for k, v in pairs(SALVAGE_ALL) do w[k] = v end
+    local h = new_alfred({widgets = w})
+    local unique = h.mod('core.utils').get_unique_items()[1]
+    assert(unique and unique.sno_id, 'unique list not empty')
+    local mythic_form = item({sno = unique.sno_id, rarity = 8, skin = 'Chest_Unique_x', ancestral = true})
+    eq((h.decide(mythic_form)), 'salvage', 'not on any keep list: mythic action applies')
+    h.set(L .. 'use_unique_filter', true)
+    h.set(L .. 'unique_' .. tostring(unique.sno_id), true)
+    local action, reason = h.decide(mythic_form)
+    eq(action, 'keep', 'kept via the unique keep list (' .. tostring(reason) .. ')')
+end)
+
 check('the loot filter never discards a mythic (Always keep on)', function()
     local w = {[L .. 'loot_filter_mode'] = true}
     for k, v in pairs(SALVAGE_ALL) do w[k] = v end

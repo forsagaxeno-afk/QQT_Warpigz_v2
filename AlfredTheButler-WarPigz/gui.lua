@@ -1,5 +1,5 @@
 local plugin_label = 'alfred_the_butler'   -- kept: user settings are keyed on it
-local plugin_version = 'WarPigz 1.0.0'
+local plugin_version = 'WarPigz 1.0.1'
 
 local utils = require 'core.utils'
 local town = require 'core.town'
@@ -319,7 +319,7 @@ function gui.render()
         gui.elements.general_tree:pop()
     end
     if gui.elements.mythic_protect_tree:push('Mythic protection') then
-        gui.elements.mythic_always_keep:render('Always keep mythics', 'Never sell or salvage a mythic: rarity 8 (incl. the new Mythic Uniques, mythic charms and seals) or an uber/mythic listed in the item database. Overrides every other rule, loot filter included.')
+        gui.elements.mythic_always_keep:render('Always keep mythics', 'Never sell or salvage a mythic: rarity 8 (since Season 15 any Unique can be Mythic via the Horadric Cube and any Unique Charm can drop Mythic) or an iconic mythic listed in the item database. Overrides every other rule, loot filter included.')
         if gui.elements.mythic_always_keep:get() then
             render_menu_header('Mythics are always kept. Turn this off only if you want the mythic actions / lists below and in the charm and seal settings to apply.')
         else

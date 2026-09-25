@@ -23,7 +23,7 @@ Then:
 
 Output fields (see core/classify.lua):
 
-  mythic[sno]   = {n=name, g=group}   every item with eMagicType 4 (Mythic
+  mythic[sno]   = {n=name, g=group}   every iconic mythic, eMagicType 4 (Mythic
                                       Unique): equipment, charms and seals.
   talisman[sno] = {n=name, g='charm'|'seal', r=runtime rarity or nil}
                                       every Charm / HoradricSeal item.

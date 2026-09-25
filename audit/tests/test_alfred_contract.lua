@@ -64,7 +64,7 @@ check('get_status carries every field the suite reads, with the right types', fu
         eq(type(s[k]), 'number', k)
     end
     eq(s.name, 'alfred_the_butler', 'plugin label kept (user settings survive)')
-    eq(s.version, 'WarPigz 1.0.0', 'version')
+    eq(s.version, 'WarPigz 1.0.1', 'version')
     eq(s.enabled, true, 'enabled')
     eq(s.restock_count, 0, 'restock_count')
     eq(live(s), false, 'idle Alfred is not live work')

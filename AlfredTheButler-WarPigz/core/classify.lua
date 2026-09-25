@@ -287,6 +287,11 @@ function classify.equipment_action(info, item_type, s)
         if s.ancestral_unique_filter and type(s.ancestral_mythic) == 'table' and s.ancestral_mythic[info.sno] then
             return classify.KEEP, 'mythic keep list'
         end
+        -- Season 15: any Unique can become Mythic (Horadric Cube, mythic
+        -- drops), so a Unique on the keep list is kept in its Mythic form too.
+        if s.ancestral_unique_filter and type(s.ancestral_unique) == 'table' and s.ancestral_unique[info.sno] then
+            return classify.KEEP, 'unique keep list (mythic form)'
+        end
         return s.ancestral_item_mythic or classify.KEEP, 'mythic action'
     end
     if is_unique then
