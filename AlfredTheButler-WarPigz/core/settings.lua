@@ -1,0 +1,276 @@
+local gui = require 'gui'
+local utils = require 'core.utils'
+local town = require 'core.town'
+local affix_types = utils.get_item_affixes()
+local item_aspects = utils.get_item_aspects()
+local unique_items = utils.get_unique_items()
+local mythic_items = gui.item_lists.mythic
+local unique_charm_items = gui.item_lists.charm_unique
+local mythic_seal_items  = gui.item_lists.seal_mythic
+local legendary_seal_items = gui.item_lists.seal_keep
+local set_charm_items    = gui.item_lists.charm_set
+local tiers = utils.classify.TIERS
+local tier_defaults = utils.classify.TIER_DEFAULTS
+
+local settings = {
+    plugin_label = gui.plugin_label,
+    plugin_version = gui.plugin_version,
+    enabled = false,
+    use_keybind = false,
+    allow_external = true,
+    -- item_magic = utils.item_enum['SALVAGE'],
+    -- item_rare = utils.item_enum['SALVAGE'],
+    -- item_legendary = utils.item_enum['SALVAGE'],
+    item_legendary_or_lower = utils.item_enum['SALVAGE'],
+    item_unique = utils.item_enum['SELL'],
+    item_junk = utils.item_enum['SALVAGE'],
+    ancestral_item_legendary = utils.item_enum['SALVAGE'],
+    ancestral_item_unique = utils.item_enum['SELL'],
+    ancestral_item_mythic = utils.item_enum['KEEP'],
+    ancestral_item_junk = utils.item_enum['SALVAGE'],
+    ancestral_ga_count = 0,
+    ancestral_unique_ga_count = 0,
+    ancestral_mythic_ga_count = 0,
+    ancestral_unique_filter = false,
+    ancestral_unique = {},
+    ancestral_mythic = {},
+    ancestral_filter = false,
+    ancestral_affix = {},
+    ancestral_affix_count = 2,
+    aggresive_movement = false,
+    path_angle = 10,
+    loot_filter_mode = false,
+    loot_filter_equipment = false,
+    loot_filter_seal = false,
+    loot_filter_charm = false,
+    stash_socketables = utils.stash_extra_enum['NEVER'],
+    stash_consumables = utils.stash_extra_enum['NEVER'],
+    stash_keys = utils.stash_extra_enum['NEVER'],
+    stash_sigis = false,
+    salvage_sigils = false,
+    max_inventory = 25,
+    max_stash_items = 350,
+    failed_action = utils.failed_action_enum['LOG'],
+    skip_cache = false,
+    skip_favorite = false,
+    gamble_enabled = false,
+    gamble_threshold = 1000,
+    gamble_category = 'UNKNOWN',
+    town_choice = town.default,
+
+    talisman_seal_action          = 1,  -- SALVAGE
+    talisman_seal_affix_filter    = false,
+    talisman_seal_affix_count     = 1,
+    talisman_seal_affix           = {},
+    talisman_charm_action         = 1,  -- SALVAGE
+    talisman_charm_affix_filter   = false,
+    talisman_charm_affix_count    = 1,
+    talisman_charm_affix          = {},
+    talisman_charm_unique_filter  = false,
+    talisman_charm_unique         = {},
+    talisman_charm_set_filter     = false,
+    talisman_charm_set            = {},
+    talisman_seal_mythic_filter   = false,
+    talisman_seal_mythic          = {},
+    talisman_tab_x              = 1466,
+    talisman_tab_y              = 650,
+
+    -- WarPigz
+    mythic_always_keep = true,
+    debug = false,
+    max_talisman = 0,
+    talisman = {},
+}
+
+local function talisman_defaults()
+    local out = {}
+    for _, kind in ipairs({'charm', 'seal'}) do
+        local tier = {}
+        for name, action in pairs(tier_defaults) do tier[name] = action end
+        out[kind] = {tier = tier, min_ga = 0, keep_list_on = false, keep_list = {},
+            affix_filter = false, affix_count = 1, affix = {}, loot_filter = false}
+    end
+    return out
+end
+settings.talisman = talisman_defaults()
+
+function settings.is_enabled()
+    local ok, value = pcall(function() return gui.elements.main_toggle:get() end)
+    if ok then return value == true end
+    return settings.enabled == true
+end
+
+local function checked(prefix, list, into)
+    for _, item in ipairs(list) do
+        local cb = gui.elements[prefix .. tostring(item.sno_id)]
+        if cb and cb:get() then into[item.sno_id] = true end
+    end
+    return into
+end
+
+function settings.get_keybind_state()
+    local toggle_key = gui.elements.keybind_toggle:get_key();
+    local toggle_state = gui.elements.keybind_toggle:get_state();
+
+    -- If not using keybind, skip
+    if not settings.use_keybind then
+        return true
+    end
+
+    if settings.use_keybind and toggle_key ~= 0x0A and toggle_state == 1 then
+        return true
+    end
+    return false
+end
+
+function settings.get_export_keybind_state()
+    local toggle_key = gui.elements.export_keybind_toggle:get_key();
+    local toggle_state = gui.elements.export_keybind_toggle:get_state();
+
+    -- WarPigz: without keybinds the export is off (it used to write an items
+    -- JSON file on every town run).
+    if not settings.use_keybind then
+        return false
+    end
+
+    if settings.use_keybind and toggle_key ~= 0x0A and toggle_state == 1 then
+        return true
+    end
+    return false
+end
+
+function settings:update_settings()
+    settings.enabled = gui.elements.main_toggle:get()
+    settings.town_choice = town.option_to_id[gui.elements.town_choice:get()] or town.default
+    settings.use_keybind = gui.elements.use_keybind:get()
+    settings.item_legendary_or_lower = gui.elements.item_legendary_or_lower:get()
+    settings.item_unique = gui.elements.item_unique:get()
+    settings.item_junk = gui.elements.item_junk:get()
+    settings.ancestral_item_legendary = gui.elements.ancestral_item_legendary:get()
+    settings.ancestral_item_unique = gui.elements.ancestral_item_unique:get()
+    settings.ancestral_item_mythic = gui.elements.ancestral_item_mythic:get()
+    settings.ancestral_item_junk = gui.elements.ancestral_item_junk:get()
+    settings.ancestral_ga_count = gui.elements.ancestral_ga_count_slider:get()
+    settings.ancestral_unique_ga_count = gui.elements.ancestral_unique_ga_count_slider:get()
+    settings.ancestral_mythic_ga_count = gui.elements.ancestral_mythic_ga_count_slider:get()
+    settings.ancestral_unique_filter = gui.elements.ancestral_unique_filter_toggle:get()
+    settings.ancestral_filter        = gui.elements.ancestral_filter_toggle:get()
+    settings.ancestral_affix_count   = gui.elements.ancestral_affix_count_slider:get()
+    settings.ancestral_affix = {}
+    for _, affix_type in pairs(affix_types) do
+        local item_type = affix_type.name
+        if not item_type:match('talisman') then
+            settings.ancestral_affix[item_type] = {}
+            for _, affix in pairs(affix_type.data) do
+                local cb = item_type .. '_affix_' .. tostring(affix.sno_id)
+                if gui.elements[cb] and gui.elements[cb]:get() then
+                    settings.ancestral_affix[item_type][affix.sno_id] = true
+                end
+            end
+        end
+    end
+    settings.path_angle = gui.elements.explorer_path_angle_slider:get()
+    settings.ancestral_unique = {}
+    for _,item in pairs(unique_items) do
+        local checkbox_name = 'unique_' .. tostring(item.sno_id)
+        if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
+            settings.ancestral_unique[item.sno_id] = true
+        end
+    end
+    settings.ancestral_mythic = {}
+    for _,item in pairs(mythic_items) do
+        local checkbox_name = 'mythic_' .. tostring(item.sno_id)
+        if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
+            settings.ancestral_mythic[item.sno_id] = true
+        end
+    end
+    settings.stash_socketables = gui.elements.stash_socketables:get()
+    settings.stash_consumables = gui.elements.stash_consumables:get()
+    settings.stash_keys = gui.elements.stash_keys:get()
+    settings.stash_sigils = gui.elements.stash_sigils:get()
+    settings.salvage_sigils = gui.elements.salvage_sigils:get()
+    settings.max_inventory = gui.elements.max_inventory:get()
+    settings.max_stash_items = gui.elements.max_stash_items:get()
+    settings.failed_action = gui.elements.failed_action:get()
+    settings.skip_cache       = gui.elements.skip_cache:get()
+    settings.skip_favorite    = gui.elements.skip_favorite:get()
+    settings.loot_filter_mode      = gui.elements.loot_filter_toggle:get()
+    settings.loot_filter_equipment = gui.elements.loot_filter_equipment:get()
+    settings.loot_filter_seal  = gui.elements.loot_filter_seal:get()
+    settings.loot_filter_charm = gui.elements.loot_filter_charm:get()
+
+    settings.gamble_enabled = gui.elements.gamble_toggle:get()
+    settings.gamble_threshold = gui.elements.gamble_threshold:get()
+
+    settings.talisman_seal_action        = gui.elements.talisman_seal_action:get()
+    settings.talisman_seal_affix_filter  = gui.elements.talisman_seal_affix_filter_toggle:get()
+    settings.talisman_seal_affix_count   = gui.elements.talisman_seal_affix_count_slider:get()
+    settings.talisman_seal_affix         = {}
+    settings.talisman_charm_action       = gui.elements.talisman_charm_action:get()
+    settings.talisman_charm_affix_filter = gui.elements.talisman_charm_affix_filter_toggle:get()
+    settings.talisman_charm_affix_count  = gui.elements.talisman_charm_affix_count_slider:get()
+    settings.talisman_charm_affix        = {}
+    for _, affix_type in pairs(affix_types) do
+        local item_type = affix_type.name
+        if item_type:match('talisman') then
+            local tbl = {}
+            for _, affix in pairs(affix_type.data) do
+                local cb = item_type .. '_affix_' .. tostring(affix.sno_id)
+                if gui.elements[cb] and gui.elements[cb]:get() then tbl[affix.sno_id] = true end
+            end
+            if item_type == 'talisman_seal'  then settings.talisman_seal_affix  = tbl end
+            if item_type == 'talisman_charm' then settings.talisman_charm_affix = tbl end
+        end
+    end
+    settings.talisman_charm_unique_filter = gui.elements.talisman_charm_unique_filter_toggle:get()
+    settings.talisman_charm_unique = checked('charm_unique_', unique_charm_items, {})
+    settings.talisman_charm_set_filter = gui.elements.talisman_charm_set_filter_toggle:get()
+    settings.talisman_charm_set = checked('charm_set_', set_charm_items, {})
+    settings.talisman_seal_mythic_filter = gui.elements.talisman_seal_mythic_filter_toggle:get()
+    settings.talisman_seal_mythic = checked('seal_keep_', legendary_seal_items, checked('seal_mythic_', mythic_seal_items, {}))
+    settings.talisman_tab_x             = gui.elements.talisman_tab_x:get()
+    settings.talisman_tab_y             = gui.elements.talisman_tab_y:get()
+
+    settings.mythic_always_keep = gui.elements.mythic_always_keep:get()
+    settings.debug              = gui.elements.debug_toggle:get()
+    settings.max_talisman       = gui.elements.max_talisman:get()
+    settings.update_talisman_settings()
+
+    -- (gambling is not registered in this fork; the category lookup could index
+    -- past the end of a class list and throw every pulse, so it is gone)
+end
+
+-- Per-kind charm/seal rules read by core/classify.lua.
+function settings.update_talisman_settings()
+    local out = {}
+    for _, kind in ipairs({'charm', 'seal'}) do
+        local tier = {}
+        for _, name in ipairs(tiers) do
+            local combo = gui.elements['talisman_' .. kind .. '_tier_' .. name]
+            tier[name] = combo and combo:get() or tier_defaults[name]
+        end
+        out[kind] = {
+            tier = tier,
+            min_ga = gui.elements['talisman_' .. kind .. '_min_ga_slider']:get(),
+            loot_filter = settings['loot_filter_' .. kind],
+            affix_filter = settings['talisman_' .. kind .. '_affix_filter'],
+            affix_count = settings['talisman_' .. kind .. '_affix_count'],
+            affix = settings['talisman_' .. kind .. '_affix'],
+            keep_list = {},
+        }
+    end
+    local charm_list = out.charm.keep_list
+    if settings.talisman_charm_unique_filter then
+        for sno in pairs(settings.talisman_charm_unique) do charm_list[sno] = true end
+    end
+    if settings.talisman_charm_set_filter then
+        for sno in pairs(settings.talisman_charm_set) do charm_list[sno] = true end
+    end
+    out.charm.keep_list_on = settings.talisman_charm_unique_filter or settings.talisman_charm_set_filter
+    out.seal.keep_list_on = settings.talisman_seal_mythic_filter
+    out.seal.keep_list = settings.talisman_seal_mythic
+    settings.talisman = out
+end
+
+utils.settings = settings
+return settings

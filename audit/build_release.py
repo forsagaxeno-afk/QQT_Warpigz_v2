@@ -1,7 +1,7 @@
 """Build the installable release package and its release notes.
 
 Usage: python3 audit/build_release.py [--out dist]
-Creates <out>/QQT_Warpigz_v2-vX.Y.Z.zip with the nine plugin folders under
+Creates <out>/QQT_Warpigz_v2-vX.Y.Z.zip with the plugin folders listed in versions.json under
 scripts/ (the only folders users copy into QQT's scripts directory) plus the
 user documents, and <out>/RELEASE_NOTES.md from the matching CHANGELOG entry.
 Used by .github/workflows/release.yml; runs locally the same way.
@@ -39,7 +39,7 @@ changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 match = re.search(rf"^## \[{re.escape(version)}\].*?$(.*?)(?=^## \[|\Z)", changelog, re.S | re.M)
 body = match.group(1).strip() if match else "See CHANGELOG.md."
 rows = "\n".join(f"| `{folder}` | {v} |" for folder, v in manifest["components"].items())
-notes = (f"{body}\n\n## Install\n\nDownload `{name}.zip` and copy **only the nine folders inside `scripts/`** "
+notes = (f"{body}\n\n## Install\n\nDownload `{name}.zip` and copy **only the {len(manifest['components'])} folders inside `scripts/`** "
          f"into QQT's scripts directory (see `УСТАНОВКА_RU.txt` / README).\n\n| Folder | Version |\n| --- | --- |\n{rows}\n")
 (out / "RELEASE_NOTES.md").write_text(notes, encoding="utf-8")
 print(f"Built {package} and {out / 'RELEASE_NOTES.md'}")

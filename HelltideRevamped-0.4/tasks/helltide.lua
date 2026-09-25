@@ -8,6 +8,10 @@ local zone_overrides = require "data.zone_overrides"
 local chest_targets = require "core.chest_targets"
 local recovery = require "core.recovery"
 local loot_guard = require "core.loot_guard"
+-- Warplan / Farm mode and the Farm-mode Pandemonium rupture machine. Stored
+-- on tracker (no new file-level locals: this chunk is at LuaJIT's limit).
+tracker.hr_mode = require "core.hr_mode"
+tracker.tear_event = require "core.hr_tear_event"
 
 local found_chest = nil
 local found_chest_position = nil -- cached position so we can navigate even when actor unloads
@@ -270,12 +274,14 @@ local traversal_recovery_time = nil    -- wall-clock of last triggered recovery
 -- traversals more than 3m off the player's Z, so we must target it ourselves and
 -- call interact_object once close — Batmobile's last_trav stays nil under a custom
 -- target, so its built-in interaction at line 539 of navigator.lua never fires.
-local TRAVERSAL_DESCENT_TIMEOUT   = 15 -- seconds before giving up on a descent
-local TRAVERSAL_DESCENT_Z_DELTA   = 2  -- min Z drop to consider a traversal "down"
-local TRAVERSAL_DESCENT_DONE_DROP = 3  -- player Z drop that confirms descent succeeded
-local TRAVERSAL_DESCENT_MAX_DIST  = 30 -- max XY dist to consider a down-traversal
-local TRAVERSAL_INTERACT_RANGE    = 3  -- distance at which to interact_object the gizmo
-local TRAVERSAL_INTERACT_COOLDOWN = 1  -- min seconds between interact_object calls
+local DESCENT = {
+    TIMEOUT          = 15, -- seconds before giving up on a descent
+    Z_DELTA          = 2,  -- min Z drop to consider a traversal "down"
+    DONE_DROP        = 3,  -- player Z drop that confirms descent succeeded
+    MAX_DIST         = 30, -- max XY dist to consider a down-traversal
+    INTERACT_RANGE   = 3,  -- distance at which to interact_object the gizmo
+    INTERACT_COOLDOWN = 1, -- min seconds between interact_object calls
+}
 local descent_actor      = nil         -- traversal gizmo we're descending through
 local descent_start_z    = nil         -- player Z when descent started
 local descent_until      = nil         -- wall-clock safety timeout
@@ -409,7 +415,7 @@ local function navigate_to(target)
             -- keeps the approach-node target re-asserted if Batmobile drifts.
             if descent_actor ~= nil then
                 local zdrop = (descent_start_z or player_pos:z()) - player_pos:z()
-                if zdrop >= TRAVERSAL_DESCENT_DONE_DROP then
+                if zdrop >= DESCENT.DONE_DROP then
                     console.print(string.format(
                         "[TRAVERSAL RECOVERY] Descent confirmed (z drop %.1fm) — exiting free-explore",
                         zdrop))
@@ -432,8 +438,8 @@ local function navigate_to(target)
                     descent_approach = nil
                 else
                     local trav_pos = descent_actor:get_position()
-                    if trav_pos and player_pos:dist_to(trav_pos) <= TRAVERSAL_INTERACT_RANGE
-                        and (now - descent_last_inter) >= TRAVERSAL_INTERACT_COOLDOWN
+                    if trav_pos and player_pos:dist_to(trav_pos) <= DESCENT.INTERACT_RANGE
+                        and (now - descent_last_inter) >= DESCENT.INTERACT_COOLDOWN
                     then
                         descent_last_inter = now
                         console.print(string.format(
@@ -621,7 +627,7 @@ try_traversal_recovery = function(now)
     trav_blacklist = {}  -- also clear helltide's own traversal blacklist
 
     -- Classify nearby traversals by Z-delta to player. A DOWN-traversal (more
-    -- than TRAVERSAL_DESCENT_Z_DELTA below player) is the escape route from an
+    -- than DESCENT.Z_DELTA below player) is the escape route from an
     -- isolated platform; track the nearest one separately so we can drive to
     -- it even when select_target's ±3m Z filter would reject it.
     local actors = actors_manager:get_all_actors()
@@ -639,8 +645,8 @@ try_traversal_recovery = function(now)
                 nearest_any = actor
                 nearest_any_dist = d
             end
-            if (player_z - tpos:z()) > TRAVERSAL_DESCENT_Z_DELTA
-                and d < TRAVERSAL_DESCENT_MAX_DIST
+            if (player_z - tpos:z()) > DESCENT.Z_DELTA
+                and d < DESCENT.MAX_DIST
                 and d < nearest_down_dist
             then
                 nearest_down = actor
@@ -664,7 +670,7 @@ try_traversal_recovery = function(now)
             approach and "" or " (no walkable approach found, targeting gizmo pos)"))
         descent_actor      = nearest_down
         descent_start_z    = player_z
-        descent_until      = now + TRAVERSAL_DESCENT_TIMEOUT
+        descent_until      = now + DESCENT.TIMEOUT
         descent_approach   = approach or tpos
         descent_last_set   = now
         descent_last_inter = -math.huge
@@ -753,6 +759,20 @@ local helltide_state = {
     RETURN_TO_HELLTIDE = "RETURN_TO_HELLTIDE",
     MOVING_TO_MAIDEN = "MOVING_TO_MAIDEN",
     AT_MAIDEN = "AT_MAIDEN",
+    -- Pandemonium ruptures (Farm mode, core/hr_tear_event.lua)
+    MOVING_TO_RIFT = "MOVING_TO_RIFT",
+    RIFT_KILL_GUARDS = "RIFT_KILL_GUARDS",
+    RIFT_WAIT_OPEN = "RIFT_WAIT_OPEN",
+    RIFT_CLOSE_TEARS = "RIFT_CLOSE_TEARS",
+    RIFT_STAY_ACTIVE = "RIFT_STAY_ACTIVE",
+    RIFT_OPEN_CHEST = "RIFT_OPEN_CHEST",
+    RIFT_WAIT_REALMWALKER = "RIFT_WAIT_REALMWALKER",
+    RIFT_KILL_REALMWALKER = "RIFT_KILL_REALMWALKER",
+    RIFT_ENTER_CHAMBER = "RIFT_ENTER_CHAMBER",
+    CHAMBER_START_RITUAL = "CHAMBER_START_RITUAL",
+    CHAMBER_CLOSE_TEARS = "CHAMBER_CLOSE_TEARS",
+    CHAMBER_STAY_ACTIVE = "CHAMBER_STAY_ACTIVE",
+    CHAMBER_EXIT = "CHAMBER_EXIT",
 }
 
 -- ── Maiden state (do_maiden setting) ────────────────────────────────────────
@@ -771,13 +791,17 @@ local helltide_state = {
 -- We do NOT cap hearts inserted by us. We just chase any interactable altar
 -- in range. Combat happens inside the lock zone whenever there's no altar to
 -- interact with.
-local MAIDEN_ARRIVE_DIST   = 6     -- meters: switch from MOVING_TO_MAIDEN to AT_MAIDEN
-local MAIDEN_LOCK_RADIUS   = 12    -- meters: drift further than this and we re-pin
-local MAIDEN_KILL_RADIUS   = 15    -- meters: only kill monsters within this of altar
-local MAIDEN_INTERACT_DIST = 5     -- meters: interact with altar within this range
-local MAIDEN_ALTAR_SEARCH  = 14    -- meters: walk to interactable altars within this range
-local MAIDEN_INSERT_WAIT   = 3.0   -- seconds: charge time before checking heart drop
-local MAIDEN_INSERT_RETRY  = MAIDEN_INSERT_WAIT + 1.5 -- allow the charge and confirmation grace
+-- (One table instead of seven file-level locals: this chunk is close to
+-- LuaJIT's 200-local limit.)
+local MAIDEN = {
+    ARRIVE_DIST   = 6,     -- meters: switch from MOVING_TO_MAIDEN to AT_MAIDEN
+    LOCK_RADIUS   = 12,    -- meters: drift further than this and we re-pin
+    KILL_RADIUS   = 15,    -- meters: only kill monsters within this of altar
+    INTERACT_DIST = 5,     -- meters: interact with altar within this range
+    ALTAR_SEARCH  = 14,    -- meters: walk to interactable altars within this range
+    INSERT_WAIT   = 3.0,   -- seconds: charge time before checking heart drop
+}
+MAIDEN.INSERT_RETRY = MAIDEN.INSERT_WAIT + 1.5 -- allow the charge and confirmation grace
 local maiden_pos                       = nil   -- vec3 of the active altar (set on entry)
 local maiden_pre_insert_heart_count    = nil   -- snapshot before interact_object
 local maiden_insert_attempt_t          = nil   -- get_time_since_inject of last interact
@@ -876,6 +900,7 @@ end
 -- Used by check_events to enter, and by AT_MAIDEN to know when to release.
 should_do_maiden = function()
     if not settings.do_maiden then return false, "setting off" end
+    if not tracker.hr_mode.allow_maiden() then return false, "warplan mode" end
     if not utils.is_in_helltide() then return false, "not in helltide" end
     if not get_maiden_pos() then return false, "no maiden pos for zone" end
     -- Heart-count check: get_helltide_coin_hearts may not exist on older hosts.
@@ -1214,6 +1239,14 @@ local function get_kill_target()
     return result
 end
 
+-- Movement / actor helpers for the Farm-mode rupture machine.
+tracker.tear_event.bind({
+    move_to = move_to,
+    clear_movement = clear_movement,
+    get_actors = get_cached_actors,
+    get_kill_target = get_kill_target,
+})
+
 local last_chest_diagnostic = -math.huge
 local unknown_chest_skins = {}
 local function log_chest_diagnostics()
@@ -1262,7 +1295,7 @@ local function check_events(self)
         if ok then
             local mpos = get_maiden_pos()
             if mpos then
-                if utils.distance_to(mpos) <= MAIDEN_ARRIVE_DIST then
+                if utils.distance_to(mpos) <= MAIDEN.ARRIVE_DIST then
                     -- Already at the altar — go straight into the pinned loop.
                     if self.current_state ~= helltide_state.AT_MAIDEN then
                         console.print("[MAIDEN] Already at altar — entering AT_MAIDEN")
@@ -1293,6 +1326,12 @@ local function check_events(self)
             maiden_reset_cycle()
             self.current_state = helltide_state.EXPLORE_HELLTIDE
         end
+    end
+
+    -- Priority 0b (Farm mode only): Pandemonium ruptures before chests.
+    -- Warplan / external enable never enters a rupture (core/hr_mode.lua).
+    if tracker.tear_event.check_events(self, helltide_state) then
+        return
     end
 
     -- Priority 1: Cinder chests when player can afford one
@@ -1421,7 +1460,7 @@ local function check_events(self)
     end
 
     -- Priority 4: Nearby events / interactables while patrolling
-    if settings.event and utils.do_events() then
+    if settings.event and utils.do_events() and not tracker.hr_mode.skip_local_events() then
         target = find_closest_target("S04_Helltide_Prop_SoulSyphon_01_Dyn")
         if target and target:is_interactable() and utils.distance_to(target) < 12 then
             self.current_state = helltide_state.MOVING_TO_PYRE
@@ -1434,7 +1473,7 @@ local function check_events(self)
         end
     end
 
-    if settings.chaos_rift then
+    if settings.chaos_rift and tracker.hr_mode.allow_chaos_rift() then
         target = find_closest_target("S10_ChaosRiftChoiceGizmo")
         if target and target:is_interactable() and utils.distance_to(target) < 16 then
             self.current_state = helltide_state.MOVING_TO_CHAOS_RIFT
@@ -1524,6 +1563,11 @@ local helltide_task = {
             tracker.helltide_seen_at, tracker.return_expired_logged = now, nil
             return true
         end
+        -- Farm mode Deathtoll Chamber run: the chamber instance has no
+        -- helltide buff; keep the tick while the hour is still active.
+        if utils.helltide_active() and tracker.tear_event.holds_zone(tracker.hr_task_state) then
+            return true
+        end
         -- Live report: HR "stopped and searched for a helltide in the middle
         -- of a helltide". Walking over the zone edge, a cellar or a buff-list
         -- refresh drops the buff for a moment; without this grace the very
@@ -1555,6 +1599,7 @@ local helltide_task = {
         perf.inc("state_" .. self.current_state)
         perf.start("hr_tick")
         self.name = "Explore Helltide (" .. self.current_state .. ")"
+        tracker.hr_task_state = self.current_state
         local lp = get_local_player()
         if not lp then return end
         if recovery.revive_if_dead(lp) then
@@ -1745,7 +1790,8 @@ local helltide_task = {
         -- Detect leaving the zone mid-session (buff lost but hour still active → walk back, don't teleport)
         if not in_ht_now and utils.helltide_active()
             and self.current_state ~= helltide_state.RETURN_TO_HELLTIDE
-            and self.current_state ~= helltide_state.BACK_TO_TOWN then
+            and self.current_state ~= helltide_state.BACK_TO_TOWN
+            and not tracker.tear_event.holds_zone(self.current_state) then
             console.print(string.format("[HELLTIDE] Left helltide zone at (%.1f,%.1f) — navigating back via backtrack",
                 lp and lp:get_position():x() or 0, lp and lp:get_position():y() or 0))
             if settings.experimental_explorer then
@@ -1778,6 +1824,11 @@ local helltide_task = {
             self:return_from_salvage()
         elseif needs_salvage then
             self:back_to_town()
+        elseif tracker.tear_event.poll(self, helltide_state) then
+            -- Farm mode: a rupture pre-empted monsters / chest recall (or a
+            -- rupture state was dropped because the mode became warplan).
+        elseif tracker.tear_event.is_rift_state(self.current_state) then
+            tracker.tear_event.execute(self, helltide_state)
         elseif self.current_state == helltide_state.INIT then
             self:initiate_waypoints()
         elseif self.current_state == helltide_state.EXPLORE_HELLTIDE then
@@ -2340,7 +2391,7 @@ local helltide_task = {
             return
         end
         local dist = utils.distance_to(maiden_pos)
-        if dist <= MAIDEN_ARRIVE_DIST then
+        if dist <= MAIDEN.ARRIVE_DIST then
             console.print(string.format("[MAIDEN] Arrived at altar (dist=%.1f) — entering AT_MAIDEN", dist))
             maiden_reset_cycle()
             self.current_state = helltide_state.AT_MAIDEN
@@ -2382,7 +2433,7 @@ local helltide_task = {
         -- Find any nearby altar that's currently interactable. Per spec: 3
         -- altars exist; inserting into one makes it disappear / go non-
         -- interactable. We chase whichever is closest until none remain.
-        local altar, altar_dist = find_maiden_altar(MAIDEN_ALTAR_SEARCH)
+        local altar, altar_dist = find_maiden_altar(MAIDEN.ALTAR_SEARCH)
 
         -- Periodic state log (every 3s) so we can see what the bot's doing.
         if now - maiden_last_log_t > 3 then
@@ -2399,7 +2450,7 @@ local helltide_task = {
         -- we're outside the lock radius — but ONLY measure against maiden_pos,
         -- not the altar (an altar that just spawned far is not a reason to
         -- abandon the lock).
-        if dist_to_pos > MAIDEN_LOCK_RADIUS then
+        if dist_to_pos > MAIDEN.LOCK_RADIUS then
             if maiden_insert_attempt_t ~= nil then
                 console.print("[MAIDEN] Drifted out of lock radius mid-insert — re-locking")
                 maiden_insert_attempt_t       = nil
@@ -2426,7 +2477,7 @@ local helltide_task = {
                     tostring(before), tostring(current_hearts)))
                 maiden_insert_attempt_t       = nil
                 maiden_pre_insert_heart_count = nil
-            elseif elapsed >= MAIDEN_INSERT_RETRY then
+            elseif elapsed >= MAIDEN.INSERT_RETRY then
                 console.print(string.format(
                     "[MAIDEN] Insert attempt timed out after %.1fs — retrying", elapsed))
                 maiden_insert_attempt_t       = nil
@@ -2435,7 +2486,7 @@ local helltide_task = {
                 -- Hold position during the charge window so the interact
                 -- channel completes cleanly. Past the charge window, allow
                 -- natural movement (combat / next altar walk).
-                if elapsed < MAIDEN_INSERT_WAIT then
+                if elapsed < MAIDEN.INSERT_WAIT then
                     if BatmobilePlugin then BatmobilePlugin.pause(plugin_label) end
                     clear_movement()
                 end
@@ -2444,7 +2495,7 @@ local helltide_task = {
         end
 
         if can_insert and altar then
-            if altar_dist <= MAIDEN_INTERACT_DIST then
+            if altar_dist <= MAIDEN.INTERACT_DIST then
                 -- In range — start a new insert attempt.
                 maiden_pre_insert_heart_count = current_hearts
                 maiden_insert_attempt_t       = now
@@ -2457,7 +2508,7 @@ local helltide_task = {
                 return
             else
                 -- Altar visible but not close enough — walk to it. Caps at
-                -- MAIDEN_LOCK_RADIUS via the early return above so we can't
+                -- MAIDEN.LOCK_RADIUS via the early return above so we can't
                 -- stray into the next zone chasing an outlier altar.
                 navigate_to(altar:get_position())
                 return
@@ -2472,7 +2523,7 @@ local helltide_task = {
             km_target = get_kill_target()
             if km_target then
                 local km_dist_to_pos = maiden_pos:dist_to(km_target:get_position())
-                if km_dist_to_pos > MAIDEN_KILL_RADIUS then
+                if km_dist_to_pos > MAIDEN.KILL_RADIUS then
                     km_target = nil  -- outside lock zone — ignore
                 end
             end
@@ -2497,7 +2548,7 @@ local helltide_task = {
 
         -- Drift back to altar position if we're past the arrive threshold,
         -- otherwise idle so the navigator doesn't oscillate on micro-movement.
-        if dist_to_pos > MAIDEN_ARRIVE_DIST then
+        if dist_to_pos > MAIDEN.ARRIVE_DIST then
             navigate_to(maiden_pos)
         else
             if BatmobilePlugin then
@@ -3553,6 +3604,8 @@ local helltide_task = {
         if patrol_stuck_time then patrol_stuck_time = patrol_stuck_time + gap end
         if patrol_free_explore_start then patrol_free_explore_start = patrol_free_explore_start + gap end
         for _, nav in pairs(km_nav_map) do nav.time = nav.time + gap end
+        -- Rupture timers (cap, approach, wait-open, Realmwalker, ...) too.
+        tracker.tear_event.credit_yield(gap)
         for _, key in ipairs({"chest_drop_time", "remembered_chest_timeout", "farm_chest_gone"}) do
             if tracker[key] then tracker[key] = tracker[key] + gap end
         end
@@ -3685,6 +3738,7 @@ local helltide_task = {
         maiden_pos = nil
         maiden_reset_cycle()
         helltide_explorer.reset()
+        tracker.tear_event.on_reset()
         clear_movement()
     end,
 

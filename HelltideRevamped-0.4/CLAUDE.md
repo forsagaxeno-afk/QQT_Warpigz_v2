@@ -49,3 +49,7 @@ The plugin communicates with two optional external plugins:
 ## Adding a New Interactable Target
 
 Add detection logic to `check_events()` in `tasks/helltide.lua` following the existing pattern: check setting → `find_closest_target(skin_name)` → check interactable/distance → set state. Then add the corresponding state handler method to `helltide_task`.
+
+## Run modes (Warplan / Farm)
+
+`core/hr_mode.lua` owns the mode. GUI combo `mode` (0 = Warplan, 1 = Farm, default Farm) picks it for manual use; `HelltideRevampedPlugin.enable()` (WarPigs) sets `tracker.hr_external`, and `HelltideRevampedPlugin.set_external(true)` does the same when WarPigs adopts an HR that is already on (no enable() call); the effective mode is then always Warplan until HR is disabled/unticked. Warplan: no ruptures, maiden or chaos rift. Farm: Pandemonium ruptures (`core/hr_tear_event.lua`, skins in `data/hr_tear_skins.lua`, leash in `core/hr_rupture_leash.lua`) first, then chests, then monsters. `tasks/helltide.lua` is close to LuaJIT's 200-local limit (186 file-level locals): reach new modules through `tracker.hr_mode` / `tracker.tear_event`, group new constants into an existing table (e.g. `MAIDEN`, `DESCENT`), never add file-level locals there. Rupture timers follow C5/L11: `tear_event.credit_yield(gap)` is called from the task's `credit_yield`; `tear_event.engage` always starts a fresh per-rupture session.

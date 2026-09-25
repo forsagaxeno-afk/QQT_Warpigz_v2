@@ -1332,6 +1332,7 @@ local function plugin_enable(entry, reason)
     if unconfirmed and get_time_since_inject() - unconfirmed.at < dispatch.ENABLE_RETRY then
         if is_plugin_on(entry.plugin) then
             owned[entry.plugin] = true
+            dispatch.mark_adopted(entry.plugin)
             enable_blocked[entry.plugin] = nil
             dispatch.gate_denials[entry.plugin] = nil
             dispatch.unconfirmed[entry.plugin] = nil
@@ -2018,6 +2019,17 @@ function dispatch.adoptable(plugin_name)
     return st ~= nil and st.in_run == true
 end
 
+-- Adoption without enable() (cold-start adopt, unconfirmed-enable adopt):
+-- HelltideRevamped must still know WarPigs drives it, so its effective mode
+-- is Warplan (no ruptures / maiden / chaos rift) whatever its GUI says.
+function dispatch.mark_adopted(plugin_name)
+    if plugin_name ~= 'HelltideRevampedPlugin' then return end
+    local p = rawget(_G, plugin_name)
+    local fn = type(p) == 'table' and rawget(p, 'set_external')
+    -- (An older HR without set_external has no modes: nothing to force.)
+    if type(fn) == 'function' then pcall(fn, true) end
+end
+
 -- WPD-6 / RPR-7: account for a finished Reaper run once. A run that failed
 -- (on_complete('failed'), status last_result/failed, or a self-stop without
 -- any completion callback from Reaper <= 1.9.1) puts its boss on a growing
@@ -2464,6 +2476,7 @@ function orchestrator.tick()
         for plugin_name in pairs(wants) do
             if is_plugin_on(plugin_name) and dispatch.adoptable(plugin_name) then
                 owned[plugin_name] = true
+                dispatch.mark_adopted(plugin_name)
                 last_enabled_reason[plugin_name] = matched_reason[plugin_name]
                 last_wanted[plugin_name] = true
                 had_active_session = true

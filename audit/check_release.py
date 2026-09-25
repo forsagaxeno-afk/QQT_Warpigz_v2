@@ -41,10 +41,13 @@ for folder, component_version in manifest["components"].items():
     if folder == "Reaper-main":
         source = (ROOT / folder / "main.lua").read_text()
         require(f"v{component_version}" in source, f"Reaper displayed version mismatch")
+    elif folder == "TristramLoop":
+        source = (ROOT / folder / "tristram" / "data.lua").read_text()
+        require(f'version = "{component_version}"' in source, f"TristramLoop displayed version mismatch")
     else:
         gui = "silent_raven/gui.lua" if folder.startswith("SilentRaven") else "gui.lua"
         source = (ROOT / folder / gui).read_text()
-        match = re.search(r"local (?:plugin_version|version)\s*=\s*['\"]v?([^'\"]+)", source)
+        match = re.search(r"local (?:plugin_version|version)\s*=\s*['\"](?:WarPigz )?v?([^'\"]+)", source)
         require(bool(match) and match[1] == component_version, f"GUI version mismatch: {folder}")
     rows = [line for line in readme.splitlines() if line.startswith(f"| `{folder}` |")]
     require(len(rows) == 1 and f"| {component_version} |" in rows[0], f"README version mismatch: {folder}")

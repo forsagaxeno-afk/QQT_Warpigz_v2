@@ -25,6 +25,29 @@ local settings = {
     maiden_disable_cinders = 0,
     manage_orbwalker = false,
     draw_chest_status = false,
+    -- Run mode (core/hr_mode.lua): 0 = Warplan, 1 = Farm (default, manual use;
+    -- an external enable / WarPigs adoption always runs Warplan).
+    mode = 1,
+    -- Pandemonium Ruptures (Farm mode, core/hr_tear_event.lua).
+    hunt_rift = true,
+    rupture_replace_local_events = true,
+    rupture_prioritize_surging = true,
+    rupture_hunt_normal = true,
+    rupture_hunt_surging = true,
+    rupture_hunt_colossal = true,
+    rupture_max_cinders = 0,
+    tear_search_dist = 110,
+    tear_passby_dist = 50,
+    tear_event_radius = 12,
+    tear_circle_radius = 2,
+    rupture_linger_sec = 5,
+    rupture_do_realmwalker = true,
+    rupture_do_deathtoll_chamber = false,
+    rupture_rw_wait_sec = 25,
+    rupture_chamber_linger_sec = 8,
+    rupture_open_chests = true,
+    tear_use_charge_ring = true,
+    log_tear_candidates = false,
 }
 
 -- Keep external writes and the persisted GUI value in sync. A false setting
@@ -39,6 +62,27 @@ local setting_controls = {
     farm_cinder_threshold = "farm_cinder_threshold", do_maiden = "do_maiden_toggle",
     maiden_disable_cinders = "maiden_disable_cinders", manage_orbwalker = "manage_orbwalker",
     draw_chest_status = "draw_chest_status",
+    mode = "mode", hunt_rift = "hunt_rift_toggle",
+    rupture_replace_local_events = "rupture_replace_local_events",
+    rupture_prioritize_surging = "rupture_prioritize_surging",
+    rupture_hunt_normal = "rupture_hunt_normal", rupture_hunt_surging = "rupture_hunt_surging",
+    rupture_hunt_colossal = "rupture_hunt_colossal", rupture_max_cinders = "rupture_max_cinders",
+    tear_search_dist = "tear_search_dist", tear_passby_dist = "tear_passby_dist",
+    tear_event_radius = "tear_event_radius", tear_circle_radius = "tear_circle_radius",
+    rupture_linger_sec = "rupture_linger_sec", rupture_do_realmwalker = "rupture_do_realmwalker",
+    rupture_do_deathtoll_chamber = "rupture_do_deathtoll_chamber",
+    rupture_rw_wait_sec = "rupture_rw_wait_sec", rupture_chamber_linger_sec = "rupture_chamber_linger_sec",
+    rupture_open_chests = "rupture_open_chests", tear_use_charge_ring = "tear_use_charge_ring",
+    log_tear_candidates = "log_tear_candidates",
+}
+-- Settings synced 1:1 from their control in update_settings (mode + ruptures).
+local synced_controls = {
+    "mode", "hunt_rift", "rupture_replace_local_events", "rupture_prioritize_surging",
+    "rupture_hunt_normal", "rupture_hunt_surging", "rupture_hunt_colossal", "rupture_max_cinders",
+    "tear_search_dist", "tear_passby_dist", "tear_event_radius", "tear_circle_radius",
+    "rupture_linger_sec", "rupture_do_realmwalker", "rupture_do_deathtoll_chamber",
+    "rupture_rw_wait_sec", "rupture_chamber_linger_sec", "rupture_open_chests",
+    "tear_use_charge_ring", "log_tear_candidates",
 }
 
 function settings.set_setting(name, value)
@@ -86,6 +130,13 @@ function settings:update_settings()
     settings.maiden_disable_cinders = gui.elements.maiden_disable_cinders:get()
     settings.manage_orbwalker = gui.elements.manage_orbwalker:get()
     settings.draw_chest_status = gui.elements.draw_chest_status:get()
+    for _, name in ipairs(synced_controls) do
+        local el = gui.elements[setting_controls[name]]
+        if el then
+            local v = el:get()
+            if type(v) == type(settings[name]) then settings[name] = v end
+        end
+    end
 end
 
 -- Above this cinder count, force orbwalker clear OFF so the bot stops lingering

@@ -4,6 +4,7 @@ local gui          = require "gui"
 local task_manager = require "core.task_manager"
 local settings     = require "core.settings"
 local tracker      = require "core.tracker"
+local hr_mode      = require "core.hr_mode"
 
 local local_player, player_position
 local was_enabled = false
@@ -17,6 +18,9 @@ local function main_pulse()
     settings:update_settings()
     if not settings.enabled then
         if was_enabled then task_manager.stop() end
+        -- Unticked (by the user or a caller): the next manual enable runs
+        -- the GUI-selected mode again.
+        hr_mode.set_external(false)
         was_enabled = false
         return
     end
@@ -53,6 +57,8 @@ HelltideRevampedPlugin = {
             tracker.external_enable_at = get_time_since_inject()
         end
         if gui.elements.main_toggle then gui.elements.main_toggle:set(true) end
+        -- An external caller (WarPigs War Plan) always runs Warplan mode.
+        hr_mode.set_external(true)
         -- HR doesn't currently expose a keybind_toggle GUI element, but guard
         -- the access so an external orchestrator (WarPigs) doesn't crash on
         -- repeat enables when the symbol is absent.
@@ -65,7 +71,20 @@ HelltideRevampedPlugin = {
         if gui.elements.keybind_toggle then gui.elements.keybind_toggle:set(false) end
         settings:update_settings()
         task_manager.stop()
+        hr_mode.set_external(false)
         was_enabled = false
+    end,
+    -- An orchestrator that takes over an HR that is already on (WarPigs
+    -- adoption: HR's Enable was saved on, or the user left it on) never calls
+    -- enable(); it marks HR as externally driven here instead, so the
+    -- effective mode is Warplan exactly as after enable(). Ignored while HR
+    -- is off (main_pulse clears the flag on every disabled tick anyway).
+    set_external = function (on)
+        if on and not (gui.elements.main_toggle and gui.elements.main_toggle:get()) then
+            return false
+        end
+        hr_mode.set_external(on)
+        return true
     end,
     status = function ()
         local task = task_manager.get_current_task()
@@ -74,6 +93,8 @@ HelltideRevampedPlugin = {
             ['task'] = task,
             -- C6: why HR is holding for a companion (Looter/Alfred), else nil.
             ['hold'] = type(task) == 'table' and task.hold_reason or nil,
+            -- 'warplan' | 'farm' (external enable always reports 'warplan').
+            ['mode'] = hr_mode.effective(),
         }
     end,
     getSettings = function (setting)

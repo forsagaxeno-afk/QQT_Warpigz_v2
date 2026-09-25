@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Generate AlfredTheButler-WarPigz/data/item_db.lua from a d4data checkout.
+
+Source: DiabloTools/d4data (https://github.com/DiabloTools/d4data), the JSON
+dump of Diablo IV's game files. Only these parts are read:
+
+  json/base/meta/Item/*.itm.json                  item definitions
+  json/enUS_Text/meta/StringList/Item_*.stl.json  English item names
+
+A minimal sparse checkout (about 150 MB) is enough:
+
+  git clone --filter=blob:none --no-checkout --depth 1 \\
+      https://github.com/DiabloTools/d4data d4data
+  cd d4data
+  git sparse-checkout init --no-cone
+  git sparse-checkout set '/json/base/meta/Item/' \\
+      '/json/enUS_Text/meta/StringList/Item_*'
+  git checkout HEAD
+
+Then:
+
+  python3 audit/tools/gen_alfred_item_db.py path/to/d4data
+
+Output fields (see core/classify.lua):
+
+  mythic[sno]   = {n=name, g=group}   every item with eMagicType 4 (Mythic
+                                      Unique): equipment, charms and seals.
+  talisman[sno] = {n=name, g='charm'|'seal', r=runtime rarity or nil}
+                                      every Charm / HoradricSeal item.
+  patterns      = skin-name fallbacks for charms and seals the database
+                  does not list (new patch items).
+
+d4data eMagicType -> QQT runtime rarity: 1 legendary -> 5, 2 unique -> 6,
+3 set -> 7, 4 mythic unique -> 8. eMagicType 0 items roll their rarity when
+they drop (magic/rare/legendary), so no rarity hint is stored for them.
+
+The output is deterministic (sorted by SNO id).
+"""
+import argparse
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_OUT = ROOT / "AlfredTheButler-WarPigz" / "data" / "item_db.lua"
+
+RUNTIME_RARITY = {1: 5, 2: 6, 3: 7, 4: 8}
+TALISMAN_TYPES = {"Charm": "charm", "HoradricSeal": "seal"}
+JEWELRY = {"Ring", "Amulet"}
+ARMOR = {"Helm", "ChestArmor", "Gloves", "Legs", "Boots", "Shield", "Focus", "OffHandTotem"}
+# Test/vendor/quest items that never drop for players.
+SKIP_PREFIXES = ("PTR_", "QST_", "Test", "TEST_", "Debug", "DEBUG_", "Cheat")
+PATTERNS = [
+    ("seal", "Talisman_Seal"),
+    ("charm", "Talisman_Charm"),
+    ("charm", "Generic_Charm_"),
+]
+
+
+def group_of(item_type):
+    if item_type in TALISMAN_TYPES:
+        return TALISMAN_TYPES[item_type]
+    if item_type in JEWELRY:
+        return "jewelry"
+    if item_type in ARMOR:
+        return "armor"
+    return "weapon"
+
+
+def lua_string(text):
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ") + '"'
+
+
+def english_name(strings_dir, stem):
+    path = strings_dir / f"Item_{stem}.stl.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    for entry in data.get("arStrings") or []:
+        if entry.get("szLabel") == "Name" and entry.get("szText"):
+            return entry["szText"].strip()
+    return None
+
+
+def d4data_version(root):
+    try:
+        out = subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%cs %h"],
+                             capture_output=True, text=True, check=True).stdout.strip()
+        return out or "unknown"
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("d4data", type=Path, help="path to a d4data checkout")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    args = parser.parse_args()
+
+    items_dir = args.d4data / "json" / "base" / "meta" / "Item"
+    strings_dir = args.d4data / "json" / "enUS_Text" / "meta" / "StringList"
+    if not items_dir.is_dir() or not strings_dir.is_dir():
+        sys.exit(f"not a d4data checkout (missing {items_dir} or {strings_dir})")
+
+    mythic, talisman = {}, {}
+    for path in sorted(items_dir.glob("*.itm.json")):
+        stem = path.name[: -len(".itm.json")]
+        if stem.startswith(SKIP_PREFIXES):
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        sno = data.get("__snoID__")
+        item_type = (data.get("snoItemType") or {}).get("name")
+        magic = data.get("eMagicType")
+        if not isinstance(sno, int) or not item_type:
+            continue
+        is_talisman = item_type in TALISMAN_TYPES
+        if not is_talisman and magic != 4:
+            continue
+        name = english_name(strings_dir, stem)
+        if not name:
+            continue
+        group = group_of(item_type)
+        if magic == 4:
+            mythic[sno] = (name, group)
+        if is_talisman:
+            talisman[sno] = (name, group, RUNTIME_RARITY.get(magic))
+
+    if not talisman:
+        sys.exit("no charms or seals found - wrong d4data layout?")
+
+    version = d4data_version(args.d4data)
+    lines = [
+        "-- AUTO-GENERATED by audit/tools/gen_alfred_item_db.py - do not edit by hand.",
+        f"-- Source: DiabloTools/d4data ({version}), the JSON dump of Diablo IV's game files.",
+        "-- Regenerate: python3 audit/tools/gen_alfred_item_db.py <d4data checkout>",
+        "-- Fields: mythic[sno] = {n=name, g=group}; talisman[sno] = {n=name, g='charm'|'seal',",
+        "-- r=runtime rarity when fixed (5 legendary, 6 unique, 7 set, 8 mythic), nil when rolled}.",
+        "return {",
+        f"    version = {lua_string(version)},",
+        f"    source = {lua_string('DiabloTools/d4data')},",
+        "    mythic = {",
+    ]
+    for sno in sorted(mythic):
+        name, group = mythic[sno]
+        lines.append(f"        [{sno}] = {{n={lua_string(name)},g={lua_string(group)}}},")
+    lines.append("    },")
+    lines.append("    talisman = {")
+    for sno in sorted(talisman):
+        name, group, rarity = talisman[sno]
+        r = f",r={rarity}" if rarity else ""
+        lines.append(f"        [{sno}] = {{n={lua_string(name)},g={lua_string(group)}{r}}},")
+    lines.append("    },")
+    lines.append("    patterns = {")
+    for group, pattern in PATTERNS:
+        lines.append(f"        {{g={lua_string(group)},p={lua_string(pattern)}}},")
+    lines.append("    },")
+    lines.append("}")
+    args.out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    charms = sum(1 for v in talisman.values() if v[1] == "charm")
+    print(f"wrote {args.out}: {len(mythic)} mythic, {charms} charms, {len(talisman) - charms} seals (d4data {version})")
+
+
+if __name__ == "__main__":
+    main()

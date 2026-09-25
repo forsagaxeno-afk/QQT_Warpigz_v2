@@ -145,7 +145,7 @@ local function actor(skin,x,z)
 end
 
 test('Helltide Maiden preserves the full charge window before retry',function()
- local env,s,settings=helltide_session();settings.do_maiden=true
+ local env,s,settings=helltide_session();settings.do_maiden=true;settings.mode=1 -- maiden is a Farm-mode detour (core/hr_mode.lua)
  local altar=actor('S04_SMP_Succuboss_Altar_A_Dyn',0);s.actors={altar}
  env.get_helltide_coin_hearts=function()return 3 end
  local task=env.require('tasks.helltide');task:at_maiden();assert(#s.interactions==1)
