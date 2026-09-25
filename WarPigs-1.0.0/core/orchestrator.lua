@@ -1649,7 +1649,8 @@ function dispatch.hwe_new(fired_at)
     return {state = 'IDLE', fired_at = fired_at or -math.huge, snap_world = nil, snap_zone = nil,
         missed = 0, round = 1, backoff_until = nil, compass = false, mode = nil,
         reason = nil, reason_at = nil, logged_at = nil, landing = nil, done_since = nil,
-        landing_bsk = false, landing_zone = nil, landing_world = nil, left_since = nil, retagged = nil}
+        landing_bsk = false, landing_zone = nil, landing_world = nil, left_since = nil, retagged = nil,
+        busy_since = nil, busy_logged = nil}
 end
 dispatch.hwe = dispatch.hwe_new()
 
@@ -1947,18 +1948,18 @@ function dispatch.hwe_run_finished(now, by_warpigs)
     if by_warpigs then dispatch.hwe_retag() end
     local st = dispatch.horde_warplan() and not dispatch.inside_horde() and dispatch.status_of(_G.InfernalHordesPlugin)
     if not st or st.enabled ~= true or (by_warpigs and H.mode == 'compass') then
-        H.done_since, H.left_since = nil, nil
+        H.done_since, H.left_since, H.busy_since, H.busy_logged = nil, nil, nil, nil
         return false
     end
     if not by_warpigs then
-        H.done_since, H.left_since = nil, nil
+        H.done_since, H.left_since, H.busy_since, H.busy_logged = nil, nil, nil, nil
         if st.in_run ~= false then return false end
         log('InfernalHordesPlugin is on outside the Horde without a run and was not started by WarPigs — '
             .. 'stopping it (War Plan entry: HordeDev starts inside the Horde, no compass)')
         return true
     end
     if st.last_result == 'completed' and st.alfred_trip ~= true and st.exit_pending ~= true then
-        H.left_since = nil
+        H.left_since, H.busy_since, H.busy_logged = nil, nil, nil
         H.done_since = H.done_since or now
         if now - H.done_since < dispatch.HORDE_DONE_SETTLE then return false end
         H.done_since = nil
@@ -1968,22 +1969,39 @@ function dispatch.hwe_run_finished(now, by_warpigs)
     end
     H.done_since = nil
     if st.in_run ~= false then
-        H.left_since = nil
+        H.left_since, H.busy_since, H.busy_logged = nil, nil, nil
         return false
     end
     if st.entry_mode == 'compass' then
-        H.left_since = nil
+        H.left_since, H.busy_since, H.busy_logged = nil, nil, nil
         log('HordeDev (compass mode) is out of the Horde without a run — releasing it before its compass entry; '
             .. 'the next War Plan Horde gets a new War Plan teleport')
         return true
     end
+    -- C6: the keep while C1 Alfred live work or a teleport cast lasts is
+    -- bounded by HORDE_TRIP_CAP, measured from the first busy sample of this
+    -- out-of-Horde episode (a flapping Alfred flag cannot extend it), logged
+    -- once and shown in the status line (dispatch.status_suffix).
     if dispatch.alfred_busy(now) or dispatch.teleport_casting() then
         H.left_since = nil
-        return false
+        H.busy_since = H.busy_since or now
+        local held = now - H.busy_since
+        if held < dispatch.HORDE_TRIP_CAP then
+            if not H.busy_logged then
+                H.busy_logged = true
+                log(string.format('HordeDev War Plan run is out of the Horde during Alfred work or a teleport — '
+                    .. 'holding it (up to %.0fs)', dispatch.HORDE_TRIP_CAP))
+            end
+            return false
+        end
+        H.busy_since, H.busy_logged = nil, nil
+        log(string.format('HordeDev War Plan run is still out of the Horde %.0fs after Alfred work or a teleport '
+            .. 'began — releasing it; the War Plan Horde gets a new War Plan teleport', held))
+        return true
     end
     H.left_since = H.left_since or now
     if now - H.left_since < dispatch.HORDE_LEFT_SETTLE then return false end
-    H.left_since = nil
+    H.left_since, H.busy_since, H.busy_logged = nil, nil, nil
     log(string.format('HordeDev left the Horde without a completed run (in_run=false outside the Horde for %.0fs, '
         .. 'no Alfred work, no teleport) — releasing it; the War Plan Horde gets a new War Plan teleport',
         dispatch.HORDE_LEFT_SETTLE))
@@ -2148,7 +2166,7 @@ function dispatch.forget_unwanted(wants_)
         H.state, H.missed, H.round, H.backoff_until, H.compass, H.reason = 'IDLE', 0, 1, nil, false, nil
     else
         -- W5-1: the once-per-ownership War Plan retag belongs to one owner.
-        H.retagged, H.left_since = nil, nil
+        H.retagged, H.left_since, H.busy_since, H.busy_logged = nil, nil, nil, nil
     end
     local R = reaper_run_once
     if R.refused_boss then
@@ -2234,6 +2252,10 @@ function dispatch.status_suffix(now)
     -- War Plan Horde entry: what the delivery waits for, shown at once (a
     -- loading screen, when tick() does not run, keeps the last reason).
     local H = dispatch.hwe
+    if H.busy_since and owned.InfernalHordesPlugin then
+        parts[#parts + 1] = string.format('Horde: HordeDev out of the Horde during Alfred work or a teleport — '
+            .. 'holding %.0fs of %.0fs', now - H.busy_since, dispatch.HORDE_TRIP_CAP)
+    end
     if H.reason and H.reason_at and now - H.reason_at <= 10 and not owned.InfernalHordesPlugin then
         parts[#parts + 1] = 'Horde: ' .. H.reason .. ((H.backoff_until and now < H.backoff_until)
             and string.format(' — retrying the War Plan teleport in %.0fs', H.backoff_until - now) or '')

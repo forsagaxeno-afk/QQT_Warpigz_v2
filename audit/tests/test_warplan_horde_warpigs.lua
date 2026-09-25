@@ -563,6 +563,34 @@ case('W5-2 a War Plan run out of the Horde without "completed" is kept during Al
     eq(g.logged('finished its War Plan run (completed)'), 1)
 end)
 
+-- Round-5 critic/auditor blocker (C6): the W5-2 keep during Alfred live work
+-- or a teleport cast must be bounded, logged and visible. A latched Alfred
+-- flag (trigger_tasks stuck, or a teleport with no done/failed) used to keep
+-- the War Plan HordeDev forever with no log line and no status text.
+case('W5-2 cap: a latched Alfred flag keeps a War Plan HordeDev outside the Horde at most HORDE_TRIP_CAP, logged and shown', function()
+    for _, latched in ipairs({{enabled = true, trigger_tasks = true}, {enabled = true, teleport = true}}) do
+        for _, tp in ipairs({false, true}) do
+            local f = fixture({teleport = tp})
+            local horde = f.horde({in_run = true})
+            f.warplan_to(f.to_bsk)
+            f.quests = {HORDE}
+            truthy(f.until_true(function() return horde.enables == 1 end, 30), 'War Plan horde')
+            f.run(5)
+            f.alfred(latched)
+            horde.st.in_run = false
+            f.to_gate()
+            f.run(100)
+            eq(horde.disables, 0, 'kept while Alfred works (within the cap)')
+            eq(f.logged('out of the Horde during Alfred work or a teleport — holding it'), 1, 'hold logged once')
+            local line = f.o.get_status_line and f.o.get_status_line() or ''
+            truthy(line:find('holding', 1, true) ~= nil, 'hold shown in the status line: ' .. line)
+            truthy(f.until_true(function() return horde.disables == 1 end, 100),
+                'released by the cap (d275b9d..5fbd1e5: never)\n' .. f.dump())
+            eq(f.logged('still out of the Horde'), 1, 'release reason logged')
+        end
+    end
+end)
+
 case('W5-2 Use teleport on: the via-Temis preamble never teleports out of a Horde the War Plan flow wants', function()
     -- (a) The transition is armed (a foreign HordeDev stopped in Temis) and
     -- the player stands in the Horde when the preamble would start.

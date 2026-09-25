@@ -1053,40 +1053,39 @@ case('R4 joint: War Plan entry, HordeDev runs in War Plan mode inside BSK, exits
     eq(modes.compass, nil, 'never enabled in compass mode')
 end)
 
--- F-H4 (joint OPEN item): no advisory-only Alfred trip at activity start while
--- WarPigs is enabled. H5-4 (round-5 suite policy): WarPigs enabled => the
--- advisory flag is WarPigs' to service (once per Temis visit), whatever its
--- alfred_idle reading; hard needs and standalone HordeDev are unchanged.
-local function advisory_at_gate(st, wp)
+-- Round-5 critic blocker: at the gate with NO compass the stash restock is
+-- the activity's own blocking need. The suite policy that leaves advisory
+-- flags to WarPigs (H5-4, still applied in the War Plan chest room) must not
+-- apply here, or a compass-mode HordeDev under WarPigs (compass fallback, or
+-- War Plan entry off) waits at the gate forever. The sticky grace after
+-- HordeDev's own completed Alfred cycle still bounds re-triggers.
+local function advisory_at_gate(st, wp, completed_ago)
     local triggers = 0
     local alfred = {get_status = function() return st end,
         trigger_tasks_with_teleport = function() triggers = triggers + 1; return true end}
     local s = horde({aether = 0, globals = {AlfredTheButlerPlugin = alfred, WarPigsPlugin = wp}})
     s.P.enable()
     s:outside(); s.actors = {actor('QST_Caldeum_GatesToHell_Seal', 3, 0)} -- at the gate, no compass
-    s:run(40)
+    if completed_ago then s.loaded['core.tracker'].alfred_completed_at = s.now - completed_ago end
+    s:run(completed_ago and 10 or 40)
     return s, triggers
 end
-case('F-H4/H5-4 advisory restock at the gate under WarPigs: no Alfred trip; hard needs and standalone unchanged', function()
-    local idle_wp = {status = function() return {enabled = true, alfred_idle = true} end}
-    local s, n = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, idle_wp)
-    eq(n, 0, 'no advisory Alfred trip while WarPigs is enabled')
-    eq(s.loaded['core.tracker'].needs_salvage, false)
-    eq(s:logged('Advisory Alfred restock skipped'), 1, 'logged once')
-    eq(s:task_name(), 'Start Dungeon')
-    local _, hard = advisory_at_gate({enabled = true, need_trigger = true, inventory_full = true}, idle_wp)
-    truthy(hard >= 1, 'inventory_full still triggers')
-    local _, repair = advisory_at_gate({enabled = true, need_trigger = true, need_repair = true}, idle_wp)
-    truthy(repair >= 1, 'need_repair still triggers')
-    -- H5-4: no longer conditional on alfred_idle
-    for _, reading in ipairs({{enabled = true, alfred_idle = false}, {enabled = true}}) do
+case('out of compasses at the gate: the restock is a blocking need, also under WarPigs; the sticky grace still bounds it', function()
+    local restock = {enabled = true, need_trigger = true, restock_count = 2}
+    for _, reading in ipairs({{enabled = true, alfred_idle = true}, {enabled = true, alfred_idle = false}, {enabled = true}}) do
         local wp = {status = function() return reading end}
-        local t, busy = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, wp)
-        eq(busy, 0, 'WarPigs enabled (alfred_idle=' .. tostring(reading.alfred_idle) .. '): no advisory trip')
-        eq(t.loaded['core.tracker'].needs_salvage, false)
-        eq(t:logged('Advisory Alfred restock skipped'), 1)
+        local s, n = advisory_at_gate(restock, wp)
+        truthy(n >= 1, 'WarPigs enabled (alfred_idle=' .. tostring(reading.alfred_idle) .. '): compass restock requested')
+        eq(s:logged('Advisory Alfred restock skipped'), 0, 'never skipped at the gate')
+        eq(s:logged('Out of compasses: asking Alfred to restock them'), 1, 'logged once')
         local _, full = advisory_at_gate({enabled = true, need_trigger = true, inventory_full = true}, wp)
-        truthy(full >= 1, 'WarPigs not idle: inventory_full still triggers')
+        truthy(full >= 1, 'inventory_full still triggers')
+        local _, repair = advisory_at_gate({enabled = true, need_trigger = true, need_repair = true}, wp)
+        truthy(repair >= 1, 'need_repair still triggers')
+        -- A stash without compasses cannot loop faster than the grace allows.
+        local g, graced = advisory_at_gate(restock, wp, 5)
+        eq(graced, 0, 'no re-trigger within the sticky grace after HordeDev\'s own cycle')
+        eq(g:task_name(), 'Start Dungeon')
     end
     local off_wp = {status = function() return {enabled = false, alfred_idle = true} end}
     local _, off = advisory_at_gate({enabled = true, need_trigger = true, restock_count = 2}, off_wp)

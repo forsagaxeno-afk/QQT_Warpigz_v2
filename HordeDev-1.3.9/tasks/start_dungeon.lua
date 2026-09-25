@@ -189,21 +189,22 @@ local function use_dungeon_sigil(task, now, snapshot)
         -- add additional conditions to trigger if required
         -- C1: advisory need_trigger alone cannot re-trigger within the sticky
         -- grace after HordeDev's own completed Alfred cycle.
-        -- F-H4 / H5-4 (suite policy): while WarPigs is enabled an
-        -- advisory-only flag (restock/stash, no inventory_full/need_repair)
-        -- never starts a HordeDev Alfred trip here; WarPigs services advisory
-        -- flags once per Temis visit. Hard needs and standalone are unchanged.
+        -- Out of compasses the stash restock is this activity's own blocking
+        -- need, not an optional advisory trip: the suite policy that leaves
+        -- advisory flags to WarPigs (H5-4) does not apply here, otherwise a
+        -- compass-mode HordeDev under WarPigs (compass fallback, or War Plan
+        -- entry off) would wait at the gate forever. The grace above still
+        -- bounds re-triggers when the stash has no compass either.
         if utils.alfred_trip_wanted(status, tracker.alfred_completed_at) then
-            if utils.alfred_hard_need(status) or not task.warpigs_advisory_idle() then
-                tracker.start_dungeon_time = nil
-                tracker.needs_salvage = true
-                return false
+            tracker.start_dungeon_time = nil
+            tracker.needs_salvage = true
+            if task.warpigs_advisory_idle() and not utils.alfred_hard_need(status)
+                and not task.restock_logged then
+                task.restock_logged = true
+                console.print("[start_dungeon] Out of compasses: asking Alfred to restock them"
+                    .. " (blocking need, not left to WarPigs' advisory service).")
             end
-            if not task.advisory_skip_logged then
-                task.advisory_skip_logged = true
-                console.print("[start_dungeon] Advisory Alfred restock skipped:"
-                    .. " WarPigs is enabled and services advisory flags once per Temis visit.")
-            end
+            return false
         end
     end
     
