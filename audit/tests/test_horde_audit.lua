@@ -160,6 +160,27 @@ check('War Plan altar (The Black Pact) is taken like a pylon, once, and only whe
  s2.actors={actor('Warplans_BSK_ReplicatorGizmo_HellsWrath',1)};e2.require('tasks.horde'):Execute()
  assert(s2.interactions==0,'option off')
 end)
+check('live 2.1.3: a busy Looter gets a bounded yield at a pylon, then HordeDev walks to it',function()
+ local e,s=harness();local p=actor('BSK_PylTest',30)
+ e.LooteerPlugin={get_enabled=function()return true end,is_actively_looting=function()return true end}
+ s.actors={p};local horde=e.require('tasks.horde')
+ local before=#s.targets;horde:Execute()
+ assert(#s.targets==before,'yield: no movement while the Looter is busy')
+ s.now=s.now+9;horde:Execute()
+ assert(#s.targets>before,'after 8 s HordeDev walks to the pylon (was: tug of war forever)')
+ local logged=false;for _,l in ipairs(s.logs) do if l:find('walking to the pylon anyway',1,true) then logged=true end end
+ assert(logged,'logged once')
+end)
+check('a Looter with acquire_pause (Rosie) is paused for the pylon and released after',function()
+ local e,s=harness();local p=actor('BSK_PylTest',30);local paused,released=0,0
+ e.LooteerPlugin={get_enabled=function()return true end,is_actively_looting=function()return true end,
+  acquire_pause=function(c)assert(c=='HordeDev');paused=paused+1;return true end,release_pause=function()released=released+1;return true end}
+ s.actors={p};local horde=e.require('tasks.horde')
+ local before=#s.targets;horde:Execute()
+ assert(paused==1 and #s.targets>before,'paused and moving at once')
+ s.actors={};s.now=s.now+1;horde:Execute()
+ assert(released==1,'released when no pylon is pending')
+end)
 check('movement ownership is released only once and never before issuance',function()
  local e,s=harness();local m=e.require('core.movement');m.stop();assert(s.stops==0)
  m.claim(true);m.stop();m.stop();assert(s.stops==1)

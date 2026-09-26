@@ -5,6 +5,7 @@ local navigation = require "core.navigation"
 local tracker = require "core.tracker"
 local explorer = require "core.explorer"
 local pylons = require "data.pylons"
+local loot_guard = require "core.loot_guard"
 tracker.horde_opened = false  -- For start_dungeon again, after dying and exit horde
 
 -- Batmobile integration: used when aggressive movement is off
@@ -453,7 +454,7 @@ function bomber:main_pulse()
         tracker.interacting_pylon = true
         tracker.victory_lap = false
         if not settings.party_mode then
-            console.print("settings.party_mode:" .. tostring(settings.party_mode))
+            if loot_guard.pylon_pending() then return end -- bounded yield to a busy Looter
             console.print("Targeting Pylon and interacting with it.")
             if utils.distance_to(pylon) > 2 then
                 pylon_interact_time = nil
@@ -491,6 +492,7 @@ function bomber:main_pulse()
     end
 
     pylon_interact_time = nil
+    loot_guard.pylon_done()
     local target = bomber:get_target()
     if target then
         local name = target:get_skin_name()

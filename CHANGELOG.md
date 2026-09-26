@@ -2,6 +2,18 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.3] — 2026-09-26
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.2.
+
+### Fixed
+
+- HordeDev 2.2.1: "after a couple of rounds the character gets stuck at a pylon while also trying to go loot" (live, on 2.1.3 with LooteerV3; the HUD showed *waiting for Looter (439s)*). LooteerV3 reports busy while any wanted item is nearby, even an unreachable one, so the Looter and HordeDev steered the player every tick and neither reached its target. During pylon/altar selection HordeDev now pauses a Looter that supports `acquire_pause` (Rosie) for at most 20 s, released as soon as the pylon is taken; with a Looter without a pause API (LooteerV3) it yields movement for at most 8 s per pylon, then walks to the pylon anyway (logged once). The per-tick `settings.party_mode:false` log line is gone.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: all test files × (Lua 5.4 + LuaJIT) pass; two new cases in `test_horde_audit.lua`.
+
 ## [2.3.0-rc.2] — 2026-09-25
 
 Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.1.

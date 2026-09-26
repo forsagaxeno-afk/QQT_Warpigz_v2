@@ -6,7 +6,7 @@
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v2.1.3.** Test build: v2.3.0-rc.2 (private draft, not yet published). v2.2.0 and v2.2.1 were withdrawn. Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. Project release numbering started with v2.0.0. Plugin folder names and upstream history remain separate from the bundle version.
+**Current release: v2.1.3.** Test build: v2.3.0-rc.3 (private draft, not yet published). v2.2.0 and v2.2.1 were withdrawn. Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. Project release numbering started with v2.0.0. Plugin folder names and upstream history remain separate from the bundle version.
 
 [English changelog](CHANGELOG.md) · [Audit and validation](AUDIT.md) · [Credits](CREDITS.md) · [Version rules](CONTRIBUTING.md)
 
@@ -23,7 +23,7 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | `Batmobile-1.0.12` | Shared navigation | 2.1.0 |
 | `ArkhamAsylum-1.0.6` | The Pit | 2.1.0 |
 | `HelltideRevamped-0.4` | Helltides (Warplan / Farm modes, Pandemonium Ruptures) | 2.2.0 |
-| `HordeDev-1.3.9` | Infernal Hordes | 2.2.0 |
+| `HordeDev-1.3.9` | Infernal Hordes | 2.2.1 |
 | `Reaper-main` | Boss lairs | 1.10.1 |
 | `WonderCity-main` | Kurast Undercity | 2.2.0 |
 | `SilentRaven-0.1.3` | Whisper reward checks in Temis | 0.2.1 |
