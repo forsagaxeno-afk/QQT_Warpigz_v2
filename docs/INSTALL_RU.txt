@@ -3,18 +3,27 @@ QQT_Warpigz_v2 (версия в имени архива) — установка
 
 1. Закрой QQT. Сделай резервную копию своих папок плагинов, настроек и WarPug\positions.txt
    ВНЕ папки scripts.
-2. Скопируй в папку scripts QQT ТОЛЬКО 9 папок из каталога scripts\ этого архива
+2. Скопируй в папку scripts QQT ТОЛЬКО 11 папок из каталога scripts\ этого архива
    (ArkhamAsylum-1.0.6, Batmobile-1.0.12, HelltideRevamped-0.4, HordeDev-1.3.9, Reaper-main,
-   SilentRaven-0.1.3, WarPigs-1.0.0, WarPug-1.0.0, WonderCity-main). Заменяй папки целиком.
-3. Свои Alfred, Looter и боевой плагин/ротацию оставь — они не входят в сборку.
-4. Полностью перезапусти QQT. Версии плагинов в консоли должны совпасть с таблицей в README.md
+   Rosie, SilentRaven-0.1.3, TristramLoop, WarPigs-1.0.0, WarPug-1.0.0, WonderCity-main).
+   Заменяй папки целиком. Папки audit, docs, assets в scripts НЕ копируй.
+3. Rosie заменяет Alfred и Looter. Убери из папки scripts старые Alfred, SteroidAlfred,
+   AlfredTheButler-WarPigz, LooteerV3 и любые другие Alfred/Looter — иначе Rosie покажет
+   конфликт и не включится. Свой боевой плагин/ротацию (Orbwalker) оставь — он не входит в сборку.
+4. Если калибровал WarPug сам — верни свой positions.txt из резервной копии в WarPug-1.0.0.
+5. Запусти QQT. Версии плагинов в консоли должны совпасть с таблицей в README.md
    этого архива (например "Lua Plugin - WarPigs - v...").
-5. WarPug: positions.txt идёт БЕЗ калибровки. Захвати позиции кнопок Reroll и Confirm в меню
-   WarPug (или верни свой positions.txt из резервной копии, если калибровал сам).
-6. WarPigs: "Hordes: enter via War Plan teleport (no compass)" — ВКЛ (по умолчанию):
+6. Rosie стартует ВЫКЛЮЧЕННОЙ: настрой Pickup rules и Keep, storage & town, выключи
+   Auto Loot хоста, затем включи Rosie. Мифики по умолчанию всегда сохраняются
+   ("Always keep mythics"), избранные (замок) предметы никогда не продаются и не разбираются.
+7. WarPug: positions.txt идёт БЕЗ калибровки. Если не вернул свой — захвати позиции кнопок
+   Reroll и Confirm в меню WarPug.
+8. WarPigs: "Hordes: enter via War Plan teleport (no compass)" — ВКЛ (по умолчанию):
    орда из War Plan заходит через телепорт War Plan, компас не тратится.
    "Allow compass entry if the War Plan teleport fails" — ВЫКЛ (по умолчанию).
-7. Ставь на паузу WarPigs, а не хоткей отдельного плагина.
+9. Ставь на паузу WarPigs, а не хоткей отдельного плагина.
+10. TristramLoop — отдельный плагин, WarPigs его не запускает. Перед стартом укажи друга
+    (Friend) в его меню; первый сброс карты будет после ожидания лута (по умолчанию 60 мин).
 
 После первой сессии пришли лог — особенно строки из LIVE_CHECKLIST.md
 (где приземляет телепорт War Plan, "[SilentRaven] reward diagnostics", "[WarPigs] ... held ...").

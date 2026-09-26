@@ -181,6 +181,22 @@ check('a Looter with acquire_pause (Rosie) is paused for the pylon and released 
  s.actors={};s.now=s.now+1;horde:Execute()
  assert(released==1,'released when no pylon is pending')
 end)
+check('the Looter pause for one pylon is bounded: released after 20 s and not re-taken while it stays pending (C6)',function()
+ local e,s=harness();local p=actor('BSK_PylTest',30);local paused,released=0,0
+ e.LooteerPlugin={get_enabled=function()return true end,is_actively_looting=function()return true end,
+  acquire_pause=function()paused=paused+1;return true end,release_pause=function()released=released+1;return true end}
+ s.actors={p};local horde=e.require('tasks.horde')
+ horde:Execute();assert(paused==1,'paused once')
+ for _=1,30 do s.now=s.now+1;horde:Execute() end
+ assert(released==1,'released after 20 s: '..released)
+ assert(paused==1,'not re-acquired while the same pylon is still pending: '..paused)
+ local before=#s.targets;s.now=s.now+1;horde:Execute()
+ assert(#s.targets>before,'HordeDev keeps walking to the pylon')
+ -- A new pylon episode may pause again.
+ s.actors={};s.now=s.now+1;horde:Execute()
+ s.actors={p};s.now=s.now+1;horde:Execute()
+ assert(paused==2,'a new episode pauses again: '..paused)
+end)
 check('movement ownership is released only once and never before issuance',function()
  local e,s=harness();local m=e.require('core.movement');m.stop();assert(s.stops==0)
  m.claim(true);m.stop();m.stop();assert(s.stops==1)

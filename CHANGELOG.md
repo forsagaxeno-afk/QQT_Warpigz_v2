@@ -2,6 +2,22 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.7] — 2026-09-26
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.6. The Rosie town/Helltide movement stall reported live on rc.6 is still being fixed and is not in this build.
+
+### Fixed
+
+- HordeDev 2.2.2: the Looter pause for a pylon or the War Plan altar was meant to last at most 20 s, but when it ran out it was released and immediately taken again on the next tick, so an unreachable pylon could keep Rosie's pickup paused indefinitely (C6). The pause is now taken once per pylon episode; after 20 s it is released for good (logged) and HordeDev walks to the pylon. A new pylon episode may pause again.
+
+### Changed
+
+- `УСТАНОВКА_RU.txt` (docs/INSTALL_RU.txt): 11 folders including Rosie and TristramLoop; remove old Alfred/Looter folders (Rosie replaces them); Rosie starts off; Auto Loot off; TristramLoop needs a Friend.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: all test files × (Lua 5.4 + LuaJIT) pass; new case in `test_horde_audit.lua` (fails before the fix: the pause was re-acquired).
+
 ## [2.3.0-rc.6] — 2026-09-26
 
 Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.5.

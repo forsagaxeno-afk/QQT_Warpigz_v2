@@ -87,7 +87,17 @@ end
 --     per pylon episode, then walks to the pylon regardless (logged once).
 local PYLON_PAUSE_MAX, PYLON_YIELD_MAX = 20, 8
 local PAUSE_CALLER = 'HordeDev'
-local pylon = {paused_at = nil, yield_since = nil, yield_over = false, logged = false}
+local pylon = {paused_at = nil, pause_spent = false, yield_since = nil, yield_over = false, logged = false}
+
+local function release_pause()
+    if pylon.paused_at then
+        local looter = LooteerPlugin
+        if type(looter) == 'table' and type(looter.release_pause) == 'function' then
+            pcall(looter.release_pause, PAUSE_CALLER)
+        end
+    end
+    pylon.paused_at = nil
+end
 
 -- true: HordeDev must not issue movement this tick (yielding to the Looter).
 function M.pylon_pending()
@@ -95,7 +105,11 @@ function M.pylon_pending()
     if type(looter) ~= 'table' then return false end
     local now = get_time_since_inject()
     if type(looter.acquire_pause) == 'function' and type(looter.release_pause) == 'function' then
-        if not pylon.paused_at then
+        -- One bounded pause per pylon episode: once spent it is not re-taken
+        -- until pylon_done() (no pylon pending) ends the episode.
+        if pylon.pause_spent then
+            -- fall through to the bounded movement yield below
+        elseif not pylon.paused_at then
             local ok, acquired = pcall(looter.acquire_pause, PAUSE_CALLER)
             if ok and acquired ~= false then
                 pylon.paused_at = now
@@ -105,8 +119,9 @@ function M.pylon_pending()
         elseif now - pylon.paused_at < PYLON_PAUSE_MAX then
             return false
         else
-            M.pylon_done()
-            pylon.yield_over = true
+            release_pause()
+            pylon.pause_spent, pylon.yield_over = true, true
+            console.print(string.format('[HordeDev] Looter paused for %ds; releasing it and walking to the pylon', PYLON_PAUSE_MAX))
         end
     end
     if pylon.yield_over or not M.busy() then return false end
@@ -122,13 +137,8 @@ end
 
 -- No pylon pending any more (taken, gone, reset): release the pause.
 function M.pylon_done()
-    if pylon.paused_at then
-        local looter = LooteerPlugin
-        if type(looter) == 'table' and type(looter.release_pause) == 'function' then
-            pcall(looter.release_pause, PAUSE_CALLER)
-        end
-    end
-    pylon.paused_at, pylon.yield_since, pylon.yield_over, pylon.logged = nil, nil, false, false
+    release_pause()
+    pylon.pause_spent, pylon.yield_since, pylon.yield_over, pylon.logged = false, nil, false, false
 end
 
 function M.reset()
