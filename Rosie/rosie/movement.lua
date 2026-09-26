@@ -106,7 +106,7 @@ function M.move(owner,target)
     if changed then
         if state.owner and not M.release(owner) then return false end
         state.owner=owner;state.goal=goal;state.context=context;state.next=0
-        state.anchor=here;state.progress_at=now;state.plan_at=0;state.route=nil;state.recovery=0
+        state.anchor=here;state.progress_at=now;state.route=nil;state.recovery=0
     end
     if distance(here,goal)<=1.5 then M.release(owner);return true end
     if distance(here,state.anchor)>=0.4 then state.anchor=here;state.progress_at=now;state.recovery=0 end
@@ -122,27 +122,24 @@ function M.move(owner,target)
     end
     if now<(state.next or 0) then return true end
     state.next=now+pace()
-    if not state.route and now>=(state.plan_at or 0) then
-        state.plan_at=now+1
-        if type(native.create_path_game_engine)=='function' then
-            local ok,route=pcall(native.create_path_game_engine,vector(goal))
-            if not ok or type(route)~='table' then state.detail='Waiting for readable path';return false end
-            local points={}
-            for _,v in ipairs(route) do local p=point(v);if not p then state.detail='Waiting for readable path';return false end;points[#points+1]=p end
-            if #points==0 then state.detail='Waiting for a reachable path';return false end
-            if distance(points[#points],goal)>3 then state.detail='Path does not reach destination';return false end
-            state.route=points;state.index=1
-        else
-            -- Older hosts expose request_move without a readable route result.
-            state.route={goal};state.index=1
-        end
-    end
-    if not state.route then return false end
+    -- QQT_Warpigz_v2 local patch (live 2.3.0-rc.6): walk with the native move
+    -- request. The host's create_path_game_engine is asynchronous and routes to
+    -- the map pin; Rosie sets none, so no route to the NPC or drop ever came back
+    -- and Rosie never moved (Temis Blacksmith/stash, Helltide pickup; its calls
+    -- also flooded the host). Never call it and never set a pin (global,
+    -- user-visible). The progress bound above (3 s, two re-requests, then
+    -- 'Stopped: no movement progress') still limits recovery (C6).
+    if not state.route then state.route={goal};state.index=1 end
     while state.index<#state.route and distance(here,state.route[state.index])<=1.5 do state.index=state.index+1 end
     local ok,result=pcall(native.request_move,vector(state.route[state.index]))
     state.requests=state.requests+1
-    if not ok or result==false then state.detail='Movement request refused';return false end
-    state.detail='Walking to '..owner..' destination'
+    if not ok then state.detail='Movement request refused';return false end
+    -- request_move only sends a command while the player is not already moving
+    -- and may report false for a skipped repeat. That is not a refusal: treating
+    -- it as one dropped pickup's busy flag every step, so the activity and Rosie
+    -- pulled the player back and forth. The progress bound decides instead.
+    state.detail=result==false and 'Walking to '..owner..' destination (host kept its current move)'
+        or 'Walking to '..owner..' destination'
     return true
 end
 function M.for_owner(owner)

@@ -1,6 +1,7 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.0.
+One local addon for pickup, item rules, repairs and storage. Version 1.0.5
+(QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
 ## Install and first run
@@ -34,7 +35,16 @@ Temis is the supported town. Rosie does not fight, revive or reset encounters.
 The overview explains waits, ownership, failures and cleanup, including a disabled
 town worker or its paused automatic-service keybind. Equipment and talisman bag
 counts are displayed separately from the latest scan. Settings remain available while off. A failed trip
-waits for an explicit retry; protected full bags do not cause endless town trips.
+is retried after 120 s while its need remains; after three failures (or a failure
+that a retry cannot fix) it waits for **Run town service**. Protected full bags do
+not cause endless town trips.
+
+**Mythics.** *Always keep mythics* (default on) keeps rarity-8 mythics, mythic
+charms and seals, and Season 15 Mythic forms of ordinary Uniques (recognised by
+their Mythic upgrade affix). *Use Mythic Unique filter* (Ancestral, default off)
+replaces that rule for Mythic Uniques: checked ones are always kept, unchecked
+ones take the chosen action (default Salvage) unless the Mythic Greater Affix
+override keeps them.
 Unfinished resource release is retried and prevents new work, including on reload.
 
 **Pickup rules** separates equipment rarity/Greater Affixes from charms, seals,
@@ -62,11 +72,14 @@ bag before processing it; missing or ambiguous items cannot count as success.
 Clear queue removes pending intent without moving anything. Pending entries
 survive Lua refresh; a running trip is cancelled and must be retried.
 
-**Movement** offers Smooth and responsive or Fast request pacing. Both use the
-host pathfinder, reuse stable paths and nearly equal targets, account for height,
-and allow only bounded recovery from stalls. Chat, death and loading release owned
-movement and suspend work. Unknown paths wait; missing optional route helpers use
-the host's native move request. No random wandering or arbitrary delay is added.
+**Movement** offers Smooth and responsive or Fast request pacing. Both walk with
+the host's native move request (`pathfinder.request_move`) straight to the
+target, keep nearly equal targets, account for height, and allow only bounded
+recovery from stalls (3 s without progress: re-request, twice, then *Stopped: no
+movement progress*). Rosie never uses the map-pin engine path
+(`create_path_game_engine`) and never sets a map pin. Chat, death and loading
+release owned movement and suspend work. No random wandering or arbitrary delay
+is added.
 
 **Display and diagnostics** controls Rosie's status and read-only decision log.
 Bag highlights and their alignment live under town Display settings; ground item

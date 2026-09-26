@@ -440,6 +440,83 @@ case('S15 Mythic form of a Unique (rarity 6, same SNO, mythic upgrade affix) is 
     h.assert_clean('mythic form')
 end)
 
+-- Live 2.3.0-rc.6: Rosie stood still in Temis ("Moving to stash", repair) and
+-- flooded the Helltide with engine path requests. The joint host models the
+-- live create_path_game_engine (asynchronous, routes to the map pin, never
+-- completes without one); Rosie must walk with request_move and never use it.
+local function rosie_moves(h)
+    local n = 0
+    for _, m in ipairs(h.moves) do if m.owner == 'Rosie' and m.kind == 'request_move' then n = n + 1 end end
+    return n
+end
+case('live host engine path: a town trip walks with request_move, never waits on the engine or sets a pin', function()
+    local h = new()
+    enable(h)
+    ok(h.engine ~= nil, 'the live engine model is active')
+    fill_bag(h, 25)
+    local done, waited = nil, false
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('WarPigs', function(r, d) done = {r, d} end) end), true)
+    ok(h.run_until(function() return done ~= nil end, 60, function()
+        local s = as_consumer(h, function() return h.G.RosiePlugin.status() end)
+        local detail = s and s.movement and s.movement.detail or ''
+        if tostring(detail):find('Waiting for', 1, true) then waited = true end
+    end), 'the trip finished\n' .. h.tail())
+    eq(done[1], nil, 'serviced (nil = success): ' .. tostring(done[2] and done[2].reason))
+    eq(#h.inventory, 0, 'bag emptied')
+    ok(rosie_moves(h) > 0, 'Rosie walked with request_move')
+    eq(h.engine.calls, 0, 'create_path_game_engine never called')
+    eq(#h.pins, 0, 'no map pin set')
+    eq(waited, false, 'movement never waited on a route')
+    h.assert_clean('engine town')
+end)
+
+-- Every frame an activity walks its own route unless the Looter reports busy
+-- (the HelltideRevamped loot_guard contract). Counts busy false->true flips
+-- while drops remain: each flip is the player turning back to a drop.
+local function patrol_with_drops(opts)
+    local h = new({place = 'pit', request_move_redundant = opts.redundant})
+    h.pos = h.v(0, 0)
+    enable(h)
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(30)
+    local drops = {{-8, 3}, {-4, 5}, {0, 4}, {4, 3}, {8, 5}, {12, 4}}
+    for _, d in ipairs(drops) do h.drop('pit', d[1], d[2]) end
+    local flips, was_busy, activity_moves_while_busy = 0, false, 0
+    local patrol = {h.v(-10, -10), h.v(10, -10)}
+    local leg = 1
+    h.run_until(function() return (h.pickups or 0) >= #drops end, 30, function()
+        local busy = as_consumer(h, function() return looter(h).is_actively_looting() end) == true
+        if busy and not was_busy then flips = flips + 1 end
+        was_busy = busy
+        if not busy then
+            if h.pos:dist_to_ignore_z(patrol[leg]) < 1 then leg = 3 - leg end
+            as_consumer(h, function() return h.G.pathfinder.request_move(patrol[leg]) end)
+        end
+    end, 0.05)
+    return h, #drops, flips
+end
+case('live host: pickup walks to drops without flooding the engine; the activity yields once, not back and forth', function()
+    local h, n, flips = patrol_with_drops({})
+    eq(h.pickups or 0, n, 'every drop picked up\n' .. h.tail())
+    eq(h.engine.calls, 0, 'no create_path_game_engine calls (live: GENERATING helltide EXCEPTION spam)')
+    eq(#h.pins, 0, 'no map pin set')
+    ok(flips <= 2, 'the busy flag does not flap between drops: ' .. flips .. ' flips')
+    h.assert_clean('engine pickup')
+end)
+case('live host: request_move reporting false for a repeated command is not a refusal (no back and forth)', function()
+    local h, n, flips = patrol_with_drops({redundant = true})
+    ok((h.redundant_moves or 0) > 0, 'the host skipped repeated commands')
+    eq(h.pickups or 0, n, 'every drop picked up\n' .. h.tail())
+    ok(flips <= 2, 'the busy flag does not flap: ' .. flips .. ' flips')
+    h.assert_clean('redundant moves')
+end)
+case('static: Rosie movement never uses the map-pin engine path or sets a map pin', function()
+    local f = assert(io.open(ROOT .. '/Rosie/rosie/movement.lua', 'r'))
+    local src = f:read('*a'); f:close()
+    local code = src:gsub('%-%-[^\n]*', '')
+    ok(not code:find('create_path_game_engine', 1, true), 'no engine path call')
+    ok(not code:find('set_map_pin', 1, true), 'no map pin')
+end)
+
 case('one unreadable item never ends the census, a classification or the pulse (M2)', function()
     local h = new()
     enable(h)

@@ -826,19 +826,66 @@ function J.new(opts)
     local function move_request(kind)
         return function(p)
             if not p then return end
+            -- Live QQT (opts.request_move_redundant): request_move "only sends a
+            -- command if the player isn't already moving" there; a repeat of the
+            -- current destination is skipped and reports false.
+            if kind == 'request_move' and opts.request_move_redundant and h.goal
+                and math.abs(h.goal:x() - p:x()) + math.abs(h.goal:y() - p:y()) <= 0.5 then
+                h.redundant_moves = (h.redundant_moves or 0) + 1
+                return false
+            end
             local rec = note_call(h.moves, {kind = kind, x = p:x(), y = p:y()})
             h.goal = Vec:new(p:x(), p:y(), 0)
             h.native = {x = p:x(), y = p:y(), by = rec.owner, context = rec.context, t = h.now}
             return true
         end
     end
-    host('pathfinder', {request_move = move_request('request_move'), force_move_raw = move_request('force_move_raw'),
+    local pathfinder_api = {request_move = move_request('request_move'), force_move_raw = move_request('force_move_raw'),
         force_move = move_request('force_move'), move_to_cpathfinder = move_request('move_to_cpathfinder'),
         clear_stored_path = function()
             note_call(h.clears, {})
             h.goal, h.native = nil, nil
-        end})
+            if h.engine then h.engine.stored = nil end -- a pending mark request is NOT cancelled (live log)
+        end}
+    -- Live QQT create_path_game_engine (2.3.0-rc.6 logs), modelled whenever the
+    -- real Rosie is loaded (opts.engine_path=false turns it off): asynchronous
+    -- ("forward_mark_request ... forwarded", then a result only on a later call),
+    -- a dummy {} within 500 ms of the previous call (flood prevention), and it
+    -- routes to the MAP PIN: without a pin the request never completes
+    -- ("create_path function exit point" forever, as in Temis).
+    h.pins = {}
+    if rosie and opts.engine_path ~= false then
+        local engine = {calls = 0, forwards = 0, dummies = 0, finals = 0, last = -math.huge, log = {}}
+        h.engine = engine
+        pathfinder_api.create_path_game_engine = function(p)
+            note_call(engine.log, {x = p and p:x(), y = p and p:y()})
+            engine.calls = engine.calls + 1
+            if h.now - engine.last < 0.5 then
+                engine.dummies = engine.dummies + 1; engine.last = h.now
+                return {}
+            end
+            engine.last = h.now
+            local pending = engine.pending
+            if pending and pending.mark and h.now >= pending.at + 0.6 then
+                local route, from, mark = {}, pending.from, pending.mark
+                local d = math.max(from:dist_to_ignore_z(mark), 0.01)
+                for i = 1, math.ceil(d / 2) do
+                    local f = math.min(1, i * 2 / d)
+                    route[#route + 1] = Vec:new(from:x() + (mark:x() - from:x()) * f, from:y() + (mark:y() - from:y()) * f, 0)
+                end
+                engine.finals, engine.pending, engine.stored = engine.finals + 1, nil, route
+                return route
+            end
+            if not pending then
+                engine.forwards = engine.forwards + 1
+                engine.pending = {at = h.now, from = Vec:new(h.pos:x(), h.pos:y(), 0), mark = h.pin}
+            end
+            return engine.stored or {}
+        end
+    end
+    host('pathfinder', pathfinder_api)
     host('utility', {
+        set_map_pin = function(p) h.pin = p; h.pins[#h.pins + 1] = p end,
         is_point_walkeable = walkable,
         set_height_of_valid_position = function(p) return p end,
         is_ray_cast_walkeable = function() return true end,

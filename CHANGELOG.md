@@ -2,6 +2,25 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.8] — 2026-09-26
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.7.
+
+### Fixed
+
+- Rosie 1.0.5: **stood still in Temis** on the way to the Blacksmith (repair/salvage) and to the stash (live rc.6: "Moving to stash", `[Rosie:repair] is_done() -> false`, then only `world_traveler::create_path function exit point` every ~2.5 s), and in the Helltide it **looted oddly and ran back and forth** while the host printed ~30 `GENERATING helltide EXCEPTION - 222` lines in 10 s. Rosie moved only after the host's `create_path_game_engine` returned a complete route to the target. On the live host that call is asynchronous and routes to the map pin; Rosie sets none, so no route ever came back and Rosie never walked, while pickup re-requested it every 0.35 s inside the host's 500 ms flood window. Rosie now walks with the native `request_move` (as WarPigs' Temis route and SilentRaven do), never calls the engine path and never sets a map pin. The existing bound still applies: 3 s without progress, two re-requests, then *Stopped: no movement progress*.
+- Rosie 1.0.5: `request_move` reporting `false` (the host skips a command that repeats the current one) is no longer treated as a refusal. It used to drop pickup's busy flag every step, so the activity (HelltideRevamped, which yields while the Looter is busy) and Rosie pulled the player back and forth.
+
+### Changed
+
+- Rosie README: movement, retry and mythic sections match the current behaviour; version 1.0.5.
+
+### Validation
+
+- `audit/tests/joint_host.lua` now models the live `create_path_game_engine` whenever the real Rosie is loaded (asynchronous, 500 ms flood dummy, routes only to a map pin) and, on request, a `request_move` that reports `false` for a repeated command. With the old movement code every Rosie town trip and pickup test fails on this model, as in the live log.
+- New cases in `test_rosie_contract.lua`: a town trip walks and never calls the engine or sets a pin; six drops are picked up next to a patrolling activity with at most two busy flips (no back and forth); the same with the repeated-command `false` (8 flips before the second fix); a static guard. All fail before the fix.
+- `python3 audit/tests/run_tests.py`: all test files × (Lua 5.4 + LuaJIT) pass.
+
 ## [2.3.0-rc.7] — 2026-09-26
 
 Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.6. The Rosie town/Helltide movement stall reported live on rc.6 is still being fixed and is not in this build.
