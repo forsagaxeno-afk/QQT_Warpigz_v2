@@ -27,7 +27,7 @@ local function case(name, fn)
     end
 end
 
-local WP, HR = 'WarPigs-1.0.0', 'HelltideRevamped-0.4'
+local WP, HR = 'WarPigs', 'HelltideRevamped'
 local HELLTIDE_Q = 'WarPlans_QST_Helltide_TorturedGifts'
 local PERSISTED = {helltide_revamped_main_toggle = true, war_pigs_main_toggle = true,
     war_pug_main_toggle = true, silent_raven_main_toggle = true}

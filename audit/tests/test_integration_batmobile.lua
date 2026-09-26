@@ -3,7 +3,7 @@
 -- cache for ARK-3, R11 companion-safe ownership).  Loads the real Batmobile navigator / external /
 -- long_path (and main.lua or the real explorer where a case needs them)
 -- with QQT-shaped host mocks.  Runs under Lua 5.4 and LuaJIT.
-local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/Batmobile-1.0.12/'
+local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/Batmobile/'
 local checks, cases, failures = 0, 0, {}
 local function ok(cond, message)
     checks = checks + 1

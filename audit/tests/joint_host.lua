@@ -30,15 +30,15 @@
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = {}
 
-J.DIRS = {'ArkhamAsylum-1.0.6', 'Batmobile-1.0.12', 'HelltideRevamped-0.4', 'HordeDev-1.3.9',
-    'Reaper-main', 'SilentRaven-0.1.3', 'WarPigs-1.0.0', 'WarPug-1.0.0', 'WonderCity-main'}
+J.DIRS = {'ArkhamAsylum', 'Batmobile', 'HelltideRevamped', 'HordeDev',
+    'Reaper', 'SilentRaven', 'WarPigs', 'WarPug', 'WonderCity'}
 -- Documented cross-plugin exports (plugin READMEs / main.lua).
 J.EXPORTS = {
-    ArkhamAsylumPlugin = 'ArkhamAsylum-1.0.6', BatmobilePlugin = 'Batmobile-1.0.12',
-    HelltideRevampedPlugin = 'HelltideRevamped-0.4', InfernalHordesPlugin = 'HordeDev-1.3.9',
-    ReaperPlugin = 'Reaper-main', SilentRavenPlugin = 'SilentRaven-0.1.3',
-    PLUGIN_silent_raven = 'SilentRaven-0.1.3', WarPigsPlugin = 'WarPigs-1.0.0',
-    WarPugPlugin = 'WarPug-1.0.0', WonderCityPlugin = 'WonderCity-main',
+    ArkhamAsylumPlugin = 'ArkhamAsylum', BatmobilePlugin = 'Batmobile',
+    HelltideRevampedPlugin = 'HelltideRevamped', InfernalHordesPlugin = 'HordeDev',
+    ReaperPlugin = 'Reaper', SilentRavenPlugin = 'SilentRaven',
+    PLUGIN_silent_raven = 'SilentRaven', WarPigsPlugin = 'WarPigs',
+    WarPugPlugin = 'WarPug', WonderCityPlugin = 'WonderCity',
 }
 -- Pre-existing upstream globals (luacheck W111 since the original archive):
 -- class filters and explorer state written lazily. Reported, not failures.

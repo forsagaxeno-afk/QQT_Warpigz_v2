@@ -9,7 +9,7 @@
 -- Every case fails on d275b9d (HordeDev enabled in town with enable() and no
 -- War Plan teleport; the WPD-3 bypass enables it outside the Horde).
 local ROOT = assert(SUITE_ROOT)
-local root = ROOT .. '/WarPigs-1.0.0/'
+local root = ROOT .. '/WarPigs/'
 local checks, failures = 0, {}
 local function eq(a, b, message)
     if a ~= b then error((message or 'mismatch') .. ': expected ' .. tostring(b) .. ', got ' .. tostring(a), 2) end
@@ -660,7 +660,7 @@ end)
 
 -- ── part B: the joint host (all nine real plugins) ──────────────────────────
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
-local WP, PUG, SR, HD = 'WarPigs-1.0.0', 'WarPug-1.0.0', 'SilentRaven-0.1.3', 'HordeDev-1.3.9'
+local WP, PUG, SR, HD = 'WarPigs', 'WarPug', 'SilentRaven', 'HordeDev'
 local function el(h, dir) return assert(h.mod(dir, dir == SR and 'silent_raven.gui' or 'gui'), dir).elements end
 local function joint(opts)
     local h = J.new({})

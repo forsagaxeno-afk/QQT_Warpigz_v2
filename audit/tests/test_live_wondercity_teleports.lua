@@ -1,7 +1,7 @@
 -- Live report (v2.1.0): "when wondercity starts he TPs to the entrance 5 times
 -- in a row, then starts the run". Loads the real teleport_kurast and
 -- walk_kurast tasks with QQT-shaped doubles.
-local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/WonderCity-main/'
+local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/WonderCity/'
 local failures, checks = {}, 0
 local function check(label, fn)
     checks = checks + 1

@@ -3,7 +3,7 @@
 -- results, orbwalker restore, warplan error handling and bounded gates (C6).
 -- Loads the real orchestrator (and, where noted, the real turn-in task) with
 -- QQT-shaped host mocks in an isolated environment.
-local root = assert(SUITE_ROOT) .. '/WarPigs-1.0.0/'
+local root = assert(SUITE_ROOT) .. '/WarPigs/'
 local checks, failures = 0, {}
 local function eq(a, b, message)
     if a ~= b then error((message or 'mismatch') .. ': expected ' .. tostring(b) .. ', got ' .. tostring(a), 2) end

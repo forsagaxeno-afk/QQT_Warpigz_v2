@@ -1,4 +1,4 @@
-local root = SUITE_ROOT .. '/Batmobile-1.0.12/'
+local root = SUITE_ROOT .. '/Batmobile/'
 local tests, checks = 0, 0
 local function eq(actual, expected, message)
     checks = checks + 1

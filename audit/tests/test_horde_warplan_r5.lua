@@ -34,7 +34,7 @@ local function case(name, fn)
     else failures[#failures + 1] = name .. ': ' .. tostring(err) end
 end
 
-local WP, PUG, SR, HD = 'WarPigs-1.0.0', 'WarPug-1.0.0', 'SilentRaven-0.1.3', 'HordeDev-1.3.9'
+local WP, PUG, SR, HD = 'WarPigs', 'WarPug', 'SilentRaven', 'HordeDev'
 local HORDE_Q, LIBRARY_WP, CHEST_WAIT = 'WarPlans_QST_InfernalHordes_BSK', 0x10D63D, 20
 local function el(h, dir) return assert(h.mod(dir, dir == SR and 'silent_raven.gui' or 'gui'), dir).elements end
 local function setup(opts)

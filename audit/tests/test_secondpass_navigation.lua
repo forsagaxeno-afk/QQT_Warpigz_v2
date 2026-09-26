@@ -134,7 +134,7 @@ function V:new(x,y,z)return setmetatable({x,y,z or 0},self)end
 function V:x()return self[1]end;function V:y()return self[2]end;function V:z()return self[3]end
 local function bm_fixture()
     local c={now=10,moves=0,unpaused=0};local e=setmetatable({}, {__index=_G});e._G=e
-    local root=SUITE_ROOT..'/Batmobile-1.0.12/'
+    local root=SUITE_ROOT..'/Batmobile/'
     local player={get_position=function()return V:new(0,0,0)end,get_buffs=function()return {}end,is_dead=function()return false end,
         get_attribute=function()return 0 end,get_active_spell_id=function()return -1 end,get_current_speed=function()return 0 end}
     e.vec3=V;e.vec2=V;e.get_hash=function()return 1 end;e.get_time_since_inject=function()return c.now end

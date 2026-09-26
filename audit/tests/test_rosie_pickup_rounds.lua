@@ -191,7 +191,7 @@ end)
 -- (Reaper loot_ready, 3 s of quiet) left before round 2 could pick the drop.
 case('R-E10 a stalled drop keeps the busy flag through its rounds; Reaper waits for it', function()
     for _, fight in ipairs({10, 15}) do
-        local h = J.new({rosie = true, dirs = {'Reaper-main'}, place = 'pit'})
+        local h = J.new({rosie = true, dirs = {'Reaper'}, place = 'pit'})
         h.pos = h.v(0, 0)
         eq(h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end), true, 'enable')
         h.frame()
@@ -200,13 +200,13 @@ case('R-E10 a stalled drop keeps the busy flag through its rounds; Reaper waits 
         local real = h.G.pathfinder.request_move
         local fight_until = h.now + fight
         h.G.pathfinder.request_move = function(p) if h.now < fight_until then return false end return real(p) end
-        local utils = h.mod('Reaper-main', 'core.utils')
+        local utils = h.mod('Reaper', 'core.utils')
         local started, idle_gap, ready_early = false, 0, false
         h.run_until(function() return (h.pickups or 0) > 0 end, 40, function(hh)
             if (hh.pickups or 0) > 0 then return end
             local b = busy(hh)
             if b then started = true elseif started then idle_gap = idle_gap + 1 end
-            if hh.as('Reaper-main', function() return utils.loot_ready() end) then ready_early = true end
+            if hh.as('Reaper', function() return utils.loot_ready() end) then ready_early = true end
         end)
         ok((h.pickups or 0) > 0, fight .. ' s fight: picked up\n' .. h.tail())
         eq(idle_gap, 0, fight .. ' s fight: idle frames between rounds')

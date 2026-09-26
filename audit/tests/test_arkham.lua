@@ -1,4 +1,4 @@
-local root = assert(SUITE_ROOT) .. '/ArkhamAsylum-1.0.6/'
+local root = assert(SUITE_ROOT) .. '/ArkhamAsylum/'
 local checks = 0
 local function test(name, fn)
     local ok, err = pcall(fn)

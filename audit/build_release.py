@@ -1,7 +1,7 @@
 """Build the installable release package and its release notes.
 
 Usage: python3 audit/build_release.py [--out dist]
-Creates <out>/QQT_Warpigz_v2-vX.Y.Z.zip with the plugin folders listed in versions.json under
+Creates <out>/QQT_Warpigz_v3-vX.Y.Z.zip with the plugin folders listed in versions.json under
 scripts/ (the only folders users copy into QQT's scripts directory) plus the
 user documents, and <out>/RELEASE_NOTES.md from the matching CHANGELOG entry.
 Used by .github/workflows/release.yml; runs locally the same way.
@@ -25,7 +25,7 @@ version = (ROOT / "VERSION").read_text().strip()
 manifest = json.loads((ROOT / "versions.json").read_text())
 out = Path(args.out)
 out.mkdir(parents=True, exist_ok=True)
-name = f"QQT_Warpigz_v2-v{version}"
+name = f"QQT_Warpigz_v3-v{version}"
 package = out / f"{name}.zip"
 with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
     for folder in manifest["components"]:

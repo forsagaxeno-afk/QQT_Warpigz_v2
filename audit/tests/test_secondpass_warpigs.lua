@@ -33,7 +33,7 @@ local function fixture()
     e.pathfinder={request_move=function() f.moves=(f.moves or 0)+1 end}
     f.settings={enabled=true,manage_whispers=false,use_teleport_transition=false}
     local modules={['core.settings']=f.settings,['core.tasks.turn_in_rewards']={tick=function(active) f.task_active=active end}}
-    local root=SUITE_ROOT .. '/WarPigs-1.0.0/'
+    local root=SUITE_ROOT .. '/WarPigs/'
     e.require=function(name)
         if modules[name] then return modules[name] end
         local value=assert(loadfile(root .. name:gsub('%.','/') .. '.lua','t',e))()
@@ -141,7 +141,7 @@ local function add_creator(f)
     local creator_environment=setmetatable({require=function(name)
         assert(name=='core.settings'); return f.psettings
     end},{__index=e})
-    f.planner=assert(loadfile(SUITE_ROOT .. '/WarPug-1.0.0/core/planner.lua','t',creator_environment))()
+    f.planner=assert(loadfile(SUITE_ROOT .. '/WarPug/core/planner.lua','t',creator_environment))()
     e.WarPigsPlugin={status=function() return {enabled=true,busy=f.o.is_busy()} end}
     e.WarPugPlugin={status=function() return {enabled=true,state=f.planner.get_current_state()} end}
 end

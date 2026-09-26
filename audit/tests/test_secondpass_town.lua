@@ -4,7 +4,7 @@ local function eq(actual, expected, message)
     assert(actual == expected, (message or 'mismatch') .. ': ' .. tostring(actual) .. ' ~= ' .. tostring(expected))
     checks = checks + 1
 end
-local folders = {'WonderCity-main', 'ArkhamAsylum-1.0.6', 'HelltideRevamped-0.4', 'HordeDev-1.3.9'}
+local folders = {'WonderCity', 'ArkhamAsylum', 'HelltideRevamped', 'HordeDev'}
 local function caller(folder, mode)
     local c = {now=100, calls=0, pauses=0, resumes=0, teleports=0, in_town=true, floor_loot=false,
         status={enabled=true, need_trigger=true}, callbacks={}}
@@ -119,7 +119,7 @@ end
 
 -- Arkham keeps its own bounded retry only for an accepted plain request.
 do
-    local c=caller('ArkhamAsylum-1.0.6','nil');c.in_town=false;c.task.Execute()
+    local c=caller('ArkhamAsylum','nil');c.in_town=false;c.task.Execute()
     eq(c.method,'plain');eq(c.teleports,1,'plain accepted request starts own town hop')
     c.now=101;c.task.Execute();eq(c.teleports,1,'native channel debounce')
     c.now=103;c.task.Execute();eq(c.teleports,2,'interrupted own hop can retry')
@@ -127,15 +127,15 @@ do
     c.now=109;c.task.Execute();eq(c.teleports,3,'at most three local attempts for one request')
 end
 for _, mode in ipairs({'reject','throw','throw_after_queue'}) do
-    local c=caller('ArkhamAsylum-1.0.6',mode);c.in_town=false;c.task.Execute();c.now=103;c.task.Execute()
+    local c=caller('ArkhamAsylum',mode);c.in_town=false;c.task.Execute();c.now=103;c.task.Execute()
     eq(c.teleports,0,'unaccepted or uncertain request cannot authorize local teleport')
 end
 do
-    local c=caller('ArkhamAsylum-1.0.6','nil');c.in_town=false;c.floor_loot=true;c.task.Execute()
+    local c=caller('ArkhamAsylum','nil');c.in_town=false;c.floor_loot=true;c.task.Execute()
     eq(c.method,'teleport');c.now=103;c.task.Execute();eq(c.teleports,0,'Alfred round-trip never receives a local retry')
 end
 for _, blocker in ipairs({'unknown','pending','foreign','loading','arrived'}) do
-    local c=caller('ArkhamAsylum-1.0.6','nil');c.in_town=false;c.task.Execute();c.now=103
+    local c=caller('ArkhamAsylum','nil');c.in_town=false;c.task.Execute();c.now=103
     if blocker=='unknown' then c.status_error=true elseif blocker=='pending' then c.status.pending=true
     elseif blocker=='foreign' then c.status.external_caller='Other' elseif blocker=='loading' then c.loading=true
     else c.in_town=true end
@@ -160,13 +160,13 @@ local function bridge_session()
         ['core.settings']={enabled=true,plugin_version='1.0.0'}}
     e.require=function(name)
         if modules[name] then return modules[name] end
-        local prefix=name:match('^silent_raven%.') and 'SilentRaven-0.1.3/' or 'WarPug-1.0.0/'
+        local prefix=name:match('^silent_raven%.') and 'SilentRaven/' or 'WarPug/'
         local value=assert(loadfile(SUITE_ROOT..'/'..prefix..name:gsub('%.','/')..'.lua','t',e))()
         modules[name]=value;return value
     end
     c.raven=e.require('silent_raven.external');c.tracker=e.require('silent_raven.tracker');e.SilentRavenPlugin=c.raven
     c.planner=e.require('core.planner');e.WarPugPlugin=e.require('core.external')
-    c.bridge=assert(loadfile(SUITE_ROOT..'/WarPigs-1.0.0/wp_silent_raven.lua','t',e))().new()
+    c.bridge=assert(loadfile(SUITE_ROOT..'/WarPigs/wp_silent_raven.lua','t',e))().new()
     e.WarPigsPlugin={status=function()return {enabled=true,busy=c.bridge:is_busy() or c.bridge:blocks_plan_creator()}end}
     -- The idle Looter has been observed for the bridge's L7 quiet window (4 s).
     for t=6,10 do c.bridge:observe(t,true) end;c.bridge:observe(11.1,true);c.now=11.1;c.env=e

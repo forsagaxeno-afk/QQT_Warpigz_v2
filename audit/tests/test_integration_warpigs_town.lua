@@ -7,8 +7,8 @@
 -- API (and, in one case, the real WarPug planner) with QQT-shaped host mocks
 -- in an isolated environment. Companion plugins are mocked by their public
 -- status contracts.
-local root = assert(SUITE_ROOT) .. '/WarPigs-1.0.0/'
-local pug_root = SUITE_ROOT .. '/WarPug-1.0.0/'
+local root = assert(SUITE_ROOT) .. '/WarPigs/'
+local pug_root = SUITE_ROOT .. '/WarPug/'
 local checks, failures = 0, {}
 local function eq(a, b, message)
     if a ~= b then error((message or 'mismatch') .. ': expected ' .. tostring(b) .. ', got ' .. tostring(a), 2) end

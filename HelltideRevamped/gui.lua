@@ -1,5 +1,5 @@
 local gui = {}
-local version = "v2.2.0"
+local version = "v2.2.2"
 local plugin_label = "helltide_revamped"
 
 local function create_checkbox(value, key)
@@ -83,17 +83,15 @@ end
 
 local function render_ruptures()
     local e = gui.elements
-    if not e.ruptures_tree:push("Pandemonium Ruptures (Farm mode)") then return end
-    e.hunt_rift_toggle:render("Hunt Pandemonium Ruptures",
-        "Farm mode: route to ruptures (tears) first — kill the cultists, close the golden tears, open the rupture chests, then go back to chests/monsters.")
+    -- QQT_Warpigz_v2 (2.2.1): Season 15 calls these Tears; the Season 14
+    -- only options (Surging/Colossal filters and priority, Deathtoll Chamber,
+    -- scan log) are no longer shown and stay at fixed values (core/settings.lua).
+    if not e.ruptures_tree:push("Tears (Farm mode)") then return end
+    e.hunt_rift_toggle:render("Hunt tears",
+        "Farm mode: go to tears first: kill the cultists, close the golden tears, open the chests, then go back to chests/monsters.")
     if e.hunt_rift_toggle:get() then
-        e.rupture_replace_local_events:render("Prefer ruptures over legacy Helltide events",
-            "Skip flame pillar / ravenous soul events while hunting ruptures.")
-        e.rupture_prioritize_surging:render("Prioritize Surging ruptures",
-            "Route to Colossal and Surging ruptures before Normal ones when several are in range.")
-        e.rupture_hunt_normal:render("  Hunt Normal ruptures", "S14_Rupture_SMP_* ruptures")
-        e.rupture_hunt_surging:render("  Hunt Surging ruptures", "S14_Rupture_LE_* ruptures (Realmwalker chance)")
-        e.rupture_hunt_colossal:render("  Hunt Colossal ruptures", "S14_Rupture_Major_* / ZE_* ruptures")
+        e.rupture_replace_local_events:render("Prefer tears over legacy Helltide events",
+            "Skip flame pillar / ravenous soul events while hunting tears.")
         e.rupture_max_cinders:render("  Pause hunt at cinders",
             "Stop looking for NEW ruptures once you hold this many cinders so they get spent on chests first (0 = always hunt). A rupture already in progress is finished.", 1)
         e.tear_search_dist:render("  Search distance", "Scan this far for ritual rings, rupture gizmos and active tears", 5)
@@ -101,20 +99,14 @@ local function render_ruptures()
         e.tear_event_radius:render("  Ritual stay radius", "Stay within this distance of the rupture anchor while closing tears", 1)
         e.tear_circle_radius:render("  Hold-area tolerance", "How far from the ritual circle centre before walking back", 1)
         e.rupture_linger_sec:render("  Linger after last tear", "Seconds to stay in the ring after the tears are gone (more kills, rupture rewards)", 1)
-        e.rupture_do_realmwalker:render("  Fight Realmwalker after Surging/Colossal",
-            "Wait for and kill the Realmwalker (S14_Golem_Stone_Realmwalker) after a Surging/Colossal rupture.")
+        e.rupture_do_realmwalker:render("  Fight Realmwalker",
+            "Wait for and kill the Realmwalker when it spawns after tears.")
         if e.rupture_do_realmwalker:get() then
             e.rupture_rw_wait_sec:render("    Realmwalker wait (sec)", "How long to wait for the Realmwalker to spawn", 1)
-            e.rupture_do_deathtoll_chamber:render("    Enter Deathtoll Chamber (experimental)",
-                "Use the portal after the Realmwalker dies. Leaves the helltide zone for a while; off by default.")
-            if e.rupture_do_deathtoll_chamber:get() then
-                e.rupture_chamber_linger_sec:render("    Chamber linger (sec)", "Stay on the tears in the chamber after they clear", 1)
-            end
         end
         e.tear_use_charge_ring:render("  Stand on chargeable tears", "Walk onto golden tears and stay put while your rotation clears the adds")
-        e.rupture_open_chests:render("  Open rupture chests",
+        e.rupture_open_chests:render("  Open tear chests",
             "Open Pandemonium chests (free) and affordable helltide chests inside the ritual ring. Requires Open Helltide Chest.")
-        e.log_tear_candidates:render("  Log rupture scan hits", "Print matched rupture actors to the console (debug)")
     end
     e.ruptures_tree:pop()
 end

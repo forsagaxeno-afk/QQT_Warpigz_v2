@@ -1,5 +1,5 @@
 -- Actual standalone modules, QQT-shaped host mocks. No game execution.
-local root = SUITE_ROOT .. '/SilentRaven-0.1.3/'
+local root = SUITE_ROOT .. '/SilentRaven/'
 local checks = 0
 local function eq(a,b,message)
     assert(a==b,(message or 'mismatch')..': '..tostring(a)..' ~= '..tostring(b))

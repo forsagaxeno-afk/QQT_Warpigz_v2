@@ -67,6 +67,6 @@ jobs:
           esac
           gh release create "$tag" dist/*.zip \
             --target "$GITHUB_SHA" \
-            --title "QQT_Warpigz_v2 $tag" \
+            --title "QQT_Warpigz_v3 $tag" \
             --notes-file dist/RELEASE_NOTES.md \
             $visibility

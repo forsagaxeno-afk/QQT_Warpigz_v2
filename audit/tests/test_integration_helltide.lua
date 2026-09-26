@@ -7,7 +7,7 @@
 -- tasks and core modules with QQT-shaped host mocks; Alfred, Batmobile,
 -- Looteer and the orbwalker are the synthetic boundaries. Runs under Lua 5.4
 -- and LuaJIT.
-local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/HelltideRevamped-0.4/'
+local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/HelltideRevamped/'
 local checks, cases, failures = 0, 0, {}
 local function ok(cond, message)
     checks = checks + 1
@@ -470,6 +470,21 @@ case('HLT-3 give-up with salvage off still retries instead of parking in BACK_TO
     s.bm.giving_up = true
     s.tick(7)
     eq(#s.teleports, 2)
+end)
+
+case('live rc.13: after the trap recovery reached town, coming back to the same Helltide does not teleport out again', function()
+    local s = session({salvage = false})
+    s.tick(1)
+    s.bm.giving_up = true
+    s.tick(0.1)
+    eq(#s.teleports, 1, 'give-up teleport')
+    s.bm.giving_up = false
+    s.in_helltide = false                        -- arrived in town
+    s.tick(2)
+    s.in_helltide = true                         -- search brought us back (the only active Helltide)
+    s.tick(10)
+    eq(#s.teleports, 1, 'no town <-> Helltide loop (live: "Still in the abandoned zone" every 15 s)')
+    ok(s.helltide.current_state ~= 'BACK_TO_TOWN', 'a fresh session: ' .. tostring(s.helltide.current_state))
 end)
 
 case('HLT-8 the give-up teleport and its retries wait for an active Looter pickup', function()

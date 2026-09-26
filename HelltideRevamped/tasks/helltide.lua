@@ -3561,6 +3561,20 @@ local helltide_task = {
             -- keep clearing the mobs and re-fire it (6 s channel debounce).
             -- Salvage waits until we are out: an Alfred with-teleport trip
             -- from here would portal straight back into the trap.
+            -- QQT_Warpigz_v2 (2.2.1, live rc.13): once the trip reached town
+            -- the recovery is over. Coming back (search found the same, only
+            -- active Helltide) starts a fresh session instead of teleporting
+            -- out again in an endless town <-> Helltide loop.
+            if not utils.is_in_helltide() then
+                self._abandon_reached_town = true
+            elseif self._abandon_reached_town then
+                console.print("[HELLTIDE] Back in the Helltide after the trap recovery — starting fresh")
+                self._abandon_reached_town = nil
+                tracker.abandoning_zone = nil
+                force_zone_change = false
+                self.current_state = helltide_state.INIT
+                return
+            end
             if utils.is_in_helltide() then
                 settings.force_orb_clear_for(5)
                 local now = get_time_since_inject()
@@ -3754,6 +3768,7 @@ local helltide_task = {
         self._handlers_ran_at = nil
         self.hold_reason, self._hold_since, self._hold_logged = nil, nil, nil
         self._town_tp_at = nil
+        self._abandon_reached_town = nil
         self._trav_cleared_for = nil
         tracker.abandoning_zone = nil
     end

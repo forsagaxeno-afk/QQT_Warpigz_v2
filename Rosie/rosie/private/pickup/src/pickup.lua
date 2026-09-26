@@ -82,8 +82,16 @@ function M.wake(item)
     if e then e.rest_until=0 end
 end
 -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): end a round (see the header).
-local function fail_round(e,now,why)
+local function item_name(item)
+    local info=Utils.call(item,'get_item_info')
+    return tostring(Utils.call(info,'get_display_name') or Utils.call(info,'get_skin_name') or 'item'):gsub('[\r\n]',' '):sub(1,80)
+end
+local function fail_round(e,now,why,item,d)
     e.rounds=e.rounds+1;e.why=why;e.rest_until=now+REST
+    -- QQT_Warpigz_v2 (live rc.13): name the drop Rosie could not take.
+    console.print(string.format('[Rosie pickup] %s %s: round %d/%d failed (%s, distance %.1f)',
+        e.rounds>=MAX_ROUNDS and 'Gave up on' or 'Retrying',item and item_name(item) or 'item',e.rounds,MAX_ROUNDS,
+        why=='stall' and 'no progress toward it' or 'interactions did not pick it up',d or -1))
     e.interacts=0;e.best=nil;e.best_at=nil;e.working=false;e.next=0
 end
 function M.step(item)
@@ -103,8 +111,8 @@ function M.step(item)
     if not e.best or d<e.best-PROGRESS or d<=REACH then e.best=math.min(d,e.best or d);e.best_at=now end
     -- QQT_Warpigz_v2 local patch: a round that ends with rounds left keeps the busy flag for this frame
     -- (the next pulse wakes it or serves another drop; review rc.10).
-    if d>REACH and now-e.best_at>=ROUND_STALL then fail_round(e,now,'stall');M.release_movement();return e.rounds<MAX_ROUNDS end
-    if e.interacts>=ROUND_INTERACTS then fail_round(e,now,'interact');M.release_movement();return e.rounds<MAX_ROUNDS end
+    if d>REACH and now-e.best_at>=ROUND_STALL then fail_round(e,now,'stall',item,d);M.release_movement();return e.rounds<MAX_ROUNDS end
+    if e.interacts>=ROUND_INTERACTS then fail_round(e,now,'interact',item,d);M.release_movement();return e.rounds<MAX_ROUNDS end
     if now<e.next then return e.working==true end
     if d>REACH then
         e.next=now+MOVE_GAP

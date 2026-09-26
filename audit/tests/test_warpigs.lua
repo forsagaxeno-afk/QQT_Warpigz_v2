@@ -1,4 +1,4 @@
-local root = assert(SUITE_ROOT) .. '/WarPigs-1.0.0/'
+local root = assert(SUITE_ROOT) .. '/WarPigs/'
 package.path = root .. '?.lua;' .. package.path
 local function equal(a, b, message)
     assert(a == b, (message or 'mismatch') .. ': expected ' .. tostring(b) .. ', got ' .. tostring(a))

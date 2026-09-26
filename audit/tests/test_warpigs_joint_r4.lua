@@ -26,7 +26,7 @@ local function case(name, fn)
     if not passed then failures[#failures + 1] = name .. ': ' .. tostring(err) end
 end
 
-local WP, PUG, SR = 'WarPigs-1.0.0', 'WarPug-1.0.0', 'SilentRaven-0.1.3'
+local WP, PUG, SR = 'WarPigs', 'WarPug', 'SilentRaven'
 local function el(h, dir) return assert(h.mod(dir, dir == SR and 'silent_raven.gui' or 'gui'), dir).elements end
 local function setup(opts)
     local h = J.new(opts)

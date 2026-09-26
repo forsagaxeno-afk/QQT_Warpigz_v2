@@ -96,18 +96,18 @@ gui.elements = cached or {
 
    item_types = {
       tree = tree_node:new(1),
-      event_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_event_items_toggle")),
-      quest_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_quest_items_toggle")),
-      crafting_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_crafting_items_toggle")),
-      boss_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_boss_items_toggle")),
+      event_items_toggle = checkbox:new(true, get_hash(plugin_label .. "_event_items_toggle")),
+      quest_items_toggle = checkbox:new(true, get_hash(plugin_label .. "_quest_items_toggle")),
+      crafting_items_toggle = checkbox:new(true, get_hash(plugin_label .. "_crafting_items_toggle")),
+      boss_items_toggle = checkbox:new(true, get_hash(plugin_label .. "_boss_items_toggle")),
       rare_elixir_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_rare_elixir_items_toggle")),
       basic_elixir_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_basic_elixir_items_toggle")),
       advanced_elixir_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_advanced_elixir_items_toggle")),
       sigil_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_sigil_items_toggle")),
-      compass_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_compass_items_toggle")),
-      rune_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_rune_items_toggle")),
-      tribute_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_tribute_items_toggle")),
-      scroll_items_toggle = checkbox:new(false, get_hash(plugin_label .. "_scroll_items_toggle")),
+      compass_items_toggle = checkbox:new(true, get_hash(plugin_label .. "_compass_items_toggle")),
+      rune_items_toggle = checkbox:new(true, get_hash(plugin_label .. "_rune_items_toggle")),
+      tribute_items_toggle = checkbox:new(true, get_hash(plugin_label .. "_tribute_items_toggle")),
+      scroll_items_toggle = checkbox:new(true, get_hash(plugin_label .. "_scroll_items_toggle")),
       cinders_toggle = checkbox:new(false, get_hash(plugin_label .. "_cinders_toggle")),
       heavenly_sigil_toggle = checkbox:new(false, get_hash(plugin_label .. "_heavenly_sigil_toggle")),
       charm_items_toggle = checkbox:new(true, get_hash(plugin_label .. "_charm_items_toggle")),
@@ -155,7 +155,7 @@ end
 add_slot_control("unique_focus",4)
 add_slot_control("unique_totem",4)
 gui.elements.item_types.other_consumable_items_toggle=gui.elements.item_types.other_consumable_items_toggle
-   or checkbox:new(false,get_hash(plugin_label.."_other_consumable_items_toggle"))
+   or checkbox:new(true,get_hash(plugin_label.."_other_consumable_items_toggle"))
 
 local menu_stack,menu_error={},nil
 local function push_tree(node,label)
@@ -353,22 +353,14 @@ local function render_settings(status)
       gui.elements.item_types.gemstone_items_toggle:render("Gemstones", "Uses the socketable bag.")
       gui.elements.item_types.fish_items_toggle:render("Fish", "Pick up recognized fish when there is room.")
       gui.elements.item_types.cache_items_toggle:render("Reward Caches", "Pick up recognized reward caches when there is room.")
-      gui.elements.item_types.rare_elixir_items_toggle:render("Special / Legacy Elixirs and Opals",
-         "Recognized special elixirs, legacy seasonal elixirs, Seething Opals and Draught of Whispers. An item record does not guarantee current drop availability.")
-      gui.elements.item_types.basic_elixir_items_toggle:render("Basic Elixirs",
-         "Do you wanna pickup Basic Elixirs?")
-      gui.elements.item_types.advanced_elixir_items_toggle:render("Advanced Elixirs",
-         "Do you wanna pickup Advanced Elixirs II?")
       gui.elements.item_types.other_consumable_items_toggle:render("Other Consumables / Incense",
-         "Otherwise uncategorized consumables, elixirs and incense. Basic, Advanced, Special, Event and Triad items retain their existing controls. Off by default.")
+         "Otherwise uncategorized consumables and incense.")
       gui.elements.item_types.scroll_items_toggle:render("Scrolls", "Do you want to loot scrolls?")
       gui.elements.item_types.sigil_items_toggle:render("Nightmare Dungeon Sigils", "Do you want to loot dungeon sigils?")
       gui.elements.item_types.compass_items_toggle:render("Horde Compasses", "Do you want to loot horde compasses?")
       gui.elements.item_types.tribute_items_toggle:render("Tributes", "Do you want to loot tributes?")
       gui.elements.item_types.rune_items_toggle:render("Runes", "Do you want to runes?")
       gui.elements.item_types.event_items_toggle:render("Event Bags / Gileon's Brew", "Recognized event treasure bags and Gileon's Brew. Reward Caches have a separate control.")
-      gui.elements.item_types.cinders_toggle:render("Cinders (Legacy)", "Compatibility control for recognized legacy Cinder skins. The current item catalog does not establish live availability.")
-      gui.elements.item_types.heavenly_sigil_toggle:render("Heavenly Sigil (Legacy)", "Compatibility control for recognized legacy Heavenly Sigil skins. The current item catalog does not establish live availability.")
       pop_tree(gui.elements.item_types.tree)
    end
  

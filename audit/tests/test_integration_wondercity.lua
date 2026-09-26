@@ -5,7 +5,7 @@
 -- gui/settings -> external -> scheduler -> tasks with QQT-shaped host mocks
 -- (Alfred/Batmobile/Looter are the synthetic boundaries). Runs under Lua 5.4
 -- and LuaJIT.
-local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/WonderCity-main/'
+local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/WonderCity/'
 local checks, cases, failures = 0, 0, {}
 local function ok(cond, message)
     checks = checks + 1

@@ -8,7 +8,7 @@
 -- AlfredTheButler / Looteer are behaviour-level mocks.
 -- Runs under Lua 5.4 and LuaJIT.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
-local ARK_DIR, BAT_DIR = ROOT .. '/ArkhamAsylum-1.0.6/', ROOT .. '/Batmobile-1.0.12/'
+local ARK_DIR, BAT_DIR = ROOT .. '/ArkhamAsylum/', ROOT .. '/Batmobile/'
 local checks, failures = 0, {}
 local function test(name, fn)
     local ok, err = pcall(fn)

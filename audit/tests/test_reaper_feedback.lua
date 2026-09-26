@@ -1,5 +1,5 @@
 -- External callers must not resolve Reaper's dependencies in their own context.
-local root = SUITE_ROOT .. '/Reaper-main/'
+local root = SUITE_ROOT .. '/Reaper/'
 local harness_env = setmetatable({REAPER_TEST_HARNESS_ONLY=true}, {__index=_G})
 local harness = assert(loadfile(SUITE_ROOT .. '/audit/tests/test_reaper.lua', 't', harness_env))()
 local count = 0

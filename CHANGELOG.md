@@ -2,6 +2,49 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.0.0] — 2026-09-27
+
+![QQT Warpigz Suite v3](https://raw.githubusercontent.com/forsagaxeno-afk/QQT_Warpigz_v2/claude/qqt-diablo4-plugins-orchestrator-4439v5/assets/branding/qqt-warpigz-suite-v3.png)
+
+**QQT_Warpigz_v3**: the public release of the 2.3.0 test builds, the first one since 2.1.3. All credits for the original foundation go to **@ZEWX — LONG LIVE LEGEND**. The Rosie author stays anonymous.
+
+### Upgrade from 2.x (important)
+
+- **Plugin folders no longer carry version numbers**: `WarPigs`, `WarPug`, `Batmobile`, `ArkhamAsylum`, `HelltideRevamped`, `HordeDev`, `Reaper`, `WonderCity`, `SilentRaven`, `Rosie`. Delete the old `WarPigs-1.0.0`, `WarPug-1.0.0`, `Batmobile-1.0.12`, `ArkhamAsylum-1.0.6`, `HelltideRevamped-0.4`, `HordeDev-1.3.9`, `Reaper-main`, `WonderCity-main` and `SilentRaven-0.1.3` folders first, or QQT loads two copies. From now on an update simply replaces the same folders.
+- **Rosie replaces Alfred and Looter**: remove your old Alfred / SteroidAlfred / AlfredTheButler-WarPigz / LooteerV3 folders (Rosie stays off while another one is loaded). Rosie starts off: set your pickup and town rules, then enable it.
+- Menu settings are kept (they are stored by the plugins' own keys, not by folder name).
+
+### Highlights
+
+- **Rosie**: one plugin for pickup and town service (sell, salvage, repair, Occultist, stash), used by WarPigs and every activity out of the box. LooteerV3-style pickup (rounds per drop, host Auto Loot switched off, walks around walls), Alfred-style stash handling (several open signals, confirmed deposits), bounded retries.
+- **Mythic sorting**: a fresh drop shows no affixes until it is picked up once, so on the ground a Mythic Unique looks like its plain Unique. *Pick up every Unique (sort in the bag)* (default on) takes every Unique and Mythic and sorts them in the bag: Mythics (the Mythic upgrade affix, the 14 Season 14 iconic re-issues, rarity 8) are always kept; *Plain Uniques* go to town rules (*In town*) or are dropped on the spot and never picked up again (*Drop*). Favourites, the Unique filter, the GA override and *Always keep mythics* always win. *Use Mythic Unique filter* chooses which Mythic Uniques to keep.
+- **HelltideRevamped**: *Warplan* / *Farm* modes; Farm hunts **tears** (kills the cultists, closes the tears, opens the chests, fights the Realmwalker). WarPigs always runs Warplan.
+- **HordeDev**: takes the War Plan altar (The Black Pact) between waves; the Looter pause at a pylon is bounded.
+- **WonderCity**: optional *Take the boss portal as soon as it opens*.
+
+### Changed since 2.3.0-rc.14
+
+- **TristramLoop is removed from the bundle** (it was only in the private test builds). If you installed it from a test build, delete its folder.
+
+- Rosie 1.0.12: the *Item Types* list no longer shows categories that do not exist in Season 15 (Special / Basic / Advanced Elixirs, Cinders, Heavenly Sigil; they are never picked up). New-install defaults match the recommended setup: quest items, crafting materials, boss trophies, lair keys, charms, seals, soul splinters, reward caches, other consumables, scrolls, horde compasses, tributes, runes and event bags on; gemstones, fish and Nightmare Dungeon sigils off. Saved choices are kept.
+- HelltideRevamped 2.2.2: after the trap recovery ("Batmobile gave up after 60s trapped") had reached town, returning to the same Helltide (the only active one) teleported out again every 15 s in an endless town ↔ Helltide loop (live). The recovery now ends in town and the next Helltide visit starts fresh.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: all test files × (Lua 5.4 + LuaJIT) pass; new case in `test_integration_helltide.lua` for the town ↔ Helltide loop (fails before the fix).
+
+## [2.3.0-rc.14] — 2026-09-27
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.13.
+
+### Changed
+
+- HelltideRevamped 2.2.1: the Farm-mode section is now **Tears (Farm mode)** (the Season 15 name): *Hunt tears*, *Prefer tears over legacy Helltide events*, *Fight Realmwalker*, *Open tear chests*. The Season 14 only options are removed from the menu (live report): *Prioritize Surging ruptures*, *Hunt Normal / Surging / Colossal ruptures*, *Enter Deathtoll Chamber* and *Log rupture scan hits*. Every tear found is hunted, the chamber is never entered and the scan log is off; the code paths stay for tests.
+
+### Added
+
+- Rosie 1.0.11: a pickup round that fails is logged with the drop's name: `[Rosie pickup] Retrying <name>: round n/3 failed (...)` and `[Rosie pickup] Gave up on <name> ...` (live rc.13: Helltide waited 12 s and 38.9 s for a drop Rosie could not take; the next log names it).
+
 ## [2.3.0-rc.13] — 2026-09-26
 
 Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.12.

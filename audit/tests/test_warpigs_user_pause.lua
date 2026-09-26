@@ -10,7 +10,7 @@
 -- host with all nine real plugins (critic probe_horde_hotkey_joint for
 -- HordeDev, the same pause for ArkhamAsylum).
 local ROOT = assert(SUITE_ROOT)
-local root = ROOT .. '/WarPigs-1.0.0/'
+local root = ROOT .. '/WarPigs/'
 local checks, failures = 0, {}
 local function eq(a, b, message)
     if a ~= b then error((message or 'mismatch') .. ': expected ' .. tostring(b) .. ', got ' .. tostring(a), 2) end
@@ -205,7 +205,7 @@ end)
 
 -- ── part B: the joint host (all nine real plugins) ──────────────────────────
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
-local WP, PUG, SR, HD, ARK = 'WarPigs-1.0.0', 'WarPug-1.0.0', 'SilentRaven-0.1.3', 'HordeDev-1.3.9', 'ArkhamAsylum-1.0.6'
+local WP, PUG, SR, HD, ARK = 'WarPigs', 'WarPug', 'SilentRaven', 'HordeDev', 'ArkhamAsylum'
 local HORDE = 'WarPlans_QST_InfernalHordes_BSK'
 local function el(h, dir) return assert(h.mod(dir, dir == SR and 'silent_raven.gui' or 'gui'), dir).elements end
 local function joint(opts)

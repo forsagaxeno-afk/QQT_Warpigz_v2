@@ -46,7 +46,7 @@ check('Batmobile processes a traversal buff despite a temporarily empty actor sc
     env._G = env
     env.require = function(name)
         if modules[name] ~= nil then return modules[name] end
-        modules[name] = assert(loadfile(root .. '/Batmobile-1.0.12/' .. name:gsub('%.','/') .. '.lua', 't', env))()
+        modules[name] = assert(loadfile(root .. '/Batmobile/' .. name:gsub('%.','/') .. '.lua', 't', env))()
         return modules[name]
     end
     local nav = env.require('core.navigator')

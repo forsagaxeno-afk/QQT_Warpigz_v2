@@ -1,4 +1,4 @@
-local root = assert(SUITE_ROOT) .. '/HordeDev-1.3.9/'
+local root = assert(SUITE_ROOT) .. '/HordeDev/'
 local checks = 0
 local function check(name, run)
     run(); checks = checks + 1; print('PASS Horde feedback: ' .. name)

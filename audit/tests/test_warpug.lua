@@ -1,7 +1,7 @@
-local root = assert(SUITE_ROOT) .. '/WarPug-1.0.0/'
+local root = assert(SUITE_ROOT) .. '/WarPug/'
 -- The cross-plugin cases load the actual WarPigs dispatcher, which now captures
 -- its dedicated Whisper bridge during bootstrap.
-package.path = SUITE_ROOT .. '/WarPigs-1.0.0/?.lua;' .. package.path
+package.path = SUITE_ROOT .. '/WarPigs/?.lua;' .. package.path
 local function equal(actual, expected, message)
     assert(actual == expected, (message or 'mismatch') .. ': expected ' .. tostring(expected) .. ', got ' .. tostring(actual))
 end
@@ -193,7 +193,7 @@ end
 -- external module, so the busy handshake is exercised rather than invented.
 for _, transitions in ipairs({ false, true }) do
     local f = fixture()
-    local pigs_root = SUITE_ROOT .. '/WarPigs-1.0.0/'
+    local pigs_root = SUITE_ROOT .. '/WarPigs/'
     local pigs_settings = { use_teleport_transition = transitions, run_pit_after_turnin = true,
         get_keybind_state = function() return true end }
     package.loaded['core.settings'] = pigs_settings
@@ -245,7 +245,7 @@ end
 -- ordinary cleanup. Native-transition intent must not then block creation.
 do
     local f = fixture(); f.settings.enabled = false
-    local pigs_root = SUITE_ROOT .. '/WarPigs-1.0.0/'
+    local pigs_root = SUITE_ROOT .. '/WarPigs/'
     local pigs_settings = { use_teleport_transition = false, run_pit_after_turnin = true,
         get_keybind_state = function() return true end }
     package.loaded['core.settings'] = pigs_settings

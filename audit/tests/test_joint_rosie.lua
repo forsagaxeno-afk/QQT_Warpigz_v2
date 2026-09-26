@@ -37,7 +37,7 @@ local function case(name, fn)
     else failures[#failures + 1] = name .. ': ' .. tostring(err); print('FAIL joint-rosie: ' .. name .. ': ' .. tostring(err)) end
 end
 
-local WP, PUG, SR, ARK, WC = 'WarPigs-1.0.0', 'WarPug-1.0.0', 'SilentRaven-0.1.3', 'ArkhamAsylum-1.0.6', 'WonderCity-main'
+local WP, PUG, SR, ARK, WC = 'WarPigs', 'WarPug', 'SilentRaven', 'ArkhamAsylum', 'WonderCity'
 local function el(h, dir)
     local mod = dir == SR and 'silent_raven.gui' or 'gui'
     return assert(h.mod(dir, mod), 'gui of ' .. dir).elements
@@ -284,7 +284,7 @@ case('R3 failed Rosie trips in Temis: bounded cooldown retries, then a latched s
     eq(#h.waypoints, 0, 'nobody teleported')
 end)
 
-local BAT, HR, RP = 'Batmobile-1.0.12', 'HelltideRevamped-0.4', 'Reaper-main'
+local BAT, HR, RP = 'Batmobile', 'HelltideRevamped', 'Reaper'
 local function bat_moves(h, from, to)
     return h.count(h.moves, function(m) return m.owner == BAT and m.t > from and (not to or m.t <= to) end)
 end

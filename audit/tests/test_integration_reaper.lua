@@ -7,7 +7,7 @@
 -- tasks with the QQT-shaped harness of test_reaper.lua; the joint cases also
 -- load the real WarPigs orchestrator and the real Batmobile. Lua 5.4 + LuaJIT.
 local SUITE = assert(SUITE_ROOT, 'SUITE_ROOT is required')
-local root = SUITE .. '/Reaper-main/'
+local root = SUITE .. '/Reaper/'
 local harness_env = setmetatable({REAPER_TEST_HARNESS_ONLY = true}, {__index = _G})
 local harness = assert(loadfile(SUITE .. '/audit/tests/test_reaper.lua', 't', harness_env))()
 
@@ -402,7 +402,7 @@ function V:z() return self[3] end
 local function real_batmobile()
     local b = {now = 100}
     local e = setmetatable({}, {__index = _G}); e._G = e
-    local broot = SUITE .. '/Batmobile-1.0.12/'
+    local broot = SUITE .. '/Batmobile/'
     local player = {get_position = function() return V:new(0, 0, 0) end, get_buffs = function() return {} end,
         is_dead = function() return false end, get_attribute = function() return 0 end,
         get_active_spell_id = function() return -1 end, get_current_speed = function() return 0 end}
@@ -634,7 +634,7 @@ local function warpigs_joint()
     w.revive_at_checkpoint = function() end
     local wsettings = {enabled = true, manage_whispers = false, use_teleport_transition = false}
     local modules = {['core.settings'] = wsettings, ['core.tasks.turn_in_rewards'] = {tick = function() end}}
-    local wroot = SUITE .. '/WarPigs-1.0.0/'
+    local wroot = SUITE .. '/WarPigs/'
     w.require = function(name)
         if modules[name] then return modules[name] end
         local value = assert(loadfile(wroot .. name:gsub('%.', '/') .. '.lua', 't', w))()

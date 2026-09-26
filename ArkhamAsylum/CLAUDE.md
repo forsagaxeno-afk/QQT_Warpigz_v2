@@ -2,19 +2,19 @@
 
 ## Project structure
 Two plugins work together:
-- **ArkhamAsylum-1.0.6** (this dir) — task orchestration, pit management
-- **Batmobile-1.0.12** (sibling dir) — navigation, exploration, pathfinding
+- **ArkhamAsylum** (this dir) — task orchestration, pit management
+- **Batmobile** (sibling dir) — navigation, exploration, pathfinding
 
 Changes to navigation/pathfinding logic almost always happen in Batmobile. Changes to task priorities, kill logic, and pit-flow happen in ArkhamAsylum.
 
 ## Key files
-- `ArkhamAsylum-1.0.6/core/task_manager.lua` — task priority order
-- `ArkhamAsylum-1.0.6/tasks/kill_monster.lua` — enemy targeting + progress tracking
-- `ArkhamAsylum-1.0.6/tasks/explore_pit.lua` — delegates to BatmobilePlugin
-- `Batmobile-1.0.12/core/navigator.lua` — movement, pathfinding loop, traversal handling
-- `Batmobile-1.0.12/core/explorer.lua` — frontier BFS exploration
-- `Batmobile-1.0.12/core/pathfinder.lua` — A* implementation
-- `Batmobile-1.0.12/core/external.lua` — public API (BatmobilePlugin)
+- `ArkhamAsylum/core/task_manager.lua` — task priority order
+- `ArkhamAsylum/tasks/kill_monster.lua` — enemy targeting + progress tracking
+- `ArkhamAsylum/tasks/explore_pit.lua` — delegates to BatmobilePlugin
+- `Batmobile/core/navigator.lua` — movement, pathfinding loop, traversal handling
+- `Batmobile/core/explorer.lua` — frontier BFS exploration
+- `Batmobile/core/pathfinder.lua` — A* implementation
+- `Batmobile/core/external.lua` — public API (BatmobilePlugin)
 
 ## Task priority (highest first)
 teleport_cerrigar > d4assistant > upgrade_glyph > alfred > enter_pit > portal > exit_pit > follower > interact_shrine > push_monsters > **kill_monster** > **explore_pit** > idle

@@ -59,18 +59,18 @@ local function fixture(options)
     e.require = function(name)
         if modules[name] ~= nil then return modules[name] end
         assert(name:match('^silent_raven%.'), 'unexpected non-namespaced dependency: ' .. name)
-        local value = assert(loadfile(root .. '/SilentRaven-0.1.3/' .. name:gsub('%.', '/') .. '.lua', 't', e))()
+        local value = assert(loadfile(root .. '/SilentRaven/' .. name:gsub('%.', '/') .. '.lua', 't', e))()
         modules[name] = value
         return value
     end
     e.on_update = function(fn) c.update = fn end
     e.on_render_menu = function() end
-    assert(loadfile(root .. '/SilentRaven-0.1.3/main.lua', 't', e))()
+    assert(loadfile(root .. '/SilentRaven/main.lua', 't', e))()
     c.update()
     c.api, c.tracker = e.SilentRavenPlugin, e.require('silent_raven.tracker')
     local bridge_options = {}
     if options.alfred_idle then bridge_options.alfred_idle = function() return options.alfred_idle(c) end end
-    c.bridge = assert(loadfile(root .. '/WarPigs-1.0.0/wp_silent_raven.lua', 't', e))().new(bridge_options)
+    c.bridge = assert(loadfile(root .. '/WarPigs/wp_silent_raven.lua', 't', e))().new(bridge_options)
     c.env, c.modules, c.gui, c.foreign_tracker = e, modules, gui, foreign_tracker
     function c:queue()
         self.bridge:observe(self.now, true)
@@ -290,7 +290,7 @@ do
     c.env.require = function(name)
         if name == 'core.settings' then return {manage_whispers = true, use_teleport_transition = false} end
         if name == 'wp_silent_raven' then
-            return assert(loadfile(root .. '/WarPigs-1.0.0/wp_silent_raven.lua', 't', c.env))()
+            return assert(loadfile(root .. '/WarPigs/wp_silent_raven.lua', 't', c.env))()
         end
         if name == 'core.tasks.turn_in_rewards' then return {tick = function() end, get_state = function() return 'IDLE' end} end
         return previous_require(name)
@@ -303,7 +303,7 @@ do
     local first = {get_status = function() return first_status end,
         trigger_tasks = function(_, callback) completed = callback; return true end}
     c.env.AlfredTheButlerPlugin = first
-    local orchestrator = assert(loadfile(root .. '/WarPigs-1.0.0/core/orchestrator.lua', 't', c.env))()
+    local orchestrator = assert(loadfile(root .. '/WarPigs/core/orchestrator.lua', 't', c.env))()
     orchestrator.tick()
     eq(completed, nil, 'actual orchestrator does not retrigger Alfred pending queue')
     eq(orchestrator.alfred_idle(), false, 'published pending flag is not idle')

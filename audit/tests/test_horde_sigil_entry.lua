@@ -1,5 +1,5 @@
 -- Preserved prior regression suite; only runner paths adapted.
-ROOT = assert(SUITE_ROOT) .. '/HordeDev-1.3.9'
+ROOT = assert(SUITE_ROOT) .. '/HordeDev'
 package.path = ROOT .. '/?.lua;' .. ROOT .. '/?/init.lua;' .. package.path
 local n=0
 local function eq(a,b,msg) n=n+1;assert(a==b,(msg or 'mismatch')..': expected '..tostring(b)..', got '..tostring(a)) end

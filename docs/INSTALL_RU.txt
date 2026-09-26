@@ -1,16 +1,19 @@
-QQT_Warpigz_v2 (версия в имени архива) — установка
+QQT_Warpigz_v3 (версия в имени архива) — установка
 ==================================
 
 1. Закрой QQT. Сделай резервную копию своих папок плагинов, настроек и WarPug\positions.txt
    ВНЕ папки scripts.
-2. Скопируй в папку scripts QQT ТОЛЬКО 11 папок из каталога scripts\ этого архива
-   (ArkhamAsylum-1.0.6, Batmobile-1.0.12, HelltideRevamped-0.4, HordeDev-1.3.9, Reaper-main,
-   Rosie, SilentRaven-0.1.3, TristramLoop, WarPigs-1.0.0, WarPug-1.0.0, WonderCity-main).
+2. Скопируй в папку scripts QQT ТОЛЬКО 10 папок из каталога scripts\ этого архива
+   (ArkhamAsylum, Batmobile, HelltideRevamped, HordeDev, Reaper,
+   Rosie, SilentRaven, WarPigs, WarPug, WonderCity).
    Заменяй папки целиком. Папки audit, docs, assets в scripts НЕ копируй.
+   С версии 3.0 в именах папок НЕТ номеров версий. При обновлении с 2.x СНАЧАЛА удали старые
+   WarPigs-1.0.0, WarPug-1.0.0, Batmobile-1.0.12, ArkhamAsylum-1.0.6, HelltideRevamped-0.4,
+   HordeDev-1.3.9, Reaper-main, WonderCity-main, SilentRaven-0.1.3 — иначе QQT загрузит две копии.
 3. Rosie заменяет Alfred и Looter. Убери из папки scripts старые Alfred, SteroidAlfred,
    AlfredTheButler-WarPigz, LooteerV3 и любые другие Alfred/Looter — иначе Rosie покажет
    конфликт и не включится. Свой боевой плагин/ротацию (Orbwalker) оставь — он не входит в сборку.
-4. Если калибровал WarPug сам — верни свой positions.txt из резервной копии в WarPug-1.0.0.
+4. Если калибровал WarPug сам — верни свой positions.txt из резервной копии в WarPug.
 5. Запусти QQT. Версии плагинов в консоли должны совпасть с таблицей в README.md
    этого архива (например "Lua Plugin - WarPigs - v...").
 6. Rosie стартует ВЫКЛЮЧЕННОЙ: настрой Pickup rules и Keep, storage & town, затем включи
@@ -36,8 +39,6 @@ QQT_Warpigz_v2 (версия в имени архива) — установка
    орда из War Plan заходит через телепорт War Plan, компас не тратится.
    "Allow compass entry if the War Plan teleport fails" — ВЫКЛ (по умолчанию).
 9. Ставь на паузу WarPigs, а не хоткей отдельного плагина.
-10. TristramLoop — отдельный плагин, WarPigs его не запускает. Перед стартом укажи друга
-    (Friend) в его меню; первый сброс карты будет после ожидания лута (по умолчанию 60 мин).
 
 После первой сессии пришли лог — особенно строки из LIVE_CHECKLIST.md
 (где приземляет телепорт War Plan, "[SilentRaven] reward diagnostics", "[WarPigs] ... held ...").

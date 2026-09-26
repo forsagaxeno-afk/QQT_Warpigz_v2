@@ -63,9 +63,9 @@ local function turn_in(w)
     env._G = env
     env.require = function(name)
         assert(name == 'wp_temis_route', 'unexpected dependency ' .. name)
-        return assert(loadfile(suite .. '/WarPigs-1.0.0/wp_temis_route.lua', 't', env))()
+        return assert(loadfile(suite .. '/WarPigs/wp_temis_route.lua', 't', env))()
     end
-    return assert(loadfile(suite .. '/WarPigs-1.0.0/core/tasks/turn_in_rewards.lua', 't', env))()
+    return assert(loadfile(suite .. '/WarPigs/core/tasks/turn_in_rewards.lua', 't', env))()
 end
 
 local function logged(w, needle)
@@ -88,7 +88,7 @@ end)
 
 check('a direct walk that stalls on the wall takes a bounded detour', function()
     local w = world(Vec:new(2593.0, -498.0, 30.5))      -- beside the wall, farther than 10 yd? no: stall path
-    local route = assert(loadfile(suite .. '/WarPug-1.0.0/warpug_temis_route.lua', 't',
+    local route = assert(loadfile(suite .. '/WarPug/warpug_temis_route.lua', 't',
         setmetatable({vec3 = Vec, pathfinder = w.pathfinder}, {__index = _G})))()
     local r = route.new(function(l) w.logs[#w.logs + 1] = l end)
     r.started = true                                       -- skip the Raven-side shortcut: test the stall detour

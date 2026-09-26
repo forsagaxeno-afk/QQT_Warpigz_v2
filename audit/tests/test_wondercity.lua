@@ -1,4 +1,4 @@
-local root = assert(SUITE_ROOT) .. '/WonderCity-main/'
+local root = assert(SUITE_ROOT) .. '/WonderCity/'
 local checks = 0
 local function test(name, fn)
     local ok, err = pcall(fn)

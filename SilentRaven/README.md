@@ -4,7 +4,7 @@ Based on magoogle's user-supplied SilentRaven 0.1.3. This build supports the cur
 
 ## Installation and behavior
 
-Replace the existing `SilentRaven-0.1.3` folder with this complete folder; do not load both copies. Enable SilentRaven in its own menu and enable the SilentRaven option in WarPigs. Your existing slot priority settings retain their widget identifiers. WarPigs does not enable SilentRaven on your behalf.
+Replace the existing `SilentRaven` folder with this complete folder; do not load both copies. Enable SilentRaven in its own menu and enable the SilentRaven option in WarPigs. Your existing slot priority settings retain their widget identifiers. WarPigs does not enable SilentRaven on your behalf.
 
 WarPigs checks each settled visit to **Temis (`Skov_Temis`)**, including return visits. It reserves SilentRaven's automatic/manual execution while managing it, waits for current activity cleanup and observable Alfred/Looter work, then requests a town reward check. An orchestrated request never teleports. Other towns are ignored. Standalone manual teleport remains an explicit user action targeting Temis.
 

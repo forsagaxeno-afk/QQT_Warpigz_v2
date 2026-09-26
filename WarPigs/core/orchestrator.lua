@@ -376,7 +376,7 @@ end
 -- chest task is running. This guard hard-blocks that window.
 --
 -- HordeDev's getState() returns "OPENING_CHESTS" iff the current task is
--- "Open Chests" (HordeDev-1.3.9/main.lua), which spans the whole INIT →
+-- "Open Chests" (HordeDev/main.lua), which spans the whole INIT →
 -- MOVING_TO_CHEST → OPENING_CHEST → WAITING_FOR_VFX → WAITING_FOR_LOOT →
 -- (next chest) cycle. When that returns true we refuse to (a) start the
 -- via-Temis preamble and (b) re-fire the TO_TEMIS retry teleport.
@@ -770,7 +770,7 @@ local function has_helltide_buff()
 end
 
 -- Predicate: is helltide currently active in-world? Mirrors HelltideRevamped's
--- `utils.helltide_active` (HelltideRevamped-0.4/core/utils.lua:139): minutes
+-- `utils.helltide_active` (HelltideRevamped/core/utils.lua:139): minutes
 -- 55-59 of every hour are the off-window when no helltide exists. Used to
 -- hold the warplan teleport in POST_ALFRED_SETTLE when incoming is helltide
 -- and we'd otherwise teleport into a helltide that doesn't exist yet.
@@ -1224,7 +1224,7 @@ orchestrator.quest_plugin_map = {
     WarPlans_QST_TurnIn_Rewards = { task = require 'core.tasks.turn_in_rewards' },
 
     -- Boss runs via Reaper. boss_id must match an entry in
-    -- Reaper-main/data/enums.lua boss_zones (duriel, andariel, varshan,
+    -- Reaper/data/enums.lua boss_zones (duriel, andariel, varshan,
     -- grigoire, zir, beast, harbinger, urivar, butcher, belial).
     --
     -- Quest-name suffixes are confirmed where marked; the rest are best

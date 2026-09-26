@@ -1,12 +1,12 @@
-# QQT_Warpigz_v2
+# QQT_Warpigz_v3
 
-![Diablo 4 QQT Season 15 — Warplan Orchestrator](assets/branding/warplan-orchestrator-v2.0.0.png)
+![QQT Warpigz Suite v3](assets/branding/qqt-warpigz-suite-v3.png)
 
 **All credits for the original foundation go to @ZEWX — LONG LIVE LEGEND.**
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v2.1.3.** Test build: v2.3.0-rc.13 (private draft, not yet published). v2.2.0 and v2.2.1 were withdrawn. Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. Project release numbering started with v2.0.0. Plugin folder names and upstream history remain separate from the bundle version.
+**Current release: v3.0.0.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
 
 [English changelog](CHANGELOG.md) · [Audit and validation](AUDIT.md) · [Credits](CREDITS.md) · [Version rules](CONTRIBUTING.md)
 
@@ -18,24 +18,23 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 
 | Folder | Role | Component version |
 | --- | --- | --- |
-| `WarPigs-1.0.0` | Master orchestrator and town handoffs | 1.1.3 |
-| `WarPug-1.0.0` | War Plan selection and creation | 1.0.13 |
-| `Batmobile-1.0.12` | Shared navigation | 2.1.0 |
-| `ArkhamAsylum-1.0.6` | The Pit | 2.1.0 |
-| `HelltideRevamped-0.4` | Helltides (Warplan / Farm modes, Pandemonium Ruptures) | 2.2.0 |
-| `HordeDev-1.3.9` | Infernal Hordes | 2.2.2 |
-| `Reaper-main` | Boss lairs | 1.10.1 |
-| `WonderCity-main` | Kurast Undercity | 2.2.0 |
-| `SilentRaven-0.1.3` | Whisper reward checks in Temis | 0.2.1 |
-| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.10 |
-| `TristramLoop` | Standalone Uber Tristram / Whimsyshire loop (not driven by WarPigs) | 1.0.1 |
+| `WarPigs` | Master orchestrator and town handoffs | 1.1.3 |
+| `WarPug` | War Plan selection and creation | 1.0.13 |
+| `Batmobile` | Shared navigation | 2.1.0 |
+| `ArkhamAsylum` | The Pit | 2.1.0 |
+| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.2.2 |
+| `HordeDev` | Infernal Hordes | 2.2.2 |
+| `Reaper` | Boss lairs | 1.10.1 |
+| `WonderCity` | Kurast Undercity | 2.2.0 |
+| `SilentRaven` | Whisper reward checks in Temis | 0.2.1 |
+| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.12 |
 
 Nightmare Dungeons are not supported. WarPug excludes those nodes.
 
 ## Installation
 
 1. Stop the controllers and close QQT before replacing source files. Back up your plugin folders, settings, custom paths, and WarPug `positions.txt` outside the scripts directory.
-2. Copy **only the eleven plugin folders above** into the QQT scripts directory. Do not copy `audit`, `docs` or `assets` there (QQT would try to load them as plugins and print `cannot open ...\main.lua`). Keep one loaded copy of each plugin. Folder names remain unchanged even when a component version increases.
+2. Copy **only the ten plugin folders above** into the QQT scripts directory. Do not copy `audit`, `docs` or `assets` there (QQT would try to load them as plugins and print `cannot open ...\main.lua`). Keep one loaded copy of each plugin. **From 3.0 the folders have no version in their name** and keep it across updates; when upgrading from 2.x, delete `WarPigs-1.0.0`, `WarPug-1.0.0`, `Batmobile-1.0.12`, `ArkhamAsylum-1.0.6`, `HelltideRevamped-0.4`, `HordeDev-1.3.9`, `Reaper-main`, `WonderCity-main` and `SilentRaven-0.1.3` first, or QQT loads two copies.
 3. Replace the SilentRaven folder completely: its modules now live under `silent_raven.*`. Restore your saved configuration as needed. Do not load old SilentRaven alongside this build.
 4. **Rosie replaces Alfred and Looter**: remove (or move out of the scripts directory) your old Alfred, SteroidAlfred, AlfredTheButler-WarPigz and LooteerV3 folders — Rosie publishes the same `AlfredTheButlerPlugin` / `LooteerPlugin` APIs and yields if another provider is loaded. Rosie switches the host Auto Loot off while its pickup runs. Keep your separately installed **combat/Orbwalker** plugin; it is not bundled or replaced. Configure town, loot rules, combat, and activity settings before enabling automation.
 5. Fully reload QQT. This matters for the captured module imports that fix Reaper's externally triggered `reset_run` crash.
@@ -55,7 +54,7 @@ If three War Plan teleports do not reach the Horde, WarPigs backs off 60 s and s
 
 On each stable Temis visit, WarPigs waits for outgoing activity cleanup and observable Alfred/Looter work (a short Looter quiet window) before requesting a reward check. An active WarPug transaction keeps priority. A Looter burst pauses a managed request instead of cancelling it; after accept the claim is never cancelled. Requests have time limits, cancellation and late-callback guards. Managed Whisper requests never teleport or change Looter settings.
 
-SilentRaven verifies the selected reward and observes cache receipt before reporting success. A card is rejected only when it is explicitly invalid; if a claim cannot be verified, one automatic `[SilentRaven] reward diagnostics` dump shows the host's reward fields. Unreadable state or an unconfirmed claim is not reported as completed. See its [integration contract](SilentRaven-0.1.3/README.md).
+SilentRaven verifies the selected reward and observes cache receipt before reporting success. A card is rejected only when it is explicitly invalid; if a claim cannot be verified, one automatic `[SilentRaven] reward diagnostics` dump shows the host's reward fields. Unreadable state or an unconfirmed claim is not reported as completed. See its [integration contract](SilentRaven/README.md).
 
 ## Validation
 

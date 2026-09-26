@@ -3,8 +3,8 @@
 local root = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local failures, checks = {}, 0
 local plugins = {
-    'ArkhamAsylum-1.0.6', 'WonderCity-main', 'HelltideRevamped-0.4',
-    'HordeDev-1.3.9', 'Reaper-main',
+    'ArkhamAsylum', 'WonderCity', 'HelltideRevamped',
+    'HordeDev', 'Reaper',
 }
 
 local function check(label, fn)
@@ -168,7 +168,7 @@ for _, plugin in ipairs(plugins) do
     end)
 end
 
-for _, plugin in ipairs({'ArkhamAsylum-1.0.6', 'WonderCity-main'}) do
+for _, plugin in ipairs({'ArkhamAsylum', 'WonderCity'}) do
     check(plugin .. ' ignores disabled Looteer stale busy flag', function()
         local enabled = false
         local env = setmetatable({
@@ -229,14 +229,14 @@ check('Horde teleport completion survives subsequent task selection', function()
     env._G = env
     env.require = function(name)
         if not modules[name] then
-            modules[name] = assert(loadfile(root .. '/HordeDev-1.3.9/' .. name:gsub('%.', '/') .. '.lua', 't', env))()
+            modules[name] = assert(loadfile(root .. '/HordeDev/' .. name:gsub('%.', '/') .. '.lua', 't', env))()
         end
         return modules[name]
     end
     local tracker = env.require('core.tracker')
     tracker.finished_chest_looting, tracker.horde_opened = true, true
     local manager = env.require('core.task_manager')
-    assert(loadfile(root .. '/HordeDev-1.3.9/main.lua', 't', env))()
+    assert(loadfile(root .. '/HordeDev/main.lua', 't', env))()
     manager.execute_tasks()
     assert(state.teleports == 1, 'exit task must issue the waypoint request')
     env.InfernalHordesPlugin.chests_done()

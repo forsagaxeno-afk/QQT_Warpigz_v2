@@ -32,7 +32,7 @@ def semver(value):
 
 semver(version)
 require(version == manifest["version"], "VERSION and versions.json disagree")
-require(manifest["project"] == "QQT_Warpigz_v2", "Unexpected project name")
+require(manifest["project"] == "QQT_Warpigz_v3", "Unexpected project name")
 readme = (ROOT / "README.md").read_text()
 changelog = (ROOT / "CHANGELOG.md").read_text()
 require(f"v{version}" in readme, "README is missing the current bundle version")
@@ -42,15 +42,12 @@ require("@ZEWX" in readme and "LONG LIVE LEGEND" in readme, "Original credits mi
 for folder, component_version in manifest["components"].items():
     semver(component_version)
     require((ROOT / folder / "main.lua").is_file(), f"Missing plugin entrypoint: {folder}")
-    if folder == "Reaper-main":
+    if folder == "Reaper":
         source = (ROOT / folder / "main.lua").read_text()
         require(f"v{component_version}" in source, f"Reaper displayed version mismatch")
     elif folder == "Rosie":
         source = (ROOT / folder / "rosie" / "controller.lua").read_text()
         require(f"s.version='{component_version}'" in source, f"Rosie displayed version mismatch")
-    elif folder == "TristramLoop":
-        source = (ROOT / folder / "tristram" / "data.lua").read_text()
-        require(f'version = "{component_version}"' in source, f"TristramLoop displayed version mismatch")
     else:
         gui = "silent_raven/gui.lua" if folder.startswith("SilentRaven") else "gui.lua"
         source = (ROOT / folder / gui).read_text()
@@ -75,4 +72,4 @@ if args.base:
 
 if errors:
     raise SystemExit("Release checks failed:\n- " + "\n- ".join(errors))
-print(f"PASS: QQT_Warpigz_v2 v{version}, {len(manifest['components'])} component versions, credits and changelog")
+print(f"PASS: QQT_Warpigz_v3 v{version}, {len(manifest['components'])} component versions, credits and changelog")

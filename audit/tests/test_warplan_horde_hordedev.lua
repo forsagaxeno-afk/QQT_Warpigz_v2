@@ -24,7 +24,7 @@
 -- host mocks. Every case fails on d275b9d (no entry modes, first-frame
 -- Library teleport) and passes now; the compass cases prove standalone
 -- farming is unchanged.
-local ROOT = assert(SUITE_ROOT) .. '/HordeDev-1.3.9/'
+local ROOT = assert(SUITE_ROOT) .. '/HordeDev/'
 local checks, failures = 0, {}
 local function eq(a, b, message)
     if a ~= b then error((message or 'mismatch') .. ': expected ' .. tostring(b) .. ', got ' .. tostring(a), 2) end

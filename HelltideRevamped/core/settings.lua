@@ -31,7 +31,7 @@ local settings = {
     -- Pandemonium Ruptures (Farm mode, core/hr_tear_event.lua).
     hunt_rift = true,
     rupture_replace_local_events = true,
-    rupture_prioritize_surging = true,
+    rupture_prioritize_surging = false, -- S14 option, not shown (2.2.1)
     rupture_hunt_normal = true,
     rupture_hunt_surging = true,
     rupture_hunt_colossal = true,
@@ -76,13 +76,14 @@ local setting_controls = {
     log_tear_candidates = "log_tear_candidates",
 }
 -- Settings synced 1:1 from their control in update_settings (mode + ruptures).
+-- QQT_Warpigz_v2 (2.2.1): the Season 14 only options (tear type filters and
+-- priority, Deathtoll Chamber, scan log) are no longer shown or synced; every
+-- tear type found is hunted, the chamber is never entered, the log is off.
 local synced_controls = {
-    "mode", "hunt_rift", "rupture_replace_local_events", "rupture_prioritize_surging",
-    "rupture_hunt_normal", "rupture_hunt_surging", "rupture_hunt_colossal", "rupture_max_cinders",
+    "mode", "hunt_rift", "rupture_replace_local_events", "rupture_max_cinders",
     "tear_search_dist", "tear_passby_dist", "tear_event_radius", "tear_circle_radius",
-    "rupture_linger_sec", "rupture_do_realmwalker", "rupture_do_deathtoll_chamber",
-    "rupture_rw_wait_sec", "rupture_chamber_linger_sec", "rupture_open_chests",
-    "tear_use_charge_ring", "log_tear_candidates",
+    "rupture_linger_sec", "rupture_do_realmwalker",
+    "rupture_rw_wait_sec", "rupture_open_chests", "tear_use_charge_ring",
 }
 
 function settings.set_setting(name, value)

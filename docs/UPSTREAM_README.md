@@ -29,14 +29,14 @@ Supported activity types:
 
 | Plugin | Activity | Notes |
 |---|---|---|
-| **WarPigs-1.0.0** | Master orchestrator | The brain. Watches quests, enables/disables sub-plugins. Always required. |
-| **WarPug-1.0.0** | War Plan creator | Companion to WarPigs. When you're in Temis with no active WarPlans quests, auto-selects and confirms a new war plan path using the `warplan` API (Nightmare Dungeon nodes always excluded). Falls back to a configured reroll + confirm pixel click when no valid path exists — coordinates captured by hovering the in-game button and pressing the bound keybind, stored as resolution-independent ratios. |
-| **ArkhamAsylum-1.0.6** | The Pit | Pit runner. Requires Batmobile + Alfred + Looteer v2. |
-| **Batmobile-1.0.12** | (shared library) | Pathfinder/explorer used by ArkhamAsylum and WonderCity. Does nothing on its own. |
-| **HelltideRevamped-0.4** | Helltides | Maiden routes, chests, ore/herb, shrines, goblins, chaos rifts. |
-| **HordeDev-1.3.9** | Infernal Hordes | Spires/masses, pylons, aether, boss room, talisman / GA / materials chest rewards. |
-| **Reaper-main** (v1.7, Moogazoog) | Boss Runs | Native-teleport boss farmer for Andariel / Duriel / Varshan / Grigoire / Zir / Beast in Ice / Harbinger / Urivar / Butcher / Belial. Consumes Lair Keys / Greater Lair Keys / Betrayer's Husks (per-boss `key_tier`). Path-file walks primary, Batmobile auto-fallback. Belial chest dialog has live in-GUI alignment with center-aware ultrawide scaling, plus Astaroth / Bartuc as additional reward targets. |
-| **WonderCity-main** | Kurast Undercity | Tribute selection, enticements, beacons, boss, final chest. Optional objective-first custom explorer (opt-in). |
+| **WarPigs** | Master orchestrator | The brain. Watches quests, enables/disables sub-plugins. Always required. |
+| **WarPug** | War Plan creator | Companion to WarPigs. When you're in Temis with no active WarPlans quests, auto-selects and confirms a new war plan path using the `warplan` API (Nightmare Dungeon nodes always excluded). Falls back to a configured reroll + confirm pixel click when no valid path exists — coordinates captured by hovering the in-game button and pressing the bound keybind, stored as resolution-independent ratios. |
+| **ArkhamAsylum** | The Pit | Pit runner. Requires Batmobile + Alfred + Looteer v2. |
+| **Batmobile** | (shared library) | Pathfinder/explorer used by ArkhamAsylum and WonderCity. Does nothing on its own. |
+| **HelltideRevamped** | Helltides | Maiden routes, chests, ore/herb, shrines, goblins, chaos rifts. |
+| **HordeDev** | Infernal Hordes | Spires/masses, pylons, aether, boss room, talisman / GA / materials chest rewards. |
+| **Reaper** (v1.7, Moogazoog) | Boss Runs | Native-teleport boss farmer for Andariel / Duriel / Varshan / Grigoire / Zir / Beast in Ice / Harbinger / Urivar / Butcher / Belial. Consumes Lair Keys / Greater Lair Keys / Betrayer's Husks (per-boss `key_tier`). Path-file walks primary, Batmobile auto-fallback. Belial chest dialog has live in-GUI alignment with center-aware ultrawide scaling, plus Astaroth / Bartuc as additional reward targets. |
+| **WonderCity** | Kurast Undercity | Tribute selection, enticements, beacons, boss, final chest. Optional objective-first custom explorer (opt-in). |
 
 ## Required companion plugins (not bundled)
 
@@ -74,7 +74,7 @@ WarPigs maps each boss-lair War Plan quest to a Reaper boss id:
 | `WarPlans_QST_BossLair_Butcher` | butcher |
 | `WarPlans_QST_BossLair_Belial` | belial |
 
-A few quest suffixes are best-guesses (anything not marked CONFIRMED in `WarPigs-1.0.0/core/orchestrator.lua`). If a boss plan never triggers, enable **Log ALL quests** in the WarPigs menu, run that plan once to capture the real quest name, and update the map in `core/orchestrator.lua`.
+A few quest suffixes are best-guesses (anything not marked CONFIRMED in `WarPigs/core/orchestrator.lua`). If a boss plan never triggers, enable **Log ALL quests** in the WarPigs menu, run that plan once to capture the real quest name, and update the map in `core/orchestrator.lua`.
 
 ## GUI options (WarPigs)
 

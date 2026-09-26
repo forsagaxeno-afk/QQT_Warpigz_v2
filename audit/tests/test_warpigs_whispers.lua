@@ -1,4 +1,4 @@
-local root = assert(SUITE_ROOT) .. '/WarPigs-1.0.0/'
+local root = assert(SUITE_ROOT) .. '/WarPigs/'
 package.path = root .. '?.lua;' .. package.path
 local Bridge = require 'wp_silent_raven'
 local checks = 0

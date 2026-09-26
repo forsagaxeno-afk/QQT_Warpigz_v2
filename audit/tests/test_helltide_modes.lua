@@ -3,7 +3,7 @@
 -- data/hr_tear_skins.lua). Loads the real main.lua, settings, task_manager,
 -- tasks and core modules with QQT-shaped host mocks (same boundaries as
 -- test_integration_helltide.lua). Runs under Lua 5.4 and LuaJIT.
-local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/HelltideRevamped-0.4/'
+local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/HelltideRevamped/'
 local checks, cases, failures = 0, 0, {}
 local function ok(cond, message)
     checks = checks + 1
@@ -433,7 +433,7 @@ end)
 
 case('Deathtoll Chamber: buff drops before the zone name changes; the chamber run is kept', function()
     local s = session({enabled = true, mode = 1})
-    s.controls.rupture_do_deathtoll_chamber.value = true
+    s.settings.rupture_do_deathtoll_chamber = true -- not in the menu since 2.2.1; code path kept
     s.tick(0.2)
     local portal = actor('S14_Realmwalker_eventEnd_RuptureEntrance_Portal', 2, 0)
     s.actors = {portal}
@@ -483,7 +483,7 @@ case('ring-only rupture is Unknown (no Realmwalker wait) until a starter confirm
     ok(s.logged('Unknown rupture complete') >= 1, 'completed as Unknown')
     -- Surging toggle off: a ring next to a Surging starter is not engaged.
     local t = session({enabled = true, mode = 1})
-    t.controls.rupture_hunt_surging.value = false
+    t.settings.rupture_hunt_surging = false -- not in the menu since 2.2.1; code path kept
     t.actors = {actor(SKIN.hold, 10, 0), actor(SKIN.surging_starter, 12, 0)}
     t.tick(3)
     eq(t.any_rift_state(), nil, 'Hunt Surging off is honoured for a ring')

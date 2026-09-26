@@ -1,8 +1,8 @@
 -- Integration regressions for WarPug (review items WPT-3/WPG-4, WPG-5, WPG-6,
 -- WPG-9, CRT-5, SRV-4 WarPug side, WPG-1). Real WarPug modules run against
 -- QQT-shaped mocks; one case also runs the real WarPigs dispatcher.
-local root = assert(SUITE_ROOT) .. '/WarPug-1.0.0/'
-local pigs_root = SUITE_ROOT .. '/WarPigs-1.0.0/'
+local root = assert(SUITE_ROOT) .. '/WarPug/'
+local pigs_root = SUITE_ROOT .. '/WarPigs/'
 local real_io, real_package_path = io, package.path
 
 local failures, checks = {}, 0

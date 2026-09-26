@@ -18,8 +18,8 @@
 -- pause as a pause or as a self-disable. The real HordeDev plugin is loaded
 -- in an isolated environment with QQT-shaped host mocks; the joint cases
 -- also load the real WarPigs orchestrator.
-local ROOT = assert(SUITE_ROOT) .. '/HordeDev-1.3.9/'
-local WROOT = SUITE_ROOT .. '/WarPigs-1.0.0/'
+local ROOT = assert(SUITE_ROOT) .. '/HordeDev/'
+local WROOT = SUITE_ROOT .. '/WarPigs/'
 local checks, failures = 0, {}
 local function eq(a, b, message)
     if a ~= b then error((message or 'mismatch') .. ': expected ' .. tostring(b) .. ', got ' .. tostring(a), 2) end

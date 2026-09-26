@@ -1,4 +1,4 @@
-local root=assert(SUITE_ROOT)..'/HordeDev-1.3.9/'
+local root=assert(SUITE_ROOT)..'/HordeDev/'
 local count=0
 local function test(name,fn)
     local ok,err=pcall(fn);assert(ok,name..': '..tostring(err));count=count+1
@@ -87,7 +87,7 @@ test('actual Horde main callback debounces revival and rejects loading snapshots
  s.world=nil;s.updates[1]();assert(s.revives==3)
 end)
 
-local helltide_root=assert(SUITE_ROOT)..'/HelltideRevamped-0.4/'
+local helltide_root=assert(SUITE_ROOT)..'/HelltideRevamped/'
 local function helltide_session()
     local state = {now=100,cinders=100,actors={},loot={},pos=v:new(0,0),zone='Test_Zone',world='Test_World',
         in_helltide=true,active=true,teleports={},interactions={},logs={},moves=0,stops=0,pauses=0,resets=0,revives=0,clears=0,dead=false}

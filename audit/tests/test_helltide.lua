@@ -1,4 +1,4 @@
-local root = assert(SUITE_ROOT) .. '/HelltideRevamped-0.4/'
+local root = assert(SUITE_ROOT) .. '/HelltideRevamped/'
 local checks = 0
 local function check(name, fn)
     fn()

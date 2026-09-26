@@ -3,8 +3,8 @@
 -- one joint case, the real WarPug planner) with QQT-shaped host mocks.
 -- SR_ROOT may point at another copy of SilentRaven (used to confirm that
 -- each case fails on the pre-fix sources).
-local root = rawget(_G, 'SR_ROOT') or (SUITE_ROOT .. '/SilentRaven-0.1.3/')
-local PUG = SUITE_ROOT .. '/WarPug-1.0.0/'
+local root = rawget(_G, 'SR_ROOT') or (SUITE_ROOT .. '/SilentRaven/')
+local PUG = SUITE_ROOT .. '/WarPug/'
 local RAVEN, VIA, ARRIVAL = { 2596.38, -495.79 }, { 2597.24, -488.08 }, { 2579.58, -482.19 }
 local checks, failures, cases = 0, {}, 0
 

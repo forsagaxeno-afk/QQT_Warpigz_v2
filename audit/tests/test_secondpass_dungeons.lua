@@ -37,7 +37,7 @@ local function control(value,key)
 end
 local function session(plugin)
     local root=assert(SUITE_ROOT)..'/'..plugin..'/'
-    local uc=plugin=='WonderCity-main'
+    local uc=plugin=='WonderCity'
     local s={now=100,actors={},enemies={},items={},world=uc and 'Undercity_First' or 'PIT_First',
         zone=uc and 'X1_Undercity_First' or 'EGD_MSWK_World_01',world_id=1,
         updates={},teleports=0,interactions={},paths=0,nav_accept=true,stops=0,moves=0,scans=0,revives=0}
@@ -89,7 +89,7 @@ local function session(plugin)
     function s:enable()self.external.enable();self:tick()end
     return s
 end
-local plugins={'WonderCity-main','ArkhamAsylum-1.0.6'}
+local plugins={'WonderCity','ArkhamAsylum'}
 check('real GUI/external enable and disable control each actual main scheduler',function()
     for _,plugin in ipairs(plugins)do
         local s=session(plugin);s:tick();assert(s.scans==0 and not s.external.get_status().enabled)
@@ -128,20 +128,20 @@ check('modern unreadable status stays busy and is not replaced by a legacy nil',
     end
 end)
 check('WonderCity reward exits after real legacy Looter goes idle and quiet period elapses',function()
-    local s=session('WonderCity-main');local busy=true
+    local s=session('WonderCity');local busy=true
     s.env.LooteerPlugin={getSettings=function(k)if k=='enabled' or (k=='looting' and busy)then return true end end}
     s:enable();s.tracker.done=true;s:tick();s:tick(4);assert(s.teleports==0)
     busy=false;s:tick();s:tick(2.9);assert(s.teleports==0)
     s:tick(0.2);s:tick();assert(s.teleports==1)
 end)
 check('Arkham glyphstone cannot cause normal exit while modern Looter is active',function()
-    local s=session('ArkhamAsylum-1.0.6');local busy=true
+    local s=session('ArkhamAsylum');local busy=true
     s.env.LooteerPlugin={get_enabled=function()return true end,is_actively_looting=function()return busy end}
     s.actors={actor('Gizmo_Paragon_Glyph_Upgrade',1,0)};s:enable();s:tick(5);assert(s.teleports==0)
     busy=false;s:tick();s:tick();assert(s.teleports==1)
 end)
 check('Arkham foreign Alfred trip owns scheduler even outside selected town',function()
-    local s=session('ArkhamAsylum-1.0.6');s.world='Sanctuary';s.zone='Foreign_Service_Town'
+    local s=session('ArkhamAsylum');s.world='Sanctuary';s.zone='Foreign_Service_Town'
     s.env.AlfredTheButlerPlugin={get_status=function()return {enabled=true,trigger_tasks=true}end}
     s:enable();s:tick(10)
     assert(s.manager.get_current_task().name=='alfred_running' and s.teleports==0)
@@ -170,7 +170,7 @@ end)
 check('altar, Heart of Stone and shrine interactions stay spaced throughout the timeout',function()
     local names={altar='Warplans_Pit_ChoronsBurden_Receptacle',heart='Warplans_Pit_ChoronsBurden_Carryable',shrine='Shrine_DRLG_Protection'}
     for _,kind in ipairs({'altar','heart','shrine'})do
-        local s=session('ArkhamAsylum-1.0.6')
+        local s=session('ArkhamAsylum')
         s.actors={actor(names[kind],1,0)}
         s:enable();for _=1,80 do s:tick(0.1)end
         assert(#s.interactions>=2 and #s.interactions<=6)
@@ -200,13 +200,13 @@ check('main death handling debounces revival without running task actor scans',f
     end
 end)
 check('rejected progress-orb navigation observes retry interval',function()
-    local s=session('ArkhamAsylum-1.0.6');s.actors={actor('TWR_ProgressOrb',30,0)};s.nav_accept=false
+    local s=session('ArkhamAsylum');s.actors={actor('TWR_ProgressOrb',30,0)};s.nav_accept=false
     s:enable();assert(s.paths==1)
     for _=1,15 do s:tick()end;assert(s.paths==1)
     s:tick(0.6);assert(s.paths==2)
 end)
 check('walking toward a traversal is not itself a completed crossing',function()
-    local s=session('ArkhamAsylum-1.0.6');s.actors={actor('Traversal_Gizmo_Up',25,0)};s:enable()
+    local s=session('ArkhamAsylum');s.actors={actor('Traversal_Gizmo_Up',25,0)};s:enable()
     local portal=s.env.require('tasks.portal');portal.long_path_failed_time=s.now
     s:tick();assert(s.manager.get_current_task().name=='cross_traversal')
     s.player.pos=V:new(12,0);s:tick()

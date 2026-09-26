@@ -54,8 +54,8 @@ local function note(line)
     report[#report + 1] = line
 end
 
-local WP, PUG, SR, BAT = 'WarPigs-1.0.0', 'WarPug-1.0.0', 'SilentRaven-0.1.3', 'Batmobile-1.0.12'
-local ARK, WC, HR, HD, RP = 'ArkhamAsylum-1.0.6', 'WonderCity-main', 'HelltideRevamped-0.4', 'HordeDev-1.3.9', 'Reaper-main'
+local WP, PUG, SR, BAT = 'WarPigs', 'WarPug', 'SilentRaven', 'Batmobile'
+local ARK, WC, HR, HD, RP = 'ArkhamAsylum', 'WonderCity', 'HelltideRevamped', 'HordeDev', 'Reaper'
 local ACTIVITY_EXPORTS = {ArkhamAsylumPlugin = ARK, WonderCityPlugin = WC, HelltideRevampedPlugin = HR,
     InfernalHordesPlugin = HD, ReaperPlugin = RP}
 

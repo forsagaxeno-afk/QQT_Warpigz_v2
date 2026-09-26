@@ -2,7 +2,7 @@
 -- Loads the REAL ArkhamAsylum main.lua -> gui/settings/external/task_manager
 -- and every task with a per-plugin module cache. Only QQT host bindings,
 -- Batmobile, AlfredTheButler and Looteer are behaviour-level mocks.
-local ROOT = assert(SUITE_ROOT) .. '/ArkhamAsylum-1.0.6/'
+local ROOT = assert(SUITE_ROOT) .. '/ArkhamAsylum/'
 local checks, failures = 0, {}
 local function test(name, fn)
     local ok, err = pcall(fn)

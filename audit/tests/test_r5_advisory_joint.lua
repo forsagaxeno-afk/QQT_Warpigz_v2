@@ -38,8 +38,8 @@ local function case(name, fn)
     end
 end
 
-local WP, PUG, SR = 'WarPigs-1.0.0', 'WarPug-1.0.0', 'SilentRaven-0.1.3'
-local ARK, WC, HR, RP = 'ArkhamAsylum-1.0.6', 'WonderCity-main', 'HelltideRevamped-0.4', 'Reaper-main'
+local WP, PUG, SR = 'WarPigs', 'WarPug', 'SilentRaven'
+local ARK, WC, HR, RP = 'ArkhamAsylum', 'WonderCity', 'HelltideRevamped', 'Reaper'
 local function el(h, dir) return assert(h.mod(dir, dir == SR and 'silent_raven.gui' or 'gui'), dir).elements end
 local function setup(opts)
     local h = J.new(opts)

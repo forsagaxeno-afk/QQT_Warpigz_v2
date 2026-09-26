@@ -1,5 +1,5 @@
 -- Behavioral regressions using actual Reaper modules and QQT-shaped mocks.
-local root = SUITE_ROOT .. '/Reaper-main/'
+local root = SUITE_ROOT .. '/Reaper/'
 local count = 0
 local function eq(actual, expected, message)
     assert(actual == expected, (message or 'unexpected result') .. ': expected ' .. tostring(expected) .. ', got ' .. tostring(actual))
