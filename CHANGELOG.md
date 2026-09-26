@@ -2,6 +2,22 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.6] — 2026-09-26
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.5.
+
+### Fixed
+
+- Rosie 1.0.4: Season 15 **Mythic forms of ordinary Uniques** were treated as plain Uniques (live: "Condemnation", Ancestral Mythic Unique Dagger, skipped on the ground by the Unique Greater Affix minimum and salvaged in town by the default ancestral Unique rule). Such an item keeps the Unique's SNO and rarity 6; the live dump showed the only difference is the Mythic upgrade affix `S14_Mythic_UniquePotency` (hash 2628989). Pickup and town now recognise any Unique carrying it as a mythic: it uses the Mythic GA rule on the ground and *Always keep mythics* protects it from selling and salvage. Unreadable affixes never promote an item. The Greater Affix count is unchanged: built-in `*_Greater` affixes on some Uniques are not Greater Affixes.
+
+### Added
+
+- Rosie town, *Ancestral*: **Use Mythic Unique filter** with a searchable list of every Unique. Checked Mythic Uniques are always kept; unchecked ones take the *unchecked Mythic Uniques* action (default Salvage) unless the Mythic Greater Affix override keeps them. Iconic mythics and plain Uniques are unaffected; locked (favourite) items are never touched. Off (default): Mythic Uniques count as mythics.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: all test files × (Lua 5.4 + LuaJIT) pass; new case in `test_rosie_contract.lua` (pickup, town keep, filter, unreadable affixes).
+
 ## [2.3.0-rc.5] — 2026-09-26
 
 Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.4.

@@ -373,6 +373,73 @@ case('mythics: the persisted loot-filter toggles and junk marks never sell or sa
     h.assert_clean('mythic')
 end)
 
+-- Live dump (Season 15): the Mythic form of an ordinary Unique keeps the
+-- Unique's SNO and rarity 6; only the upgrade affix S14_Mythic_UniquePotency
+-- (hash 2628989) tells them apart. "Condemnation" was skipped on the ground
+-- (Unique GA minimum) and would be salvaged in town (unique default).
+case('S15 Mythic form of a Unique (rarity 6, same SNO, mythic upgrade affix) is picked up and kept', function()
+    local h = new({place = 'pit'})
+    h.pos = h.v(0, 0)
+    enable(h)
+    local pgui = h.mod('Rosie', 'rosie.private.pickup.gui')
+    pgui.elements.general.distance_slider:set(30)
+    pgui.elements.affix_settings.unique_greater_affix_slider:set(2)
+    local function affix(hash, name) return {affix_name_hash = hash, get_name = function() return name end} end
+    local base = {affix(578864, '1HDagger_Unique_Rogue_001'), affix(1829588, 'S04_Damage_All')}
+    local marked = {base[1], affix(2628989, 'S14_Mythic_UniquePotency'), base[2]}
+    local named_only = {base[1], {name = 'S14_Mythic_UniquePotency'}}
+    local function dagger(affixes)
+        return {name = '1HDagger_Unique_Rogue_001', sno = 451091, rarity = 6, ancestral = true, affixes = affixes}
+    end
+    local im = h.mod('Rosie', 'rosie.private.pickup.src.item_manager')
+    h.run(1)
+    local function wanted(item) return (h.as('Rosie', function() return im.check_want_item(item, true) end)) end
+    eq(wanted(h.gear(dagger(base))), false, 'plain Unique below the Unique GA minimum is skipped')
+    eq(wanted(h.gear(dagger(marked))), true, 'Mythic form uses the Mythic GA rule (0) and is wanted')
+    eq(wanted(h.gear(dagger(named_only))), true, 'the affix name alone also marks it')
+    local broken = h.gear(dagger(nil))
+    function broken:get_affixes() error('host: affixes unreadable') end
+    eq(wanted(broken), false, 'unreadable affixes never promote a Unique')
+    -- Town: the default ancestral Unique rule salvages 0-GA uniques; the
+    -- Mythic form is kept by "Always keep mythics".
+    local utils = h.mod('Rosie', 'rosie.private.town.core.utils')
+    local SALVAGE, SELL = utils.item_enum.SALVAGE, utils.item_enum.SELL
+    local function acts(item)
+        return h.as('Rosie', function()
+            return utils.is_salvage_or_sell(item, SALVAGE) or utils.is_salvage_or_sell(item, SELL)
+        end)
+    end
+    eq(acts(h.gear(dagger(base))), true, 'plain 0-GA ancestral Unique follows the Unique rule')
+    eq(acts(h.gear(dagger(marked))), false, 'Mythic form is never sold or salvaged')
+    -- Mythic Unique filter: checked forms are always kept, unchecked ones
+    -- take their own action (default Salvage); iconic mythics are untouched.
+    local tgui = h.mod('Rosie', 'rosie.private.town.gui')
+    ok(tgui.elements.mythic_form_451091 ~= nil, 'Condemnation is in the Mythic Unique picker')
+    tgui.elements.mythic_form_filter_toggle:set(true)
+    h.run(1)
+    local function salvages(item) return h.as('Rosie', function() return utils.is_salvage_or_sell(item, SALVAGE) end) end
+    eq(salvages(h.gear(dagger(marked))), true, 'filter on: unchecked Mythic Unique is salvaged')
+    eq(acts(h.gear({rarity = 8, ancestral = true})), false, 'filter on: iconic mythic still kept')
+    tgui.elements.mythic_form_451091:set(true)
+    h.run(1)
+    eq(acts(h.gear(dagger(marked))), false, 'filter on: checked Mythic Unique is kept')
+    eq(acts(h.gear(dagger(base))), true, 'the checked list never keeps the plain Unique')
+    tgui.elements.mythic_form_451091:set(false); tgui.elements.mythic_form_other:set(0)
+    h.run(1)
+    eq(acts(h.gear(dagger(marked))), false, 'unchecked action Keep: kept')
+    local locked = h.gear(dagger(marked)); locked.locked = true
+    tgui.elements.mythic_form_other:set(SALVAGE)
+    h.run(1)
+    eq(acts(locked), false, 'a locked (favorite) Mythic Unique is never touched')
+    tgui.elements.mythic_form_filter_toggle:set(false)
+    h.run(1)
+    eq(acts(h.gear(dagger(marked))), false, 'filter off: back to Always keep mythics')
+    -- The real drop is picked up.
+    h.drop('pit', 12, 0, dagger(marked))
+    ok(h.run_until(function() return (h.pickups or 0) > 0 end, 20), 'the Mythic form was picked up\n' .. h.tail())
+    h.assert_clean('mythic form')
+end)
+
 case('one unreadable item never ends the census, a classification or the pulse (M2)', function()
     local h = new()
     enable(h)

@@ -986,7 +986,7 @@ function J.new(opts)
             function item:is_ancestral() return self.ancestral end
             function item:is_junk() return self.junk end
             function item:get_attribute() return self.ga end
-            function item:get_affixes() return {} end
+            function item:get_affixes() return self.affixes or {} end
             function item:get_durability() return self.durability end
             function item:is_filtered_by_loot_filter() return self.filtered == true end
             function item:get_stack_count() return 1 end

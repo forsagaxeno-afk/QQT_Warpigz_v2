@@ -159,6 +159,9 @@ gui.elements = cached and cached.elements or {
     ancestral_item_mythic = combo_box:new(0, get_hash(plugin_label .. '_ancestral_item_mythic')),
     -- QQT_Warpigz_v2 local patch: the old WarPigz Alfred's key and default (on).
     mythic_always_keep = create_checkbox(true, 'mythic_always_keep'),
+    -- QQT_Warpigz_v2: keep-list for Season 15 Mythic forms of ordinary Uniques.
+    mythic_form_filter_toggle = create_checkbox(false, 'mythic_form_filter'),
+    mythic_form_other = combo_box:new(1, get_hash(plugin_label .. '_mythic_form_other')),
     ancestral_keep_max_aspect_toggle = create_checkbox(true, 'max_aspect'),
     ancestral_aspect_filter_toggle = create_checkbox(false, 'aspect_filter'),
     ancestral_ga_count_slider = slider_int:new(0, 4, 1, get_hash(plugin_label .. '_ga_slider')),
@@ -285,6 +288,9 @@ for _,item in ipairs(mythic_items) do
     local current=gui.elements['mythic_'..tostring(item.sno_id)]
     if old and old~=current and old:get() then current:set(true); old:set(false) end
 end
+add_tree('mythic_form')
+add_checkbox('mythic_form', unique_items, false)
+add_search('mythic_form')
 add_tree('charm_unique')
 add_checkbox('charm_unique', unique_charm_items, false)
 add_search('charm_unique')
@@ -371,7 +377,7 @@ local function render_settings()
     end
     if push_tree(gui.elements.ancestral_item_tree, 'Ancestral') then
         render_menu_header('Select the default action for the following item types for ancestral items')
-        gui.elements.mythic_always_keep:render('Always keep mythics', 'Mythic items, charms and seals are never sold or salvaged. Overrides every other rule, loot filter and junk mark included. Off: mythics follow the mythic rules below (never the loot filter or junk action).')
+        gui.elements.mythic_always_keep:render('Always keep mythics', 'Mythic items, charms and seals are never sold or salvaged. Overrides every other rule, loot filter and junk mark included. Off: mythics follow the mythic rules below (never the loot filter or junk action). Mythic Uniques follow the Mythic Unique filter when it is on.')
         gui.elements.ancestral_item_mythic:render('mythic items', gui.item_options, 'Select what to do with mythic items')
         gui.elements.ancestral_item_unique:render('unique items', gui.item_options, 'Select what to do with unique items')
         gui.elements.ancestral_item_legendary:render('Common / Magic / Rare / Legendary', gui.item_options, 'Default action for ancestral common, magic, rare and legendary equipment, including crafting bases, when no keep override applies.')
@@ -393,6 +399,15 @@ local function render_settings()
                         pop_tree(gui.elements[name .. '_tree'])
                     end
                 end
+            end
+        end
+        gui.elements.mythic_form_filter_toggle:render('Use Mythic Unique filter', 'Season 15 Mythic forms of ordinary Uniques (same item as the Unique, with the Mythic upgrade). On: checked ones are always kept, unchecked ones take the action below. Off: they count as mythics (Always keep mythics / mythic rules).')
+        if gui.elements.mythic_form_filter_toggle:get() then
+            gui.elements.mythic_form_other:render('unchecked Mythic Uniques', gui.item_options, 'Action for Mythic Uniques you did not check. The Mythic Greater Affix override above still keeps them. Locked (favorite) items are never touched.')
+            if push_tree(gui.elements['mythic_form_tree'], 'Mythic Uniques to keep') then
+                gui.elements['mythic_form_search']:render('Search', 'Search name, class, item type or item ID', false, '', '')
+                render_checkbox('mythic_form', unique_items, true)
+                pop_tree(gui.elements['mythic_form_tree'])
             end
         end
         gui.elements.ancestral_unique_filter_toggle:render('Use unique/mythic filter', 'Checked ancestral uniques and mythics are kept. Unchecked items still use the GA override and default action above.')

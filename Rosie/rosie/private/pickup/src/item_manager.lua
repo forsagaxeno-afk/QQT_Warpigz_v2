@@ -5,6 +5,7 @@ local CustomItems = require('rosie.private.pickup.data.custom_items')
 local CurrentItems = require('rosie.data.items')
 local ItemLogic = require('rosie.private.pickup.src.item_logic')
 local Pickup = require('rosie.private.pickup.src.pickup')
+local MythicForm = require('rosie.private.mythic_form')
 local M = {}
 -- Every recognized category owns its refusal. It must never enter gear rules.
 local policies = {
@@ -25,15 +26,17 @@ local function filter_reason(info,enabled)
     if filtered==true then return 'ingame loot filter' end
     if filtered~=false then return 'ingame loot filter unavailable','deferred' end
 end
-local function is_mythic(rarity,sno)
+local function is_mythic(rarity,sno,info)
     local known=CurrentItems.by_id[sno]
     -- Some native Unique values need the same exact-SNO mythic fallback as
     -- the legacy list. Metadata never promotes lower or unreadable rarities.
     return rarity>=8 or CustomItems.ubers[sno]~=nil
         or rarity==6 and known~=nil and known.kind=='equipment' and known.quality=='mythic'
+        -- QQT_Warpigz_v2: S15 Mythic form of an ordinary Unique (same SNO).
+        or MythicForm.is_mythic_form(info,rarity)
 end
-local function equipment_threshold(s,rarity,sno,slot)
-    local mythic=is_mythic(rarity,sno)
+local function equipment_threshold(s,rarity,sno,slot,info)
+    local mythic=is_mythic(rarity,sno,info)
     local required,source=0,'common_general'
     if mythic then required,source=s.uber_unique_ga_count,'mythic_general'
     elseif rarity==6 then required,source=s.unique_ga_count,'unique_general'
@@ -101,7 +104,7 @@ function M.check_want_item(item, ignore_distance)
     local rarity=Utils.call(info,'get_rarity')
     if type(rarity)~='number' or rarity~=rarity then return false,'item rarity unavailable','deferred' end
     if rarity<s.rarity then return false,'below minimum rarity or unreadable rarity' end
-    local required,threshold,overridden=equipment_threshold(s,rarity,Utils.call(info,'get_sno_id'),slot)
+    local required,threshold,overridden=equipment_threshold(s,rarity,Utils.call(info,'get_sno_id'),slot,info)
     local ga,ga_readable=Utils.get_ga_count(info)
     if required>0 and not ga_readable then return false,'Greater Affix count unavailable','deferred' end
     return ga>=required, string.format('%s: GA %d, required %d%s [threshold=%s]',ga>=required and 'accepted' or 'below GA minimum',
@@ -116,7 +119,7 @@ function M.describe(item, reason)
     local kind,slot=ItemLogic.classify(info)
     local threshold='category:'..kind
     if kind=='equipment' and type(rarity)=='number' and rarity==rarity then
-        local required,source=equipment_threshold(Settings.get(),rarity,sno,slot)
+        local required,source=equipment_threshold(Settings.get(),rarity,sno,slot,info)
         threshold=source..':'..tostring(required)
     end
     return string.format('%s | sno=%s rarity=%s ancestral=%s GA=%d nativeGA=%s displayGA=%s GA_source=%s GA_readable=%s GA_conflict=%s threshold=%s distance=%.1f | %s',name,
@@ -241,7 +244,7 @@ end
 function M.calculate_item_score(item)
     local info=Utils.call(item,'get_item_info')
     local rarity=Utils.call(info,'get_rarity') or 0
-    local mythic=is_mythic(rarity,Utils.call(info,'get_sno_id'))
+    local mythic=is_mythic(rarity,Utils.call(info,'get_sno_id'),info)
     return (mythic and 1000 or rarity>=5 and 500 or rarity>=3 and 300 or rarity>=1 and 100 or 10)
         + Utils.get_ga_count(info)*25
 end

@@ -34,6 +34,9 @@ local settings = {
     ancestral_unique_filter = false,
     ancestral_unique = {},
     ancestral_mythic = {},
+    mythic_form_filter = false,
+    mythic_form_other = utils.item_enum['SALVAGE'],
+    mythic_form_keep = {},
     ancestral_filter = false,
     ancestral_affix = {},
     ancestral_affix_count = 2,
@@ -162,6 +165,15 @@ function settings:update_settings()
         local checkbox_name = 'mythic_' .. tostring(item.sno_id)
         if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
             settings.ancestral_mythic[item.sno_id] = true
+        end
+    end
+    settings.mythic_form_filter = gui.elements.mythic_form_filter_toggle:get()
+    settings.mythic_form_other = gui.elements.mythic_form_other:get()
+    settings.mythic_form_keep = {}
+    for _,item in pairs(unique_items) do
+        local checkbox_name = 'mythic_form_' .. tostring(item.sno_id)
+        if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
+            settings.mythic_form_keep[item.sno_id] = true
         end
     end
     settings.stash_socketables = gui.elements.stash_socketables:get()
