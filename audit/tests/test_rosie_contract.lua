@@ -571,6 +571,24 @@ case('live rc: the menu does not jump when the preview fails for single frames',
     ok(first > 0, 'menu rendered')
 end)
 
+case('live rc.3: get_item_count() returning nil does not break the item census', function()
+    local h = new({})
+    enable(h)
+    fill_bag(h, 7)
+    local real_player = h.G.get_local_player
+    h.G.get_local_player = function()
+        local p = real_player()
+        if not p then return p end
+        return setmetatable({get_item_count = function() return nil end}, {__index = p})
+    end
+    h.run(2)
+    local s = st(h)
+    h.G.get_local_player = real_player
+    eq(s.inventory_count, 7, 'inventory counted from the item list')
+    eq(s.inventory_full, false, 'not full')
+    h.assert_clean('nil item count')
+end)
+
 case('RosiePlugin API from a foreign plugin context resolves no module lazily (QQT per-folder require)', function()
     local h = new()
     enable(h)

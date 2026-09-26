@@ -2,6 +2,22 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.5] — 2026-09-26
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.4.
+
+### Fixed
+
+- Rosie 1.0.3: `utils.lua:923: attempt to compare nil with number` on every item census (live log): the host's `get_item_count()` returned nil, so the bag counts, the town-trip need and the menu preview failed (this also caused the menu flicker). The count now falls back to the inventory list and a missing limit to 25.
+
+### Added
+
+- Rosie diagnostics: *Log item and service decisions* now also dumps every Unique/Mythic within 20 m on the ground and in the inventory — all probed host fields (quality, rarity, flags, names with colour codes), the host method list and the affixes. Live finding: a Season 15 **Mythic form of an ordinary Unique** ("Condemnation", Ancestral Mythic Unique Dagger) reports the same SNO and **rarity 6** as the Unique, so neither rarity 8 nor an SNO list can recognise it; the dump is to find the host's real Mythic marker.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: all test files × (Lua 5.4 + LuaJIT) pass; new case in `test_rosie_contract.lua` (fails before the fix).
+
 ## [2.3.0-rc.4] — 2026-09-26
 
 Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.3.

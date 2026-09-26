@@ -143,6 +143,74 @@ function M.observe(items)
     for _,item in pairs(items) do local id=Pickup.key(item); if id then present[id]=true end end
     for id in pairs(reported) do if not present[id] then reported[id]=nil end end
 end
+-- QQT_Warpigz_v2: Season 15 Mythic forms of ordinary Uniques report the
+-- same SNO and rarity 6 as the Unique (live: "Condemnation", Ancestral Mythic
+-- Unique Dagger, sno=451091 rarity=6). This deep dump shows everything the
+-- host exposes on such an item so the real Mythic marker can be found.
+local PROBES={'is_mythic','is_uber','is_unique','is_iconic','is_legendary','is_ancestral','is_sacred',
+    'get_quality','get_item_quality','get_quality_level','get_rarity','get_rarity_type','get_item_rarity',
+    'get_magic_type','get_item_power','get_power','get_level','get_flags','get_item_flags','get_sno_id',
+    'get_skin_name','get_name','get_display_name','get_unique_id','get_item_type','get_affix_count',
+    'get_greater_affix_count','get_upgrade_level','get_masterwork_rank','get_tempering_count'}
+local function method_names(obj)
+    local names,seen={},{}
+    local ok,mt=pcall(getmetatable,obj)
+    local function add(t)
+        if type(t)~='table' then return end
+        for k in pairs(t) do
+            if type(k)=='string' and not seen[k] and k:sub(1,2)~='__' then seen[k]=true;names[#names+1]=k end
+        end
+    end
+    if ok and type(mt)=='table' then add(mt);add(rawget(mt,'__index')) end
+    table.sort(names)
+    return table.concat(names,',')
+end
+local function short(v)
+    local t=type(v)
+    if t=='string' then return string.format('%q',#v>160 and v:sub(1,160)..'...' or v) end
+    if t=='table' then local n=0;for _ in pairs(v) do n=n+1 end;return 'table#'..n end
+    return tostring(v)
+end
+function M.deep_dump(label,obj)
+    if obj==nil then return end
+    local parts={}
+    for _,name in ipairs(PROBES) do
+        local ok,fn=pcall(function() return obj[name] end)
+        if ok and type(fn)=='function' then
+            local ok2,v=pcall(fn,obj)
+            parts[#parts+1]=name..'='..(ok2 and short(v) or 'error')
+        end
+    end
+    console.print('[Rosie dump] '..label..' | '..table.concat(parts,' '))
+    console.print('[Rosie dump] '..label..' methods: '..method_names(obj))
+    local ok,affixes=pcall(function() return obj:get_affixes() end)
+    if ok and type(affixes)=='table' then
+        for i,a in ipairs(affixes) do
+            local ok3,line=pcall(function()
+                return string.format('affix %d hash=%s name=%s roll=%s greater=%s', i, tostring(a.affix_name_hash),
+                    short(a.get_name and a:get_name() or a.name), tostring(a.get_roll and a:get_roll() or a.roll),
+                    tostring(a.is_greater_affix and a:is_greater_affix() or a.greater))
+            end)
+            console.print('[Rosie dump]   '..(ok3 and line or ('affix '..i..' unreadable')))
+        end
+    end
+end
+local function dump_rare_items()
+    local items=Utils.host_call(actors_manager.get_all_items)
+    for _,item in pairs(type(items)=='table' and items or {}) do
+        if Utils.distance_to(item)<=20 then
+            local info=Utils.call(item,'get_item_info')
+            local rarity=Utils.call(info,'get_rarity')
+            if type(rarity)=='number' and rarity>=6 then M.deep_dump('ground '..tostring(Utils.call(info,'get_sno_id')),info) end
+        end
+    end
+    local player=get_local_player()
+    local ok,inv=pcall(function() return player:get_inventory_items() end)
+    for _,item in pairs(ok and type(inv)=='table' and inv or {}) do
+        local rarity=Utils.call(item,'get_rarity')
+        if type(rarity)=='number' and rarity>=6 then M.deep_dump('inventory '..tostring(Utils.call(item,'get_sno_id')),item) end
+    end
+end
 function M.diagnose()
     Settings.update()
     local s=Settings.get()
@@ -166,6 +234,8 @@ function M.diagnose()
         end
     end
     console.print('[Rosie pickup] Nearby decisions logged: '..count)
+    local ok_dump,err=pcall(dump_rare_items)
+    if not ok_dump then console.print('[Rosie dump] failed: '..tostring(err)) end
     return count
 end
 function M.calculate_item_score(item)

@@ -869,6 +869,12 @@ function utils.update_tracker_count(local_player,force)
 
 
     local items = local_player:get_inventory_items()
+    -- QQT_Warpigz_v2 (live rc.3 log: 'utils.lua:923: attempt to compare nil
+    -- with number' every census): get_item_count() can return nil on some
+    -- hosts, and a missing limit must not break the census either.
+    local listed_count = 0
+    for _ in pairs(type(items) == 'table' and items or {}) do listed_count = listed_count + 1 end
+    local max_inventory = tonumber(utils.settings.max_inventory) or 25
     local cached_inventory = {}
     local salvage_counter = 0
     local sell_counter = 0
@@ -911,7 +917,8 @@ function utils.update_tracker_count(local_player,force)
         end
     end
     tracker.cached_inventory = cached_inventory
-    tracker.inventory_count = local_player:get_item_count()
+    local ok_count, host_count = pcall(function() return local_player:get_item_count() end)
+    tracker.inventory_count = ok_count and tonumber(host_count) or listed_count
     tracker.talisman_inventory_count = #talisman_items
     tracker.salvage_count = salvage_counter
     tracker.salvage_talisman_count = salvage_talisman_counter
@@ -920,7 +927,7 @@ function utils.update_tracker_count(local_player,force)
     tracker.sell_equipment_count = sell_equipment_counter
     tracker.sell_talisman_count = sell_talisman_counter
     tracker.stash_count = stash_counter
-    tracker.inventory_full = tracker.inventory_count >= utils.settings.max_inventory
+    tracker.inventory_full = tracker.inventory_count >= max_inventory
 
     local need_repair = false
     local items = local_player:get_equipped_items()
@@ -932,10 +939,10 @@ function utils.update_tracker_count(local_player,force)
         end
     end
     tracker.need_repair = need_repair
-    tracker.need_stash_socketables = utils.settings.stash_socketables == utils.stash_extra_enum['FULL'] and #local_player:get_socketable_items() >= utils.settings.max_inventory
-    tracker.need_stash_consumables = utils.settings.stash_consumables == utils.stash_extra_enum['FULL'] and #local_player:get_consumable_items() >= utils.settings.max_inventory
-    tracker.need_stash_keys        = utils.settings.stash_keys        == utils.stash_extra_enum['FULL'] and #local_player:get_dungeon_key_items() >= utils.settings.max_inventory
-    tracker.talisman_inventory_full    = #talisman_items >= utils.settings.max_inventory
+    tracker.need_stash_socketables = utils.settings.stash_socketables == utils.stash_extra_enum['FULL'] and #local_player:get_socketable_items() >= max_inventory
+    tracker.need_stash_consumables = utils.settings.stash_consumables == utils.stash_extra_enum['FULL'] and #local_player:get_consumable_items() >= max_inventory
+    tracker.need_stash_keys        = utils.settings.stash_keys        == utils.stash_extra_enum['FULL'] and #local_player:get_dungeon_key_items() >= max_inventory
+    tracker.talisman_inventory_full    = #talisman_items >= max_inventory
 
     tracker.need_trigger = tracker.inventory_full or
         tracker.need_repair or
