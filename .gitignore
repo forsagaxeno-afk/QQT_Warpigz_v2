@@ -1,0 +1,21 @@
+# Personal logs
+**/log.txt
+**/zewxlog.md
+
+# Per-user Claude Code settings
+**/.claude/settings.local.json
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+
+# Generated caches, private credentials and proprietary packages
+__pycache__/
+*.pyc
+*.log
+*.zip
+*.rar
+*.pack
+.env
+.env.*

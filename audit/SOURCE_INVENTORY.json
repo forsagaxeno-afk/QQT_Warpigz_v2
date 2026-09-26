@@ -1,0 +1,1422 @@
+{
+  "project": "QQT_Warpigz_v2",
+  "version": "2.1.0",
+  "runtime_lua_count": 202,
+  "scope": "All bundled Lua source, including inactive legacy modules and data tables. Each folder was read by its domain reviewer and cross-checked by the auditor and critic; source review does not certify every runtime path.",
+  "files": [
+    {
+      "path": "ArkhamAsylum-1.0.6/core/external.lua",
+      "sha256": "0f2c0996946913399ed36e4eaf811b8132503c1a50df3d338343dada6a98b457",
+      "lines": 48,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/core/settings.lua",
+      "sha256": "f6485e5e15af43e92987fa64d4e3b5d2dcc6642d84933418fb7e16eadd3999fa",
+      "lines": 160,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/core/task_manager.lua",
+      "sha256": "8c2bb245bec2ccd5f0a18aea11e44123cef933d3e8f69a7d679085a2048bf9e8",
+      "lines": 211,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/core/tracker.lua",
+      "sha256": "b7fe1d693e28acfdcdf63ef885af1777f7a8df9080342b237f31d8264ad817ba",
+      "lines": 92,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/core/utils.lua",
+      "sha256": "c843cd1eb7a115e9c25a0338434393450b7d6edb6dad793908b2c4a19b5ca6b5",
+      "lines": 152,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/data/pitlevels.lua",
+      "sha256": "261a3d1db384b851c483fddb26dd931189dc2835bc504d85d7196860790ccb50",
+      "lines": 154,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/gui.lua",
+      "sha256": "b9a594e2609dfda250e5bd8d0c557d6dbc29847f67f68cea30b28f364663cfc3",
+      "lines": 191,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/main.lua",
+      "sha256": "e2b1fe197dda2e558d27f91d28dbc79c9d0dd0c3b86b041b5ea1f0f6481380ea",
+      "lines": 75,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/alfred.lua",
+      "sha256": "a99e2e9c1fdf4fb1d7468caed9fab90e05c629a21c40052f27a73bc7ae88d9a9",
+      "lines": 467,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/consume_chorons_soul.lua",
+      "sha256": "f21ee77ab2a799d6a4a101bc720dd3a6d7333b3986fd15e3120de4e971c2ada6",
+      "lines": 370,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/cross_traversal.lua",
+      "sha256": "50afe3211c4f5b410388e3f58a192066eeb4f7ef035e1614af8652b3be990ab6",
+      "lines": 356,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/d4assistant.lua",
+      "sha256": "d19e141c87501bf916f963a52a7b3c8c3bc64af3da4a065e50d32e517d5de242",
+      "lines": 29,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/enter_pit.lua",
+      "sha256": "fb32fab08a209c98311653590fe95d518883d30daae8f22b32fad77d1f859113",
+      "lines": 165,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/exit_pit.lua",
+      "sha256": "1368ae9b7768b87f3ad47f4a30fbfa1993153b906d7637e410520adb561034a5",
+      "lines": 101,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/explore_pit.lua",
+      "sha256": "1fcb98fb082be4465c7ff37d88db0add0ef493d92e0f767157a197105ede9ff8",
+      "lines": 335,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/follower.lua",
+      "sha256": "d0c85380baa517e5682097e15b445e3bdd0b2b3e705eb4b9fb82d7f398e2097a",
+      "lines": 19,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/idle.lua",
+      "sha256": "12237a670c425229a0d0adf67780e5cece72367959a598933f43da77c652cdee",
+      "lines": 16,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/interact_shrine.lua",
+      "sha256": "e48efaee8071d75e816e5d53dadbf8c526fde314033fba3500029a499b826252",
+      "lines": 118,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/kill_boss.lua",
+      "sha256": "5a54ff1db855985b564ccd7d42c3688c75e150dc7417af2b1818a4bb2da1e3a1",
+      "lines": 326,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/kill_monster.lua",
+      "sha256": "be6504cda22041c67205dd49947579df554347b36e26c3d1c2bdc01cf9616564",
+      "lines": 209,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/pickup_heart_of_stone.lua",
+      "sha256": "f06ccea1865b2a8fc2472c6a10ad3618638bd44a65a8526e76b6b91990bd1d2d",
+      "lines": 207,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/portal.lua",
+      "sha256": "72ac32920c6fc73225cfd3b3830da772ad1e3cd067303cdcb79928c720c56759",
+      "lines": 611,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/push_monsters.lua",
+      "sha256": "f5d919f525d2bed1828e17df82c0eec8088b37ed2d86b2714a105145a2a561c3",
+      "lines": 458,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/teleport_cerrigar.lua",
+      "sha256": "859575d22cdba0c0306cbe20afcde63d14ea17a9177f32f5fb5f459c643a548e",
+      "lines": 50,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/upgrade_glyph.lua",
+      "sha256": "e20c5c09be42e04473dea5adc347dc32dfc663a8b020c32db2f4a1a1867340d4",
+      "lines": 167,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/use_burden_altar.lua",
+      "sha256": "0c24da292f62f75095ac3c695101a626406224170474dc34eb690f08d776e5dc",
+      "lines": 162,
+      "review_domain": "arkham",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/drawing.lua",
+      "sha256": "afcf49d811b34afc83c9e69a6366012a2484bb74af4c299cc6520bfc11fcb39f",
+      "lines": 255,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/explorer.lua",
+      "sha256": "8f3fa4edf47f491eded0b443978085ffa3641f95b14d22920e339ffe2ef7ec59",
+      "lines": 864,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/external.lua",
+      "sha256": "fe1aef0f5bbe81196a1048d371a98ba8536c04a2ffc1693bce011031576adb5a",
+      "lines": 499,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/long_path.lua",
+      "sha256": "0f041afffe5ec1288b94ce7922d4e90a9c5f7be1f8f07b23ac220dfa3eaf60a4",
+      "lines": 250,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/movement_conditions.lua",
+      "sha256": "18bd179f1c7c56d84912e8bc45a7dd2f3ae42b316ba91a9f6418f71f8e8786d0",
+      "lines": 115,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/movement_engine.lua",
+      "sha256": "123980fcf2574da3c57dbd1d245e5a092c46dec60c66de417c4a0da74116d2d6",
+      "lines": 127,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/movement_helpers.lua",
+      "sha256": "ccad28a71ed1435cad26bcada0a5d9bcbe83db6797aa34368669c4f019661c80",
+      "lines": 251,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/movement_rules.lua",
+      "sha256": "d65f6a3a621e1dd004c6fd5100842417e1a082d2be9346f37081a236c75812ce",
+      "lines": 121,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/navigator.lua",
+      "sha256": "17186d32ee909e6ea48d885999f3b8b274f778fc7dc998a7f52f35c0794f083e",
+      "lines": 2685,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/pathfinder.lua",
+      "sha256": "7f7f0c52f021f8087a447672cc19d70fe68e37216600f1aa2e622810b181df92",
+      "lines": 535,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/settings.lua",
+      "sha256": "8f0664f082a43d9c83da59fc6fa0e6ca3eb57738914bc157e07013336df17d74",
+      "lines": 150,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/tracker.lua",
+      "sha256": "1e932a0096680377be0d6fbf579de1c78550984aac0bf392677947cc42edaa60",
+      "lines": 141,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/utils.lua",
+      "sha256": "9e75b930f5509301d52028956e48e3e79522a347fcc7b7530279165bf7377ffa",
+      "lines": 152,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/gui.lua",
+      "sha256": "27bcffd68879c053bbc20cea229b4efba17f1dc91eb376f5e0532c244add00c9",
+      "lines": 427,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Batmobile-1.0.12/main.lua",
+      "sha256": "d39509b5e7c64d340fbf219e622577db5c2e13f8587e6ed54a64631055d10377",
+      "lines": 169,
+      "review_domain": "batmobile",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/chest_targets.lua",
+      "sha256": "78d77f3e22428ccb1f35aafbd9bdfc4db2c1b8995f6d874ccd74c5603d585be2",
+      "lines": 92,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/explorer.lua",
+      "sha256": "69b4aca3f7bfe16260dfe44ee96a660d58be8754c743a101165b268e7456aabe",
+      "lines": 1131,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/explorerlite.lua",
+      "sha256": "0a7e016c6f20a880f7d8dd32aa5a87f32d1d00ff7359df1b1181f5fac54db9f5",
+      "lines": 514,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/helltide_explorer.lua",
+      "sha256": "eb74476e7db1f73f1a98551e19978e7be8684c2cd59294a0cbe6b2266cf90b57",
+      "lines": 442,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/loot_guard.lua",
+      "sha256": "3fcecce0ca8ade699c875d312a82ca50d3785038b5da433c77b16393d3482cfd",
+      "lines": 62,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/perf.lua",
+      "sha256": "314ad399649037c6ae5559441d579b5b134776b5bf2e723555d82def4b6b484f",
+      "lines": 124,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/recovery.lua",
+      "sha256": "9eb28fe951b90bb16dee728adb5d48ea18cd8751b268dc3c556b7a498823e660",
+      "lines": 19,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/settings.lua",
+      "sha256": "25f1204a92cc766d62d0008bbf2e19cba1662c28741f4108c4aef45a4c41915c",
+      "lines": 183,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/task_manager.lua",
+      "sha256": "9f7fed03fbc89e0fb642fb358b60a1b8278c36180e8c55edb7f556a3ec351665",
+      "lines": 60,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/tracker.lua",
+      "sha256": "c2d7159b49f80ef9accfabae4c0627b7fb67d10865af38a687738dbda867c9e1",
+      "lines": 30,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/utils.lua",
+      "sha256": "c37322d23e1182be23a7cb1c12add6a4867c4a86242ce939dbf0fa2d3349a13d",
+      "lines": 224,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/data/enums.lua",
+      "sha256": "575f7dc18dba2b9dd1c02ed85a5ed7f5c6a7a647d572d10a7fb2e6d6bf5e1fb7",
+      "lines": 44,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/data/filter.lua",
+      "sha256": "8c7b62ad5a6ef070e6fe327d3f40dc2f39a26a08d7d101bf0f87ac4c6b6f71a8",
+      "lines": 89,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/data/zone_overrides.lua",
+      "sha256": "f474231dd04dfeb06e509a9de5775c185945c543714180bb55b2de9e137dbe01",
+      "lines": 63,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/gui.lua",
+      "sha256": "ba331e0d461362b53b73983edbf476ada43006405c3db6887eb875be70f673e1",
+      "lines": 87,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/main.lua",
+      "sha256": "af1062e04db06898fea58cc92976fc3bafcef250249b6470de51509ae604d665",
+      "lines": 97,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/tasks/alfred.lua",
+      "sha256": "6153a2ea8c0032e6ba303c3f51a7e0d04f6da0a0158feaf52ce859a8c916e11d",
+      "lines": 332,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/tasks/helltide.lua",
+      "sha256": "b4b81685b23b9bfd8b147337a35fd716c0687c66c3e2b481509fea657ce7c8fd",
+      "lines": 3744,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/tasks/search_helltide.lua",
+      "sha256": "71da4f9706bced88939ab667454d7cd24c2b624378151dfaf605768a854e188d",
+      "lines": 343,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/waypoints/ironwolfs.lua",
+      "sha256": "db7e5289892ee16c112e9698e10fdfe234206ec876c413edc88ee10818c5b8ff",
+      "lines": 1860,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/waypoints/ironwolfs_to_maiden.lua",
+      "sha256": "bba65d69b3cc799b2929b137dc1e563fccd0d9f5263335f5aa9e8d7ef4ecf718",
+      "lines": 63,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/waypoints/jirandai.lua",
+      "sha256": "a999e542fa12df7669f285398aed7365763389f6992178c6a909f3167e331ed2",
+      "lines": 1644,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/waypoints/jirandai_to_maiden.lua",
+      "sha256": "f4fb81764821011deb017d8956ea03279d8343fda39c95a048f30fcbf8e723da",
+      "lines": 69,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/waypoints/marowen.lua",
+      "sha256": "9b0d8dd058a40806f3415dac9022bb2d72278af703513bf54621df1484f1740d",
+      "lines": 1533,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/waypoints/marowen_to_maiden.lua",
+      "sha256": "6a2d53f8fe797f8547cd5559796ec2b2f30c6e0edec9a3b68bdabcc9675f17e1",
+      "lines": 80,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/waypoints/menestad.lua",
+      "sha256": "f222c0a86526178eecab9c5cf1e1e6f633d28040df6de9e998fd48d1489e3cff",
+      "lines": 1544,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/waypoints/menestad_to_maiden.lua",
+      "sha256": "748feea82e02716ea6c808702152628e5790a909a40df7937aada4214e830604",
+      "lines": 49,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/waypoints/wejinhani.lua",
+      "sha256": "61b5af022d9d278befff88625227944b5e3e68d045fc1a5280de052864c8ad1c",
+      "lines": 1730,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HelltideRevamped-0.4/waypoints/wejinhani_to_maiden.lua",
+      "sha256": "e2b829b9134995957bdd43913d852f843a3eb6a21762020230ab9503b7af5dcd",
+      "lines": 81,
+      "review_domain": "helltide",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/Meteor.lua",
+      "sha256": "920c71c71e10c69643d5cd9b0a99cd409696f9dd9c1a2bb241d540d4d7a28639",
+      "lines": 41,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/affix_filter.lua",
+      "sha256": "cc37fbfba5420d7d497bbb18f2a1f129426a3997bf1c33502c9d967f6066a397",
+      "lines": 78,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/explorer.lua",
+      "sha256": "47ed59c8f0b71aa9b486dffde30af380d5aa9aea69c0e45ac2daed7f1d187d15",
+      "lines": 832,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/loot_guard.lua",
+      "sha256": "5d99290ed7b12c0bb05dbb30af170df73ffeb1881112f40e0e2670484b53c157",
+      "lines": 106,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/movement.lua",
+      "sha256": "ea027062eb0705e4feb5b4a27e94e4f435c140693d92a9c742946d1c9a1726a9",
+      "lines": 30,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/navigation.lua",
+      "sha256": "b9a012f5ccb01082be5f2358306049cd3fb281359ee6395efb4e64c4cbf9d098",
+      "lines": 23,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/settings.lua",
+      "sha256": "051b0ff47925ccf0413d0f01838740370c68716a9e63bdc7aef27b86c2831199",
+      "lines": 147,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/task_manager.lua",
+      "sha256": "6b6c6e2876b5f9f4d7f034e4cbcfcb82c36748f54fbf3a0ca511884ae7d1440e",
+      "lines": 124,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/tracker.lua",
+      "sha256": "7de9405119909e4d738b9ecf8cc337e8e9fa89713e07e4a24270c61420ad96d9",
+      "lines": 127,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/utils.lua",
+      "sha256": "c1c5b2420d1454d057015f697ad770abd0fb4af2d5ae15dcf59f17dec49b1e20",
+      "lines": 446,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/warplan.lua",
+      "sha256": "2d2d4ae121246b5e833dd9e1ecc53ea26fbca60eace8b64f7eb422a81decfafe",
+      "lines": 206,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/data/enums.lua",
+      "sha256": "b7654229c8441081ecb9d2c74e8203d591e5d161c6ebb1a5331a70294f8dd759",
+      "lines": 42,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/data/filters/barbarian.lua",
+      "sha256": "0682fb2a58eec4d21b0444c2c41a1d2ac812cd1aa8ce8d2097257da395311fc0",
+      "lines": 60,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/data/filters/default.lua",
+      "sha256": "0682fb2a58eec4d21b0444c2c41a1d2ac812cd1aa8ce8d2097257da395311fc0",
+      "lines": 60,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/data/filters/druid.lua",
+      "sha256": "0682fb2a58eec4d21b0444c2c41a1d2ac812cd1aa8ce8d2097257da395311fc0",
+      "lines": 60,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/data/filters/necromancer.lua",
+      "sha256": "0682fb2a58eec4d21b0444c2c41a1d2ac812cd1aa8ce8d2097257da395311fc0",
+      "lines": 60,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/data/filters/rogue.lua",
+      "sha256": "38232d1b8ce2cebd0354c6abe85cc322e5af43445fb158c2ccca86ef65b032c8",
+      "lines": 84,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/data/filters/sorcerer.lua",
+      "sha256": "c641d374645c45a0c92c80514373bb5c6ea7876f5c86d63642a82ca050c00f56",
+      "lines": 88,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/data/filters/spiritborn.lua",
+      "sha256": "3a0c296303e46e93849dcc7a57477b0b0389e3ced36dae3f3b3c41292a6608fc",
+      "lines": 130,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/data/library.lua",
+      "sha256": "d1c204c0b455a003023e1b1185912a13b374499cb5b8b8a3db905c214909d09f",
+      "lines": 112,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/data/pylons.lua",
+      "sha256": "dbc1c33a11e8127ecda0b7a0f61f70d3ea5ab82b8f8856b6f634fb99ce1080a6",
+      "lines": 55,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/gui.lua",
+      "sha256": "15b8ead134d116aa3aaeaea2827756fbbd578a254b2d48d269978e741aa88d20",
+      "lines": 153,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/main.lua",
+      "sha256": "bf42419e1094dd96269e1a2c7d57934fac5161e6e866cb09e08f32c11e347d92",
+      "lines": 497,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/alfred.lua",
+      "sha256": "9e9fd8b370e8769226279248df74d53048692c43166d9a715a3e17f9c68806e1",
+      "lines": 299,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/enter_horde.lua",
+      "sha256": "24ecdd621dba58a6797b149ce65a49c177f462bcb5a9dfcd9eebefb3ec7ac32e",
+      "lines": 90,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/exit_horde.lua",
+      "sha256": "d3036753bea6c5514f082f996c94e7fe0ef70c434bab5a5019745e832955f18d",
+      "lines": 327,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/explore.lua",
+      "sha256": "effaf11190e7c243bb8bd7ffdc0ca2bc7e00878c7af0e93c51314ec3aa139954",
+      "lines": 14,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/horde.lua",
+      "sha256": "073aa249cb4128eef2e556c5800a387886964066d2c487360e8cd278e200b1b1",
+      "lines": 722,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/kill_monsters.lua",
+      "sha256": "a8b8cc2a257210193d71db098ed57a39bf34d7308b5fe11017cdac3e7c32c3f0",
+      "lines": 60,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/open_chests.lua",
+      "sha256": "ac36adcc11b57314d21d8bb282fff5956d1af9dcdbb330fa2e72a0b1ffb8ee49",
+      "lines": 574,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/start_dungeon.lua",
+      "sha256": "298b10c62a6fdd37aa19ad38d4cf0d8c680a7ce30bb87d85856248b0cf739245",
+      "lines": 289,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/town_repair.lua",
+      "sha256": "071258a875d10f6499baa96279658d2fe313bc29745abd7939f0026959fbc617",
+      "lines": 36,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/town_salvage.lua",
+      "sha256": "ddcac743811938bdf9a87bd8f4416d5bfc39fefc87b48f4e2000132acaf43dae",
+      "lines": 428,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/town_sell.lua",
+      "sha256": "65c9a9c57bb56033e7b3eb40ce3cee13f485e3348e8dee65b9c0b98408f92a0f",
+      "lines": 45,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/walking_to_horde.lua",
+      "sha256": "687281d9f6a89ab2973e97569987de773b965e2839129cc0418bcbfa77f88911",
+      "lines": 326,
+      "review_domain": "horde",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/boss_rotation.lua",
+      "sha256": "db38e225cebf96a852237701f550b4eb8a36dc35c315f2cce02d4fa2979349da",
+      "lines": 425,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/explorerlite.lua",
+      "sha256": "a09489568543bb3d3ed9c00532543f84029ba0492fedec57eb9f956e7a7bc245",
+      "lines": 587,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/input.lua",
+      "sha256": "d4ef597ecf871f2d4bba0b7750853f2072cdeb242ab3b84112c74371cf1b1f26",
+      "lines": 93,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/map_nav.lua",
+      "sha256": "9bd5c83b0e4e3fad7aa3d4b35d0df684088437b3013433545cce4d713f0b06c3",
+      "lines": 118,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/materials.lua",
+      "sha256": "1c6f2a448f7dc71de15160f7311c36493a8250fd410cc64d89c8c8dc7504f468",
+      "lines": 174,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/navigation_owner.lua",
+      "sha256": "64512d362e9914aae364a5d172f8eaf92cd393bd16dedce9036437619815c577",
+      "lines": 42,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/pathwalker.lua",
+      "sha256": "a0a0f93d8111b84b1575546edbc7640b3250e48fb7992e690127031267efe866",
+      "lines": 299,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/settings.lua",
+      "sha256": "0252f5233857b600297775320013b4973340b65c17bb491f8584fb7737a15003",
+      "lines": 157,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/task_manager.lua",
+      "sha256": "acb3e9e0082611aae210ecb056f8ce653e994b69a2c6ca2c8f082d5a5f3556ca",
+      "lines": 90,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/tracker.lua",
+      "sha256": "891060f19adb9824237cd562764ba862eaf544c931920ce997ec724a304eacd6",
+      "lines": 50,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/core/utils.lua",
+      "sha256": "2aa5241f81a5854efc7077fb2b0a5370ad243eb35e47cb73bf81ce70689bce4b",
+      "lines": 246,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/data/enums.lua",
+      "sha256": "e42b4c02475b62457cf93437d4d9d11e9a316b5cf9c52f2ef27368af7b576dcf",
+      "lines": 180,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/gui.lua",
+      "sha256": "f2dfed8d0a75d51042cf6e7b231ed9852347fedf940577bcabf1d736c404efa8",
+      "lines": 227,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/main.lua",
+      "sha256": "d12f05a268fc0447b3a25ca5c0f2ab2ec8a299b0f4e5483ab39c19a987680b5e",
+      "lines": 477,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/andariel_a.lua",
+      "sha256": "19360be1572de367cd09fda275ea397909a7d6c671706f0d4add37708352ea0a",
+      "lines": 133,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/andariel_b.lua",
+      "sha256": "999da1f0f6d7cbce700acf2923c89bc063e845a99314116b20f3c2a1c0ad7b18",
+      "lines": 267,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/andariel_c.lua",
+      "sha256": "a92714ccd490cb49460fb7deda5ee1a68b2371cce6d6f14a2453ce27dcbedfd7",
+      "lines": 252,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/beast_a.lua",
+      "sha256": "c9466460b51db1bc0ade273597494a0480a86d6f966fd1119a68c37f73ffa9ee",
+      "lines": 99,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/beast_b.lua",
+      "sha256": "d652032d50054474786a72c6599077da869741184f1c88c7568d6f58c4483518",
+      "lines": 109,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/beast_c.lua",
+      "sha256": "1d7d764b8fd053f10f78f84bb4a4647d6d84d61d33fff5d1486179f73af2e4b4",
+      "lines": 182,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/belial_a.lua",
+      "sha256": "ab43cc3bceed021a167b51c0e16f44439c5db5dc616f4ee2f65766b143a85160",
+      "lines": 117,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/butcher_a.lua",
+      "sha256": "85789636e0f861f32af226ab27eb10f1366298e0dad574bbb1e2922c8649ada5",
+      "lines": 82,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/butcher_b.lua",
+      "sha256": "fa2341c51ae0ac8346e9350ea526059866dfafe5081b68a20c02728dab7b0938",
+      "lines": 91,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/duriel_a.lua",
+      "sha256": "6fed85d18aa14e6c8ab3862e1bce42b64022bbbb10d096f0e18c446f4b7eb4f1",
+      "lines": 134,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/duriel_b.lua",
+      "sha256": "263303f3c2911b641bc781bb43ac24d6f50e582ac12b82ec8cf2e0b54cc9ea5b",
+      "lines": 124,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/duriel_c.lua",
+      "sha256": "7583c3e1864198cb9d60b8b8b531c5cac204ab01338e47718424a29ce21a2fbd",
+      "lines": 237,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/grigoire_a.lua",
+      "sha256": "4a692513ac8ed2172996f549a2c0da31f936eed320209acb809be2bbc0013f1d",
+      "lines": 100,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/grigoire_b.lua",
+      "sha256": "e4534462d0c3ad8cebd0021e83c0abf9b5c561d98709b3c24aaf5ba8dec584d8",
+      "lines": 98,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/grigoire_c.lua",
+      "sha256": "18c609bb59c3b1bb6d846352aeae2e9e4d88b8bcdfd1a986025bd49317ecd62c",
+      "lines": 129,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/harbinger_a.lua",
+      "sha256": "d3ae735ccc03439693541c6f8b41f623c8143ae8ef91696f3718863984ee62bb",
+      "lines": 184,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/harbinger_b.lua",
+      "sha256": "657316f491f497adcad5d52c2be8c5fcf54ee866129a0b52b09885afe61ad397",
+      "lines": 160,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/urivar_a.lua",
+      "sha256": "12a5efde4a62da85d450589458431bff5667ec6c39c02c93f6890a10ab5a1b62",
+      "lines": 114,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/urivar_b.lua",
+      "sha256": "9efadc3856da652b20b160fdf7dc419dbfbcfad7fd6c500d9b79c2d632d81375",
+      "lines": 104,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/varshan_a.lua",
+      "sha256": "e8700624be2f524485bc6a54d7704e31480b4506d699ebc310633dfb25b28221",
+      "lines": 106,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/varshan_b.lua",
+      "sha256": "432bf34503939f714fda7f651b3b19f49efffae47013c2ef93ba379a06aa7809",
+      "lines": 119,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/varshan_c.lua",
+      "sha256": "3e55d018702363bdee691f210099a93e0cbed8a986c302c113f55ac81eab7f51",
+      "lines": 171,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/varshan_d.lua",
+      "sha256": "87decc00211bdf09e967e78da2a21ee1171313c5dfc4099867330fab1aa9b142",
+      "lines": 158,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/zir_a.lua",
+      "sha256": "ee3b0ab1c317cd19ed2695327801a23eac3176a3068f499bc2448e2da73b98f3",
+      "lines": 167,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/paths/zir_b.lua",
+      "sha256": "c061202ebc671eabb11e03d9e8abdd99782b9c50697b76b6e332a25ce0507c0d",
+      "lines": 140,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/tasks/alfred.lua",
+      "sha256": "f2f097f989cd4bd0f86ee4caf5af3f1d6817c9f63fe4282731ffdf06e962382b",
+      "lines": 301,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/tasks/belial_chest.lua",
+      "sha256": "f90b8c75536491813d5a10d4b7eb78a74f00dcc09e8be8134e9a192afa57091a",
+      "lines": 401,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/tasks/dungeon_reset.lua",
+      "sha256": "e941b2e26aa33929ff6dc13ee462d390ece31a0803191e1bc1545fd5181c2267",
+      "lines": 105,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/tasks/interact_altar.lua",
+      "sha256": "b347ad0653b294005e725fcc2df6fcc34cac41fd89d1d9e503c83216b51ec256",
+      "lines": 207,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/tasks/kill_monsters.lua",
+      "sha256": "bad1a5bf905a12134d7a1c7d65e249fad257a87e23049ae6531a726aac4b2751",
+      "lines": 76,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/tasks/navigate_to_boss.lua",
+      "sha256": "bd4d0218f86fd7a36fbf855d5295e6a543e70bc3546e726da1c5acdcd7f6aab4",
+      "lines": 819,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/tasks/open_chest.lua",
+      "sha256": "926dcc29181590a0a4dedf3baff1a90f08d3a9f035ff10642ce30bbe90b3be8b",
+      "lines": 269,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/tasks/revive.lua",
+      "sha256": "40471f5efb8cd398e41d959cad6196c05ebb8198e853d82a14c234309f542dd5",
+      "lines": 109,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "Reaper-main/tasks/sigil_complete.lua",
+      "sha256": "a18e997fa669195b70d42b5b263f72041450d06a02298279043ad527e5eb08cb",
+      "lines": 150,
+      "review_domain": "reaper",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/main.lua",
+      "sha256": "e16e88d4a746ae0dd08c52d1efc38bee838e32b71ce497ccd297dbb8bef525e3",
+      "lines": 379,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/coordination.lua",
+      "sha256": "50fd532fa7c705ba324969c808b17862e4ac2bc61393ffa1592a5657cf30a56e",
+      "lines": 190,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/data/caches.lua",
+      "sha256": "801b1088713c50edfafad7a08ba881d8fc14cf14807ba0814761935edd252ea7",
+      "lines": 87,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/external.lua",
+      "sha256": "a9cc9ab982325381a4ef38077814e03871ab2a17143223bf423215d6ddc11cab",
+      "lines": 121,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/fsm.lua",
+      "sha256": "45f71651e215ed944cdac6aee9ca3216a09948a49e747ab333f92fa9e5011263",
+      "lines": 419,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/gui.lua",
+      "sha256": "4719359b64e73e8182e74eb32fa849b6421fab9dc6cef4879ab279e1e604b190",
+      "lines": 138,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/log.lua",
+      "sha256": "a151e3f5be17b3d15c23b94c5740cb2854370656309717dfb7269be75d1987c7",
+      "lines": 19,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/rewards.lua",
+      "sha256": "03d557b41d4104bc12475d04ba1dda8850f4f09d632ea7c7553bb7b807578db0",
+      "lines": 519,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/settings.lua",
+      "sha256": "62425630f1760d3b9debcc5fe7eb443e4cc5528d0d68140b762ce4c97773e149",
+      "lines": 75,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/stats.lua",
+      "sha256": "ba3439be99389e618bb93319f3e71c1ad24f8f0c92c1d896fa3bd4bccf5578bc",
+      "lines": 97,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/tracker.lua",
+      "sha256": "66b3a98eeab8fc7a2622d6eee088402599d03e77eed8e781fbc80966cd495776",
+      "lines": 132,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "SilentRaven-0.1.3/silent_raven/whispers.lua",
+      "sha256": "0097bc444b7df98719f9d74e6b407616b1d57a03f1dd81e5360bc1dc9c7fb885",
+      "lines": 477,
+      "review_domain": "silentraven",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPigs-1.0.0/core/external.lua",
+      "sha256": "d9de498cba8f09b877d7be96c6d2c2262930ba350843d6fcf55470a235381fc0",
+      "lines": 28,
+      "review_domain": "warpigs-dispatch + warpigs-town",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPigs-1.0.0/core/orchestrator.lua",
+      "sha256": "e309455cea20258b65769578b75b73a1d75f5f26cca6f423785faf83c285932f",
+      "lines": 3539,
+      "review_domain": "warpigs-dispatch + warpigs-town",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPigs-1.0.0/core/settings.lua",
+      "sha256": "429d5753d4cfb0165324127c3d32450b2ab77195a7e64878055939a423f4d086",
+      "lines": 43,
+      "review_domain": "warpigs-dispatch + warpigs-town",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPigs-1.0.0/core/tasks/turn_in_rewards.lua",
+      "sha256": "4dc570c3816bcbbbc427e632ed97371dd49d78b7fae482bee1154ba36ff14c29",
+      "lines": 346,
+      "review_domain": "warpigs-dispatch + warpigs-town",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPigs-1.0.0/gui.lua",
+      "sha256": "8c88361baea3cf228bffe5bb158c614db1de7362a92dc06a74a70fca2087324e",
+      "lines": 95,
+      "review_domain": "warpigs-dispatch + warpigs-town",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPigs-1.0.0/main.lua",
+      "sha256": "85d5d6601e9899e28d0d3148b4b8d75de42de47665691a8631df21d2760e8db0",
+      "lines": 44,
+      "review_domain": "warpigs-dispatch + warpigs-town",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPigs-1.0.0/wp_silent_raven.lua",
+      "sha256": "f2cd7bf16e3cadb0ae72f75ade7c1ebb65dcec28a104e0f4c6c3a11496a175af",
+      "lines": 547,
+      "review_domain": "warpigs-dispatch + warpigs-town",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPug-1.0.0/core/external.lua",
+      "sha256": "9b8677c8204b9898899d419503dfae639f21f5daa0c91eae2cd7930418c11cbb",
+      "lines": 19,
+      "review_domain": "warpug",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPug-1.0.0/core/planner.lua",
+      "sha256": "f1857dd887e401df214d90e0227925765288a1d96b8830f30c1bd2bf74ad9db9",
+      "lines": 573,
+      "review_domain": "warpug",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPug-1.0.0/core/settings.lua",
+      "sha256": "94124b2bc58edcf0e713d4ce97dfae67be395b1e62810cfcc01c3b321d9872e6",
+      "lines": 43,
+      "review_domain": "warpug",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPug-1.0.0/gui.lua",
+      "sha256": "b6079170359bc74fdf7e5c7d2ac4a4e0e25f0763b4b68fe85f49413baf2c34f6",
+      "lines": 239,
+      "review_domain": "warpug",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WarPug-1.0.0/main.lua",
+      "sha256": "1e653056f1086e30ceebe7c6dfdde9d6dca135554354a7d29ef2a54f68ee77df",
+      "lines": 114,
+      "review_domain": "warpug",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/core/external.lua",
+      "sha256": "3586b1ac4348c39e50f28535e6d14214dae25427b072f1658b5a7373783a035f",
+      "lines": 48,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/core/reward_phase.lua",
+      "sha256": "6a56c9ce353f1ec96db3977ac0c74e5c618073744914391bb64d4d8248a0be9d",
+      "lines": 163,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/core/settings.lua",
+      "sha256": "84571420085d9c6ea8a358f0cfdd5ed398b13d96487e07ec7cd8a9e37379f7fa",
+      "lines": 152,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/core/task_manager.lua",
+      "sha256": "bbd426a46fb395fe3a2dba5ba940f1a0430177d19acdfd59a473f32f5cf7b464",
+      "lines": 234,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/core/tracker.lua",
+      "sha256": "ac2037554183e6a85920ff2d7d20e150e7a850055f3cdb94a63782bdc8e082f5",
+      "lines": 131,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/core/utils.lua",
+      "sha256": "9f874dd846a208690150ea4c77a80b6f6b97bac1fd047247b5357b23afe16f47",
+      "lines": 189,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/data/path.lua",
+      "sha256": "616d6a0355f03974fdd6b5e7b9cd948b2659f17dc79923183ead3bf3d2219a0a",
+      "lines": 28,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/gui.lua",
+      "sha256": "be99d79946da254c6eca3ff38023a52e520b0467885fe458c0a7c0d78e125463",
+      "lines": 299,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/main.lua",
+      "sha256": "6c69251517f4e57bbc3d024388a8dc791b6311db84704883d15d6d3f331507bc",
+      "lines": 142,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/alfred.lua",
+      "sha256": "d99c4c500a795dacacab934779b4b44db7f939c69742f3058dcac664abd3c37e",
+      "lines": 402,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/custom_explorer.lua",
+      "sha256": "0a49a7ce6767ada04ad8f908344d4f0341e373529f2dc0035927f467338c76a6",
+      "lines": 455,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/d4assistant.lua",
+      "sha256": "dc10ede5ba434cd2d2191919d36dc4e9b8df91eb0add3865d6d4cf0c98441098",
+      "lines": 29,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/enter_undercity.lua",
+      "sha256": "dda796a0094056142210552575255fe0c22c4480e88bc84d6f09e789955abdbe",
+      "lines": 684,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/exit_undercity.lua",
+      "sha256": "412e97ab71151509b40de2216da601e0a82ccc6870b0122e935dd3a33aa6b09a",
+      "lines": 91,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/explore_undercity.lua",
+      "sha256": "abbdf553062e2876d9cae6b9ed7e5b6ee9607f2d96e7e2ba0862c7e2ea972237",
+      "lines": 107,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/follower.lua",
+      "sha256": "9e2720a010f8748cc86ec43bde708f7f5c35779def966024e50701fb37d5f299",
+      "lines": 19,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/goto_chest.lua",
+      "sha256": "45a4a0053c7b480a34865e88828a3f9b5f7c60cddcad693d470147568aa16842",
+      "lines": 249,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/idle.lua",
+      "sha256": "71fc808000fb736f847c7c145da4f17dd457a92cfde153a8e50be01947a25d8f",
+      "lines": 16,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/interact_enticement.lua",
+      "sha256": "a8c4321de536f74ecfbee480b2dff1cd6b7ad21cb361a80953f4dc12a5ed9d80",
+      "lines": 108,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/kill_monster.lua",
+      "sha256": "75ec3c76f79f71f077039a563c36ab74bfeb37ad3dbedd991d742bfff0d5712b",
+      "lines": 120,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/loot_obols.lua",
+      "sha256": "40856dcb8041a5325b11b62db8000d65691bf634af0822bcd8a57b0845e63c89",
+      "lines": 76,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/portal.lua",
+      "sha256": "4e2faa334428463451d533780bb1183311c36052380aef295f894e8102a761cd",
+      "lines": 129,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/sort_tribute.lua",
+      "sha256": "7a7481f239115c10e26fbcf5753c39ea87854b36c955c0cb951a1e8e658dd07d",
+      "lines": 136,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/teleport_kurast.lua",
+      "sha256": "8d51d925d8bd13324ca6b22959491b811f248c19d2be2b1d67146aa2e5736221",
+      "lines": 48,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    },
+    {
+      "path": "WonderCity-main/tasks/walk_kurast.lua",
+      "sha256": "2a587f512db81f9e3d870e1bd6811ad0cf680b98bbf9769f14c94ad4793b71c0",
+      "lines": 164,
+      "review_domain": "wondercity",
+      "review": "audit/reviews-2.1.0/FINDINGS.md"
+    }
+  ]
+}

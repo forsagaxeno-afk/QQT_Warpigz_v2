@@ -1,0 +1,917 @@
+-- Rosie as the suite's Alfred / Looter provider. The REAL Rosie/main.lua is
+-- loaded alone into the emulated QQT host (joint_host.lua, opts.rosie with no
+-- other plugin folder): per-plugin require, one shared _G, caller-context
+-- require detection. Consumer calls run in a foreign plugin context, as QQT
+-- runs them, so a lazy require() inside a Rosie export is reported.
+-- Checks the contract the bundle relies on (AUDIT.md C1/C5 and the inventory
+-- below): documented globals, every function/field the bundle reads, idle
+-- status, a with-teleport town trip and its callback, pause/resume ownership,
+-- a failed trip that must not loop, and Looter busy/idle.
+local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
+local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
+local checks, failures = 0, {}
+local function ok(value, message)
+    if not value then error(message or 'expected a true value', 2) end
+    checks = checks + 1
+end
+local function eq(actual, expected, message)
+    if actual ~= expected then
+        error((message or 'mismatch') .. ': expected ' .. tostring(expected) .. ', got ' .. tostring(actual), 2)
+    end
+    checks = checks + 1
+end
+local function case(name, fn)
+    local passed, err = xpcall(fn, debug.traceback)
+    if passed then print('PASS rosie: ' .. name)
+    else failures[#failures + 1] = name .. ': ' .. tostring(err); print('FAIL rosie: ' .. name .. ': ' .. tostring(err)) end
+end
+
+-- What the bundle calls / reads (inventory of WarPigs, WarPug, SilentRaven,
+-- HordeDev, HelltideRevamped, Reaper, Arkham, WonderCity, TristramLoop).
+local ALFRED_FUNCTIONS = {'get_status', 'trigger_tasks', 'trigger_tasks_with_teleport', 'pause', 'resume'}
+-- C1 booleans every reader tests with == true / ~= true.
+local ALFRED_BOOLEANS = {'enabled', 'trigger_tasks', 'external_trigger', 'pending', 'running', 'teleport',
+    'teleport_done', 'teleport_failed', 'inventory_full', 'need_repair', 'need_trigger', 'paused',
+    'all_task_done', 'allow_external', 'external_pause', 'talisman_inventory_full', 'stash_full', 'stuck'}
+local LOOTER_FUNCTIONS = {'get_enabled', 'is_actively_looting', 'is_idle', 'getSettings', 'status',
+    'evaluate_item', 'observe_items'}
+local ROSIE_FUNCTIONS = {'status', 'enable', 'disable', 'service', 'stop', 'shutdown'}
+
+-- A foreign plugin context (code owner != Rosie) for consumer calls.
+local CONSUMER = {name = 'Consumer', dir = ROOT .. '/audit/tests/', loaded = {}}
+local function new(opts)
+    opts = opts or {}
+    opts.rosie, opts.dirs = true, {}
+    local h = J.new(opts)
+    h.assert_clean('load')
+    return h
+end
+local function as_consumer(h, fn) return h.as(CONSUMER, fn) end
+local function alfred(h) return h.G.AlfredTheButlerPlugin end
+local function looter(h) return h.G.LooteerPlugin end
+local function st(h) return as_consumer(h, function() return alfred(h).get_status() end) end
+-- AUDIT.md C1 canonical reading (copied verbatim across the suite).
+local function live(s)
+    return s.trigger_tasks == true or s.external_trigger == true or s.pending == true or s.running == true
+        or (s.teleport == true and s.teleport_done ~= true and s.teleport_failed ~= true)
+end
+-- Rosie applies its switches on its next update: one frame after enable().
+local function enable(h)
+    eq(as_consumer(h, function() return h.G.RosiePlugin.enable() end), true, 'RosiePlugin.enable()')
+    h.frame()
+end
+local function fill_bag(h, n)
+    h.inventory = {}
+    for i = 1, n or 25 do h.inventory[i] = h.gear() end
+end
+
+case('loads cleanly and publishes exactly its documented globals', function()
+    local h = new()
+    local globals = table.concat(h.new_globals(), ',')
+    eq(globals, 'AlfredTheButlerPlugin,LooteerPlugin,PLUGIN_alfred_the_butler,RosiePlugin', 'new globals')
+    eq(h.G.PLUGIN_alfred_the_butler, h.G.AlfredTheButlerPlugin, 'legacy Alfred alias is the same adapter')
+    eq(alfred(h)._rosie, true); eq(looter(h)._rosie, true); eq(h.G.RosiePlugin._rosie, true)
+    local rec = h.by_dir.Rosie
+    ok(#rec.update == 1 and #rec.menu == 1 and #rec.render == 1, 'one host callback of each kind')
+    for _, name in ipairs(ALFRED_FUNCTIONS) do eq(type(alfred(h)[name]), 'function', 'AlfredTheButlerPlugin.' .. name) end
+    for _, name in ipairs(LOOTER_FUNCTIONS) do eq(type(looter(h)[name]), 'function', 'LooteerPlugin.' .. name) end
+    for _, name in ipairs(ROSIE_FUNCTIONS) do eq(type(h.G.RosiePlugin[name]), 'function', 'RosiePlugin.' .. name) end
+    h.run(3)
+    h.assert_clean('idle frames')
+    eq(#h.file_writes, 0, 'no file writes')
+    eq(#h.moves + #h.waypoints, 0, 'Rosie starts off: no movement, no teleport')
+end)
+
+case('idle status: C1 fields are booleans, nothing live, master switch gates both adapters', function()
+    local h = new()
+    h.run(1)
+    local s = st(h)
+    eq(s.enabled, false, 'Rosie starts off: Alfred adapter disabled')
+    eq(as_consumer(h, function() return looter(h).get_enabled() end), false, 'Looter adapter disabled')
+    local accepted, why = as_consumer(h, function() return alfred(h).trigger_tasks_with_teleport('Consumer') end)
+    eq(accepted, false, 'a request while Rosie is off is refused'); ok(type(why) == 'string', 'with a reason')
+    enable(h)
+    h.run(2)
+    s = st(h)
+    for _, key in ipairs(ALFRED_BOOLEANS) do eq(type(s[key]), 'boolean', 'get_status().' .. key) end
+    eq(s.enabled, true); eq(live(s), false, 'idle: no live work'); eq(s.paused, false)
+    eq(s.inventory_full or s.need_repair, false, 'no hard need'); eq(s.need_trigger, false)
+    eq(s.paused_by, nil); eq(s.external_caller, nil); eq(s.owner, nil)
+    eq(s.restock_count, 0, 'Rosie does not restock')
+    eq(as_consumer(h, function() return looter(h).get_enabled() end), true)
+    eq(as_consumer(h, function() return looter(h).is_actively_looting() end), false)
+    eq(as_consumer(h, function() return looter(h).is_idle() end), true)
+    eq(as_consumer(h, function() return looter(h).getSettings('enabled') end), true, 'legacy getSettings(enabled)')
+    eq(as_consumer(h, function() return looter(h).getSettings('looting') end), nil, 'legacy nil = not looting')
+    local ls = as_consumer(h, function() return looter(h).status() end)
+    eq(ls.enabled, true); eq(ls.running, false); eq(ls.paused, false); eq(ls.activity_owned, false)
+    local rs = as_consumer(h, function() return h.G.RosiePlugin.status() end)
+    eq(rs.enabled, true); eq(rs.phase, 'ready')
+    h.assert_clean('idle')
+end)
+
+case('with-teleport trip from the pit: live at once, town service, return portal, one success callback', function()
+    local h = new({place = 'pit', pos = nil})
+    h.pos = h.v(40, 5)
+    enable(h)
+    fill_bag(h, 25)
+    local results = {}
+    -- Requested before Rosie's own 0.5 s scan could start an automatic trip.
+    local accepted = as_consumer(h, function()
+        return alfred(h).trigger_tasks_with_teleport('Consumer', function(result, detail)
+            results[#results + 1] = {first = result, detail = detail}
+        end)
+    end)
+    eq(accepted, true, 'request accepted')
+    local s = st(h)
+    eq(live(s), true, 'C1: live synchronously after the call')
+    eq(s.external_trigger, true); eq(s.running, true); eq(s.teleport, true); eq(s.pending, true)
+    eq(s.external_caller, 'Consumer'); eq(s.owner, 'Consumer'); eq(s.inventory_full, true)
+    local again = as_consumer(h, function() return alfred(h).trigger_tasks_with_teleport('Other') end)
+    eq(again, false, 'a second caller cannot replace the running request')
+    eq(as_consumer(h, function() return alfred(h).pause('Other') end), false, 'another caller cannot pause our trip')
+    local saw_town, live_in_town = false, true
+    ok(h.run_until(function()
+        if h.place == h.P.temis then
+            saw_town = true
+            live_in_town = live_in_town and live(st(h))
+        end
+        return #results > 0
+    end, 90), 'trip finished\n' .. h.tail())
+    ok(saw_town, 'serviced in Temis'); ok(live_in_town, 'live during the whole town leg')
+    eq(#results, 1, 'one callback')
+    -- Old fork contract: nil on success; Rosie's result table as 2nd argument.
+    eq(results[1].first, nil, 'legacy first argument nil = success')
+    eq(type(results[1].detail), 'table', 'Rosie result table as the second argument')
+    eq(results[1].detail.success, true, 'success'); eq(results[1].detail.reason, nil)
+    eq(h.place, h.P.pit, 'back in the pit'); eq(h.pos:x(), 40, 'at the same spot'); eq(h.pos:y(), 5)
+    eq(#h.inventory, 0, 'bag emptied'); eq(#h.salvaged, 25, 'salvaged at the Blacksmith')
+    s = st(h)
+    eq(live(s), false, 'C1: the latched teleport of a finished trip is not live work')
+    eq(s.teleport_done, true); eq(s.all_task_done, true); eq(s.outcome, 'completed')
+    eq(s.inventory_full, false); eq(s.need_trigger, false); eq(s.external_caller, nil)
+    eq(h.count(h.waypoints), 1, 'one waypoint teleport (to Temis)')
+    h.run(5)
+    eq(#results, 1, 'the callback is not repeated')
+    eq(live(st(h)), false)
+    h.assert_clean('trip')
+end)
+
+case('plain trigger_tasks in Temis (WarPigs kick): serviced in place, no teleport', function()
+    local h = new()
+    enable(h)
+    fill_bag(h, 25)
+    local done
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('WarPigs', function(r, d) done = {r, d} end) end), true)
+    eq(st(h).teleport, false, 'no teleport from town')
+    ok(h.run_until(function() return done ~= nil end, 60), 'finished\n' .. h.tail())
+    eq(done[1], nil, 'nil = success'); eq(done[2].success, true)
+    eq(#h.waypoints, 0, 'nobody teleported'); eq(h.place, h.P.temis)
+    eq(st(h).external_trigger, false, 'WarPigs pickup edge: external_trigger clears at completion')
+    h.assert_clean('kick')
+end)
+
+case('pause/resume: owner-scoped, published as paused/paused_by, holds automatic and requested trips', function()
+    local h = new({place = 'pit'})
+    enable(h)
+    eq(as_consumer(h, function() return alfred(h).pause('TristramLoop') end), true, 'pause while idle')
+    local s = st(h)
+    eq(s.paused, true); eq(s.paused_by, 'TristramLoop'); eq(s.external_pause, true); eq(s.pause_caller, 'TristramLoop')
+    eq(live(s), false, 'C1: a pause alone is not live work')
+    fill_bag(h, 25)
+    h.run(5)
+    eq(#h.waypoints, 0, 'no automatic trip while paused, even with a full bag')
+    eq(st(h).inventory_full, true, 'hard need published while paused')
+    local accepted = as_consumer(h, function() return alfred(h).trigger_tasks_with_teleport('Consumer') end)
+    eq(accepted, false, 'requests wait for the pause owner')
+    eq(as_consumer(h, function() return alfred(h).pause('WarPigs') end), false, 'a second pauser is refused')
+    eq(as_consumer(h, function() return alfred(h).resume('WarPigs') end), false, 'only the owner resumes')
+    eq(st(h).paused_by, 'TristramLoop')
+    eq(as_consumer(h, function() return alfred(h).resume('TristramLoop') end), true, 'owner resumes')
+    eq(st(h).paused, false)
+    -- Rosie's own automatic service then starts (need_trigger with the keybind off).
+    ok(h.run_until(function() return h.place == h.P.temis end, 10), 'automatic trip after the resume')
+    local s2 = st(h)
+    eq(live(s2), true, 'an automatic trip is live work for every reader (running)')
+    eq(s2.external_trigger, false, 'automatic: not an external request')
+    ok(h.run_until(function() return h.place == h.P.pit and not live(st(h)) end, 60), 'automatic trip returned')
+    h.assert_clean('pause')
+end)
+
+-- QQT_Warpigz_v2 latch: a transient failure refuses API requests for
+-- RETRY_COOLDOWN s (stuck_retry_in published), then allows another attempt;
+-- MAX_FAIL_STREAK consecutive failures latch until an explicit Run town service.
+case('a failed trip whose need remains is stuck for a bounded cooldown; three failures latch until Run town service', function()
+    local h = new()
+    enable(h)
+    local life = h.mod('Rosie', 'rosie.private.town.core.lifecycle')
+    eq(life.RETRY_COOLDOWN, 120); eq(life.MAX_FAIL_STREAK, 3)
+    h.remove_actor(h.blacksmith) -- the salvage vendor cannot be reached
+    fill_bag(h, 25)
+    local results = {}
+    eq(as_consumer(h, function()
+        return alfred(h).trigger_tasks('Consumer', function(r, d) results[#results + 1] = {first = r, detail = d} end)
+    end), true)
+    ok(h.run_until(function() return #results > 0 end, 200), 'failure reported\n' .. h.tail())
+    eq(results[1].first, 'failed', "legacy 'failed' first argument")
+    eq(results[1].detail.success, false, 'failure is reported'); ok(type(results[1].detail.reason) == 'string', 'with a reason')
+    h.run(2)
+    local s = st(h)
+    eq(s.outcome, 'failed'); eq(live(s), false); eq(s.fail_streak, 1)
+    eq(s.stuck, true, 'stuck published'); eq(s.stuck_reason, s.failure_reason)
+    ok(type(s.stuck_retry_in) == 'number' and s.stuck_retry_in > 100 and s.stuck_retry_in <= 120, 'retry_in ' .. tostring(s.stuck_retry_in))
+    eq(s.inventory_full, true, 'the hard need stays visible')
+    eq(s.need_trigger, false, 'need_trigger is not advertised for a stuck provider')
+    local accepted, why = as_consumer(h, function() return alfred(h).trigger_tasks('WarPigs') end)
+    eq(accepted, false, 'no looping API trips'); ok(tostring(why):find('next attempt allowed in', 1, true), tostring(why))
+    accepted = as_consumer(h, function() return alfred(h).trigger_tasks_with_teleport('Consumer') end)
+    eq(accepted, false)
+    local before = #h.vendors
+    h.run(60)
+    eq(live(st(h)), false, 'no retry inside the cooldown')
+    eq(#h.vendors, before, 'no vendor walk inside the cooldown')
+    eq(h.logged('[Rosie] failed'), 1)
+    -- The cooldown expires: another attempt (Rosie's own automatic service or
+    -- an API request, whichever comes first), which fails again.
+    ok(h.run_until(function() return h.logged('[Rosie] failed') == 2 end, 400), 'second attempt\n' .. h.tail())
+    h.run(1)
+    eq(st(h).fail_streak, 2); eq(st(h).stuck, true); ok(st(h).stuck_retry_in ~= nil, 'still a bounded latch')
+    ok(h.run_until(function() return h.logged('[Rosie] failed') == 3 end, 400), 'third attempt\n' .. h.tail())
+    h.run(1)
+    s = st(h)
+    eq(s.fail_streak, 3); eq(s.stuck, true); eq(s.stuck_retry_in, nil, 'latched until an explicit retry')
+    accepted, why = as_consumer(h, function() return alfred(h).trigger_tasks('WarPigs') end)
+    eq(accepted, false); ok(tostring(why):find('Run town service', 1, true), tostring(why))
+    before = #h.vendors
+    h.run(300)
+    eq(h.logged('[Rosie] failed'), 3, 'no fourth attempt'); eq(#h.vendors, before, 'no vendor walk while latched')
+    -- The explicit retry (menu button / RosiePlugin.service) is still accepted.
+    h.blacksmith = h.actor('temis', 'TWN_Skov_Temis_Crafter_Blacksmith', 2574.25, -479.20, {vendor = true})
+    eq(as_consumer(h, function() return h.G.RosiePlugin.service() end), true, 'Run town service retries')
+    eq(st(h).stuck, false, 'a running retry is not stuck')
+    ok(h.run_until(function() return st(h).outcome == 'completed' end, 60), 'retry completes\n' .. h.tail())
+    eq(#h.inventory, 0); eq(st(h).fail_streak, 0, 'a completed trip resets the streak')
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('WarPigs') end), true, 'API accepted again')
+    h.assert_clean('stuck')
+end)
+
+case('a non-transient failure (needs left after a complete service) latches at once; a user cancel never latches', function()
+    local h = new()
+    enable(h)
+    -- Protected (locked, skip favourites) items keep the bag full after a complete service.
+    h.mod('Rosie', 'rosie.private.town.gui').elements.skip_favorite:set(true)
+    h.inventory = {}
+    for i = 1, 25 do h.inventory[i] = h.gear({locked = true}) end
+    local r
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('Consumer', function(a) r = a end) end), true)
+    ok(h.run_until(function() return r ~= nil end, 200), 'finished\n' .. h.tail())
+    eq(r, 'failed')
+    h.run(1)
+    local s = st(h)
+    eq(s.stuck, true); eq(s.stuck_retry_in, nil, 'permanent at the first failure'); eq(s.fail_streak, 1)
+    h.run(200)
+    eq(h.logged('[Rosie] failed'), 1, 'no retry of a non-transient failure')
+    -- Cancel: a fresh bag, a trip, then the user switches Rosie off mid-trip.
+    for _, item in ipairs(h.inventory) do item.locked = false end
+    eq(as_consumer(h, function() return h.G.RosiePlugin.service() end), true)
+    ok(h.run_until(function() return st(h).outcome == 'completed' end, 90), 'explicit retry completes\n' .. h.tail())
+    fill_bag(h, 25)
+    local c
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('Consumer', function(a) c = a end) end), true)
+    h.run(0.3) -- still walking to the vendors
+    eq(live(st(h)), true)
+    eq(as_consumer(h, function() return h.G.RosiePlugin.disable() end), true)
+    eq(c, 'cancelled', "legacy 'cancelled' first argument")
+    -- Rosie's own automatic service gated (keybind) to observe the adapter.
+    h.mod('Rosie', 'rosie.private.town.gui').elements.use_keybind:set(true)
+    enable(h)
+    h.run(1)
+    s = st(h)
+    eq(s.running, false)
+    eq(s.stuck, false, 'a cancel does not latch'); eq(s.need_trigger, true, 'the need is advertised again')
+    ok(s.outcome ~= 'failed', 'outcome ' .. tostring(s.outcome))
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('Consumer') end), true, 'accepted right after re-enable')
+    h.assert_clean('cancel')
+end)
+
+case("a pause inside the owner's running trip is bounded (60 s), then the trip fails", function()
+    local h = new({place = 'pit'})
+    enable(h)
+    fill_bag(h, 25)
+    local r, d
+    eq(as_consumer(h, function()
+        return alfred(h).trigger_tasks_with_teleport('Consumer', function(a, b) r, d = a, b end)
+    end), true)
+    ok(h.run_until(function() return h.place == h.P.temis end, 20), 'in town')
+    eq(as_consumer(h, function() return alfred(h).pause('Consumer') end), true, 'the owner pauses its trip')
+    local t0 = h.now
+    ok(h.run_until(function() return r ~= nil end, 90), 'the paused trip ended\n' .. h.tail())
+    ok(h.now - t0 >= 59 and h.now - t0 <= 62, 'after ~60 s: ' .. tostring(h.now - t0))
+    eq(r, 'failed'); ok(tostring(d.reason):find('Paused by Consumer', 1, true), tostring(d.reason))
+    local s = st(h)
+    eq(live(s), false); eq(s.paused, false, 'the owner pause ends with its trip')
+    h.assert_clean('pause bound')
+end)
+
+case('mythics: the persisted loot-filter toggles and junk marks never sell or salvage a mythic (H3)', function()
+    -- The old WarPigz Alfred's keys: Universal loot-filter mode on.
+    local h = new({persisted = {alfred_the_butler_loot_filter_mode = true}})
+    enable(h)
+    local utils = h.mod('Rosie', 'rosie.private.town.core.utils')
+    local settings = h.mod('Rosie', 'rosie.private.town.core.settings')
+    local tgui = h.mod('Rosie', 'rosie.private.town.gui')
+    h.run(1)
+    eq(settings.loot_filter_mode, true, 'persisted Universal loot-filter mode')
+    eq(settings.mythic_always_keep, true, 'Always keep mythics defaults on')
+    local SALVAGE, SELL = utils.item_enum.SALVAGE, utils.item_enum.SELL
+    local function acts(item)
+        return h.as('Rosie', function()
+            return utils.is_salvage_or_sell(item, SALVAGE) or utils.is_salvage_or_sell(item, SELL)
+        end)
+    end
+    local rare = h.gear({filtered = true})
+    local mythic = h.gear({rarity = 8, ancestral = true, filtered = true})
+    local junk_mythic = h.gear({rarity = 8, ancestral = true, junk = true})
+    eq(acts(rare), true, 'a filtered rare is salvaged (loot-filter mode works)')
+    eq(acts(mythic), false, 'a filtered mythic is kept')
+    tgui.elements.loot_filter_toggle:set(false); tgui.elements.loot_filter_equipment:set(true)
+    tgui.elements.ancestral_item_junk:set(SALVAGE)
+    h.run(1)
+    eq(acts(mythic), false, 'equipment filter mode: kept')
+    eq(acts(junk_mythic), false, 'junk-marked mythic: kept')
+    -- Guard off: mythics follow only the mythic rules (default Keep), never
+    -- the filter or junk action; an explicit mythic action still applies.
+    tgui.elements.mythic_always_keep:set(false)
+    h.run(1)
+    eq(acts(mythic), false, 'guard off, mythic action Keep: kept despite the filter')
+    eq(acts(junk_mythic), false, 'guard off: the junk action is not the mythic rule')
+    tgui.elements.ancestral_item_mythic:set(SALVAGE)
+    h.run(1)
+    eq(acts(mythic), true, 'guard off + mythic action Salvage: the user rule applies')
+    tgui.elements.mythic_always_keep:set(true); tgui.elements.ancestral_item_mythic:set(0)
+    tgui.elements.loot_filter_toggle:set(true)
+    -- Talismans: unique / mythic charms and seals never take the filter action.
+    tgui.elements.talisman_charm_action:set(SALVAGE); tgui.elements.talisman_seal_action:set(SALVAGE)
+    h.run(1)
+    local function t_acts(item)
+        return h.as('Rosie', function() return utils.should_salvage_talisman(item) or utils.should_sell_talisman(item) end)
+    end
+    eq(t_acts(h.gear({name = 'talisman_charm_joint', rarity = 3, filtered = true})), true, 'filtered rare charm salvaged')
+    eq(t_acts(h.gear({name = 'talisman_charm_joint', rarity = 6, filtered = true})), false, 'filtered unique charm kept')
+    eq(t_acts(h.gear({name = 'talisman_charm_joint', rarity = 8, filtered = true})), false, 'filtered mythic charm kept')
+    eq(t_acts(h.gear({name = 'talisman_seal_joint', rarity = 8, filtered = true})), false, 'filtered mythic seal kept')
+    -- A trip with the persisted filter on: filtered mythics survive it.
+    h.inventory = {}
+    for i = 1, 20 do h.inventory[i] = h.gear({filtered = true}) end
+    for _ = 1, 5 do h.inventory[#h.inventory + 1] = h.gear({rarity = 8, ancestral = true, filtered = true}) end
+    local r
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('Consumer', function(a) r = a or 'ok' end) end), true)
+    ok(h.run_until(function() return r ~= nil end, 120), 'trip finished\n' .. h.tail())
+    eq(#h.salvaged, 20, 'the filtered rares were salvaged')
+    for _, item in ipairs(h.salvaged) do ok(item.rarity < 8, 'no mythic salvaged') end
+    for _, item in ipairs(h.sold) do ok(item.rarity < 8, 'no mythic sold') end
+    h.assert_clean('mythic')
+end)
+
+-- Live dump (Season 15): the Mythic form of an ordinary Unique keeps the
+-- Unique's SNO and rarity 6; the upgrade affix S14_Mythic_UniquePotency
+-- (hash 2628989) tells them apart once the item is known. "Condemnation" was
+-- skipped on the ground (Unique GA minimum) and would be salvaged in town.
+case('S15 Mythic form of a Unique (rarity 6, same SNO, mythic upgrade affix) is picked up and kept', function()
+    local h = new({place = 'pit'})
+    h.pos = h.v(0, 0)
+    enable(h)
+    local pgui = h.mod('Rosie', 'rosie.private.pickup.gui')
+    pgui.elements.general.distance_slider:set(30)
+    pgui.elements.affix_settings.unique_greater_affix_slider:set(2)
+    local function affix(hash, name) return {affix_name_hash = hash, get_name = function() return name end} end
+    local base = {affix(578864, '1HDagger_Unique_Rogue_001'), affix(1829588, 'S04_Damage_All')}
+    local marked = {base[1], affix(2628989, 'S14_Mythic_UniquePotency'), base[2]}
+    local named_only = {base[1], {name = 'S14_Mythic_UniquePotency'}}
+    -- ga = 1: a known Ancestral Unique below the Unique minimum (2). The
+    -- 0-GA reading is the undecided case, asserted separately below.
+    local function dagger(affixes, ga)
+        return {name = '1HDagger_Unique_Rogue_001', sno = 451091, rarity = 6, ancestral = true, ga = ga or 1, affixes = affixes}
+    end
+    local im = h.mod('Rosie', 'rosie.private.pickup.src.item_manager')
+    h.run(1)
+    local function wanted(item) return (h.as('Rosie', function() return im.check_want_item(item, true) end)) end
+    local function why(item) return select(2, h.as('Rosie', function() return im.check_want_item(item, true) end)) end
+    eq(wanted(h.gear(dagger(base))), false, 'plain Unique below the Unique GA minimum is skipped')
+    eq(wanted(h.gear(dagger(marked))), true, 'Mythic form uses the Mythic GA rule (0) and is wanted')
+    eq(wanted(h.gear(dagger(named_only))), true, 'the affix name alone also marks it')
+    local broken = h.gear(dagger(nil))
+    function broken:get_affixes() error('host: affixes unreadable') end
+    eq(wanted(broken), true, 'unreadable affixes: taken and decided in town (may be a Mythic)')
+    -- Live Uber Mephisto (rc.8): "Skipped Helm | sno=2647147 rarity=6
+    -- ancestral=true GA=0 ... threshold=unique_general:2 | below GA minimum".
+    local fresh = h.gear({name = 'Helm_Unique_Generic_005', display = 'Helm', sno = 2647147, rarity = 6,
+        ancestral = true, ga = 0, affixes = {}})
+    local reason = why(fresh)
+    eq(wanted(fresh), true, 'live rc.8: fresh Uber Unique with nothing loaded is picked up')
+    ok(tostring(reason):find('may be a Mythic', 1, true), tostring(reason))
+    ok(im.describe(fresh, reason):find('undecided=no affixes listed', 1, true), im.describe(fresh, reason))
+    -- The same live reading with the affixes (power affix included) already
+    -- listed: rc.9 judged it "loaded" and skipped it again.
+    local label_only = h.gear({name = 'Helm_Unique_Generic_005', display = 'Helm', sno = 2647147, rarity = 6,
+        ancestral = true, ga = 0, affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(583206, 'AttackSpeed')}})
+    eq(wanted(label_only), true, 'live rc.8 reading with the power affix listed is picked up')
+    ok(tostring(why(label_only)):find('0 Greater Affixes', 1, true), tostring(why(label_only)))
+    -- Trade-off, stated: an Ancestral Unique that reads 0 GA on the ground is
+    -- always taken (the Unique minimum cannot be judged); town decides.
+    eq(wanted(h.gear(dagger(base, 0))), true, 'a known Ancestral Unique reading 0 GA is taken (town decides)')
+    -- Known plain Uniques still follow the Unique GA rule, including those
+    -- whose power affix is not named after the item (BSK, rc.9 took them always).
+    eq(wanted(h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, ga = 1,
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})), false,
+        'the same Unique, known and plain, follows the Unique GA rule')
+    eq(wanted(h.gear({name = 'S05_BSK_Amulet_Unique_Generic_001', sno = 1944508, rarity = 6, ancestral = true, ga = 1,
+        affixes = {affix(1924261, 'S05_BSK_Generic_009'), affix(2602164, 'X2_CritDamage_Greater')}})), false,
+        'a known plain BSK Unique (power affix S05_BSK_Generic_009) follows the Unique GA rule')
+    eq(wanted(h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = false, ga = 0,
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})), false,
+        'a non-Ancestral Unique with 0 GA follows the Unique GA rule')
+    eq(wanted(h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, ga = 1,
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(2628989, 'S14_Mythic_UniquePotency')}})), true,
+        'and as a Mythic form it is wanted')
+    eq(wanted(h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, ga = 1,
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1111111, 'UNIQUE_Double_Damage_Tag_Generic_Potency')}})),
+        false, 'an ordinary ...Potency affix is not a Mythic mark')
+    eq(wanted(h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, ga = 1,
+        attrs = {Item_Quality_Modifier_Bits = 4 + 32}, affixes = {affix(2662414, 'Helm_Unique_Generic_005')}})),
+        false, 'quality bits are logged, never a decision input')
+    -- A stricter Mythic rule never takes an Ancestral 0-GA Unique whose
+    -- affixes are listed; a fresh drop listing none cannot be judged and is
+    -- taken whatever the sliders say (review rc.10).
+    pgui.elements.affix_settings.uber_unique_greater_affix_slider:set(3)
+    h.run(1)
+    eq(wanted(label_only), false, 'Mythic GA 3 > Unique GA 2: a listed 0-GA drop follows the Unique rule')
+    eq(wanted(fresh), true, 'Mythic GA 3: a fresh drop listing no affixes is still taken')
+    pgui.elements.affix_settings.uber_unique_greater_affix_slider:set(0)
+    h.run(1)
+    -- Town: the default ancestral Unique rule acts on 0-GA uniques; the
+    -- Mythic form is kept by "Always keep mythics".
+    local utils = h.mod('Rosie', 'rosie.private.town.core.utils')
+    local SALVAGE, SELL = utils.item_enum.SALVAGE, utils.item_enum.SELL
+    local function acts(item)
+        return h.as('Rosie', function()
+            return utils.is_salvage_or_sell(item, SALVAGE) or utils.is_salvage_or_sell(item, SELL)
+        end)
+    end
+    eq(acts(h.gear(dagger(base, 0))), true, 'plain 0-GA ancestral Unique follows the Unique rule')
+    eq(acts(h.gear(dagger(marked, 0))), false, 'Mythic form is never sold or salvaged')
+    eq(acts(h.gear(dagger({}, 0))), false, 'a bag Unique listing no affixes is never sold or salvaged')
+    -- Mythic Unique filter: checked forms are always kept, unchecked ones
+    -- take their own action (default Salvage); iconic mythics are untouched.
+    local tgui = h.mod('Rosie', 'rosie.private.town.gui')
+    ok(tgui.elements.mythic_form_451091 ~= nil, 'Condemnation is in the Mythic Unique picker')
+    tgui.elements.mythic_form_filter_toggle:set(true)
+    h.run(1)
+    local function salvages(item) return h.as('Rosie', function() return utils.is_salvage_or_sell(item, SALVAGE) end) end
+    eq(salvages(h.gear(dagger(marked, 0))), true, 'filter on: unchecked Mythic Unique is salvaged')
+    eq(acts(h.gear({rarity = 8, ancestral = true})), false, 'filter on: iconic mythic still kept')
+    tgui.elements.mythic_form_451091:set(true)
+    h.run(1)
+    eq(acts(h.gear(dagger(marked, 0))), false, 'filter on: checked Mythic Unique is kept')
+    eq(acts(h.gear(dagger(base, 0))), true, 'the checked list never keeps the plain Unique')
+    tgui.elements.mythic_form_451091:set(false); tgui.elements.mythic_form_other:set(0)
+    h.run(1)
+    eq(acts(h.gear(dagger(marked, 0))), false, 'unchecked action Keep: kept')
+    local locked = h.gear(dagger(marked, 0)); locked.locked = true
+    tgui.elements.mythic_form_other:set(SALVAGE)
+    h.run(1)
+    eq(acts(locked), false, 'a locked (favorite) Mythic Unique is never touched')
+    tgui.elements.mythic_form_filter_toggle:set(false)
+    h.run(1)
+    eq(acts(h.gear(dagger(marked, 0))), false, 'filter off: back to Always keep mythics')
+    -- The real drop is picked up.
+    h.drop('pit', 12, 0, dagger(marked))
+    ok(h.run_until(function() return (h.pickups or 0) > 0 end, 20), 'the Mythic form was picked up\n' .. h.tail())
+    h.assert_clean('mythic form')
+end)
+
+-- Game data: the iconic Mythics were re-issued in S14 as Uniques with the
+-- Mythic modifier forced (S14_Helm_Unique_Generic_002 "Harlequin Crest",
+-- sno 2646291, eMagicType 2). The catalog lists them as quality "unique".
+case('S14 iconic Mythic SNOs; Mythic probe lines on the ground and in the bag', function()
+    local h = new({place = 'pit'})
+    h.pos = h.v(0, 0)
+    enable(h)
+    local pgui = h.mod('Rosie', 'rosie.private.pickup.gui')
+    pgui.elements.general.distance_slider:set(30)
+    pgui.elements.affix_settings.unique_greater_affix_slider:set(2)
+    local function affix(hash, name) return {affix_name_hash = hash, get_name = function() return name end} end
+    local im = h.mod('Rosie', 'rosie.private.pickup.src.item_manager')
+    local utils = h.mod('Rosie', 'rosie.private.town.core.utils')
+    local SALVAGE, SELL = utils.item_enum.SALVAGE, utils.item_enum.SELL
+    h.run(1)
+    local function wanted(item) return (h.as('Rosie', function() return im.check_want_item(item, true) end)) end
+    local function acts(item)
+        return h.as('Rosie', function()
+            return utils.is_salvage_or_sell(item, SALVAGE) or utils.is_salvage_or_sell(item, SELL)
+        end)
+    end
+    local function harlequin() return h.gear({name = 'S14_Helm_Unique_Generic_002', sno = 2646291, rarity = 6,
+        ancestral = true, ga = 1, affixes = {affix(2646292, 'S14_Helm_Unique_Generic_002'), affix(1829592, 'S04_Life')}}) end
+    eq(wanted(harlequin()), true, 'S14 Harlequin Crest (rarity 6) uses the Mythic GA rule')
+    ok(im.describe(harlequin(), 'x'):find('threshold=mythic_general', 1, true), im.describe(harlequin(), 'x'))
+    eq(acts(harlequin()), false, 'S14 Harlequin Crest is never sold or salvaged')
+    local function probes(prefix)
+        local n, last = 0, nil
+        for _, line in ipairs(h.log) do
+            if line:find(prefix, 1, true) then n = n + 1; last = line end
+        end
+        return n, last
+    end
+    -- Ground: a skipped Unique logs its markers once per reading.
+    local drop = h.drop('pit', 12, 0, {name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true,
+        ga = 1, attrs = {Item_Quality_Modifier_Bits = 4},
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})
+    h.run(3)
+    local n, line = probes('[Rosie mythic-probe] skipped')
+    eq(n, 1, 'one probe line for the skipped drop\n' .. h.tail())
+    ok(line:find('affixes=2 [Helm_Unique_Generic_005#2662414, S04_Life#1829592]', 1, true), line)
+    ok(line:find('qbits=4', 1, true) and line:find('mark=nil', 1, true), line)
+    h.run(3)
+    eq((probes('[Rosie mythic-probe] skipped')), 1, 'not repeated while the drop reads the same')
+    drop.affixes[#drop.affixes + 1] = affix(1829590, 'S04_Armor')
+    h.run(3)
+    eq((probes('[Rosie mythic-probe] skipped')), 2, 'a changed reading is logged again\n' .. h.tail())
+    drop.affixes[#drop.affixes + 1] = affix(2628989, 'S14_Mythic_UniquePotency')
+    ok(h.run_until(function() return (h.pickups or 0) > 0 end, 20), 'once marked, the drop is picked up\n' .. h.tail())
+    -- Bag: every Unique logs its reading and Rosie's decision once.
+    h.inventory[#h.inventory + 1] = h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true,
+        ga = 0, affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})
+    h.as('Rosie', function() utils.update_tracker_count(h.G.get_local_player(), 'now') end)
+    h.run(2)
+    h.as('Rosie', function() utils.update_tracker_count(h.G.get_local_player(), 'now') end)
+    local kept, kline = probes('[Rosie mythic-probe] bag keep')
+    local sold, sline = probes('[Rosie mythic-probe] bag sell')
+    local salvaged, vline = probes('[Rosie mythic-probe] bag salvage')
+    sline = sline or vline
+    eq(kept, 1, 'the marked Mythic in the bag: one keep line\n' .. h.tail())
+    ok(kline:find('mark=S14_Mythic_UniquePotency', 1, true), tostring(kline))
+    eq(sold + salvaged, 1, 'the plain 0-GA Unique in the bag: one sell/salvage line\n' .. h.tail())
+    ok(sline:find('sno=2647147', 1, true), tostring(sline))
+    h.assert_clean('s14 mythic')
+end)
+
+-- Live 2.3.0-rc.6: Rosie stood still in Temis ("Moving to stash", repair) and
+-- flooded the Helltide with engine path requests. The joint host models the
+-- live create_path_game_engine (asynchronous, routes to the map pin, never
+-- completes without one); Rosie must walk with request_move and never use it.
+local function rosie_moves(h)
+    local n = 0
+    for _, m in ipairs(h.moves) do if m.owner == 'Rosie' and m.kind == 'request_move' then n = n + 1 end end
+    return n
+end
+case('live host engine path: a town trip walks with request_move, never waits on the engine or sets a pin', function()
+    local h = new()
+    enable(h)
+    ok(h.engine ~= nil, 'the live engine model is active')
+    fill_bag(h, 25)
+    local done, waited = nil, false
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('WarPigs', function(r, d) done = {r, d} end) end), true)
+    ok(h.run_until(function() return done ~= nil end, 60, function()
+        local s = as_consumer(h, function() return h.G.RosiePlugin.status() end)
+        local detail = s and s.movement and s.movement.detail or ''
+        if tostring(detail):find('Waiting for', 1, true) then waited = true end
+    end), 'the trip finished\n' .. h.tail())
+    eq(done[1], nil, 'serviced (nil = success): ' .. tostring(done[2] and done[2].reason))
+    eq(#h.inventory, 0, 'bag emptied')
+    ok(rosie_moves(h) > 0, 'Rosie walked with request_move')
+    eq(h.engine.calls, 0, 'create_path_game_engine never called')
+    eq(#h.pins, 0, 'no map pin set')
+    eq(waited, false, 'movement never waited on a route')
+    h.assert_clean('engine town')
+end)
+
+-- Every frame an activity walks its own route unless the Looter reports busy
+-- (the HelltideRevamped loot_guard contract). Counts busy false->true flips
+-- while drops remain: each flip is the player turning back to a drop.
+local function patrol_with_drops(opts)
+    local h = new({place = 'pit', request_move_redundant = opts.redundant})
+    h.pos = h.v(0, 0)
+    enable(h)
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(30)
+    local drops = {{-8, 3}, {-4, 5}, {0, 4}, {4, 3}, {8, 5}, {12, 4}}
+    local flips, was_busy = 0, false
+    local patrol = {h.v(-10, -10), h.v(10, -10)}
+    local leg = 1
+    -- The activity is already walking its route when the drops appear.
+    h.run(1, function()
+        as_consumer(h, function() return h.G.pathfinder.request_move(patrol[leg]) end)
+    end, 0.05)
+    local activity_moves = 0
+    for _, m in ipairs(h.moves) do if m.owner ~= 'Rosie' then activity_moves = activity_moves + 1 end end
+    ok(activity_moves > 0, 'the activity walked before the drops appeared')
+    for _, d in ipairs(drops) do h.drop('pit', d[1], d[2]) end
+    h.run_until(function() return (h.pickups or 0) >= #drops end, 30, function()
+        local busy = as_consumer(h, function() return looter(h).is_actively_looting() end) == true
+        if busy and not was_busy then flips = flips + 1 end
+        was_busy = busy
+        if not busy then
+            if h.pos:dist_to_ignore_z(patrol[leg]) < 1 then leg = 3 - leg end
+            as_consumer(h, function() return h.G.pathfinder.request_move(patrol[leg]) end)
+        end
+    end, 0.05)
+    return h, #drops, flips
+end
+case('live host: pickup walks to drops without flooding the engine; the activity yields once, not back and forth', function()
+    local h, n, flips = patrol_with_drops({})
+    eq(h.pickups or 0, n, 'every drop picked up\n' .. h.tail())
+    eq(h.engine.calls, 0, 'no create_path_game_engine calls (live: GENERATING helltide EXCEPTION spam)')
+    eq(#h.pins, 0, 'no map pin set')
+    ok(flips <= 2, 'the busy flag does not flap between drops: ' .. flips .. ' flips')
+    h.assert_clean('engine pickup')
+end)
+case('live host: request_move reporting false for a repeated command is not a refusal (no back and forth)', function()
+    local h, n, flips = patrol_with_drops({redundant = true})
+    ok((h.redundant_moves or 0) > 0, 'the host skipped repeated commands')
+    eq(h.pickups or 0, n, 'every drop picked up\n' .. h.tail())
+    ok(flips <= 2, 'the busy flag does not flap: ' .. flips .. ' flips')
+    h.assert_clean('redundant moves')
+end)
+case('live host: a drop is picked up while another plugin\'s long move is still running (request_move skipped while moving)', function()
+    local h = new({place = 'pit', request_move_redundant = 'any'})
+    h.pos = h.v(0, 0)
+    enable(h)
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(30)
+    as_consumer(h, function() return h.G.pathfinder.request_move(h.v(28, 0)) end) -- a far move, still running
+    h.drop('pit', -5, 0)
+    ok(h.run_until(function() return (h.pickups or 0) >= 1 end, 20), 'the drop was picked up\n' .. h.tail())
+    ok(h.pos:dist_to_ignore_z(h.v(-5, 0)) < 12, 'the player did not follow the foreign move away')
+    h.assert_clean('foreign move')
+end)
+case('static: Rosie movement never uses the map-pin engine path or sets a map pin', function()
+    local f = assert(io.open(ROOT .. '/Rosie/rosie/movement.lua', 'r'))
+    local src = f:read('*a'); f:close()
+    local code = src:gsub('%-%-[^\n]*', '')
+    ok(not code:find('create_path_game_engine', 1, true), 'no engine path call')
+    ok(not code:find('set_map_pin', 1, true), 'no map pin')
+end)
+
+-- Live 2.3.0-rc.8: "Open stash: attempt=1..4 distance=1.9 host=true" then
+-- "Stash window did not open after 4 interactions". The stash is not a vendor:
+-- get_current_vendor() does not report it, which Rosie required, and the
+-- deposit went through vendor_action, which needs the vendor-screen flag.
+local function stash_trip(opts)
+    local h = new(opts)
+    enable(h)
+    h.stash = {h.gear({rarity = 8, ancestral = true})} -- the player's stash is not empty
+    h.inventory = {}
+    for i = 1, 3 do h.inventory[i] = h.gear() end                                   -- salvaged
+    for i = 4, 5 do h.inventory[i] = h.gear({rarity = 8, ancestral = true}) end      -- mythics: kept, stashed
+    local done
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('WarPigs', function(r, d) done = {r, d} end) end), true)
+    ok(h.run_until(function() return done ~= nil end, 90), 'the trip finished\n' .. h.tail())
+    return h, done
+end
+case('live stash: kept items are deposited although get_current_vendor() does not report the stash', function()
+    local h, done = stash_trip()
+    eq(done[1], nil, 'serviced: ' .. tostring(done[2] and done[2].reason) .. '\n' .. h.tail())
+    eq(#h.stashed, 2, 'both mythics deposited')
+    eq(#h.salvaged, 3, 'the rest salvaged')
+    eq(h.logged('Stash window did not open'), 0)
+    h.assert_clean('stash')
+end)
+case('live stash: deposit works when the stash panel does not raise the vendor-screen flag (Alfred fallback)', function()
+    local h, done = stash_trip({stash_screen_flag = false})
+    eq(done[1], nil, 'serviced: ' .. tostring(done[2] and done[2].reason))
+    eq(#h.stashed, 2, 'both mythics deposited')
+    h.assert_clean('stash no flag')
+end)
+
+case('one unreadable item never ends the census, a classification or the pulse (M2)', function()
+    local h = new()
+    enable(h)
+    fill_bag(h, 24)
+    local bad = h.gear()
+    bad.broken = true
+    function bad:get_rarity()
+        if self.broken then error('host: item vanished') end
+        return self.rarity
+    end
+    h.inventory[#h.inventory + 1] = bad
+    -- Census only (Rosie's automatic service gated by its keybind).
+    h.mod('Rosie', 'rosie.private.town.gui').elements.use_keybind:set(true)
+    h.run(2)
+    local s = st(h)
+    eq(s.inventory_count, 25); eq(s.salvage_count, 24, 'the readable items are counted'); eq(s.running, false)
+    local utils = h.mod('Rosie', 'rosie.private.town.core.utils')
+    eq(h.as('Rosie', function() return utils.is_salvage_or_sell(bad, utils.item_enum.SALVAGE) end), false,
+        'an unreadable item is kept, no error')
+    eq(h.logged('Host error'), 0, 'no host error in the pulse'); eq(st(h).enabled, true, 'Rosie stays on')
+    eq(h.logged('Item skipped this census (unreadable)'), 0, 'classification errors are contained per item')
+    -- The item becomes readable: the next census counts it and a trip services all.
+    bad.broken = false
+    local r
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('Consumer', function(a) r = a or 'ok' end) end), true)
+    ok(h.run_until(function() return r ~= nil end, 120), 'trip finished\n' .. h.tail())
+    eq(r, 'ok', 'the trip completed'); eq(#h.salvaged, 25)
+    h.assert_clean('census')
+end)
+
+-- M1: a QQT reload mid-trip, with and without the host clearing the plugin's
+-- package.loaded. The old instance cancels its trip (legacy 'cancelled'), the
+-- new one owns every global and accepts the next request.
+for _, keep in ipairs({false, true}) do
+    case('reload mid-trip (package.loaded ' .. (keep and 'kept' or 'cleared') .. '): the new instance takes over', function()
+        local h = new({place = 'pit'})
+        enable(h)
+        fill_bag(h, 25)
+        local first, detail
+        eq(as_consumer(h, function()
+            return alfred(h).trigger_tasks_with_teleport('Consumer', function(a, d) first, detail = a, d end)
+        end), true)
+        ok(h.run_until(function() return h.place == h.P.temis end, 20), 'in town mid-trip')
+        local old_alfred, old_looter, old_rosie = alfred(h), looter(h), h.G.RosiePlugin
+        h.reload('Rosie', {keep_loaded = keep})
+        h.assert_clean('reload')
+        eq(first, 'cancelled', 'the old trip is cancelled by the reload')
+        eq(detail.reason, 'Rosie reloaded during service')
+        ok(alfred(h) ~= old_alfred and looter(h) ~= old_looter and h.G.RosiePlugin ~= old_rosie, 'fresh adapters')
+        eq(h.G.PLUGIN_alfred_the_butler, alfred(h))
+        eq(#h.by_dir.Rosie.update, 1, 'one update callback after the reload')
+        h.run(2)
+        local s = st(h)
+        eq(s.enabled, true, 'the new instance is enabled (cached master switch)'); eq(s.stuck, false)
+        eq(as_consumer(h, function() return h.G.RosiePlugin.status().enabled end), true)
+        local r, d
+        local accepted, why = as_consumer(h, function()
+            return alfred(h).trigger_tasks('Consumer', function(a, b) r, d = a, b end)
+        end)
+        -- Rosie's own automatic service may already have taken the full bag.
+        if accepted then
+            ok(h.run_until(function() return d ~= nil end, 90), 'the next request completes\n' .. h.tail())
+            eq(r, nil, 'success')
+        else
+            ok(not tostring(why):find('reloaded', 1, true), 'not refused as a retired instance: ' .. tostring(why))
+            ok(h.run_until(function() return st(h).outcome == 'completed' end, 90), 'the automatic trip completes\n' .. h.tail())
+        end
+        eq(#h.inventory, 0, 'serviced by the new instance')
+        eq(h.logged('This Rosie instance has reloaded'), 0)
+        eq(as_consumer(h, function() return old_alfred.trigger_tasks('Consumer') end), false, 'the old adapter refuses')
+        h.assert_clean('after reload')
+    end)
+end
+
+case('Looter adapter: busy while collecting an accepted drop, idle after; paused during a town trip', function()
+    local h = new({place = 'pit'})
+    h.pos = h.v(0, 0)
+    enable(h)
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(30)
+    h.drop('pit', 12, 0)
+    local busy_seen, legacy_seen, status_seen = false, false, false
+    ok(h.run_until(function()
+        local busy = as_consumer(h, function() return looter(h).is_actively_looting() end)
+        if busy then
+            busy_seen = true
+            legacy_seen = legacy_seen or as_consumer(h, function() return looter(h).getSettings('looting') end) == true
+            status_seen = status_seen or as_consumer(h, function() return looter(h).status().running end) == true
+            eq(as_consumer(h, function() return looter(h).is_idle() end), false, 'is_idle agrees')
+        end
+        return (h.pickups or 0) > 0
+    end, 20), 'the drop was picked up\n' .. h.tail())
+    ok(busy_seen, 'is_actively_looting() true while approaching the drop')
+    ok(legacy_seen, 'getSettings(looting) true while collecting')
+    ok(status_seen, 'status().running true while collecting')
+    h.run(1)
+    eq(as_consumer(h, function() return looter(h).is_actively_looting() end), false, 'idle after the pickup')
+    eq(#h.inventory, 1)
+    -- A drop during a town trip is left alone: the trip pauses pickup.
+    fill_bag(h, 25)
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks_with_teleport('Consumer') end), true)
+    h.drop('pit', 3, 0)
+    local looting_during_trip = false
+    ok(h.run_until(function()
+        looting_during_trip = looting_during_trip or as_consumer(h, function() return looter(h).is_actively_looting() end)
+        return h.place == h.P.temis
+    end, 10), 'trip left for town')
+    eq(looting_during_trip, false, 'no pickup while the trip owns the player')
+    eq(as_consumer(h, function() return looter(h).status().paused end), true, 'pickup paused by the trip')
+    ok(h.run_until(function() return h.place == h.P.pit and not live(st(h)) end, 60), 'trip returned')
+    eq(as_consumer(h, function() return looter(h).status().paused end), false, 'pause released after the trip')
+    -- Master off: both adapters report disabled at once.
+    eq(as_consumer(h, function() return h.G.RosiePlugin.disable() end), true)
+    eq(as_consumer(h, function() return looter(h).get_enabled() end), false)
+    eq(as_consumer(h, function() return looter(h).is_actively_looting() end), false)
+    eq(st(h).enabled, false)
+    h.assert_clean('looter')
+end)
+
+-- M4 and the TristramLoop contract: when pickup lets go of movement while
+-- another mover drives the player (a running Batmobile route or goal, or
+-- TristramLoop owning loot), Rosie yields without clearing the native path.
+case('pickup release yields without clearing the path when Batmobile or TristramLoop drives (M4)', function()
+    local function scenario(peer)
+        local h = new({place = 'pit'})
+        h.pos = h.v(0, 0)
+        enable(h)
+        h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(30)
+        local item = h.drop('pit', 12, 0)
+        ok(h.run_until(function() return h.count(h.moves, function(m) return m.owner == 'Rosie' end) > 0 end, 5),
+            'pickup walks to the drop')
+        if peer == 'batmobile' then
+            h.G.BatmobilePlugin = {is_paused = function() return false end, get_owner = function() return 'arkham_asylum' end}
+        elseif peer == 'tristram' then
+            h.G.TRISTRAM_LOOP_STATE = {status = function()
+                return {running = true, owns_activity = true, controls_loot = true}
+            end}
+        end
+        -- The drop disappears (picked by someone else): pickup lets go.
+        for i = #h.P.pit.items, 1, -1 do if h.P.pit.items[i] == item then table.remove(h.P.pit.items, i) end end
+        local before = h.count(h.clears, function(c) return c.owner == 'Rosie' end)
+        h.run(2)
+        local cleared = h.count(h.clears, function(c) return c.owner == 'Rosie' end) - before
+        eq(as_consumer(h, function() return looter(h).is_actively_looting() end), false, 'pickup idle')
+        h.assert_clean('release ' .. tostring(peer))
+        return cleared
+    end
+    ok(scenario(nil) >= 1, 'alone: pickup clears its own path')
+    eq(scenario('batmobile'), 0, 'Batmobile driving: no clear')
+    eq(scenario('tristram'), 0, 'TristramLoop controls loot: no clear')
+end)
+
+-- M3: the item census (every service pulse, every menu frame) runs at most
+-- every 0.25 s; the overlay status is cached for 0.25 s.
+case('census and overlay are throttled during a trip with the menu open (M3)', function()
+    local h = new({place = 'pit'})
+    enable(h)
+    fill_bag(h, 25)
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks_with_teleport('Consumer') end), true)
+    h.run(1)
+    local reads0 = h.item_count_reads or 0
+    local frames, status_calls = 0, 0
+    local api = looter(h)
+    local loot_status = api.status
+    api.status = function(...) status_calls = status_calls + 1; return loot_status(...) end
+    h.run(5, function() frames = frames + 1 end, 0.05)
+    api.status = loot_status
+    local reads = (h.item_count_reads or 0) - reads0
+    ok(frames >= 100, 'frames ' .. frames)
+    ok(reads <= 5 / 0.25 + 2, 'census runs at most every 0.25 s: ' .. reads .. ' in 5 s over ' .. frames .. ' frames')
+    ok(reads >= 5, 'but it still runs during the trip: ' .. reads)
+    ok(status_calls <= 5 / 0.25 + 2, 'menu/overlay status recomputed at most every 0.25 s: ' .. status_calls)
+    h.assert_clean('throttle')
+end)
+
+case('live rc: the menu does not jump when the preview fails for single frames', function()
+    local h = new({})
+    enable(h)
+    local lines, per_frame, glitch = 0, {}, false
+    h.G.render_menu_header = function() lines = lines + 1 end
+    local real_player = h.G.get_local_player
+    -- the host briefly reports a player whose is_dead() is not a boolean
+    h.G.get_local_player = function()
+        local p = real_player()
+        if not glitch or not p then return p end
+        return setmetatable({is_dead = function() return nil end}, {__index = p})
+    end
+    for i = 1, 40 do
+        glitch = i % 2 == 0
+        lines = 0
+        h.frame()
+        per_frame[#per_frame + 1] = lines
+    end
+    h.G.get_local_player = real_player
+    local first = per_frame[1]
+    for i, n in ipairs(per_frame) do eq(n, first, 'menu line count frame ' .. i .. ' (was: jumped)') end
+    ok(first > 0, 'menu rendered')
+end)
+
+case('live rc.3: get_item_count() returning nil does not break the item census', function()
+    local h = new({})
+    enable(h)
+    fill_bag(h, 7)
+    local real_player = h.G.get_local_player
+    h.G.get_local_player = function()
+        local p = real_player()
+        if not p then return p end
+        return setmetatable({get_item_count = function() return nil end}, {__index = p})
+    end
+    h.run(2)
+    local s = st(h)
+    h.G.get_local_player = real_player
+    eq(s.inventory_count, 7, 'inventory counted from the item list')
+    eq(s.inventory_full, false, 'not full')
+    h.assert_clean('nil item count')
+end)
+
+case('RosiePlugin API from a foreign plugin context resolves no module lazily (QQT per-folder require)', function()
+    local h = new()
+    enable(h)
+    fill_bag(h, 25)
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('Consumer') end), true)
+    h.run(4)
+    local s = as_consumer(h, function() return h.G.RosiePlugin.status() end)
+    eq(s.phase, 'service', 'status() while servicing')
+    eq(as_consumer(h, function() return h.G.RosiePlugin.stop() end), true, 'stop() cancels the trip')
+    eq(live(st(h)), false)
+    eq(as_consumer(h, function() return h.G.RosiePlugin.enable() end), true)
+    eq(as_consumer(h, function() return h.G.RosiePlugin.disable() end), true)
+    h.assert_clean('foreign-context API')
+end)
+
+if #failures > 0 then error(table.concat(failures, '\n')) end
+print('Rosie contract: ' .. checks .. ' checks')

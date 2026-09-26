@@ -1,0 +1,72 @@
+# Publishes every new bundle version as a GitHub release.
+# On each push, CI runs the release checks and the offline suite under Lua 5.4
+# and LuaJIT (QQT's runtime). If the version in VERSION has no release yet, it
+# builds the installable package (scripts/ + docs) and creates release vX.Y.Z
+# on the pushed commit. A push that does not bump VERSION publishes nothing.
+# Pre-release versions (X.Y.Z-rc.N) are created as private drafts.
+name: Release
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Lua 5.4 and LuaJIT
+        run: sudo apt-get update -q && sudo apt-get install -y -q lua5.4 liblua5.4-dev luajit
+
+      - name: Release checks
+        run: python3 audit/check_release.py
+
+      - name: Offline tests (Lua 5.4 + LuaJIT)
+        run: python3 audit/tests/run_tests.py --luajit require
+
+      - name: Build package
+        run: python3 audit/build_release.py --out dist
+
+      - name: Remove withdrawn releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          grep -v '^[[:space:]]*#' audit/withdrawn_releases.txt | sed 's/[[:space:]]//g' | while read -r tag; do
+            [ -z "$tag" ] && continue
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release delete "$tag" --yes --cleanup-tag && echo "withdrew $tag"
+            fi
+          done
+
+      - name: Publish release for a new version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$(tr -d '[:space:]' < VERSION)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already released; nothing to publish."
+            exit 0
+          fi
+          # A pre-release version (e.g. 2.3.0-rc.1) becomes a private DRAFT for
+          # testing: only repository owners/collaborators see it until someone
+          # presses Publish. A plain X.Y.Z version is published as latest.
+          case "$tag" in
+            *-*) visibility="--draft --prerelease" ;;
+            *)   visibility="--latest" ;;
+          esac
+          gh release create "$tag" dist/*.zip \
+            --target "$GITHUB_SHA" \
+            --title "QQT_Warpigz_v2 $tag" \
+            --notes-file dist/RELEASE_NOTES.md \
+            $visibility

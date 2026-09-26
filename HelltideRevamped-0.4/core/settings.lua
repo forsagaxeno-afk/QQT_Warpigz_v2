@@ -1,0 +1,234 @@
+local gui = require "gui"
+local settings = {
+    enabled = false,
+    -- Resolved from gui.town selection in update_settings(). Defaults match
+    -- gui.town_data[0] (Temis); first-frame reads before the GUI pulse runs
+    -- still get a valid zone/waypoint.
+    town_zone = gui.town_data[0].zone_name,
+    town_waypoint = gui.town_data[0].waypoint_sno,
+    salvage = true,
+    path_angle = 1,
+    silent_chest = true,
+    helltide_chest = true,
+    ore = true,
+    herb = true,
+    shrine = true,
+    goblin = true,
+    event = true,
+    chaos_rift = true,
+    prioritize_traversals = false,
+    kill_monsters = true,
+    kill_monsters_rarity = 0, -- 0=All, 1=Rare+ (elite), 2=Champion+, 3=Boss only
+    experimental_explorer = false,
+    farm_cinder_threshold = 0,
+    do_maiden = false,
+    maiden_disable_cinders = 0,
+    manage_orbwalker = false,
+    draw_chest_status = false,
+    -- Run mode (core/hr_mode.lua): 0 = Warplan, 1 = Farm (default, manual use;
+    -- an external enable / WarPigs adoption always runs Warplan).
+    mode = 1,
+    -- Pandemonium Ruptures (Farm mode, core/hr_tear_event.lua).
+    hunt_rift = true,
+    rupture_replace_local_events = true,
+    rupture_prioritize_surging = true,
+    rupture_hunt_normal = true,
+    rupture_hunt_surging = true,
+    rupture_hunt_colossal = true,
+    rupture_max_cinders = 0,
+    tear_search_dist = 110,
+    tear_passby_dist = 50,
+    tear_event_radius = 12,
+    tear_circle_radius = 2,
+    rupture_linger_sec = 5,
+    rupture_do_realmwalker = true,
+    rupture_do_deathtoll_chamber = false,
+    rupture_rw_wait_sec = 25,
+    rupture_chamber_linger_sec = 8,
+    rupture_open_chests = true,
+    tear_use_charge_ring = true,
+    log_tear_candidates = false,
+}
+
+-- Keep external writes and the persisted GUI value in sync. A false setting
+-- is still a supported setting, and must remain readable/writable.
+local setting_controls = {
+    enabled = "main_toggle", salvage = "salvage_toggle",
+    silent_chest = "silent_chest_toggle", helltide_chest = "helltide_chest_toggle",
+    ore = "ore_toggle", herb = "herb_toggle", shrine = "shrine_toggle",
+    goblin = "goblin_toggle", event = "event_toggle", chaos_rift = "chaos_rift_toggle",
+    prioritize_traversals = "prioritize_traversals_toggle", kill_monsters = "kill_monsters_toggle",
+    kill_monsters_rarity = "kill_monsters_rarity", experimental_explorer = "experimental_explorer_toggle",
+    farm_cinder_threshold = "farm_cinder_threshold", do_maiden = "do_maiden_toggle",
+    maiden_disable_cinders = "maiden_disable_cinders", manage_orbwalker = "manage_orbwalker",
+    draw_chest_status = "draw_chest_status",
+    mode = "mode", hunt_rift = "hunt_rift_toggle",
+    rupture_replace_local_events = "rupture_replace_local_events",
+    rupture_prioritize_surging = "rupture_prioritize_surging",
+    rupture_hunt_normal = "rupture_hunt_normal", rupture_hunt_surging = "rupture_hunt_surging",
+    rupture_hunt_colossal = "rupture_hunt_colossal", rupture_max_cinders = "rupture_max_cinders",
+    tear_search_dist = "tear_search_dist", tear_passby_dist = "tear_passby_dist",
+    tear_event_radius = "tear_event_radius", tear_circle_radius = "tear_circle_radius",
+    rupture_linger_sec = "rupture_linger_sec", rupture_do_realmwalker = "rupture_do_realmwalker",
+    rupture_do_deathtoll_chamber = "rupture_do_deathtoll_chamber",
+    rupture_rw_wait_sec = "rupture_rw_wait_sec", rupture_chamber_linger_sec = "rupture_chamber_linger_sec",
+    rupture_open_chests = "rupture_open_chests", tear_use_charge_ring = "tear_use_charge_ring",
+    log_tear_candidates = "log_tear_candidates",
+}
+-- Settings synced 1:1 from their control in update_settings (mode + ruptures).
+local synced_controls = {
+    "mode", "hunt_rift", "rupture_replace_local_events", "rupture_prioritize_surging",
+    "rupture_hunt_normal", "rupture_hunt_surging", "rupture_hunt_colossal", "rupture_max_cinders",
+    "tear_search_dist", "tear_passby_dist", "tear_event_radius", "tear_circle_radius",
+    "rupture_linger_sec", "rupture_do_realmwalker", "rupture_do_deathtoll_chamber",
+    "rupture_rw_wait_sec", "rupture_chamber_linger_sec", "rupture_open_chests",
+    "tear_use_charge_ring", "log_tear_candidates",
+}
+
+function settings.set_setting(name, value)
+    if settings[name] == nil or type(settings[name]) == "function"
+        or type(value) ~= type(settings[name]) then return false end
+    local control = setting_controls[name]
+    if control then gui.elements[control]:set(value) end
+    if name == "town_zone" or name == "town_waypoint" then
+        local field = name == "town_zone" and "zone_name" or "waypoint_sno"
+        local matched = false
+        for index, town in pairs(gui.town_data) do
+            if town[field] == value then
+                gui.elements.town:set(index)
+                matched = true
+                break
+            end
+        end
+        if not matched then return false end
+    end
+    settings[name] = value
+    return true
+end
+
+function settings:update_settings()
+    settings.enabled = gui.elements.main_toggle:get()
+    local town_idx = gui.elements.town:get()
+    local town_data = gui.town_data[town_idx] or gui.town_data[0]
+    settings.town_zone = town_data.zone_name
+    settings.town_waypoint = town_data.waypoint_sno
+    settings.salvage = gui.elements.salvage_toggle:get()
+    settings.silent_chest = gui.elements.silent_chest_toggle:get()
+    settings.helltide_chest = gui.elements.helltide_chest_toggle:get()
+    settings.ore = gui.elements.ore_toggle:get()
+    settings.herb = gui.elements.herb_toggle:get()
+    settings.shrine = gui.elements.shrine_toggle:get()
+    settings.goblin = gui.elements.goblin_toggle:get()
+    settings.event = gui.elements.event_toggle:get()
+    settings.chaos_rift = gui.elements.chaos_rift_toggle:get()
+    settings.prioritize_traversals = gui.elements.prioritize_traversals_toggle:get()
+    settings.kill_monsters = gui.elements.kill_monsters_toggle:get()
+    settings.kill_monsters_rarity = gui.elements.kill_monsters_rarity:get()
+    settings.experimental_explorer = gui.elements.experimental_explorer_toggle:get()
+    settings.farm_cinder_threshold = gui.elements.farm_cinder_threshold:get()
+    settings.do_maiden = gui.elements.do_maiden_toggle:get()
+    settings.maiden_disable_cinders = gui.elements.maiden_disable_cinders:get()
+    settings.manage_orbwalker = gui.elements.manage_orbwalker:get()
+    settings.draw_chest_status = gui.elements.draw_chest_status:get()
+    for _, name in ipairs(synced_controls) do
+        local el = gui.elements[setting_controls[name]]
+        if el then
+            local v = el:get()
+            if type(v) == type(settings[name]) then settings[name] = v end
+        end
+    end
+end
+
+-- Above this cinder count, force orbwalker clear OFF so the bot stops lingering
+-- to fight for cinders we don't need and can prioritize finding/opening chests.
+local CINDER_CLEAR_OFF_THRESHOLD = 150
+
+local function cinder_gate_active()
+    return get_helltide_coin_cinders() > CINDER_CLEAR_OFF_THRESHOLD
+end
+
+-- Temporary override timestamp: until this time, force_orb_clear_for() callers
+-- want orbwalker clear ON regardless of the cinder gate. Used by chest combat
+-- detection so monsters can't park us at >149 cinders forever.
+local force_clear_until = -math.huge
+
+local function force_active()
+    return get_time_since_inject() <= force_clear_until
+end
+
+-- C4/L12b: orbwalker states HR itself forced (clear OFF, block ON). Like
+-- WonderCity's orb_forced, they are handed back even when 'Manage orbwalker'
+-- was switched off after HR forced them; HR never touches an orbwalker it
+-- did not force while management is off.
+local orb_forced = {clear = false, block = false}
+
+local function set_clear(v)
+    orbwalker.set_clear_toggle(v)
+    orb_forced.clear = not v
+end
+
+settings.orb_set_clear = function (v)
+    if not settings.manage_orbwalker then
+        if v and orb_forced.clear then set_clear(true) end
+        return
+    end
+    if v and cinder_gate_active() and not force_active() then
+        v = false
+    end
+    set_clear(v)
+end
+
+-- Tick driver: call from the main task pulse so the gate is asserted every
+-- frame, regardless of which state handler is running. Previously this only
+-- forced OFF above threshold, which left orbwalker stuck OFF after cinders
+-- dropped back below 150 (e.g. we just opened a chest) until the next state
+-- that explicitly called orb_set_clear(true). Now it's symmetric.
+-- With management switched off mid-run, a clear OFF the gate forced is
+-- handed back once and the gate then leaves the orbwalker alone.
+settings.apply_cinder_orb_gate = function ()
+    if not settings.manage_orbwalker then
+        if orb_forced.clear then set_clear(true) end
+        return
+    end
+    if force_active() then
+        set_clear(true)
+    elseif cinder_gate_active() then
+        set_clear(false)
+    else
+        set_clear(true)
+    end
+end
+
+-- Force orbwalker clear ON for `seconds` regardless of the cinder gate. Used
+-- when monsters are interrupting a chest channel: we'd rather burn the cinders
+-- we don't need than stand there getting hit while never killing anything.
+settings.force_orb_clear_for = function (seconds)
+    if not settings.manage_orbwalker then return end
+    force_clear_until = get_time_since_inject() + (seconds or 5)
+    set_clear(true)
+end
+
+settings.orb_set_block = function (v)
+    if settings.manage_orbwalker or (not v and orb_forced.block) then
+        orbwalker.set_block_movement(v)
+        orb_forced.block = v and true or false
+    end
+end
+
+-- C4/HLT-6: leaving HR (disable, task switch, loading) hands the orbwalker
+-- back in its neutral state: movement unblocked and clear ON, which the
+-- cinder gate may have forced OFF. A pending chest-combat force window is
+-- dropped so it cannot outlive the session. A state HR forced is restored
+-- even if 'Manage orbwalker' was switched off since (L12b).
+settings.orb_release = function ()
+    force_clear_until = -math.huge
+    if settings.manage_orbwalker or orb_forced.block then
+        orbwalker.set_block_movement(false)
+    end
+    if settings.manage_orbwalker or orb_forced.clear then
+        orbwalker.set_clear_toggle(true)
+    end
+    orb_forced.clear, orb_forced.block = false, false
+end
+
+return settings

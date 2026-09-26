@@ -1,0 +1,33 @@
+# WarPigs dedicated review
+
+Scope: `WarPigs-1.0.0` orchestrator, its external control API, and its turn-in task. Reviewed against the extracted QQT `#api` declarations and suite activity contracts. Existing quest strings and persisted GUI setting keys were preserved.
+
+## Confirmed defects fixed
+
+- **Critical — turn-in bypassed activity cleanup.** The internal task executed during quest scanning, before the outgoing plugin's disable gate and before cold-start navigation was armed. It could teleport or interact while Pit, Hordes, or Reaper still owned cleanup. Tasks now run after the common handoff gate. Reward turn-in takes precedence over an overlapping next activity, then releases that activity after the reward quest disappears.
+- **Critical — same-plugin boss changes replaced an unfinished run.** A new Reaper pattern called `run_once` again while the prior callback/loot sequence was pending. The outgoing entry now retains its completion predicate, disables only when ready, and passes through the normal cooldown/navigation gate before the next boss starts. Overlapping patterns use deterministic selection and retain a still-matching active reason.
+- **Critical — timers fabricated safe completion.** The 30-second altar watchdog forcibly disabled Reaper and set its completion flag; deferred-disable caps could stop Hordes during chest/RESET work. The watchdog and defer intervals now provide diagnostics only. They cannot override unfinished cleanup. A stuck activity requires the user to stop it or its plugin to recover/self-disable.
+- **High — failed disable could leave two activities active.** Disable exceptions previously escaped the orchestrator. Disable calls now retain ownership and block handoff until a stop is confirmed. Master disable retries failed stops and resets the internal turn-in task.
+- **High — self-disable while still matched was never reconciled.** Owned state persisted and prevented a later enable. Self-disable now enters the transition gap, and the still-wanted activity can start again. Matching activities already running at cold start are adopted without resetting their current run or sending them to town.
+- **High — Alfred callback and queued-work races.** Recent-completion restock grace could report idle during a new live cycle. A new trigger could replace an already running/queued cycle's callback. Live and queued work now wins over grace, existing cycles are joined without replacing their caller, and the turn-in task yields in every state. Both Alfred global aliases are recognized.
+- **High — invalid host data or setting changes could cause unsafe handoff.** A failed quest read was treated as an empty quest list, missing world data could confirm a teleport, and turning automatic teleport off left its pending gate active. These cases now preserve the activity, hold arrival confirmation, or cancel the optional sequence respectively. Entry-gate exceptions deny enable rather than permitting it.
+- **Medium — retry timing could interrupt its own native channel.** WarPlan and lingering-Helltide retries now allow a six-second channel window. The outgoing five-second cooldown also gates the first navigation call, not only plugin enable. A turn-in return retry now shares its teleport debounce.
+- **Medium — control contract inconsistencies.** Successful status-less enable APIs are now owned; explicit rejected enables are not. WarPigs external status/settings update immediately. A local logging function was moved before Alfred helpers so their diagnostics cannot call a nonexistent global `log`.
+
+## Input and background operation
+
+This plugin calls native QQT `warplan.teleport_to_activity`, `teleport_to_waypoint`, `pathfinder.request_move`, and `loot_manager.interact_with_object`. It does not synthesize desktop keyboard/mouse events or hold OS input, so there are no OS keys to release. Misleading Tab/pixel-click comments were corrected. Disabling stops new task work and asks each owned activity to disable; the activity/Batmobile implementations own their persistent path cancellation. The offline audit cannot establish whether a particular QQT/game build continues servicing native callbacks while minimized or unfocused.
+
+## Season 15 assessment
+
+The fixes address local orchestration defects; they do not establish live Season 15 quest-name, world-name, actor-name, or QQT support. Existing literal WarPlan aliases remain unchanged, including historically labeled guesses. Public game notes do not publish these QQT identifiers. Use the existing quest logging option to verify actual matching on the target host. Shared War Plans progress can make quest changes asynchronous; the safer cleanup gates remain relevant, but live completion/navigation still requires an in-game check.
+
+## Verification
+
+`python3 audit/tests/run_tests.py test_warpigs.lua` passes. The suite compiles runtime Lua with Lua 5.4 and exercises 17 isolated scenarios: task serialization, boss callback handoff/stale callbacks, stable overlap selection, self-disable recovery, status-less APIs, failing disable/retry, failed quest snapshots, optional teleport cancellation, cold-start task gating, Hordes chest/RESET timeout protection, diagnostic-only watchdog, Alfred callback ownership/live-cycle grace, actual turn-in task yielding, active-run adoption, missing arrival state/native retry timing, and outgoing navigation cooldown.
+
+## Independent plan-creator integration follow-up
+
+The root reviewer added a read-only `orchestrator.is_busy()` / external `status().busy` contract so WarPug can observe actual owned cleanup, native transitions, matched tasks and the post-disable gap. The common reviewer identified two circular waits introduced by such a guard: optional Pit filler could wait for a plan that could not be created while filler was active, and a bare pending intent to teleport could similarly wait for the creator. Enabled WarPug now takes priority over new filler requests, while an existing filler retains its normal cleanup gate. Idle teleport intent without an incoming quest is not active work. Actual in-flight transitions and cleanup still block creation. `test_warpug.lua` exercises the real producer and consumer together in addition to the original WarPigs regressions.
+
+These are mocked Lua regressions, not live gameplay or background-window tests. Remaining operational limits include unavailable destination/native APIs, host data that returns a valid but stale/empty quest list, and plugins that never report completion. Cleanup gates deliberately remain closed in the latter case instead of claiming loot collection succeeded.

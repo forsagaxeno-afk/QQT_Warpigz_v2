@@ -1,0 +1,127 @@
+local tracker = {
+    finished_time = 0,
+    pit_start_time = 0,
+    ga_chest_opened = false,
+    talisman_chest_opened = false,
+    selected_chest_opened = false,
+    gold_chest_opened = false,
+    finished_chest_looting = false,
+    has_salvaged = false,
+    exit_horde_start_time = 0,
+    has_entered = false,
+    start_dungeon_time = nil,
+    horde_opened = false,
+    first_run = false,
+    exit_horde_completion_time = 0,
+    exit_horde_completed = true,
+    reset_exit_pending = false,
+    sigil_activation_pending = false,
+    horde_entry_pending = false,
+    wave_start_time = 0,
+    needs_salvage = false,
+    victory_lap = false,
+    victory_positions = nil,
+    locked_door_found = false,
+    boss_killed = false,
+    teleported_from_town = false,
+    keep_items = 0,
+    sigil_used = false,
+    -- HRD-1: message of a chest phase that could not finish (unspendable
+    -- aether, unreadable aether API). The phase is terminal: exit may proceed.
+    chest_fault = nil,
+    -- C1: time of the last completed HordeDev Alfred cycle. Advisory flags
+    -- cannot re-trigger within the sticky grace; never cleared by cancel/reset.
+    alfred_completed_at = nil,
+    -- C1/C6: set by tasks/alfred.lua once HordeDev has waited 60 s on a paused
+    -- Alfred; cleared when Alfred's pause ends. The chests then continue.
+    alfred_pause_expired = false,
+    -- F-H1: 'compass' (farming: Library, compass, portal) or 'warplan' (the
+    -- War Plan Teleport entered the Horde; no compass). Runtime only, set by
+    -- InfernalHordesPlugin.enable(opts) / disable(); never persisted and
+    -- never touched by fresh_run_reset().
+    entry_mode = 'compass',
+    -- F-H1: War Plan mode found no chest room after the horde (reason text);
+    -- the chest phase is finished without spending the (unspendable) aether.
+    chests_skipped = nil,
+    -- F-H1: time the wave task has been idle in the boss room (waves
+    -- cleared, no target, pylon or locked door); nil otherwise.
+    horde_idle_since = nil,
+    -- F-H1: a Council/Bartuc pylon was seen this run (the waves are over).
+    council_seen = false,
+    -- Timestamp of the last InfernalHordesPlugin.enable(). Used by horde.lua's
+    -- shouldExecute as a settle gate so the wave-clearing task doesn't fire
+    -- the same tick an external orchestrator (WarPigs) flipped the toggle —
+    -- the world / zone snapshot can lag a tick or two behind a teleport
+    -- channel landing, and we don't want bomber:main_pulse picking targets
+    -- in the wrong world.
+    enable_time = 0
+}
+
+local runtime_timer = {}
+
+function tracker.check_time(key, delay)
+    local current_time = get_time_since_inject()
+    if not tracker[key] then
+        tracker[key] = current_time
+        table.insert(runtime_timer, key)
+    end
+    if current_time - tracker[key] >= delay then
+        return true
+    end
+    return false
+end
+
+function tracker.set_teleported_from_town(value)
+    tracker.teleported_from_town = value
+end
+
+function tracker.clear_runtime_timers()
+    console.print("Clear runtime timers")
+    for _, timer in pairs(runtime_timer) do
+        tracker.clear_key(timer)
+    end
+    runtime_timer = {}
+end
+
+-- The plan is to have a separate table that stores all the key added by check_time and clear them all on exit
+function tracker.clear_key(key)
+    tracker[key] = nil
+end
+
+-- Wipes all tracker state that needs to be cleared between horde runs.
+-- Called from InfernalHordesPlugin.enable() so a WarPigs-driven mid-BSK
+-- re-enable doesn't inherit the previous run's chest flags and skip looting.
+-- The normal Library->sigil flow already resets chest state via start_dungeon's
+-- reset_chest_flags(), so this is a superset that's idempotent on first enable.
+function tracker.fresh_run_reset()
+    console.print("[tracker] fresh_run_reset")
+    tracker.reset_exit_pending       = false
+    tracker.sigil_activation_pending = false
+    tracker.horde_entry_pending      = false
+    tracker.finished_chest_looting    = false
+    tracker.ga_chest_opened           = false
+    tracker.talisman_chest_opened     = false
+    tracker.selected_chest_opened     = false
+    tracker.gold_chest_opened         = false
+    tracker.has_salvaged              = false
+    tracker.needs_salvage             = false
+    tracker.victory_lap               = false
+    tracker.victory_positions         = nil
+    tracker.locked_door_found         = false
+    tracker.boss_killed               = false
+    tracker.horde_opened              = false
+    tracker.sigil_used                = false
+    tracker.first_run                 = false
+    tracker.keep_items                = 0
+    tracker.teleported_from_town      = false
+    tracker.start_dungeon_time        = nil
+    tracker.exit_horde_start_time     = nil
+    tracker.has_entered               = false
+    tracker.chest_fault               = nil
+    tracker.chests_skipped            = nil
+    tracker.horde_idle_since          = nil
+    tracker.council_seen              = false
+    tracker.clear_runtime_timers()
+end
+
+return tracker

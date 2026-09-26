@@ -1,0 +1,6 @@
+reroll_rx=0.000000000
+reroll_ry=0.000000000
+confirm_rx=0.000000000
+confirm_ry=0.000000000
+reroll_set=false
+confirm_set=false

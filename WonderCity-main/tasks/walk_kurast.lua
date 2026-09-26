@@ -1,0 +1,187 @@
+local plugin_label = 'wonder_city' -- change to your plugin name
+
+local utils    = require 'core.utils'
+local settings = require 'core.settings'
+local path     = require 'data.path'
+
+local status_enum = {
+    IDLE = 'idle',
+    WALKING = 'walking to spirit brazier'
+}
+local task = {
+    name = 'walk_kurast', -- change to your choice of task name
+    status = status_enum['IDLE'],
+    debounce_time = -1,
+    debounce_timeout = 3,
+    last_long_path_attempt = -999,
+}
+
+local LONG_PATH_RETRY    = 2.0  -- seconds between navigate_long_path retries on failure
+local LONG_PATH_ARRIVED  = 5.0  -- meters from target to consider arrived
+
+-- Stuck watchdog: if the player hasn't moved meaningfully for STUCK_WINDOW_S
+-- while this task is the active executor, re-teleport to the town waypoint
+-- to recover. Covers two failure modes seen in the wild:
+--   1) Temis long-path: navigator reports navigating=true but A* is not
+--      progressing (or we end up >5m from target with no movement).
+--   2) Kurast waypoint follow: BatmobilePlugin gets caught on geometry and
+--      can't reach the next path[] waypoint.
+local STUCK_THRESHOLD_M    = 1.5
+local STUCK_WINDOW_S       = 12.0
+local RECOVERY_COOLDOWN_S  = 15.0
+-- Live report: "TPs to the entrance 5 times in a row, then starts the run".
+-- Standing still right after arrival (loading, route calculation, a
+-- companion moving the player) re-armed the watchdog, and each recovery
+-- teleported back to the same waypoint. At most MAX_RECOVERIES re-teleports
+-- without real progress in between; after that the walk continues and the
+-- stall is logged once.
+local MAX_RECOVERIES       = 2
+task.last_pos          = nil
+task.last_pos_time     = 0
+task.last_recovery     = -999
+task.recoveries        = 0
+
+local function reset_progress()
+    task.last_pos      = nil
+    task.last_pos_time = 0
+end
+
+-- Returns true if recovery fired (caller should bail out of the rest of
+-- Execute for this tick).
+local function watchdog(player_pos)
+    local now = get_time_since_inject()
+    local lp = get_local_player()
+    local casting = lp and lp:get_active_spell_id() == 186139
+    if task.last_pos == nil or casting
+        or utils.distance(task.last_pos, player_pos) > STUCK_THRESHOLD_M
+    then
+        -- Real movement (not a teleport landing) ends a stall episode.
+        if task.last_pos ~= nil and not casting then task.recoveries = 0 end
+        task.last_pos      = player_pos
+        task.last_pos_time = now
+        return false
+    end
+    if now - task.last_pos_time < STUCK_WINDOW_S then return false end
+    if now - task.last_recovery < RECOVERY_COOLDOWN_S then return false end
+    if task.recoveries >= MAX_RECOVERIES then
+        if not task.recovery_cap_logged then
+            task.recovery_cap_logged = true
+            console.print(string.format(
+                '[wonder_city walk_kurast] still not moving after %d re-teleports — no further teleports, walking on',
+                task.recoveries))
+        end
+        return false
+    end
+    task.recoveries = task.recoveries + 1
+    task.last_recovery = now
+    console.print(string.format(
+        '[wonder_city walk_kurast] stuck %.1fs near (%.1f,%.1f) — re-teleporting to town waypoint',
+        now - task.last_pos_time, player_pos:x(), player_pos:y()))
+    utils.own_long_path = false
+    BatmobilePlugin.stop_long_path(plugin_label)
+    BatmobilePlugin.clear_target(plugin_label)
+    BatmobilePlugin.reset(plugin_label)
+    teleport_to_waypoint(settings.town_waypoint)
+    reset_progress()
+    return true
+end
+
+-- Pick the "destination" position used to detect arrival in shouldExecute.
+-- For long-path towns it's the configured target; for waypoint towns it's
+-- the second-to-last waypoint (matches original behavior).
+local function destination_proxy()
+    if settings.town_long_path_target then
+        return settings.town_long_path_target
+    end
+    return path[#path-1]
+end
+
+task.shouldExecute = function ()
+    local local_player = get_local_player()
+    if not local_player then return false end
+    local player_pos = local_player:get_position()
+    local brazier = utils.get_spirit_brazier()
+    local portal = utils.get_entrance_portal()
+    -- Yield at the same distance Execute considers "arrived" — otherwise the
+    -- distance window (LONG_PATH_ARRIVED-1, LONG_PATH_ARRIVED] makes
+    -- shouldExecute return true while Execute does nothing, blocking
+    -- enter_undercity from taking over and walking the last few meters to
+    -- the brazier.
+    return utils.player_in_zone(settings.town_zone) and
+        player_pos:x() ~= 0 and player_pos:y() ~= 0 and
+        portal == nil and
+        (brazier == nil and utils.distance(player_pos, destination_proxy()) > LONG_PATH_ARRIVED)
+end
+
+task.Execute = function ()
+    local local_player = get_local_player()
+    if not local_player then return end
+    local player_pos = local_player:get_position()
+
+    -- Temis (or any town with a long_path_target): hand navigation off to
+    -- BatmobilePlugin's uncapped A* and let it drive. No recorded waypoints.
+    if settings.town_long_path_target then
+        local target = settings.town_long_path_target
+        if utils.distance(player_pos, target) <= LONG_PATH_ARRIVED then
+            utils.own_long_path = false
+            BatmobilePlugin.stop_long_path(plugin_label)
+            BatmobilePlugin.clear_target(plugin_label)
+            task.status = status_enum['IDLE']
+            reset_progress()
+            return
+        end
+        if watchdog(player_pos) then return end
+        BatmobilePlugin.resume(plugin_label)
+        if not BatmobilePlugin.is_long_path_navigating() then
+            local now = get_time_since_inject()
+            if (now - task.last_long_path_attempt) < LONG_PATH_RETRY then return end
+            task.last_long_path_attempt = now
+            -- WCY-5: remember the autonomous route is ours to stop.
+            if BatmobilePlugin.navigate_long_path(plugin_label, target) then utils.own_long_path = true end
+        end
+        task.status = status_enum['WALKING']
+        return
+    end
+
+    -- Kurast (default): follow recorded data/path.lua waypoints sequentially.
+    if watchdog(player_pos) then return end
+    BatmobilePlugin.pause(plugin_label)
+    local closest_distance = nil
+    local closest_key = nil
+    for key,point in pairs(path) do
+        if closest_distance == nil or utils.distance(player_pos, point) < closest_distance then
+            closest_distance = utils.distance(player_pos, point)
+            closest_key = key
+        end
+    end
+    if path[closest_key+2] ~= nil then
+        BatmobilePlugin.set_target(plugin_label, path[closest_key+2])
+    elseif path[closest_key+1] ~= nil then
+        BatmobilePlugin.set_target(plugin_label, path[closest_key+1])
+    elseif path[closest_key] ~= nil and
+        utils.distance(path[closest_key], player_pos) < 30
+    then
+        BatmobilePlugin.set_target(plugin_label, path[closest_key])
+    else
+        BatmobilePlugin.clear_target(plugin_label)
+        task.status = status_enum['IDLE']
+        reset_progress()
+        return
+    end
+    BatmobilePlugin.move(plugin_label)
+    task.status = status_enum['WALKING']
+end
+
+-- C5: a preempted walk (Alfred, entry, ...) starts a fresh stuck window.
+task.on_cancel = function ()
+    reset_progress()
+end
+
+task.reset = function ()
+    reset_progress()
+    task.last_long_path_attempt = -math.huge
+    task.last_recovery = -math.huge
+    task.recoveries, task.recovery_cap_logged = 0, nil
+end
+
+return task
