@@ -2,6 +2,14 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.12] — 2026-09-26
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.11.
+
+### Fixed
+
+- Rosie 1.0.9: the *Plain Uniques* choice overlapped its label in the menu (live screenshot). The options are now short: *In town* (default) and *Drop*; the tooltip explains both. Saved choices are unchanged (same widget, same order).
+
 ## [2.3.0-rc.11] — 2026-09-26
 
 Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.10.

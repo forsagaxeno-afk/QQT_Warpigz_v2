@@ -19,9 +19,9 @@ local function render(app)
         ..'Off: the pickup GA rules decide on the ground as before.')
     if e.all_uniques:get() then
         e.all_uniques_mode:render('Plain Uniques',
-            {'Handle in town (salvage/sell by your rules)','Drop on the ground (no town trip)'},
-            'Handle in town: plain Uniques stay in the bag and your town rules salvage, sell or keep them. '
-            ..'Drop on the ground: outside town, a plain Unique your rules would salvage or sell is dropped right away and '
+            {'In town','Drop'},
+            'In town: plain Uniques stay in the bag and your town rules salvage, sell or keep them. '
+            ..'Drop: outside town, a plain Unique your rules would salvage or sell is dropped right away and '
             ..'never picked up again (Rosie remembers that exact item). Mythics, locked items and Uniques your keep rules '
             ..'protect (Unique filter, GA override, Always keep mythics, Mythic Unique filter) are never dropped.')
     end

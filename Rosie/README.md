@@ -1,6 +1,6 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.8
+One local addon for pickup, item rules, repairs and storage. Version 1.0.9
 (QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
@@ -163,10 +163,10 @@ Crest), or carries the Mythic upgrade affix (`S14_Mythic_UniquePotency`, hash
 2628989, or any affix whose name contains `Mythic`). Everything else with
 rarity 6 is a **plain Unique**. **Plain Uniques** (shown while the option is on):
 
-- *Handle in town (salvage/sell by your rules)* (default): nothing is dropped.
+- *In town* (default): nothing is dropped.
   Plain Uniques wait in the bag; the town trip sells, salvages or keeps them by
   your rules, and Mythics follow *Always keep mythics* and the Mythic rules.
-- *Drop on the ground (no town trip)*: outside town (any town the game flags,
+- *Drop*: outside town (any town the game flags,
   not only Rosie's home town), when no town trip runs, a plain Unique your town
   rules would sell or salvage is dropped on the spot, one item every 0.6 s.
   While the sorter can act, those items do not count toward the bag limit, so a

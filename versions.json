@@ -1,6 +1,6 @@
 {
   "project": "QQT_Warpigz_v2",
-  "version": "2.3.0-rc.11",
+  "version": "2.3.0-rc.12",
   "first_release": "2.0.0",
   "components": {
     "WarPigs-1.0.0": "1.1.3",
@@ -13,6 +13,6 @@
     "WonderCity-main": "2.2.0",
     "SilentRaven-0.1.3": "0.2.1",
     "TristramLoop": "1.0.1",
-    "Rosie": "1.0.8"
+    "Rosie": "1.0.9"
   }
 }
