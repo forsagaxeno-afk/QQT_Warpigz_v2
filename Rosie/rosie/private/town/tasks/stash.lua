@@ -6,6 +6,7 @@ local utils = require 'rosie.private.town.core.utils'
 local settings = require 'rosie.private.town.core.settings'
 local tracker = require 'rosie.private.town.core.tracker'
 local explorerlite = require 'rosie.private.town.core.explorerlite'
+local vendor = require 'rosie.private.town.core.vendor'
 local task = require('rosie.private.town.tasks.base').new_task()
 local plugin_label = 'alfred_the_butler'
 local state
@@ -24,7 +25,10 @@ local function release_movement()
 end
 
 function task.reset_session()
-    state = { time=0, progress=0, next_action=0, next_interact=0, interactions=0 }
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): stash session evidence.
+    state = { time=0, progress=0, next_action=0, next_interact=0, interactions=0,
+        seen=nil, interacted=false, proven=false, probe_at=math.huge, burst_until=0,
+        base=nil, open_logged=nil, near_since=nil, diag='' }
     task.set_status(task.status_enum.IDLE)
 end
 function task.suspend()
@@ -97,35 +101,31 @@ local function quantity(player,bag,sno)
     if ok then return result end
 end
 
--- QQT_Warpigz_v2 local patch (live 2.3.0-rc.8): the stash opened but Rosie
--- reported "Stash window did not open after 4 interactions" at 1.9 m. The
--- stash is not a vendor: the live host does not report it through
--- get_current_vendor(), which Rosie required. Alfred's proven check is used
--- instead: the host's vendor-screen flag, or stash contents that read the
--- same on two consecutive checks (the stash panel is open).
-local last_stash_count=-1
-local function other_vendor_open()
-    -- A readable current vendor that is another NPC (the Blacksmith after a
-    -- repair) is not the stash. The stash itself reads as nil on the live host.
-    local ok,skin=pcall(function()
-        local current=loot_manager.get_current_vendor()
-        return current and current:get_skin_name() or nil
-    end)
-    return ok and type(skin)=='string' and skin~='' and skin~=utils.npc_enum.STASH
-end
+-- QQT_Warpigz_v2 local patch (live 2.3.0-rc.8/rc.9): the stash chest is not
+-- an NPC vendor (core/vendor.lua stash_signals). Signals count only after this
+-- stash session interacted with the chest: a Blacksmith panel left open by the
+-- repair is not the stash. A deposit receipt also proves the panel is open.
+-- QQT_Warpigz_v2 local patch (review rc.10): a signal already up before the
+-- first interaction (state.base) proves nothing; the signal that decides is
+-- logged once per attempt.
 local function stash_open()
-    if other_vendor_open() then last_stash_count=-1; return false end
-    local ok,open=pcall(function() return loot_manager:is_in_vendor_screen() end)
-    if not (ok and open==true) then ok,open=pcall(loot_manager.is_in_vendor_screen) end
-    if ok and open==true then return true end
-    local counted,count=pcall(function() return #get_local_player():get_stash_items() end)
-    local stable=counted and type(count)=='number' and count>0 and count==last_stash_count
-    last_stash_count=counted and type(count)=='number' and count or -1
-    return stable==true
+    if not state.interacted then return false,'not interacted' end
+    local open,n,diag,why=vendor.stash_signals(state.seen,state.base)
+    state.seen=n; state.diag=diag
+    if not open and state.proven then open,why=true,'receipt' end
+    if open and state.open_logged~=state.interactions then
+        state.open_logged=state.interactions
+        log('Stash reads open: signal='..tostring(why)..' attempt='..state.interactions..' '..diag)
+    end
+    return open,diag
+end
+local function diag_now()
+    return select(3,vendor.stash_signals(nil))
 end
 
 local function stash_actor()
     local best,best_distance,selected=nil,math.huge,nil
+    local best_rank=math.huge
     local origin=get_player_position()
     local function scan(list)
         for _,actor in pairs(list or {}) do
@@ -135,8 +135,15 @@ local function stash_actor()
             end)
             if ok and pos and (pos:x()~=0 or pos:y()~=0 or pos:z()~=0) then
                 local distance=origin:dist_to(pos)
+                -- QQT_Warpigz_v2 local patch: prefer a chest the host reports
+                -- interactable (TristramLoop, MaidenFarmer, WonderCity); never
+                -- require it.
+                local okf,flag=pcall(function() return actor:is_interactable() end)
+                local rank=(okf and flag==false) and 1 or 0
                 if state.actor_id and id==state.actor_id then selected=actor end
-                if distance<best_distance then best,best_distance=actor,distance end
+                if rank<best_rank or rank==best_rank and distance<best_distance then
+                    best,best_distance,best_rank=actor,distance,rank
+                end
             end
         end
     end
@@ -172,20 +179,41 @@ local function pending_receipt(player)
     if source and destination and source<=p.source-p.amount and destination>=p.destination+p.amount then
         log('Deposited '..p.name..' (sno='..p.sno..'); source and stash updated.')
         state.pending=nil; state.progress=state.time; state.interactions=0; state.deposited=true
+        state.proven=true
+        return false
+    end
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): a deposit probe's receipt.
+    if p.probe and source and destination and source<=p.source-p.amount and destination>=p.amount then
+        -- The probe was sent before the stash list was readable: the bag decides.
+        log('Deposited '..p.name..' (sno='..p.sno..'); probe proved the stash panel open.')
+        state.pending=nil; state.progress=state.time; state.interactions=0; state.deposited=true
+        state.proven=true
         return false
     end
     if state.time-p.sent<3 then return true end
+    if p.probe and source==p.source then
+        -- A probe that moved nothing only says the panel is not open; it never
+        -- counts against the item's three attempts (the 4 interactions bound it).
+        log('Deposit probe moved nothing; the stash panel is not open.')
+        state.pending=nil; state.proven=false
+        return false
+    end
     if source~=p.source or destination~=p.destination then
         -- A partial or unreadable receipt is not permission to repeat a move.
         task.set_status('Waiting for stash transfer confirmation: '..p.name)
         return true
     end
     if p.attempts>=3 then
-        fail('No transfer observed for '..p.name..' (sno='..p.sno..', host return='..tostring(p.result)..') after 3 attempts.')
+        fail('No transfer observed for '..p.name..' (sno='..p.sno..', host return='..tostring(p.result)..') after 3 attempts. '..diag_now())
         return true
     end
     -- Fresh item selection below; a failed native handle is never reused.
-    state.retry=p; state.pending=nil
+    -- QQT_Warpigz_v2 local patch (review rc.10): nothing moved, so the panel
+    -- was not open whatever the passive signals said (a cached stash list, an
+    -- inventory panel): distrust them until a fresh interaction (still bounded
+    -- by the 4 interactions).
+    state.retry=p; state.pending=nil; state.proven=false
+    state.interacted=false; state.seen=nil
     return false
 end
 
@@ -216,19 +244,43 @@ function task.Execute()
         return
     end
     local actor=stash_actor()
-    if not stash_open() then
-        local distance=actor and utils.distance_to(actor)
-        if actor and distance<=3 then
+    local open,diag=stash_open()
+    local distance=actor and utils.distance_to(actor)
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): Alfred executes 2 s after
+    -- interacting whatever the signals say; Rosie sends one deposit probe per
+    -- interaction and trusts only its receipt.
+    local probing=not open and not waiting and state.interacted and state.time>=state.probe_at
+        and actor~=nil and distance<=3 and not vendor.npc_panel_held(state.base)
+    -- QQT_Warpigz_v2 local patch (review rc.10): interact at < 2 m like
+    -- Alfred and base.lua; within 3 m keep walking to the chest centre, and
+    -- interact there only after 1.5 s without reaching 2 m (the chest body).
+    local near=actor~=nil and distance<=3
+    if not near then state.near_since=nil
+    elseif not state.near_since then state.near_since=state.time end
+    local reach=near and (distance<2 or state.time-state.near_since>=1.5)
+    if not open and not probing then
+        if reach then
             release_movement()
             task.set_status(task.status_enum.INTERACTING)
             if state.time>=state.next_interact then
-                if state.interactions>=4 then fail('Stash window did not open after 4 interactions.'); return end
+                if state.interactions>=4 then fail('Stash window did not open after 4 interactions. '..diag_now()); return end
                 state.interactions=state.interactions+1; state.next_interact=state.time+3
+                state.burst_until=state.time+2; state.probe_at=state.time+2
+                if not state.base then state.base=vendor.stash_baseline() end
                 local ok,result=pcall(interact_vendor,actor)
-                log(string.format('Open stash: attempt=%d distance=%.1f host=%s',state.interactions,distance,tostring(ok and result)))
+                state.interacted=true
+                local okp,x,y=pcall(function() local p=actor:get_position(); return p:x(),p:y() end)
+                local okf,flag=pcall(function() return actor:is_interactable() end)
+                log(string.format('Open stash: attempt=%d distance=%.1f host=%s actor=(%.1f,%.1f) interactable=%s %s',
+                    state.interactions,distance,tostring(ok and result),okp and x or 0,okp and y or 0,tostring(okf and flag),
+                    diag_now()))
+            elseif state.time<state.burst_until then
+                pcall(interact_vendor,actor) -- Alfred re-interacts every tick for 2 s
             end
         else
             task.set_status(task.status_enum.MOVING)
+            state.interacted=false; state.proven=false; state.seen=nil
+            if not near then state.base=nil end
             local target=utils.compute_move_target(state.position or utils.get_npc_location('STASH'))
             if BatmobilePlugin then
                 BatmobilePlugin.set_target(plugin_label,target); BatmobilePlugin.move(plugin_label)
@@ -264,13 +316,14 @@ function task.Execute()
     local pending={sno=sno,amount=amount,name=tostring(name),bag=bag,source=source,destination=destination,
         sent=state.time,attempts=attempts}
     state.pending=pending; state.retry=nil
-    if not stash_open() then state.pending=nil; return end
+    if probing then pending.probe=true; state.probe_at=math.huge end
     -- Alfred issues the move directly: vendor_action requires the vendor-screen
     -- flag, which the stash panel may not raise.
     local called,result=pcall(loot_manager.move_item_to_stash,item)
     pending.result=called and result or false
     tracker.last_task=task.name
-    log('Deposit requested: '..pending.name..' (sno='..sno..', attempt='..attempts..', host='..tostring(pending.result)..').')
+    log('Deposit requested: '..pending.name..' (sno='..sno..', attempt='..attempts..', host='..tostring(pending.result)
+        ..(probing and ', probe=true' or '')..').')
 end
 
 function task.shouldExecute()

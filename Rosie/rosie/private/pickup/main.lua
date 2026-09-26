@@ -59,6 +59,10 @@ local function main_pulse()
     local zone=Utils.call(world,'get_current_zone_name')
     if not world or not zone or zone=='[sno none]' or is_chat_open() or is_inventory_open() then release_pickup(); return end
     if not Settings.should_execute() then release_pickup(); return end
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.7, LooteerV3 main.lua): the host's own Auto Loot would walk
+    -- to drops Rosie refuses and fight its movement; keep it off while pickup runs.
+    local orb=rawget(_G,'orbwalker')
+    if type(orb)=='table' and type(orb.set_auto_loot_toggle)=='function' then pcall(orb.set_auto_loot_toggle,false) end
     if Settings.is_paused() then release_pickup(); return end
     -- The activity uses our filter over its arena and owns the actual movement.
     -- Its recovery/party phases must not be interrupted by standalone pickup.

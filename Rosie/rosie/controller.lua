@@ -1,5 +1,7 @@
 local Runtime=require('rosie.runtime')
 local Movement=require('rosie.movement')
+-- QQT_Warpigz_v2 local patch (Rosie 1.0.7): bounded A* for pickup only.
+local Route=require('rosie.private.route')
 local M={}
 -- QQT_Warpigz_v2 local patch (M4): another mover is driving the player right
 -- now (a Batmobile route or claimed goal that is not paused). Pickup then
@@ -80,7 +82,7 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.6';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.7';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
         for _,key in ipairs({'trigger_tasks','trigger_tasks_with_teleport'}) do
@@ -110,7 +112,9 @@ function M.new(cached,conflict)
         if not enabled() or not life or life.cleanup_pending()>0 then return false end
         if owner=='town' then return life.busy() and not tracker.external_pause end
         return owner=='pickup' and not life.busy() and not peer_owns_loot()
-    end,function() return app.elements.pace:get()==1 and 0.12 or 0.20 end)
+    end,function() return app.elements.pace:get()==1 and 0.12 or 0.20 end,
+    -- QQT_Warpigz_v2 local patch: the planner answers for owner 'pickup' only.
+    function(owner,here,goal) if owner=='pickup' then return Route.plan(here,goal) end end)
     -- A user stop / disable is a cancel (never latches the stuck state); a
     -- host error is a failure.
     local function cancel(reason,failure)

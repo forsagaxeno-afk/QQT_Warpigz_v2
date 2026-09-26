@@ -715,6 +715,29 @@ function utils.is_salvage_or_sell_with_data(item,action)
     if not ok then return false, 0, false end
     return is_salvage_or_sell == true, affix_count or 0, is_max_aspect == true
 end
+-- QQT_Warpigz_v2 local patch (review rc.10): the stash-pull queue disposes of
+-- every copy of a queued SNO, and an S15 Mythic form shares its Unique's SNO.
+-- Returns why a stash item must stay (a mythic under "Always keep mythics",
+-- a Unique whose affixes cannot rule out a Mythic form, an unreadable item),
+-- or nil when the queue may take it.
+function utils.pull_protected(item)
+    local ok,why=pcall(function()
+        local rarity=item:get_rarity()
+        if not valid_rarity(rarity) then return 'rarity unreadable' end
+        local sno=item:get_sno_id()
+        local item_type=utils.get_item_type(item)
+        local mythic=rarity>=8 or utils.mythics[sno]~=nil or mythic_form.is_mythic_sno(sno)
+            or rarity==6 and mythic_form.has_mark(item)
+            or item_type=='talisman_seal' and utils.is_mythic_seal(item)==true
+        if mythic then return utils.settings.mythic_always_keep~=false and 'Mythic (Always keep mythics)' or nil end
+        if rarity==6 and item_type~='talisman_seal' and item_type~='talisman_charm' and mythic_form.undecided(item,nil) then
+            return 'Unique whose affixes cannot rule out a Mythic'
+        end
+        return nil
+    end)
+    if not ok then return 'unreadable' end
+    return why
+end
 classify_equipment = function(item,action)
     if not utils.can_modify_item(item) then return false,0,false end
 
@@ -729,8 +752,15 @@ classify_equipment = function(item,action)
     if not valid_rarity(rarity) then return false,0,false end
     local is_unique  = rarity == 6
     -- QQT_Warpigz_v2: an S15 Mythic form keeps the Unique's SNO and rarity 6.
-    local is_form = rarity==6 and utils.mythics[item_id]==nil and mythic_form.is_mythic_form(item,rarity)
-    local is_mythic  = rarity>=8 or utils.mythics[item_id] ~= nil or is_form
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): S14 re-issued iconic Mythics
+    -- (Mythic modifier forced by definition) are iconic, not forms: the Mythic
+    -- Unique filter never applies to them.
+    local iconic_s14 = mythic_form.is_mythic_sno(item_id)
+    local is_form = rarity==6 and utils.mythics[item_id]==nil and not iconic_s14 and mythic_form.is_mythic_form(item,rarity)
+    local is_mythic  = rarity>=8 or utils.mythics[item_id] ~= nil or iconic_s14 or is_form
+    -- A bag Unique whose affixes cannot be read (or list nothing) may be a
+    -- Mythic form: never sold or salvaged.
+    if rarity==6 and not is_mythic and mythic_form.undecided(item,nil) then return false,0,false end
     local ga_count,ga_readable = utils.get_item_ga_count(item)
 
     -- QQT_Warpigz_v2: Mythic Unique filter. Checked forms are always kept;
@@ -838,12 +868,33 @@ local update_debounce_timeout = 0.5
 -- frame) runs at most every FORCED_INTERVAL; force == 'now' (a request) is
 -- immediate.
 local FORCED_INTERVAL = 0.25
+-- QQT_Warpigz_v2 local patch (Rosie 1.0.7): every Unique in the bag logs its
+-- markers and Rosie's decision once per distinct reading (live: shows whether
+-- a picked-up Mythic carries its mark before anything is sold or salvaged).
+-- The table is capped at 256 readings; the census calls it under pcall.
+local probed_bag, probed_bag_count = {}, 0
+local function probe_bag_unique(item, decision)
+    local ok, rarity = pcall(function() return item:get_rarity() end)
+    if not ok or rarity ~= 6 then return end
+    local listed, affixes = pcall(function() return item:get_affixes() end)
+    local n = 0
+    for _ in pairs(listed and type(affixes) == 'table' and affixes or {}) do n = n + 1 end
+    local ga = utils.get_item_ga_count(item)
+    -- Cheap key first: the full probe line is built once per reading.
+    local key = table.concat({tostring(item:get_sno_id()), decision, tostring(listed and n or 'x'), tostring(ga),
+        tostring(mythic_form.has_mark(item))}, '|')
+    if probed_bag[key] then return end
+    if probed_bag_count >= 256 then probed_bag, probed_bag_count = {}, 0 end
+    probed_bag[key] = true; probed_bag_count = probed_bag_count + 1
+    console.print('[Rosie mythic-probe] bag ' .. decision .. ' sno=' .. tostring(item:get_sno_id()) .. ' | ' .. mythic_form.probe(item))
+end
 -- QQT_Warpigz_v2 (M2): one unreadable item is skipped (kept), it never ends
 -- the census or the trip.
 local function census_entry(item)
     if utils.settings.skip_favorite and item:is_locked() then return nil end
     local is_salvage, affix_count, is_max_aspect = utils.is_salvage_or_sell_with_data(item,utils.item_enum['SALVAGE'])
     local is_sell = utils.is_salvage_or_sell(item,utils.item_enum['SELL'])
+    pcall(probe_bag_unique, item, is_salvage and 'salvage' or is_sell and 'sell' or 'keep')
     local is_stash = not is_salvage and not is_sell
     if is_stash then
         local item_type = utils.get_item_type(item)

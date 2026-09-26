@@ -32,7 +32,9 @@ local function is_mythic(rarity,sno,info)
     -- the legacy list. Metadata never promotes lower or unreadable rarities.
     return rarity>=8 or CustomItems.ubers[sno]~=nil
         or rarity==6 and known~=nil and known.kind=='equipment' and known.quality=='mythic'
-        -- QQT_Warpigz_v2: S15 Mythic form of an ordinary Unique (same SNO).
+        -- QQT_Warpigz_v2 local patch: S14 re-issued iconic Mythics (rarity 6,
+        -- catalog "unique") and the S15 Mythic form of an ordinary Unique.
+        or rarity==6 and MythicForm.is_mythic_sno(sno)
         or MythicForm.is_mythic_form(info,rarity)
 end
 local function equipment_threshold(s,rarity,sno,slot,info)
@@ -93,8 +95,14 @@ function M.check_want_item(item, ignore_distance)
     local inventory,full=Utils.bag_state('equipment')
     if not inventory then return false,'equipment bag unavailable','deferred' end
     if full then return false,'equipment bag full or unreadable' end
-    local reason,decision=filter_reason(info,s.respect_filter)
-    if reason then return false,reason,decision end
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): a mythic never takes the
+    -- in-game loot-filter refusal (the town rules exempt it the same way).
+    local early=Utils.call(info,'get_rarity')
+    local protected=type(early)=='number' and early==early and is_mythic(early,Utils.call(info,'get_sno_id'),info)
+    if not protected then
+        local reason,decision=filter_reason(info,s.respect_filter)
+        if reason then return false,reason,decision end
+    end
     -- Legacy heuristic, opt-in only: the host exposes no dropped-by-player flag.
     if s.skip_dropped then
         local affixes=Utils.call(info,'get_affixes')
@@ -105,13 +113,25 @@ function M.check_want_item(item, ignore_distance)
     if type(rarity)~='number' or rarity~=rarity then return false,'item rarity unavailable','deferred' end
     if rarity<s.rarity then return false,'below minimum rarity or unreadable rarity' end
     local required,threshold,overridden=equipment_threshold(s,rarity,Utils.call(info,'get_sno_id'),slot,info)
-    -- QQT_Warpigz_v2: a Unique whose details the client has not loaded yet may
-    -- be a Mythic form; take it and let the town rules (which see the full item
-    -- in the bag, Always keep mythics included) decide.
-    if rarity==6 and required>0 and not MythicForm.details_loaded(info) then
-        return true,'accepted: Unique details not loaded yet (may be a Mythic Unique; decided in town) [threshold='..threshold..']'
-    end
     local ga,ga_readable=Utils.get_ga_count(info)
+    -- QQT_Warpigz_v2 local patch (live rc.8: fresh Uber drops "Helm",
+    -- ancestral, GA 0, no mark): a drop below its threshold whose reading
+    -- cannot rule out a Mythic is taken; the bag copy decides in town.
+    -- Affixes unreadable or none listed: no GA rule can be judged (a fresh
+    -- drop reads GA 0 whatever it carries), so any Unique or mythic is taken,
+    -- whichever slider is stricter. An Ancestral Unique listing affixes but
+    -- reading 0 GA is taken only when the Unique rule is the stricter one.
+    local mythic=is_mythic(rarity,Utils.call(info,'get_sno_id'),info)
+    if ga<required and (rarity==6 or mythic) then
+        local why=MythicForm.undecided(info,ga_readable and ga or nil)
+        local blind=why=='affixes unreadable' or why=='no affixes listed'
+        if blind and mythic then
+            return true,'accepted: Mythic, Greater Affixes not readable yet ('..why..'; decided in town) [threshold='..threshold..']'
+        end
+        if why and rarity==6 and not mythic and (blind or required>(s.uber_unique_ga_count or 0)) then
+            return true,'accepted: may be a Mythic Unique ('..why..'; decided in town) [threshold='..threshold..']'
+        end
+    end
     if required>0 and not ga_readable then return false,'Greater Affix count unavailable','deferred' end
     return ga>=required, string.format('%s: GA %d, required %d%s [threshold=%s]',ga>=required and 'accepted' or 'below GA minimum',
         ga,required,overridden and ' (slot override enabled)' or '',threshold)
@@ -130,8 +150,13 @@ function M.describe(item, reason)
     end
     local extra=''
     if type(rarity)=='number' and rarity>=6 then
-        extra=string.format(' details=%s mythic_mark=%s',MythicForm.details_loaded(info) and 'loaded' or 'hidden',
-            tostring(MythicForm.has_mark(info)))
+        -- QQT_Warpigz_v2 local patch: the matching mark affix (or false), why
+        -- the reading cannot rule out a Mythic, and the listed affix count.
+        local okm,mark=pcall(MythicForm.mark_of,info)
+        local oku,why=pcall(MythicForm.undecided,info,readable and count or nil)
+        local okn,n=pcall(MythicForm.affix_count,info)
+        extra=string.format(' mythic_mark=%s undecided=%s affixes=%s',tostring(okm and mark or false),
+            tostring(oku and why or 'no'),okn and n~=nil and tostring(n) or 'unreadable')
     end
     return string.format('%s | sno=%s rarity=%s ancestral=%s GA=%d nativeGA=%s displayGA=%s GA_source=%s GA_readable=%s GA_conflict=%s threshold=%s%s distance=%.1f | %s',name,
         tostring(sno),tostring(rarity),tostring(Utils.call(info,'is_ancestral')),count,
@@ -149,6 +174,28 @@ function M.report_rejection(item, reason)
         reported[id]=reason
         console.print('[Rosie pickup] Skipped '..M.describe(item,reason))
     end
+    if rarity>=6 then pcall(M.probe,item,'skipped') end
+end
+-- QQT_Warpigz_v2 local patch: every Unique/Mythic equipment drop Rosie skips, or takes as
+-- "may be a Mythic", logs its markers (affixes, quality attributes) once per
+-- distinct reading, at most three lines per drop and one reading per second,
+-- so one live log shows how a Mythic reads on the ground.
+local probed={}
+function M.probe(item,label)
+    local id=Pickup.key(item)
+    if not id then return end
+    local now=get_time_since_inject()
+    local seen=probed[id]
+    if seen and (seen.n>=3 or now<seen.next) then return end
+    local info=Utils.call(item,'get_item_info')
+    if not info or ItemLogic.classify(info)~='equipment' then return end
+    seen=seen or {n=0,next=0}; probed[id]=seen
+    seen.next=now+1
+    local line=MythicForm.probe(info)
+    if seen[line] then return end
+    seen[line]=true; seen.n=seen.n+1
+    console.print(string.format('[Rosie mythic-probe] %s sno=%s rarity=%s | %s',label,
+        tostring(Utils.call(info,'get_sno_id')),tostring(Utils.call(info,'get_rarity')),line))
 end
 function M.observe(items)
     local complete=Pickup.observe(items)
@@ -156,6 +203,7 @@ function M.observe(items)
     local present={}
     for _,item in pairs(items) do local id=Pickup.key(item); if id then present[id]=true end end
     for id in pairs(reported) do if not present[id] then reported[id]=nil end end
+    for id in pairs(probed) do if not present[id] then probed[id]=nil end end
 end
 -- QQT_Warpigz_v2: Season 15 Mythic forms of ordinary Uniques report the
 -- same SNO and rarity 6 as the Unique (live: "Condemnation", Ancestral Mythic
@@ -266,18 +314,30 @@ local function choose(best_first)
     if type(items)~='table' then return nil end
     local selected,score,distance
     local previous,previous_score,previous_distance
+    local rested,rested_distance
     for _,item in pairs(items) do
         local wanted,reason=M.check_want_item(item,false)
         local blocked,why=Pickup.blocked(item)
+        -- QQT_Warpigz_v2 local patch (review rc.10): the nearest wanted drop
+        -- resting between rounds (woken below when nothing else is wanted).
+        if wanted and blocked and Pickup.resting(item) then
+            local d=Utils.distance_to(item)
+            if not rested or d<rested_distance then rested,rested_distance=item,d end
+        end
         if wanted and blocked then wanted,reason=false,why end
         if wanted then
+            if type(reason)=='string' and reason:find('decided in town',1,true) then pcall(M.probe,item,'taken') end
             local d=Utils.distance_to(item)
             local value=best_first and M.calculate_item_score(item) or 0
             if Pickup.key(item)==selected_key then previous,previous_score,previous_distance=item,value,d end
             if not selected or value>score or value==score and d<distance then
                 selected,score,distance=item,value,d
             end
-        else M.report_rejection(item,reason) end
+        elseif item~=rested then M.report_rejection(item,reason) end
+    end
+    if not selected and rested then
+        Pickup.wake(rested)
+        selected,score,distance=rested,best_first and M.calculate_item_score(rested) or 0,rested_distance
     end
     -- Keep equally valuable nearby targets stable; a better item still wins.
     if previous and previous_score==score and previous_distance<=distance+1.5 then selected,score=previous,previous_score end

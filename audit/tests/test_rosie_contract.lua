@@ -374,9 +374,9 @@ case('mythics: the persisted loot-filter toggles and junk marks never sell or sa
 end)
 
 -- Live dump (Season 15): the Mythic form of an ordinary Unique keeps the
--- Unique's SNO and rarity 6; only the upgrade affix S14_Mythic_UniquePotency
--- (hash 2628989) tells them apart. "Condemnation" was skipped on the ground
--- (Unique GA minimum) and would be salvaged in town (unique default).
+-- Unique's SNO and rarity 6; the upgrade affix S14_Mythic_UniquePotency
+-- (hash 2628989) tells them apart once the item is known. "Condemnation" was
+-- skipped on the ground (Unique GA minimum) and would be salvaged in town.
 case('S15 Mythic form of a Unique (rarity 6, same SNO, mythic upgrade affix) is picked up and kept', function()
     local h = new({place = 'pit'})
     h.pos = h.v(0, 0)
@@ -388,32 +388,68 @@ case('S15 Mythic form of a Unique (rarity 6, same SNO, mythic upgrade affix) is 
     local base = {affix(578864, '1HDagger_Unique_Rogue_001'), affix(1829588, 'S04_Damage_All')}
     local marked = {base[1], affix(2628989, 'S14_Mythic_UniquePotency'), base[2]}
     local named_only = {base[1], {name = 'S14_Mythic_UniquePotency'}}
-    local function dagger(affixes)
-        return {name = '1HDagger_Unique_Rogue_001', sno = 451091, rarity = 6, ancestral = true, affixes = affixes}
+    -- ga = 1: a known Ancestral Unique below the Unique minimum (2). The
+    -- 0-GA reading is the undecided case, asserted separately below.
+    local function dagger(affixes, ga)
+        return {name = '1HDagger_Unique_Rogue_001', sno = 451091, rarity = 6, ancestral = true, ga = ga or 1, affixes = affixes}
     end
     local im = h.mod('Rosie', 'rosie.private.pickup.src.item_manager')
     h.run(1)
     local function wanted(item) return (h.as('Rosie', function() return im.check_want_item(item, true) end)) end
+    local function why(item) return select(2, h.as('Rosie', function() return im.check_want_item(item, true) end)) end
     eq(wanted(h.gear(dagger(base))), false, 'plain Unique below the Unique GA minimum is skipped')
     eq(wanted(h.gear(dagger(marked))), true, 'Mythic form uses the Mythic GA rule (0) and is wanted')
     eq(wanted(h.gear(dagger(named_only))), true, 'the affix name alone also marks it')
     local broken = h.gear(dagger(nil))
     function broken:get_affixes() error('host: affixes unreadable') end
-    eq(wanted(broken), true, 'unreadable details: taken and decided in town (may be a Mythic)')
-    -- Live Uber Mephisto: a fresh drop showed "Helm", GA 0, no affixes yet
-    -- (Leoric's Crown, a Mythic). It is taken; the bag copy decides in town.
-    local fresh = h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, affixes = {}})
-    local accepted, why = h.as('Rosie', function() return im.check_want_item(fresh, true) end)
-    eq(accepted, true, 'a Unique with hidden details is picked up')
-    ok(tostring(why):find('details not loaded', 1, true), tostring(why))
-    ok(im.describe(fresh, why):find('details=hidden', 1, true), 'the skip/decision line shows hidden details')
-    local loaded_plain = h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true,
-        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})
-    eq(wanted(loaded_plain), false, 'the same Unique with loaded details still follows the Unique GA rule')
-    local loaded_mythic = h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true,
-        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(2628989, 'S14_Mythic_UniquePotency')}})
-    eq(wanted(loaded_mythic), true, 'and as a Mythic form it is wanted')
-    -- Town: the default ancestral Unique rule salvages 0-GA uniques; the
+    eq(wanted(broken), true, 'unreadable affixes: taken and decided in town (may be a Mythic)')
+    -- Live Uber Mephisto (rc.8): "Skipped Helm | sno=2647147 rarity=6
+    -- ancestral=true GA=0 ... threshold=unique_general:2 | below GA minimum".
+    local fresh = h.gear({name = 'Helm_Unique_Generic_005', display = 'Helm', sno = 2647147, rarity = 6,
+        ancestral = true, ga = 0, affixes = {}})
+    local reason = why(fresh)
+    eq(wanted(fresh), true, 'live rc.8: fresh Uber Unique with nothing loaded is picked up')
+    ok(tostring(reason):find('may be a Mythic', 1, true), tostring(reason))
+    ok(im.describe(fresh, reason):find('undecided=no affixes listed', 1, true), im.describe(fresh, reason))
+    -- The same live reading with the affixes (power affix included) already
+    -- listed: rc.9 judged it "loaded" and skipped it again.
+    local label_only = h.gear({name = 'Helm_Unique_Generic_005', display = 'Helm', sno = 2647147, rarity = 6,
+        ancestral = true, ga = 0, affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(583206, 'AttackSpeed')}})
+    eq(wanted(label_only), true, 'live rc.8 reading with the power affix listed is picked up')
+    ok(tostring(why(label_only)):find('0 Greater Affixes', 1, true), tostring(why(label_only)))
+    -- Trade-off, stated: an Ancestral Unique that reads 0 GA on the ground is
+    -- always taken (the Unique minimum cannot be judged); town decides.
+    eq(wanted(h.gear(dagger(base, 0))), true, 'a known Ancestral Unique reading 0 GA is taken (town decides)')
+    -- Known plain Uniques still follow the Unique GA rule, including those
+    -- whose power affix is not named after the item (BSK, rc.9 took them always).
+    eq(wanted(h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, ga = 1,
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})), false,
+        'the same Unique, known and plain, follows the Unique GA rule')
+    eq(wanted(h.gear({name = 'S05_BSK_Amulet_Unique_Generic_001', sno = 1944508, rarity = 6, ancestral = true, ga = 1,
+        affixes = {affix(1924261, 'S05_BSK_Generic_009'), affix(2602164, 'X2_CritDamage_Greater')}})), false,
+        'a known plain BSK Unique (power affix S05_BSK_Generic_009) follows the Unique GA rule')
+    eq(wanted(h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = false, ga = 0,
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})), false,
+        'a non-Ancestral Unique with 0 GA follows the Unique GA rule')
+    eq(wanted(h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, ga = 1,
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(2628989, 'S14_Mythic_UniquePotency')}})), true,
+        'and as a Mythic form it is wanted')
+    eq(wanted(h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, ga = 1,
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1111111, 'UNIQUE_Double_Damage_Tag_Generic_Potency')}})),
+        false, 'an ordinary ...Potency affix is not a Mythic mark')
+    eq(wanted(h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, ga = 1,
+        attrs = {Item_Quality_Modifier_Bits = 4 + 32}, affixes = {affix(2662414, 'Helm_Unique_Generic_005')}})),
+        false, 'quality bits are logged, never a decision input')
+    -- A stricter Mythic rule never takes an Ancestral 0-GA Unique whose
+    -- affixes are listed; a fresh drop listing none cannot be judged and is
+    -- taken whatever the sliders say (review rc.10).
+    pgui.elements.affix_settings.uber_unique_greater_affix_slider:set(3)
+    h.run(1)
+    eq(wanted(label_only), false, 'Mythic GA 3 > Unique GA 2: a listed 0-GA drop follows the Unique rule')
+    eq(wanted(fresh), true, 'Mythic GA 3: a fresh drop listing no affixes is still taken')
+    pgui.elements.affix_settings.uber_unique_greater_affix_slider:set(0)
+    h.run(1)
+    -- Town: the default ancestral Unique rule acts on 0-GA uniques; the
     -- Mythic form is kept by "Always keep mythics".
     local utils = h.mod('Rosie', 'rosie.private.town.core.utils')
     local SALVAGE, SELL = utils.item_enum.SALVAGE, utils.item_enum.SELL
@@ -422,8 +458,9 @@ case('S15 Mythic form of a Unique (rarity 6, same SNO, mythic upgrade affix) is 
             return utils.is_salvage_or_sell(item, SALVAGE) or utils.is_salvage_or_sell(item, SELL)
         end)
     end
-    eq(acts(h.gear(dagger(base))), true, 'plain 0-GA ancestral Unique follows the Unique rule')
-    eq(acts(h.gear(dagger(marked))), false, 'Mythic form is never sold or salvaged')
+    eq(acts(h.gear(dagger(base, 0))), true, 'plain 0-GA ancestral Unique follows the Unique rule')
+    eq(acts(h.gear(dagger(marked, 0))), false, 'Mythic form is never sold or salvaged')
+    eq(acts(h.gear(dagger({}, 0))), false, 'a bag Unique listing no affixes is never sold or salvaged')
     -- Mythic Unique filter: checked forms are always kept, unchecked ones
     -- take their own action (default Salvage); iconic mythics are untouched.
     local tgui = h.mod('Rosie', 'rosie.private.town.gui')
@@ -431,26 +468,92 @@ case('S15 Mythic form of a Unique (rarity 6, same SNO, mythic upgrade affix) is 
     tgui.elements.mythic_form_filter_toggle:set(true)
     h.run(1)
     local function salvages(item) return h.as('Rosie', function() return utils.is_salvage_or_sell(item, SALVAGE) end) end
-    eq(salvages(h.gear(dagger(marked))), true, 'filter on: unchecked Mythic Unique is salvaged')
+    eq(salvages(h.gear(dagger(marked, 0))), true, 'filter on: unchecked Mythic Unique is salvaged')
     eq(acts(h.gear({rarity = 8, ancestral = true})), false, 'filter on: iconic mythic still kept')
     tgui.elements.mythic_form_451091:set(true)
     h.run(1)
-    eq(acts(h.gear(dagger(marked))), false, 'filter on: checked Mythic Unique is kept')
-    eq(acts(h.gear(dagger(base))), true, 'the checked list never keeps the plain Unique')
+    eq(acts(h.gear(dagger(marked, 0))), false, 'filter on: checked Mythic Unique is kept')
+    eq(acts(h.gear(dagger(base, 0))), true, 'the checked list never keeps the plain Unique')
     tgui.elements.mythic_form_451091:set(false); tgui.elements.mythic_form_other:set(0)
     h.run(1)
-    eq(acts(h.gear(dagger(marked))), false, 'unchecked action Keep: kept')
-    local locked = h.gear(dagger(marked)); locked.locked = true
+    eq(acts(h.gear(dagger(marked, 0))), false, 'unchecked action Keep: kept')
+    local locked = h.gear(dagger(marked, 0)); locked.locked = true
     tgui.elements.mythic_form_other:set(SALVAGE)
     h.run(1)
     eq(acts(locked), false, 'a locked (favorite) Mythic Unique is never touched')
     tgui.elements.mythic_form_filter_toggle:set(false)
     h.run(1)
-    eq(acts(h.gear(dagger(marked))), false, 'filter off: back to Always keep mythics')
+    eq(acts(h.gear(dagger(marked, 0))), false, 'filter off: back to Always keep mythics')
     -- The real drop is picked up.
     h.drop('pit', 12, 0, dagger(marked))
     ok(h.run_until(function() return (h.pickups or 0) > 0 end, 20), 'the Mythic form was picked up\n' .. h.tail())
     h.assert_clean('mythic form')
+end)
+
+-- Game data: the iconic Mythics were re-issued in S14 as Uniques with the
+-- Mythic modifier forced (S14_Helm_Unique_Generic_002 "Harlequin Crest",
+-- sno 2646291, eMagicType 2). The catalog lists them as quality "unique".
+case('S14 iconic Mythic SNOs; Mythic probe lines on the ground and in the bag', function()
+    local h = new({place = 'pit'})
+    h.pos = h.v(0, 0)
+    enable(h)
+    local pgui = h.mod('Rosie', 'rosie.private.pickup.gui')
+    pgui.elements.general.distance_slider:set(30)
+    pgui.elements.affix_settings.unique_greater_affix_slider:set(2)
+    local function affix(hash, name) return {affix_name_hash = hash, get_name = function() return name end} end
+    local im = h.mod('Rosie', 'rosie.private.pickup.src.item_manager')
+    local utils = h.mod('Rosie', 'rosie.private.town.core.utils')
+    local SALVAGE, SELL = utils.item_enum.SALVAGE, utils.item_enum.SELL
+    h.run(1)
+    local function wanted(item) return (h.as('Rosie', function() return im.check_want_item(item, true) end)) end
+    local function acts(item)
+        return h.as('Rosie', function()
+            return utils.is_salvage_or_sell(item, SALVAGE) or utils.is_salvage_or_sell(item, SELL)
+        end)
+    end
+    local function harlequin() return h.gear({name = 'S14_Helm_Unique_Generic_002', sno = 2646291, rarity = 6,
+        ancestral = true, ga = 1, affixes = {affix(2646292, 'S14_Helm_Unique_Generic_002'), affix(1829592, 'S04_Life')}}) end
+    eq(wanted(harlequin()), true, 'S14 Harlequin Crest (rarity 6) uses the Mythic GA rule')
+    ok(im.describe(harlequin(), 'x'):find('threshold=mythic_general', 1, true), im.describe(harlequin(), 'x'))
+    eq(acts(harlequin()), false, 'S14 Harlequin Crest is never sold or salvaged')
+    local function probes(prefix)
+        local n, last = 0, nil
+        for _, line in ipairs(h.log) do
+            if line:find(prefix, 1, true) then n = n + 1; last = line end
+        end
+        return n, last
+    end
+    -- Ground: a skipped Unique logs its markers once per reading.
+    local drop = h.drop('pit', 12, 0, {name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true,
+        ga = 1, attrs = {Item_Quality_Modifier_Bits = 4},
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})
+    h.run(3)
+    local n, line = probes('[Rosie mythic-probe] skipped')
+    eq(n, 1, 'one probe line for the skipped drop\n' .. h.tail())
+    ok(line:find('affixes=2 [Helm_Unique_Generic_005#2662414, S04_Life#1829592]', 1, true), line)
+    ok(line:find('qbits=4', 1, true) and line:find('mark=nil', 1, true), line)
+    h.run(3)
+    eq((probes('[Rosie mythic-probe] skipped')), 1, 'not repeated while the drop reads the same')
+    drop.affixes[#drop.affixes + 1] = affix(1829590, 'S04_Armor')
+    h.run(3)
+    eq((probes('[Rosie mythic-probe] skipped')), 2, 'a changed reading is logged again\n' .. h.tail())
+    drop.affixes[#drop.affixes + 1] = affix(2628989, 'S14_Mythic_UniquePotency')
+    ok(h.run_until(function() return (h.pickups or 0) > 0 end, 20), 'once marked, the drop is picked up\n' .. h.tail())
+    -- Bag: every Unique logs its reading and Rosie's decision once.
+    h.inventory[#h.inventory + 1] = h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true,
+        ga = 0, affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})
+    h.as('Rosie', function() utils.update_tracker_count(h.G.get_local_player(), 'now') end)
+    h.run(2)
+    h.as('Rosie', function() utils.update_tracker_count(h.G.get_local_player(), 'now') end)
+    local kept, kline = probes('[Rosie mythic-probe] bag keep')
+    local sold, sline = probes('[Rosie mythic-probe] bag sell')
+    local salvaged, vline = probes('[Rosie mythic-probe] bag salvage')
+    sline = sline or vline
+    eq(kept, 1, 'the marked Mythic in the bag: one keep line\n' .. h.tail())
+    ok(kline:find('mark=S14_Mythic_UniquePotency', 1, true), tostring(kline))
+    eq(sold + salvaged, 1, 'the plain 0-GA Unique in the bag: one sell/salvage line\n' .. h.tail())
+    ok(sline:find('sno=2647147', 1, true), tostring(sline))
+    h.assert_clean('s14 mythic')
 end)
 
 -- Live 2.3.0-rc.6: Rosie stood still in Temis ("Moving to stash", repair) and

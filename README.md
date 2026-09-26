@@ -6,7 +6,7 @@
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v2.1.3.** Test build: v2.3.0-rc.9 (private draft, not yet published). v2.2.0 and v2.2.1 were withdrawn. Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. Project release numbering started with v2.0.0. Plugin folder names and upstream history remain separate from the bundle version.
+**Current release: v2.1.3.** Test build: v2.3.0-rc.10 (private draft, not yet published). v2.2.0 and v2.2.1 were withdrawn. Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. Project release numbering started with v2.0.0. Plugin folder names and upstream history remain separate from the bundle version.
 
 [English changelog](CHANGELOG.md) · [Audit and validation](AUDIT.md) · [Credits](CREDITS.md) · [Version rules](CONTRIBUTING.md)
 
@@ -27,7 +27,7 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | `Reaper-main` | Boss lairs | 1.10.1 |
 | `WonderCity-main` | Kurast Undercity | 2.2.0 |
 | `SilentRaven-0.1.3` | Whisper reward checks in Temis | 0.2.1 |
-| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.6 |
+| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.7 |
 | `TristramLoop` | Standalone Uber Tristram / Whimsyshire loop (not driven by WarPigs) | 1.0.1 |
 
 Nightmare Dungeons are not supported. WarPug excludes those nodes.
@@ -37,7 +37,7 @@ Nightmare Dungeons are not supported. WarPug excludes those nodes.
 1. Stop the controllers and close QQT before replacing source files. Back up your plugin folders, settings, custom paths, and WarPug `positions.txt` outside the scripts directory.
 2. Copy **only the eleven plugin folders above** into the QQT scripts directory. Do not copy `audit`, `docs` or `assets` there (QQT would try to load them as plugins and print `cannot open ...\main.lua`). Keep one loaded copy of each plugin. Folder names remain unchanged even when a component version increases.
 3. Replace the SilentRaven folder completely: its modules now live under `silent_raven.*`. Restore your saved configuration as needed. Do not load old SilentRaven alongside this build.
-4. **Rosie replaces Alfred and Looter**: remove (or move out of the scripts directory) your old Alfred, SteroidAlfred, AlfredTheButler-WarPigz and LooteerV3 folders — Rosie publishes the same `AlfredTheButlerPlugin` / `LooteerPlugin` APIs and yields if another provider is loaded. Turn the host Auto Loot off if Rosie should decide pickups. Keep your separately installed **combat/Orbwalker** plugin; it is not bundled or replaced. Configure town, loot rules, combat, and activity settings before enabling automation.
+4. **Rosie replaces Alfred and Looter**: remove (or move out of the scripts directory) your old Alfred, SteroidAlfred, AlfredTheButler-WarPigz and LooteerV3 folders — Rosie publishes the same `AlfredTheButlerPlugin` / `LooteerPlugin` APIs and yields if another provider is loaded. Rosie switches the host Auto Loot off while its pickup runs. Keep your separately installed **combat/Orbwalker** plugin; it is not bundled or replaced. Configure town, loot rules, combat, and activity settings before enabling automation.
 5. Fully reload QQT. This matters for the captured module imports that fix Reaper's externally triggered `reset_run` crash.
 6. Enable SilentRaven in its own menu and **Whispers in Temis (SilentRaven)** in WarPigs. WarPigs does not override SilentRaven's enable checkbox.
 7. WarPug ships `positions.txt` **uncalibrated** since v2.1.0 (the calibration shipped by earlier releases is ignored so WarPug never clicks blind). Capture your own **Reroll** and **Confirm** positions in WarPug's menu after installing or updating, or restore your own backed-up `positions.txt`. Boards with a valid path confirm natively without clicks.

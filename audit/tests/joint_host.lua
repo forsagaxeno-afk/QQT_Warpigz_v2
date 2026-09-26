@@ -710,6 +710,7 @@ function J.new(opts)
     -- stash-count check relies on that).
     function player:get_stash_items()
         if h.vendor_screen and h.vendor_actor ~= nil and h.vendor_actor == h.temis_stash then return h.stash or {} end
+        if opts.stash_stale and h.place == P.temis then return h.stash or {} end -- opts.stash_stale: a cached list while the panel is closed
         return {}
     end
     function player:get_equipped_items() return h.equipped or {} end
@@ -726,7 +727,13 @@ function J.new(opts)
     host('get_player_position', function() return h.pos end)
     local function walkable(p)
         local b = h.place.box
-        return b ~= nil and p:x() >= b[1] and p:x() <= b[2] and p:y() >= b[3] and p:y() <= b[4]
+        if not (b ~= nil and p:x() >= b[1] and p:x() <= b[2] and p:y() >= b[3] and p:y() <= b[4]) then return false end
+        -- Obstacles (h.place.walls = {{x1, x2, y1, y2}, ...}): the straight-line
+        -- mover stops in front of them, as the live request_move does.
+        for _, w in ipairs(h.place.walls or {}) do
+            if p:x() >= w[1] and p:x() <= w[2] and p:y() >= w[3] and p:y() <= w[4] then return false end
+        end
+        return true
     end
     h.walkable = walkable
 
@@ -819,8 +826,12 @@ function J.new(opts)
     end)
     host('interact_vendor', function(a)
         note_call(h.vendors, {actor = a, skin = a and a.skin})
-        if rosie and a and a.vendor and h.pos:dist_to_ignore_z(a.pos) <= 4 then
+        if rosie and a and a.vendor and h.pos:dist_to_ignore_z(a.pos) <= (a == h.temis_stash and (opts.stash_reach or 4) or 4)
+            and not (opts.stash_broken and a == h.temis_stash)
+            and not (a == h.temis_stash and (opts.stash_fail_first or 0) > (h.stash_fails or 0) and (function() h.stash_fails = (h.stash_fails or 0) + 1; return true end)()) then
             h.vendor_screen, h.vendor_actor = true, a
+            if a ~= h.temis_stash then h.last_npc_vendor = a end
+            if a == h.temis_stash then h.stash_opens = (h.stash_opens or 0) + 1 end
         end
         if a == h.table_actor and h.pos:dist_to_ignore_z(a.pos) <= 4 then h.board.ready = true end
         if a and a.on_interact then a.on_interact(h, a) end
@@ -896,7 +907,22 @@ function J.new(opts)
         set_map_pin = function(p) h.pin = p; h.pins[#h.pins + 1] = p end,
         is_point_walkeable = walkable,
         set_height_of_valid_position = function(p) return p end,
-        is_ray_cast_walkeable = function() return true end,
+        -- A straight line through h.place.walls is blocked (no walls: true,
+        -- as before). h.ray_casts counts the calls.
+        is_ray_cast_walkeable = function(from, to)
+            h.ray_casts = (h.ray_casts or 0) + 1
+            local walls = h.place.walls
+            if not walls or from == nil or to == nil then return true end
+            local d = math.max(from:dist_to_ignore_z(to), 0.01)
+            for i = 0, math.ceil(d / 0.2) do
+                local f = math.min(1, i * 0.2 / d)
+                local x, y = from:x() + (to:x() - from:x()) * f, from:y() + (to:y() - from:y()) * f
+                for _, w in ipairs(walls) do
+                    if x >= w[1] and x <= w[2] and y >= w[3] and y <= w[4] then return false end
+                end
+            end
+            return true
+        end,
         can_cast_spell = function() return false end,
         -- The Temis obelisk dialog opens a pit: a portal to the pit floor appears.
         open_pit_portal = function()
@@ -986,10 +1012,18 @@ function J.new(opts)
             return false
         end
         h.salvaged, h.sold, h.stashed, h.repairs = {}, {}, {}, 0
+        -- rc.10 opt-in stash variants (defaults keep the rc.9 model):
+        -- opts.vendor_sticky (get_current_vendor keeps naming the last NPC),
+        -- opts.stash_inv (is_inventory_open while the stash panel is open),
+        -- opts.stash_stale (stash list readable in Temis while closed),
+        -- opts.stash_broken (the chest never opens), opts.stash_fail_first=N
+        -- (the first N stash interactions do nothing), opts.stash_reach
+        -- (interaction reach, default 4). h.stash_moves counts deposit calls.
         -- Live (2.3.0-rc.8): the stash is not a vendor; get_current_vendor()
         -- does not report it while its panel is open (opts.stash_is_vendor
         -- restores the old model).
         lm.get_current_vendor = function()
+            if opts.vendor_sticky then return h.last_npc_vendor end -- opts.vendor_sticky: the last NPC vendor stays current
             if not h.vendor_screen then return nil end
             if h.vendor_actor == h.temis_stash and not opts.stash_is_vendor then return nil end
             return h.vendor_actor
@@ -1013,6 +1047,7 @@ function J.new(opts)
         end
         -- The stash panel must be open (Rosie's own check is not the host's).
         lm.move_item_to_stash = function(item)
+            h.stash_moves = (h.stash_moves or 0) + 1
             if not (h.vendor_screen and h.vendor_actor == h.temis_stash) then return false end
             if take(item, h.inventory) then
                 h.stashed[#h.stashed + 1] = item
@@ -1020,9 +1055,15 @@ function J.new(opts)
             end
             return true
         end
-        lm.move_item_from_stash = function() return false end
+        lm.move_item_from_stash = function(item) -- works only while the stash panel is open
+            if not (h.vendor_screen and h.vendor_actor == h.temis_stash) then return false end
+            if take(item, h.stash) then h.inventory[#h.inventory + 1] = item end
+            return true
+        end
         host('is_chat_open', function() return h.chat_open == true end)
-        host('is_inventory_open', function() return false end)
+        host('is_inventory_open', function()
+            return opts.stash_inv == true and h.vendor_screen == true and h.vendor_actor == h.temis_stash
+        end)
         host('get_actors_list', function() return actors_here() end)
         host('orb_mode', {none = 0, pvp = 1, clear = 2, flee = 3})
         -- Temis vendors Rosie services (skins and positions: rosie/private/town/core/town.lua).
@@ -1054,11 +1095,20 @@ function J.new(opts)
             function item:get_sno_id() return self.sno end
             function item:get_name() return self.name end
             function item:get_skin_name() return self.name end
-            function item:get_display_name() return self.name end
+            -- `display` models a host label that differs from the SNO name
+            -- (live rc.8: a fresh Leoric's Crown read "Helm").
+            function item:get_display_name() return self.display or self.name end
             function item:get_rarity() return self.rarity end
             function item:is_ancestral() return self.ancestral end
             function item:is_junk() return self.junk end
-            function item:get_attribute() return self.ga end
+            -- `attrs` holds named host attributes (Item_Quality_Modifier_Bits ...);
+            -- anything else keeps the old behaviour (the Greater Affix count).
+            function item:get_attribute(name)
+                if self.attrs and self.attrs[name] ~= nil then return self.attrs[name] end
+                if name == 'Item_Quality_Modifier_Bits' or name == 'Item_Quality_Level'
+                    or name == 'Item_Power_Total' then return nil end
+                return self.ga
+            end
             function item:get_affixes() return self.affixes or {} end
             function item:get_durability() return self.durability end
             function item:is_filtered_by_loot_filter() return self.filtered == true end
@@ -1087,9 +1137,10 @@ function J.new(opts)
     end
 
     -- ── orbwalker ───────────────────────────────────────────────────────────
-    h.orb = {clear = true, block = false, mode = 0}
+    h.orb = {clear = true, block = false, mode = 0, auto_loot = opts.auto_loot == true}
     host('orbwalker', {
         set_clear_toggle = function(val) h.orb.clear = val; note_call(h.orb_log, {what = 'clear', value = val}) end,
+        set_auto_loot_toggle = function(val) h.orb.auto_loot = val end,
         set_block_movement = function(val) h.orb.block = val; note_call(h.orb_log, {what = 'block', value = val}) end,
         get_orb_mode = function() return h.orb.mode end,
     })

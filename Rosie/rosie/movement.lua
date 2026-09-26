@@ -4,6 +4,7 @@ local native=pathfinder
 local state={owner=nil,detail='Idle',requests=0,repaths=0}
 local allowed=function() return false end
 local pace=function() return 0.20 end
+local planner=nil -- QQT_Warpigz_v2 local patch: optional waypoint planner
 local inherited_cleanup={}
 local cleanup_next=0
 local cleanup_transferred=false
@@ -25,7 +26,7 @@ local function world_key(world)
     if id==nil or not zone or zone=='[sno none]' or not name then return nil end
     return tostring(id)..'|'..name..'|'..zone
 end
-function M.configure(admission,interval) allowed=admission;pace=interval or pace end
+function M.configure(admission,interval,plan) allowed=admission;pace=interval or pace;planner=plan end
 function M.suspend_if_unavailable()
     local player,world=get_local_player(),get_current_world()
     if not point(call(player,'get_position')) or not world_key(world) or call(player,'is_dead')~=false or is_chat_open() then
@@ -129,8 +130,18 @@ function M.move(owner,target)
     -- also flooded the host). Never call it and never set a pin (global,
     -- user-visible). The progress bound above (3 s, two re-requests, then
     -- 'Stopped: no movement progress') still limits recovery (C6).
-    if not state.route then state.route={goal};state.index=1 end
-    while state.index<#state.route and distance(here,state.route[state.index])<=1.5 do state.index=state.index+1 end
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.7, LooteerV3 pathfinder): an owner
+    -- may get waypoints around an obstacle (rosie/private/route.lua: pickup
+    -- only, ray-cast gated, bounded, cached per goal); nil or an error walks
+    -- straight. The waypoints are still walked with request_move.
+    if not state.route then
+        local ok,route=false,nil
+        if planner then ok,route=pcall(planner,owner,here,goal) end
+        state.route=ok and type(route)=='table' and #route>0 and route or {goal};state.index=1
+    end
+    -- QQT_Warpigz_v2 local patch: a planned waypoint is passed only within 0.6 m (they sit 0.8 m apart
+    -- along a wall: a 1.5 m skip aimed the player through it; review rc.10).
+    while state.index<#state.route and distance(here,state.route[state.index])<=0.6 do state.index=state.index+1 end
     local ok,result=pcall(native.request_move,vector(state.route[state.index]))
     state.requests=state.requests+1
     if not ok then state.detail='Movement request refused';return false end

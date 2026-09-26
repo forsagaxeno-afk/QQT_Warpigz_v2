@@ -1,6 +1,6 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.6
+One local addon for pickup, item rules, repairs and storage. Version 1.0.7
 (QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
@@ -12,8 +12,10 @@ The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 2. Open **Rosie**. It starts off. Review **Pickup rules**, then **Keep, storage &
    town**, including your salvage/sell defaults and bag/stash limits. Existing
    saved pickup and item-policy IDs are retained when the host retains them.
-3. Turn the host's **Auto Loot** off if Rosie should decide which drops to take.
-   Enable **Rosie**. Fresh pickup/town controls default on; existing saved choices
+3. Rosie switches the host's **Auto Loot** off on every pickup pulse (as
+   LooteerV3 does), so the host never walks to drops Rosie refuses. The host
+   offers no way to read the previous value: after unloading Rosie, turn Auto
+   Loot back on by hand if you want it. Enable **Rosie**. Fresh pickup/town controls default on; existing saved choices
    are respected. Either service can be turned off independently.
 4. Use **Run town service** for an immediate trip or a retry after correcting a
    reported problem. **Stop Rosie** cancels an active trip and turns Rosie off.
@@ -40,11 +42,31 @@ that a retry cannot fix) it waits for **Run town service**. Protected full bags 
 not cause endless town trips.
 
 **Mythics.** *Always keep mythics* (default on) keeps rarity-8 mythics, mythic
-charms and seals, and Season 15 Mythic forms of ordinary Uniques (recognised by
-their Mythic upgrade affix). *Use Mythic Unique filter* (Ancestral, default off)
-replaces that rule for Mythic Uniques: checked ones are always kept, unchecked
-ones take the chosen action (default Salvage) unless the Mythic Greater Affix
-override keeps them.
+charms and seals, the 14 iconic Mythics re-issued in Season 14 (Harlequin Crest,
+Doombringer and the others; rarity 6 on the host), and Season 15 Mythic forms of
+ordinary Uniques. A Mythic form is recognised by its Mythic upgrade affix
+(`S14_Mythic_UniquePotency`, hash 2628989) or any affix whose name contains
+`Mythic`; the log names the affix that matched. *Use Mythic Unique filter*
+(Ancestral, default off) replaces that rule for Mythic Uniques: checked ones are
+always kept, unchecked ones take the chosen action (default Salvage) unless the
+Mythic Greater Affix override keeps them.
+
+A fresh ground drop shows no affixes until it has been picked up once, so a
+Mythic Unique and a plain Unique can read the same on the ground. **May be a
+Mythic:** a Unique below its Unique Greater Affix minimum whose reading cannot
+rule out a Mythic (affixes unreadable, no affixes listed, or Ancestral reading
+0 Greater Affixes) is picked up and decided in town (`accepted: may be a Mythic
+Unique (...); decided in town`). A drop that lists no affixes (or cannot be read)
+reads 0 Greater Affixes whatever it carries, so it is taken whichever slider is
+stricter; an Ancestral Unique that lists affixes but reads 0 GA is taken only when
+the Unique minimum is the stricter rule. *Respect in-game loot filter* never skips
+a mythic. This takes more plain Ancestral Uniques; the town rules sell or salvage
+them once the bag copy is known. In town, a Unique whose affixes are unreadable
+or empty is never sold or salvaged (it is stashed and checked again on the next
+trip). `[Rosie mythic-probe]` lines record how skipped or undecided Uniques read
+on the ground (at most 3 per drop, one per second) and how every Unique in the
+bag reads with Rosie's keep/sell/salvage decision (once per reading).
+`Item_Quality_Modifier_Bits` is logged there (`qbits=`) and never used to decide.
 Unfinished resource release is retried and prevents new work, including on reload.
 
 **Pickup rules** separates equipment rarity/Greater Affixes from charms, seals,
@@ -66,7 +88,10 @@ town service. An entry selects **every matching unlocked copy of that Item ID**.
 Rosie's automatic bag/repair trips leave this queue pending. Run town service,
 its manual keybind, or an explicit request through the compatibility API consumes it;
 another addon can make that request. Clear the queue before delegating town trips
-if those copies should remain in storage.
+if those copies should remain in storage. Copies the town rules keep as mythics
+(while *Always keep mythics* is on), Uniques whose affixes cannot rule out a
+Mythic form and unreadable items are never taken: they stay in the stash and the
+log names them (`Kept in the stash: sno=...`).
 Favorites remain protected. Rosie verifies transfer into the proper
 bag before processing it; missing or ambiguous items cannot count as success.
 Clear queue removes pending intent without moving anything. Pending entries
@@ -74,7 +99,11 @@ survive Lua refresh; a running trip is cancelled and must be retried.
 
 **Movement** offers Smooth and responsive or Fast request pacing. Both walk with
 the host's native move request (`pathfinder.request_move`) straight to the
-target, keep nearly equal targets, account for height, and allow only bounded
+target (pickup only: when the host ray cast reports the straight line to a drop
+blocked, Rosie plans waypoints around it with a bounded A* search of at most
+1500 nodes that never cuts a wall corner, re-plans from where the player stands
+at most 4 times per drop, plans a drop with no path only once, and walks
+straight when no path is found), keep nearly equal targets, account for height, and allow only bounded
 recovery from stalls (3 s without progress: re-request, twice, then *Stopped: no
 movement progress*). Rosie never uses the map-pin engine path
 (`create_path_game_engine`) and never sets a map pin. Chat, death and loading
@@ -85,8 +114,34 @@ is added.
 Bag highlights and their alignment live under town Display settings; ground item
 highlights live under Pickup rules. Hidden controls cannot run actions. A failed
 settings menu blocks new service and queue actions; a Stop button already shown
-still cancels the trip. Per-item pickup attempts and selected approach time are finite; disabling
-pickup and enabling it again explicitly resets that budget.
+still cancels the trip.
+
+**Pickup rounds** (as LooteerV3): Rosie walks to an accepted drop and, within 2 m,
+interacts with it every 0.15 s. A round ends after 30 interactions or 6 s without
+getting closer; the drop then rests 8 s while other wanted drops go first (with
+none waiting its next round starts at once, and Rosie stays busy, so activities
+that wait for looting keep waiting) and after 3 rounds it is skipped until it
+leaves the ground. A fight that
+keeps the player busy therefore costs a round, not the drop. Disabling pickup and
+enabling it again resets that budget.
+
+**Stash.** The stash chest is not an NPC vendor. Rosie walks to within 2 m of the
+nearest Stash actor (within 3 m it interacts after 1.5 s without getting closer),
+preferring one the host reports interactable, interacts with it (again every 0.3 s for
+2 s, as Alfred does, up to 4 attempts 3 s apart) and then deposits once the chest
+reads open: the inventory panel is open, the stash list reads the same twice, or
+the vendor-screen flag is up while no other NPC reads as the current vendor. These
+signals count only after this trip has interacted with the chest, and a signal
+already up just before the first interaction is ignored. A deposit that moves
+nothing makes Rosie interact again. If no signal shows, one deposit per attempt
+is sent as a probe and counts only when the bag and stash change (never while an
+NPC panel open before the interaction still reads open). Each attempt logs
+`Open stash: attempt=N distance= host= actor=(x,y) interactable= sdk= inv=
+vendor= stash_n=`, and `Stash reads open: signal=...` names the signal that
+decided. Queued stash pulls use the same rule, go ahead 2.5 s after the
+interaction as Alfred does, and interact again (at most 3 times) when nothing
+arrives in the bag. Sell, salvage, repair and talisman salvage still require the expected
+NPC (Gambler, Blacksmith, Occultist) to be the current vendor.
 
 ## Other addons and saved state
 

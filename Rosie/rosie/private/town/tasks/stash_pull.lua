@@ -31,6 +31,10 @@ local to_salvage_snos  = {}
 local to_sell_snos     = {}
 local pull_initialized = false
 local stash_seen_count = -1   -- for stash-screen fallback detection
+local stash_interacted = false -- QQT_Warpigz_v2: stash signals count only after this session interacted
+-- QQT_Warpigz_v2 local patch (review rc.10): signals before the first chest
+-- interaction, kept copies (mythics) and the PULL progress clock.
+local stash_base, kept, execute_at, pull_progress, pull_left = nil, {}, 0, 0, math.huge
 local selected, matched_snos, elapsed, last_tick, next_step = {},{},0,nil,0
 local initial_bag_items = {}
 local unstable_initial_items = {}
@@ -70,6 +74,8 @@ local function reset_state()
     to_sell_snos     = {}
     pull_initialized = false
     stash_seen_count = -1
+    stash_interacted = false
+    stash_base, kept, execute_at, pull_progress, pull_left = nil, {}, 0, 0, math.huge
     selected,matched_snos,elapsed,last_tick,next_step={},{},0,nil,0
     initial_bag_items={}
     unstable_initial_items={}
@@ -128,8 +134,13 @@ local function sdk_vendor_open()
     return vendor.is_open(npc_key_for_phase())
 end
 
+-- QQT_Warpigz_v2 local patch (live 2.3.0-rc.8): the stash chest is not an NPC
+-- vendor; vendor.is_open('STASH') required get_current_vendor() to name it.
 local function is_stash_open(player)
-    return sdk_vendor_open()
+    if not stash_interacted then return false end
+    local open,n=vendor.stash_signals(stash_seen_count,stash_base)
+    stash_seen_count=n or -1
+    return open
 end
 
 -- -----------------------------------------------------------------------
@@ -171,6 +182,14 @@ local function finish_disposition(player)
                 if not entry.arrived or item:get_sno_id()~=entry.sno_id or not unlocked(item) then
                     tracker.stash_pull_failed=true
                     tracker.failure_reason='Queued item identity or lock changed before '..entry.action
+                    return false
+                end
+                -- QQT_Warpigz_v2 local patch (review rc.10): the bag copy
+                -- may now read as a Mythic (affixes loaded after the pull).
+                local keep=utils.pull_protected(item)
+                if keep then
+                    tracker.stash_pull_failed=true
+                    tracker.failure_reason='Queued item kept after the pull ('..keep..'): '..tostring(entry.sno_id)
                     return false
                 end
                 pending=true
@@ -248,9 +267,12 @@ task.Execute = function()
             sub      = 'INTERACTING'
             task.status = phase .. ': interacting'
             last_int = now
+            if phase == 'PULL' and not stash_base then stash_base = vendor.stash_baseline() end
             interact_vendor(npc)
+            if phase == 'PULL' then stash_interacted = true end
             return
         end
+        if phase == 'PULL' then stash_interacted = false; stash_base = nil end
         if not last_pos or town_movement.progressed(last_pos,pos) then
             last_pos=pos;last_int=now;retry=0
         end
@@ -275,7 +297,16 @@ task.Execute = function()
     -- ----------------------------------------------------------------
     if sub == 'INTERACTING' then
         local open = (phase == 'PULL') and is_stash_open(player) or sdk_vendor_open()
+        -- QQT_Warpigz_v2 local patch (review rc.10): like Alfred, a pull goes
+        -- ahead int_tout after the interaction whatever the signals say. A pull
+        -- from a closed chest moves nothing; EXECUTE re-interacts (retry-bounded)
+        -- when nothing arrives.
+        if phase == 'PULL' and not open and now - last_int > int_tout then open = true end
         if open then
+            if phase == 'PULL' then
+                execute_at, pull_progress, pull_left = now, now, math.huge
+                for _,entry in pairs(selected) do entry.calls = 0 end
+            end
             sub      = 'EXECUTE'
             task.status = phase .. ': executing'
             last_int = now
@@ -299,7 +330,9 @@ task.Execute = function()
     end
 
     if sub ~= 'EXECUTE' then return end
-    if not sdk_vendor_open() then sub='INTERACTING'; last_int=now; return end
+    -- The stash has no EXECUTE re-gate (Alfred): its pulls are verified by the
+    -- identity checks below and the 60 s bound. NPC phases keep the proven gate.
+    if phase ~= 'PULL' and not sdk_vendor_open() then sub='INTERACTING'; last_int=now; return end
 
     -- ----------------------------------------------------------------
     -- EXECUTE (debounced)
@@ -315,7 +348,16 @@ task.Execute = function()
         end
 
         local stash_items  = player:get_stash_items()
-        local any_remaining = false
+        local remaining = 0
+        -- Back to INTERACTING with a fresh interaction, bounded by max_retry.
+        local function reinteract(reason)
+            retry = retry + 1
+            if retry >= max_retry then
+                tracker.stash_pull_failed=true; tracker.failure_reason=reason; return
+            end
+            sub='INTERACTING'; last_int=now; stash_seen_count=-1
+            if npc then interact_vendor(npc) end
+        end
 
         -- An initial bag handle may be replaced by the host during ordinary
         -- stashing. Without a stable ACD, a same-SNO replacement cannot safely
@@ -334,11 +376,20 @@ task.Execute = function()
         for _, item in ipairs(stash_items) do
             local sno = item:get_sno_id()
             local id=identity(item)
-            if (to_salvage_snos[sno] or to_sell_snos[sno]) and not initial_bag_items[id] then
+            -- QQT_Warpigz_v2 local patch (review rc.10): a queued SNO never
+            -- takes a stashed Mythic (an S15 form shares its Unique's SNO).
+            local keep=(to_salvage_snos[sno] or to_sell_snos[sno]) and not initial_bag_items[id]
+                and not selected[id] and utils.pull_protected(item)
+            if keep then
+                if not kept[sno] then
+                    kept[sno]=keep
+                    console.print('[Rosie:stash_pull] Kept in the stash: sno='..tostring(sno)..' ('..keep..').')
+                end
+            elseif (to_salvage_snos[sno] or to_sell_snos[sno]) and not initial_bag_items[id] then
                 if not unlocked(item) then
                     tracker.stash_pull_failed=true; tracker.failure_reason='Queued stash item is locked or unreadable'; return
                 end
-                any_remaining = true
+                remaining = remaining + 1
                 local entry=selected[id]
                 if not entry then
                     -- Capture metadata before a transfer can expire this handle.
@@ -346,42 +397,61 @@ task.Execute = function()
                     local action=to_salvage_snos[sno] and 'salvage' or 'sell'
                     local work_phase=action=='sell' and 'SELL' or
                         (kind=='talisman_seal' or kind=='talisman_charm') and 'SALVAGE_TALISMAN' or 'SALVAGE'
-                    entry={sno_id=sno,action=action,phase=work_phase,arrived=false,issued=false,completed=false}
+                    entry={sno_id=sno,action=action,phase=work_phase,arrived=false,issued=false,completed=false,calls=0}
                 end
-                local issued=false
-                local ok = vendor.action('STASH',function(target)
-                    issued=true
-                    return loot_manager.move_item_from_stash(target)
-                end,item)
-                if issued then
-                    selected[id]=entry
-                    matched_snos[sno]=true
+                selected[id]=entry
+                matched_snos[sno]=true
+                -- A direct call (Alfred): the stash is not an NPC vendor. At
+                -- most 3 calls per item per interaction (the deposit's bound).
+                if (entry.calls or 0) < 3 then
+                    entry.calls=(entry.calls or 0)+1
+                    local _,ok = pcall(loot_manager.move_item_from_stash,item)
+                    dbg(string.format('move_item_from_stash sno=%d -> %s', sno, tostring(ok)))
                 end
-                dbg(string.format('move_item_from_stash sno=%d -> %s', sno, tostring(ok)))
             end
         end
 
-        if not any_remaining then
-            for _,entry in ipairs(tracker.pending_pulls) do
-                if not matched_snos[entry.sno_id] then
-                    tracker.stash_pull_failed=true; tracker.failure_reason='Queued SNO not found: '..tostring(entry.sno_id); return
-                end
+        if remaining > 0 then
+            if remaining < pull_left then pull_left, pull_progress = remaining, now end
+            if now - pull_progress > int_tout then
+                reinteract('The stash did not hand over the queued items after '..max_retry..' interactions')
             end
-            -- A host return is acceptance; observe the selected handles in the bag.
-            if not next(selected) then
-                tracker.stash_pull_failed=true; tracker.failure_reason='Queued items were not found in the stash'; return
-            end
-            local observed={}
-            for _,item in ipairs(bag_items(player)) do observed[identity(item)]=true end
-            for id,entry in pairs(selected) do
-                if not observed[id] then return end
-                entry.arrived=true
-            end
-            dbg('PULL complete — nothing left in stash from queue')
-            phase = next_work_phase()
-            sub   = 'IDLE'
-            retry = 0
+            return
         end
+        local missing=nil
+        for _,entry in ipairs(tracker.pending_pulls) do
+            if not matched_snos[entry.sno_id] and not kept[entry.sno_id] then missing=entry.sno_id; break end
+        end
+        -- QQT_Warpigz_v2 local patch (review rc.10): the stash list can lag the
+        -- panel; re-read it for 3 s before judging a queued SNO absent.
+        if (missing or not next(selected)) and now - execute_at < 3 then return end
+        if not next(selected) then
+            if not missing and next(kept) then
+                local list={}
+                for sno,why in pairs(kept) do list[#list+1]=tostring(sno)..' ('..why..')' end
+                table.sort(list)
+                tracker.stash_pull_failed=true
+                tracker.failure_reason='Queued items kept in the stash: '..table.concat(list,', ')
+                return
+            end
+            -- Nothing arrived and nothing matched: the chest may not be open.
+            reinteract(missing and 'Queued SNO not found: '..tostring(missing) or 'Queued items were not found in the stash')
+            return
+        end
+        if missing then
+            tracker.stash_pull_failed=true; tracker.failure_reason='Queued SNO not found: '..tostring(missing); return
+        end
+        -- A host return is acceptance; observe the selected handles in the bag.
+        local observed={}
+        for _,item in ipairs(bag_items(player)) do observed[identity(item)]=true end
+        for id,entry in pairs(selected) do
+            if not observed[id] then return end
+            entry.arrived=true
+        end
+        dbg('PULL complete — nothing left in stash from queue')
+        phase = next_work_phase()
+        sub   = 'IDLE'
+        retry = 0
         return
     end
 
