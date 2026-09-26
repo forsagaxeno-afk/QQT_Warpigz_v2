@@ -45,6 +45,15 @@ town.list = {
                 via = vec3:new(2568.7685546875, -471.8046875, 30.5166015625),
                 radius = 5,
             },
+            -- QQT_Warpigz_v2: the Tree of Whispers Raven sits behind a wall on
+            -- the direct line to the portal/stash/Blacksmith (live-validated by
+            -- SilentRaven whispers.lua and WarPigs wp_temis_route.lua). A trip
+            -- that starts at the Raven leaves through the same intermediate.
+            {
+                inside_anchor = vec3:new(2596.38, -495.79, 30.52),
+                via = vec3:new(2597.24, -488.08, 30.52),
+                radius = 6,
+            },
         },
         reset_positions = {
             default     = vec3:new(2578.1103515625, -482.2646484375, 31.5029296875),

@@ -97,13 +97,31 @@ local function quantity(player,bag,sno)
     if ok then return result end
 end
 
-local function stash_open()
-    local ok,open=pcall(function()
-        if loot_manager.is_in_vendor_screen()~=true then return false end
-        local vendor=loot_manager.get_current_vendor()
-        return vendor~=nil and vendor:get_skin_name()==utils.npc_enum.STASH
+-- QQT_Warpigz_v2 local patch (live 2.3.0-rc.8): the stash opened but Rosie
+-- reported "Stash window did not open after 4 interactions" at 1.9 m. The
+-- stash is not a vendor: the live host does not report it through
+-- get_current_vendor(), which Rosie required. Alfred's proven check is used
+-- instead: the host's vendor-screen flag, or stash contents that read the
+-- same on two consecutive checks (the stash panel is open).
+local last_stash_count=-1
+local function other_vendor_open()
+    -- A readable current vendor that is another NPC (the Blacksmith after a
+    -- repair) is not the stash. The stash itself reads as nil on the live host.
+    local ok,skin=pcall(function()
+        local current=loot_manager.get_current_vendor()
+        return current and current:get_skin_name() or nil
     end)
-    return ok and open==true
+    return ok and type(skin)=='string' and skin~='' and skin~=utils.npc_enum.STASH
+end
+local function stash_open()
+    if other_vendor_open() then last_stash_count=-1; return false end
+    local ok,open=pcall(function() return loot_manager:is_in_vendor_screen() end)
+    if not (ok and open==true) then ok,open=pcall(loot_manager.is_in_vendor_screen) end
+    if ok and open==true then return true end
+    local counted,count=pcall(function() return #get_local_player():get_stash_items() end)
+    local stable=counted and type(count)=='number' and count>0 and count==last_stash_count
+    last_stash_count=counted and type(count)=='number' and count or -1
+    return stable==true
 end
 
 local function stash_actor()
@@ -247,7 +265,9 @@ function task.Execute()
         sent=state.time,attempts=attempts}
     state.pending=pending; state.retry=nil
     if not stash_open() then state.pending=nil; return end
-    local called,result=pcall(utils.vendor_action,loot_manager.move_item_to_stash,item)
+    -- Alfred issues the move directly: vendor_action requires the vendor-screen
+    -- flag, which the stash panel may not raise.
+    local called,result=pcall(loot_manager.move_item_to_stash,item)
     pending.result=called and result or false
     tracker.last_task=task.name
     log('Deposit requested: '..pending.name..' (sno='..sno..', attempt='..attempts..', host='..tostring(pending.result)..').')

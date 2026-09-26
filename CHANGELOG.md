@@ -2,6 +2,26 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.9] — 2026-09-26
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.8.
+
+### Fixed
+
+- Rosie 1.0.6: **the stash did not open** (live rc.8: `Open stash: attempt=1..4 distance=1.9 host=true`, then `Stash window did not open after 4 interactions`, while repair at the Blacksmith worked). The stash is not a vendor: Rosie required `get_current_vendor()` to report it, which the live host does not do, and sent the deposit through `vendor_action`, which needs the vendor-screen flag. Rosie now uses Alfred's check (the host's vendor-screen flag, or stash contents that read the same twice), refuses only while another vendor (for example the Blacksmith) is still the current one, and issues `move_item_to_stash` directly as Alfred does.
+- Rosie 1.0.6: **Mythic Uniques from Uber bosses were skipped** (live Uber Mephisto: Leoric's Crown, Stone of Jordan, Henri's Perquisition, Locran's Talisman and others logged as `Skipped Helm | ... GA=0 ... threshold=unique_general:2`). The client had not loaded those drops yet: generic name ("Helm"), no Greater Affixes and no Mythic mark, so they were judged as plain Uniques below the Unique GA minimum. Once loaded, every Unique carries its own Unique power affix (the dump of the same Leoric's Crown shows it plus `S14_Mythic_UniquePotency`, and Rosie then wants it with `threshold=mythic_general:0`). A Unique whose details are not loaded is now picked up and decided in town, where the bag copy is fully known (*Always keep mythics* included). Pickup log lines for Uniques show `details=loaded|hidden mythic_mark=true|false`.
+- Rosie 1.0.6: when the host skipped Rosie's move because the player was still walking another plugin's path, Rosie reported "walking" while the player followed that path away from the drop (review of rc.8). Rosie now clears the foreign path and resends its own, at most twice per destination.
+- Rosie 1.0.6: a town trip that starts at the Tree of Whispers Raven (after SilentRaven) leaves through the Raven's intermediate point, like SilentRaven and WarPigs, instead of walking into the wall on the direct line.
+
+### Corrected
+
+- rc.8 described treating a `false` from `request_move` as the fix for the Helltide back-and-forth. That was not shown: with the old movement Rosie never reached `request_move` at all. It is a precaution for the new movement path; the Helltide back-and-forth still needs live confirmation on rc.9.
+
+### Validation
+
+- The joint host now models the live stash (not reported by `get_current_vendor()`, contents readable only while its panel is open, optionally no vendor-screen flag), vendor panels that close when the player walks away, and `request_move` skipped while the player is moving. New cases: stash deposits with and without the vendor-screen flag (both fail before the fix with the live message), a hidden-details Mythic Unique is picked up while the same loaded plain Unique is not, a drop is picked up while another plugin's long move is running (fails before the fix); the patrol case now starts with the activity already walking.
+- `python3 audit/tests/run_tests.py`: all test files × (Lua 5.4 + LuaJIT) pass.
+
 ## [2.3.0-rc.8] — 2026-09-26
 
 Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.7.

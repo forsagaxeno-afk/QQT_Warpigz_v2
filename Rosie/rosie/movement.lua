@@ -106,7 +106,7 @@ function M.move(owner,target)
     if changed then
         if state.owner and not M.release(owner) then return false end
         state.owner=owner;state.goal=goal;state.context=context;state.next=0
-        state.anchor=here;state.progress_at=now;state.route=nil;state.recovery=0
+        state.anchor=here;state.progress_at=now;state.route=nil;state.recovery=0;state.overrides=0
     end
     if distance(here,goal)<=1.5 then M.release(owner);return true end
     if distance(here,state.anchor)>=0.4 then state.anchor=here;state.progress_at=now;state.recovery=0 end
@@ -134,10 +134,19 @@ function M.move(owner,target)
     local ok,result=pcall(native.request_move,vector(state.route[state.index]))
     state.requests=state.requests+1
     if not ok then state.detail='Movement request refused';return false end
-    -- request_move only sends a command while the player is not already moving
-    -- and may report false for a skipped repeat. That is not a refusal: treating
-    -- it as one dropped pickup's busy flag every step, so the activity and Rosie
-    -- pulled the player back and forth. The progress bound decides instead.
+    if result==false and (state.overrides or 0)<2 then
+        -- The host skipped the command because the player is still walking
+        -- someone else's path: clear it (at most twice per goal) and resend.
+        local dest=point(call(player,'get_move_destination'))
+        if dest and distance(dest,state.route[state.index])>1.5 then
+            state.overrides=(state.overrides or 0)+1
+            pcall(native.clear_stored_path);state.next=0
+        end
+    end
+    -- QQT documents that request_move sends nothing while the player is
+    -- already moving. A false from it (assumed to mean such a skip) is not
+    -- treated as a refusal, so pickup's busy flag cannot flap on it; the
+    -- override above and the progress bound decide instead (precaution).
     state.detail=result==false and 'Walking to '..owner..' destination (host kept its current move)'
         or 'Walking to '..owner..' destination'
     return true

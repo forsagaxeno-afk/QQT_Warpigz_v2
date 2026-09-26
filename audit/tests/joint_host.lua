@@ -706,7 +706,12 @@ function J.new(opts)
     function player:get_inventory_items() return h.inventory or {} end
     function player:get_consumable_items() return {} end
     function player:get_dungeon_key_items() return h.keys_items or {} end
-    function player:get_stash_items() return {} end
+    -- Stash contents read only while the stash panel is open (Alfred's
+    -- stash-count check relies on that).
+    function player:get_stash_items()
+        if h.vendor_screen and h.vendor_actor ~= nil and h.vendor_actor == h.temis_stash then return h.stash or {} end
+        return {}
+    end
     function player:get_equipped_items() return h.equipped or {} end
     function player:get_talisman_items() return h.talismans or {} end
     function player:get_socketable_items() return {} end
@@ -826,11 +831,14 @@ function J.new(opts)
     local function move_request(kind)
         return function(p)
             if not p then return end
-            -- Live QQT (opts.request_move_redundant): request_move "only sends a
-            -- command if the player isn't already moving" there; a repeat of the
-            -- current destination is skipped and reports false.
+            -- opts.request_move_redundant (assumed return value): QQT documents
+            -- that request_move "only sends a command if the player isn't
+            -- already moving"; a skipped repeat is modelled as returning false.
+            -- request_move_redundant='any' follows the docs literally: every
+            -- request_move is skipped while the player is still moving.
             if kind == 'request_move' and opts.request_move_redundant and h.goal
-                and math.abs(h.goal:x() - p:x()) + math.abs(h.goal:y() - p:y()) <= 0.5 then
+                and (opts.request_move_redundant == 'any'
+                    or math.abs(h.goal:x() - p:x()) + math.abs(h.goal:y() - p:y()) <= 0.5) then
                 h.redundant_moves = (h.redundant_moves or 0) + 1
                 return false
             end
@@ -956,7 +964,13 @@ function J.new(opts)
     })
     host('loot_manager', {
         any_item_around = function() return h.floor_loot end,
-        is_in_vendor_screen = function() return h.vendor_screen == true end,
+        -- opts.stash_screen_flag=false: the stash panel does not raise the
+        -- vendor-screen flag (the case Alfred's stash-count fallback covers).
+        is_in_vendor_screen = function()
+            if h.vendor_screen and h.vendor_actor ~= nil and h.vendor_actor == h.temis_stash
+                and opts.stash_screen_flag == false then return false end
+            return h.vendor_screen == true
+        end,
         get_all_items_chest_sort_by_distance = function() return {} end,
         interact_with_object = function(a)
             note_call(h.interactions, {actor = a, skin = a and a.skin, loot = true})
@@ -972,7 +986,14 @@ function J.new(opts)
             return false
         end
         h.salvaged, h.sold, h.stashed, h.repairs = {}, {}, {}, 0
-        lm.get_current_vendor = function() return h.vendor_screen and h.vendor_actor or nil end
+        -- Live (2.3.0-rc.8): the stash is not a vendor; get_current_vendor()
+        -- does not report it while its panel is open (opts.stash_is_vendor
+        -- restores the old model).
+        lm.get_current_vendor = function()
+            if not h.vendor_screen then return nil end
+            if h.vendor_actor == h.temis_stash and not opts.stash_is_vendor then return nil end
+            return h.vendor_actor
+        end
         lm.get_item_identifier = function(item) return item and item.uid end
         lm.is_gold = function() return false end
         lm.is_potion = function() return false end
@@ -990,8 +1011,13 @@ function J.new(opts)
             for _, item in ipairs(h.equipped or {}) do item.durability = 100 end
             return true
         end
+        -- The stash panel must be open (Rosie's own check is not the host's).
         lm.move_item_to_stash = function(item)
-            if take(item, h.inventory) then h.stashed[#h.stashed + 1] = item end
+            if not (h.vendor_screen and h.vendor_actor == h.temis_stash) then return false end
+            if take(item, h.inventory) then
+                h.stashed[#h.stashed + 1] = item
+                h.stash = h.stash or {}; h.stash[#h.stash + 1] = item
+            end
             return true
         end
         lm.move_item_from_stash = function() return false end
@@ -1319,6 +1345,10 @@ function J.new(opts)
         end
         for _, rec in ipairs(h.plugins) do
             for _, fn in ipairs(rec.update) do invoke(rec, 'on_update', fn) end
+        end
+        if h.vendor_screen and h.vendor_actor and h.vendor_actor.pos
+            and h.pos:dist_to_ignore_z(h.vendor_actor.pos) > 5 then
+            h.vendor_screen, h.vendor_actor = false, nil -- walking away closes the panel
         end
         if h.goal and h.place ~= P.limbo and not h.travel then
             local dx, dy = h.goal:x() - h.pos:x(), h.goal:y() - h.pos:y()

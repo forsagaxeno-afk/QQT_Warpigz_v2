@@ -399,7 +399,20 @@ case('S15 Mythic form of a Unique (rarity 6, same SNO, mythic upgrade affix) is 
     eq(wanted(h.gear(dagger(named_only))), true, 'the affix name alone also marks it')
     local broken = h.gear(dagger(nil))
     function broken:get_affixes() error('host: affixes unreadable') end
-    eq(wanted(broken), false, 'unreadable affixes never promote a Unique')
+    eq(wanted(broken), true, 'unreadable details: taken and decided in town (may be a Mythic)')
+    -- Live Uber Mephisto: a fresh drop showed "Helm", GA 0, no affixes yet
+    -- (Leoric's Crown, a Mythic). It is taken; the bag copy decides in town.
+    local fresh = h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, affixes = {}})
+    local accepted, why = h.as('Rosie', function() return im.check_want_item(fresh, true) end)
+    eq(accepted, true, 'a Unique with hidden details is picked up')
+    ok(tostring(why):find('details not loaded', 1, true), tostring(why))
+    ok(im.describe(fresh, why):find('details=hidden', 1, true), 'the skip/decision line shows hidden details')
+    local loaded_plain = h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true,
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})
+    eq(wanted(loaded_plain), false, 'the same Unique with loaded details still follows the Unique GA rule')
+    local loaded_mythic = h.gear({name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true,
+        affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(2628989, 'S14_Mythic_UniquePotency')}})
+    eq(wanted(loaded_mythic), true, 'and as a Mythic form it is wanted')
     -- Town: the default ancestral Unique rule salvages 0-GA uniques; the
     -- Mythic form is kept by "Always keep mythics".
     local utils = h.mod('Rosie', 'rosie.private.town.core.utils')
@@ -479,10 +492,17 @@ local function patrol_with_drops(opts)
     enable(h)
     h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(30)
     local drops = {{-8, 3}, {-4, 5}, {0, 4}, {4, 3}, {8, 5}, {12, 4}}
-    for _, d in ipairs(drops) do h.drop('pit', d[1], d[2]) end
-    local flips, was_busy, activity_moves_while_busy = 0, false, 0
+    local flips, was_busy = 0, false
     local patrol = {h.v(-10, -10), h.v(10, -10)}
     local leg = 1
+    -- The activity is already walking its route when the drops appear.
+    h.run(1, function()
+        as_consumer(h, function() return h.G.pathfinder.request_move(patrol[leg]) end)
+    end, 0.05)
+    local activity_moves = 0
+    for _, m in ipairs(h.moves) do if m.owner ~= 'Rosie' then activity_moves = activity_moves + 1 end end
+    ok(activity_moves > 0, 'the activity walked before the drops appeared')
+    for _, d in ipairs(drops) do h.drop('pit', d[1], d[2]) end
     h.run_until(function() return (h.pickups or 0) >= #drops end, 30, function()
         local busy = as_consumer(h, function() return looter(h).is_actively_looting() end) == true
         if busy and not was_busy then flips = flips + 1 end
@@ -509,12 +529,54 @@ case('live host: request_move reporting false for a repeated command is not a re
     ok(flips <= 2, 'the busy flag does not flap: ' .. flips .. ' flips')
     h.assert_clean('redundant moves')
 end)
+case('live host: a drop is picked up while another plugin\'s long move is still running (request_move skipped while moving)', function()
+    local h = new({place = 'pit', request_move_redundant = 'any'})
+    h.pos = h.v(0, 0)
+    enable(h)
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(30)
+    as_consumer(h, function() return h.G.pathfinder.request_move(h.v(28, 0)) end) -- a far move, still running
+    h.drop('pit', -5, 0)
+    ok(h.run_until(function() return (h.pickups or 0) >= 1 end, 20), 'the drop was picked up\n' .. h.tail())
+    ok(h.pos:dist_to_ignore_z(h.v(-5, 0)) < 12, 'the player did not follow the foreign move away')
+    h.assert_clean('foreign move')
+end)
 case('static: Rosie movement never uses the map-pin engine path or sets a map pin', function()
     local f = assert(io.open(ROOT .. '/Rosie/rosie/movement.lua', 'r'))
     local src = f:read('*a'); f:close()
     local code = src:gsub('%-%-[^\n]*', '')
     ok(not code:find('create_path_game_engine', 1, true), 'no engine path call')
     ok(not code:find('set_map_pin', 1, true), 'no map pin')
+end)
+
+-- Live 2.3.0-rc.8: "Open stash: attempt=1..4 distance=1.9 host=true" then
+-- "Stash window did not open after 4 interactions". The stash is not a vendor:
+-- get_current_vendor() does not report it, which Rosie required, and the
+-- deposit went through vendor_action, which needs the vendor-screen flag.
+local function stash_trip(opts)
+    local h = new(opts)
+    enable(h)
+    h.stash = {h.gear({rarity = 8, ancestral = true})} -- the player's stash is not empty
+    h.inventory = {}
+    for i = 1, 3 do h.inventory[i] = h.gear() end                                   -- salvaged
+    for i = 4, 5 do h.inventory[i] = h.gear({rarity = 8, ancestral = true}) end      -- mythics: kept, stashed
+    local done
+    eq(as_consumer(h, function() return alfred(h).trigger_tasks('WarPigs', function(r, d) done = {r, d} end) end), true)
+    ok(h.run_until(function() return done ~= nil end, 90), 'the trip finished\n' .. h.tail())
+    return h, done
+end
+case('live stash: kept items are deposited although get_current_vendor() does not report the stash', function()
+    local h, done = stash_trip()
+    eq(done[1], nil, 'serviced: ' .. tostring(done[2] and done[2].reason) .. '\n' .. h.tail())
+    eq(#h.stashed, 2, 'both mythics deposited')
+    eq(#h.salvaged, 3, 'the rest salvaged')
+    eq(h.logged('Stash window did not open'), 0)
+    h.assert_clean('stash')
+end)
+case('live stash: deposit works when the stash panel does not raise the vendor-screen flag (Alfred fallback)', function()
+    local h, done = stash_trip({stash_screen_flag = false})
+    eq(done[1], nil, 'serviced: ' .. tostring(done[2] and done[2].reason))
+    eq(#h.stashed, 2, 'both mythics deposited')
+    h.assert_clean('stash no flag')
 end)
 
 case('one unreadable item never ends the census, a classification or the pulse (M2)', function()

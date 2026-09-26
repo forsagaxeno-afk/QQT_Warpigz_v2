@@ -105,6 +105,12 @@ function M.check_want_item(item, ignore_distance)
     if type(rarity)~='number' or rarity~=rarity then return false,'item rarity unavailable','deferred' end
     if rarity<s.rarity then return false,'below minimum rarity or unreadable rarity' end
     local required,threshold,overridden=equipment_threshold(s,rarity,Utils.call(info,'get_sno_id'),slot,info)
+    -- QQT_Warpigz_v2: a Unique whose details the client has not loaded yet may
+    -- be a Mythic form; take it and let the town rules (which see the full item
+    -- in the bag, Always keep mythics included) decide.
+    if rarity==6 and required>0 and not MythicForm.details_loaded(info) then
+        return true,'accepted: Unique details not loaded yet (may be a Mythic Unique; decided in town) [threshold='..threshold..']'
+    end
     local ga,ga_readable=Utils.get_ga_count(info)
     if required>0 and not ga_readable then return false,'Greater Affix count unavailable','deferred' end
     return ga>=required, string.format('%s: GA %d, required %d%s [threshold=%s]',ga>=required and 'accepted' or 'below GA minimum',
@@ -122,10 +128,15 @@ function M.describe(item, reason)
         local required,source=equipment_threshold(Settings.get(),rarity,sno,slot,info)
         threshold=source..':'..tostring(required)
     end
-    return string.format('%s | sno=%s rarity=%s ancestral=%s GA=%d nativeGA=%s displayGA=%s GA_source=%s GA_readable=%s GA_conflict=%s threshold=%s distance=%.1f | %s',name,
+    local extra=''
+    if type(rarity)=='number' and rarity>=6 then
+        extra=string.format(' details=%s mythic_mark=%s',MythicForm.details_loaded(info) and 'loaded' or 'hidden',
+            tostring(MythicForm.has_mark(info)))
+    end
+    return string.format('%s | sno=%s rarity=%s ancestral=%s GA=%d nativeGA=%s displayGA=%s GA_source=%s GA_readable=%s GA_conflict=%s threshold=%s%s distance=%.1f | %s',name,
         tostring(sno),tostring(rarity),tostring(Utils.call(info,'is_ancestral')),count,
         tostring(observations.native_raw),tostring(observations.display_count),observations.source,
-        tostring(readable),tostring(observations.conflict),threshold,Utils.distance_to(item),reason or 'unknown decision')
+        tostring(readable),tostring(observations.conflict),threshold,extra,Utils.distance_to(item),reason or 'unknown decision')
 end
 function M.report_rejection(item, reason)
     local info=Utils.call(item,'get_item_info')
