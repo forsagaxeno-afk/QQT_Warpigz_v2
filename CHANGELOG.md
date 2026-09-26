@@ -2,6 +2,18 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.13] — 2026-09-26
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.12.
+
+### Fixed
+
+- Rosie 1.0.10: **the game crashed** ("Diablo Tool Runtime Error, Crash detected") about 5-6 s after hovering an item with the bag open. The live console showed hundreds of `[Rosie mythic-probe] bag keep|salvage|sell ...` lines: every bag census re-logged every Unique (the line key included the salvage/sell pass, so it never repeated) and read extra native quality attributes for each. These diagnostic probes (ground and bag) now run only for 5 minutes after *Log item and service decisions*, and log one bag line per item reading. Mythic sorting itself does not depend on them.
+
+### Validation
+
+- New case in `test_rosie_unique_sorter.lua`: twelve Uniques in the bag for 20 s produce no probe line while playing (fails on rc.12), and with diagnostics on at most one bag line per item.
+
 ## [2.3.0-rc.12] — 2026-09-26
 
 Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.11.

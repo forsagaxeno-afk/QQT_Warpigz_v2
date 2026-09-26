@@ -108,6 +108,15 @@ local function attr(obj, name)
     if ok and type(v) == 'number' and v == v then return v end
     return nil
 end
+-- QQT_Warpigz_v2 local patch (Rosie 1.0.10): the probe reads extra native
+-- attributes of every Unique. A host crash was reported while hovering an
+-- item with the bag open, so probes only run for a while after the user asks
+-- for diagnostics ('Log item and service decisions').
+M.diag_until = 0
+function M.diagnostics_on()
+    local ok, now = pcall(get_time_since_inject)
+    return ok and type(now) == 'number' and now < M.diag_until
+end
 function M.probe(obj)
     local function call(name)
         local ok, v = pcall(function() return obj[name](obj) end)

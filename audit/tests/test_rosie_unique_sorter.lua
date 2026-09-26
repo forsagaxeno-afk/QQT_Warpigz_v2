@@ -568,8 +568,21 @@ case('review P3: a pile of plain Uniques near the bag limit causes no town trip 
     t.h.assert_clean('pile'); tw.h.assert_clean('pile town')
 end)
 
+case('live rc.12 crash: no Mythic probe lines without diagnostics; with diagnostics one bag line per item', function()
+    local t = setup({mode = 'town'})
+    for i = 1, 12 do t.bag_item(leoric_plain(i)) end
+    t.h.run(20)
+    eq((t.lines('[Rosie mythic-probe]')), 0, 'no probe spam while playing (live: hundreds of bag lines, host crash)')
+    t.h.mod('Rosie', 'rosie.private.mythic_form').diag_until = math.huge
+    t.h.run(20)
+    local n = t.lines('[Rosie mythic-probe] bag')
+    ok(n >= 1 and n <= 12, 'at most one bag line per item reading: ' .. n)
+    t.h.assert_clean('probe gate')
+end)
+
 case('review P7: with the option on, a Unique taken from the ground still logs its ground probe', function()
     local t = setup({mode = 'town'})
+    t.h.mod('Rosie', 'rosie.private.mythic_form').diag_until = math.huge -- diagnostics on
     t.h.drop('pit', 6, 0, item(LEORIC, {display = 'Helm', ancestral = true, ga = 0, affixes = {}}))
     t.h.drop('pit', -6, 0, item(LEORIC, {ancestral = true, ga = 1, affixes = leoric_plain().affixes}))
     ok(t.h.run_until(function() return (t.h.pickups or 0) >= 2 end, 40), 'both taken\n' .. t.h.tail())

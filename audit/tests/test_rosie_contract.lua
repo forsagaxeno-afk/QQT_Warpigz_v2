@@ -524,6 +524,7 @@ case('S14 iconic Mythic SNOs; Mythic probe lines on the ground and in the bag', 
         return n, last
     end
     -- Ground: a skipped Unique logs its markers once per reading.
+    h.mod('Rosie', 'rosie.private.mythic_form').diag_until = math.huge -- diagnostics on
     local drop = h.drop('pit', 12, 0, {name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true,
         ga = 1, attrs = {Item_Quality_Modifier_Bits = 4},
         affixes = {affix(2662414, 'Helm_Unique_Generic_005'), affix(1829592, 'S04_Life')}})

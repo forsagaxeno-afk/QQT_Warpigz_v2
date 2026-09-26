@@ -191,6 +191,7 @@ end)
 
 case('ground probe lines are bounded: at most 3 per drop, one reading per second', function()
     local t = setup()
+    t.h.mod('Rosie', 'rosie.private.mythic_form').diag_until = math.huge -- diagnostics on
     local drop = t.h.drop('pit', 12, 0, item(LEORIC, {ancestral = true, ga = 1, affixes = LEORIC_LISTED()}))
     t.h.run(2)
     local n, line = t.lines('[Rosie mythic-probe] skipped')

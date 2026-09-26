@@ -197,6 +197,7 @@ end
 -- so one live log shows how a Mythic reads on the ground.
 local probed={}
 function M.probe(item,label)
+    if not MythicForm.diagnostics_on() then return end
     local id=Pickup.key(item)
     if not id then return end
     local now=get_time_since_inject()
@@ -289,6 +290,8 @@ local function dump_rare_items()
     end
 end
 function M.diagnose()
+    -- QQT_Warpigz_v2: Mythic probe lines for the next 5 minutes.
+    pcall(function() MythicForm.diag_until=get_time_since_inject()+300 end)
     Settings.update()
     local s=Settings.get()
     console.print(string.format('[Rosie pickup] enabled=%s paused=%s behavior_ready=%s distance=%s respect_filter=%s skip_affixes=%s custom_GA=%s',

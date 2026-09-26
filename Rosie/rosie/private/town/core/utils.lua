@@ -874,6 +874,7 @@ local FORCED_INTERVAL = 0.25
 -- The table is capped at 256 readings; the census calls it under pcall.
 local probed_bag, probed_bag_count = {}, 0
 local function probe_bag_unique(item, decision)
+    if not mythic_form.diagnostics_on() then return end
     local ok, rarity = pcall(function() return item:get_rarity() end)
     if not ok or rarity ~= 6 then return end
     local listed, affixes = pcall(function() return item:get_affixes() end)
@@ -881,7 +882,7 @@ local function probe_bag_unique(item, decision)
     for _ in pairs(listed and type(affixes) == 'table' and affixes or {}) do n = n + 1 end
     local ga = utils.get_item_ga_count(item)
     -- Cheap key first: the full probe line is built once per reading.
-    local key = table.concat({tostring(item:get_sno_id()), decision, tostring(listed and n or 'x'), tostring(ga),
+    local key = table.concat({tostring(item:get_sno_id()), tostring(listed and n or 'x'), tostring(ga),
         tostring(mythic_form.has_mark(item))}, '|')
     if probed_bag[key] then return end
     if probed_bag_count >= 256 then probed_bag, probed_bag_count = {}, 0 end
