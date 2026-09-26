@@ -1,6 +1,6 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.7
+One local addon for pickup, item rules, repairs and storage. Version 1.0.8
 (QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
@@ -142,6 +142,60 @@ decided. Queued stash pulls use the same rule, go ahead 2.5 s after the
 interaction as Alfred does, and interact again (at most 3 times) when nothing
 arrives in the bag. Sell, salvage, repair and talisman salvage still require the expected
 NPC (Gambler, Blacksmith, Occultist) to be the current vendor.
+
+## Mythic sorting
+
+A fresh ground drop shows no affixes until it has been picked up once, and a
+Season 15 Mythic form keeps its Unique's name, SNO and rarity. On the ground a
+Mythic and a plain Unique therefore look the same; in the bag they do not.
+
+**Pick up every Unique (sort in the bag)** (right under *Enable Rosie*, default
+on) makes pickup take every Unique and every Mythic, whatever the Greater Affix
+sliders and slot overrides say (`accepted: every Unique is taken (sorted in the
+bag)`). Bag space is still checked. A Mythic ignores *Respect in-game loot
+filter*; a plain Unique still respects it (turn that filter off, or let it show
+Uniques, if you want every Unique). The legacy *Skip gear with visible affixes*
+setting still applies. Off: the pickup GA rules decide on the ground as in 1.0.7.
+
+In the bag a Unique is a **Mythic** when it has rarity 8 or more, is one of the
+iconic Mythics (including the 14 re-issued in Season 14, such as Harlequin
+Crest), or carries the Mythic upgrade affix (`S14_Mythic_UniquePotency`, hash
+2628989, or any affix whose name contains `Mythic`). Everything else with
+rarity 6 is a **plain Unique**. **Plain Uniques** (shown while the option is on):
+
+- *Handle in town (salvage/sell by your rules)* (default): nothing is dropped.
+  Plain Uniques wait in the bag; the town trip sells, salvages or keeps them by
+  your rules, and Mythics follow *Always keep mythics* and the Mythic rules.
+- *Drop on the ground (no town trip)*: outside town (any town the game flags,
+  not only Rosie's home town), when no town trip runs, a plain Unique your town
+  rules would sell or salvage is dropped on the spot, one item every 0.6 s.
+  While the sorter can act, those items do not count toward the bag limit, so a
+  pile of them does not start a town trip. Rosie first remembers it (its SNO
+  plus every affix and roll), so pickup never takes it again (`dropped by Rosie
+  (plain Unique)`). The list lives 30 min and holds at most 200 items; a town
+  trip and the loading screen keep it, entering a different world clears it.
+  If the dropped copy lists no affixes, Rosie binds the entry to the first new
+  item of that SNO within 4 m of the spot in the next 5 s (items already lying
+  there are excluded) and refuses only that item, for up to 15 min; fresh drops
+  that land later, including a Mythic form, are picked up as usual. Once one
+  dropped copy was recognised by its fingerprint this fallback is off for the
+  session. A drop that does not leave the bag within 2 s is retried twice (a
+  town trip or pause in between keeps the count); then the item is left for the
+  town trip and not tried again. Never dropped: Mythics (even with *Always keep
+  mythics* off; in town your Mythic rules decide), locked items, Uniques whose
+  affixes are not readable yet, and every Unique a keep rule protects (*Use
+  unique/mythic filter* selections, the Unique Greater Affix override, *Use
+  Mythic Unique filter*). Nothing is dropped while chat or a vendor screen is
+  open, pickup is off or paused by another addon, or a town trip is requested
+  or running.
+
+Log lines (turn on *Log item and service decisions* for the summary):
+`[Rosie sort] Dropped plain Unique <name> sno=... fp=...`, `[Rosie sort] Kept
+Mythic <name> (mark=...)` (mode Drop), `[Rosie sort] Ground copy of <name> found by
+fingerprint|position: identifier bag=... ground=... matched=...` (once per
+item, for the dropped copy), `[Rosie mythic-probe] taken sno=...` (every Unique
+taken from the ground), `[Rosie sort] Drop of <name> refused by the host` and `[Rosie sort]
+Could not drop <name> after 3 attempts; it is left to the town trip.`
 
 ## Other addons and saved state
 

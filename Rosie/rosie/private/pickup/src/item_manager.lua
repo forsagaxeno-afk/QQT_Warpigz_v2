@@ -6,6 +6,10 @@ local CurrentItems = require('rosie.data.items')
 local ItemLogic = require('rosie.private.pickup.src.item_logic')
 local Pickup = require('rosie.private.pickup.src.pickup')
 local MythicForm = require('rosie.private.mythic_form')
+-- QQT_Warpigz_v2 local patch (Rosie 1.0.8): "Pick up every Unique" and the
+-- list of plain Uniques Rosie dropped on purpose.
+local Blacklist = require('rosie.private.blacklist')
+local UniqueSorter = require('rosie.private.unique_sorter')
 local M = {}
 -- Every recognized category owns its refusal. It must never enter gear rules.
 local policies = {
@@ -92,6 +96,10 @@ function M.check_want_item(item, ignore_distance)
         local skin=Utils.call(info,'get_skin_name')
         return false,'unrecognized item type',type(skin)~='string' and 'deferred' or nil
     end
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.8): a plain Unique Rosie dropped
+    -- on purpose is never taken again (fingerprint, else SNO near the drop spot).
+    local listed,dropped,dropped_reason=pcall(Blacklist.match,item,info)
+    if listed and dropped then return false,dropped_reason end
     local inventory,full=Utils.bag_state('equipment')
     if not inventory then return false,'equipment bag unavailable','deferred' end
     if full then return false,'equipment bag full or unreadable' end
@@ -111,6 +119,13 @@ function M.check_want_item(item, ignore_distance)
     end
     local rarity=Utils.call(info,'get_rarity')
     if type(rarity)~='number' or rarity~=rarity then return false,'item rarity unavailable','deferred' end
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.8): "Pick up every Unique (sort
+    -- in the bag)": every Unique and every definite Mythic, whatever the GA
+    -- sliders and slot overrides say; the bag copy shows which it is. A plain
+    -- Unique still took the in-game loot-filter check above; a Mythic never does.
+    if UniqueSorter.pick_all() and (rarity==6 or is_mythic(rarity,Utils.call(info,'get_sno_id'),info)) then
+        return true,UniqueSorter.PICKUP_REASON
+    end
     if rarity<s.rarity then return false,'below minimum rarity or unreadable rarity' end
     local required,threshold,overridden=equipment_threshold(s,rarity,Utils.call(info,'get_sno_id'),slot,info)
     local ga,ga_readable=Utils.get_ga_count(info)
@@ -326,7 +341,9 @@ local function choose(best_first)
         end
         if wanted and blocked then wanted,reason=false,why end
         if wanted then
-            if type(reason)=='string' and reason:find('decided in town',1,true) then pcall(M.probe,item,'taken') end
+            -- QQT_Warpigz_v2 local patch (Rosie 1.0.8): a Unique taken by "Pick up
+            -- every Unique" logs its ground reading too (LIVE_CHECKLIST R1/S1).
+            if type(reason)=='string' and (reason:find('decided in town',1,true) or reason==UniqueSorter.PICKUP_REASON) then pcall(M.probe,item,'taken') end
             local d=Utils.distance_to(item)
             local value=best_first and M.calculate_item_score(item) or 0
             if Pickup.key(item)==selected_key then previous,previous_score,previous_distance=item,value,d end

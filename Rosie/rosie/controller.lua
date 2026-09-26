@@ -2,6 +2,10 @@ local Runtime=require('rosie.runtime')
 local Movement=require('rosie.movement')
 -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): bounded A* for pickup only.
 local Route=require('rosie.private.route')
+-- QQT_Warpigz_v2 local patch (Rosie 1.0.8): "Pick up every Unique (sort in
+-- the bag)" and the bag sorter for mode "Drop on the ground".
+local UniqueSorter=require('rosie.private.unique_sorter')
+local Blacklist=require('rosie.private.blacklist')
 local M={}
 -- QQT_Warpigz_v2 local patch (M4): another mover is driving the player right
 -- now (a Batmobile route or claimed goal that is not paused). Pickup then
@@ -34,6 +38,12 @@ function M.new(cached,conflict)
         queue_add=button:new(get_hash('Rosie_queue_add')),
         queue_clear=button:new(get_hash('Rosie_queue_clear')),
     }
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.8): new widgets; a reload from an
+    -- older Rosie keeps its cached widgets and gains these.
+    local e=app.elements
+    e.all_uniques=e.all_uniques or checkbox:new(true,get_hash('Rosie_pickup_all_uniques'))
+    e.all_uniques_mode=e.all_uniques_mode or combo_box:new(0,get_hash('Rosie_plain_unique_mode'))
+    UniqueSorter.bind(e.all_uniques,e.all_uniques_mode)
     app.elements.root=tree_node:new(0)
     app.elements.storage=tree_node:new(1)
     app.elements.movement=tree_node:new(1)
@@ -56,6 +66,10 @@ function M.new(cached,conflict)
         -- here, at load, instead of being required lazily.
         app.pickup_settings=require('rosie.private.pickup.src.settings')
         app.task_manager=require('rosie.private.town.core.task_manager')
+        local town_utils=require('rosie.private.town.core.utils')
+        UniqueSorter.configure({utils=town_utils,tracker=tracker,lifecycle=life})
+        -- The census keeps items the sorter is about to drop out of "bag full".
+        town_utils.bag_sorter=UniqueSorter
         -- The private pickup worker also tracks successful native requests. A
         -- refused first request can still leave the shared route owner claimed.
         local release_pickup=pickup.release_movement
@@ -82,7 +96,7 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.7';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.8';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
         for _,key in ipairs({'trigger_tasks','trigger_tasks_with_teleport'}) do
@@ -253,6 +267,17 @@ function M.new(cached,conflict)
         else
             app.pickup_error=nil
         end
+        -- QQT_Warpigz_v2 local patch (Rosie 1.0.8): the bag sorter (mode "Drop
+        -- on the ground") runs only while pickup itself may run.
+        local allowed=enabled() and loot_gui.elements.main_toggle:get()==true and not app.pickup_settings.is_paused()
+        local sok,swhy=pcall(UniqueSorter.update,allowed)
+        if not sok then
+            local message='Sorter error: '..tostring(swhy)
+            if app.sorter_error~=message then console.print('[Rosie] '..message) end
+            app.sorter_error=message
+        else
+            app.sorter_error=nil;app.sorter_state=swhy
+        end
     end
     -- QQT_Warpigz_v2 (M3): the overlay redraws every render frame; its status
     -- is recomputed at most every 0.25 s.
@@ -282,6 +307,10 @@ function M.new(cached,conflict)
         if app.actions.service and app.elements.service:get() then app.service() end
         if app.actions.diagnose and app.elements.diagnose:get() then
             require('rosie.private.pickup.src.item_manager').diagnose()
+            local st=UniqueSorter.stats
+            console.print(string.format('[Rosie sort] every Unique=%s mode=%s state=%s blacklist=%d dropped=%d attempts=%d failed=%d left_to_town=%d kept_mythics=%d',
+                tostring(UniqueSorter.pick_all()),UniqueSorter.mode()==UniqueSorter.MODE_DROP and 'drop' or 'town',
+                tostring(app.sorter_state),Blacklist.count(),st.drops,st.attempts,st.failures,st.given_up,st.kept))
             require('rosie.private.town.core.utils').dump_tracker_info(tracker)
         end
         if app.actions.queue_add and app.elements.queue_add:get() then app.add_pull() end

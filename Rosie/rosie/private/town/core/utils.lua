@@ -991,7 +991,16 @@ function utils.update_tracker_count(local_player,force)
     tracker.sell_equipment_count = sell_equipment_counter
     tracker.sell_talisman_count = sell_talisman_counter
     tracker.stash_count = stash_counter
-    tracker.inventory_full = tracker.inventory_count >= max_inventory
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.8): plain Uniques the bag sorter
+    -- is about to drop (mode "Drop on the ground", sorter free to act) do not
+    -- count toward "bag full", so a pile of them does not start a town trip.
+    local droppable = 0
+    if utils.bag_sorter and type(items) == 'table' then
+        local ok_drop, n = pcall(utils.bag_sorter.pending_drop_count, items)
+        if ok_drop and type(n) == 'number' then droppable = n end
+    end
+    tracker.sorter_droppable = droppable
+    tracker.inventory_full = tracker.inventory_count - droppable >= max_inventory
 
     local need_repair = false
     local items = local_player:get_equipped_items()

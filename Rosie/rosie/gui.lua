@@ -10,6 +10,21 @@ local function render(app)
     if not push(e.root,'Rosie') then return false end
     if app.conflict then render_menu_header(app.conflict);pop(e.root);return true end
     e.enabled:render('Enable Rosie','One controller for pickup, bags, repairs and storage. Turning off cancels work.')
+    -- QQT_Warpigz_v2 local patch (Rosie 1.0.8): right after the master toggle.
+    e.all_uniques:render('Pick up every Unique (sort in the bag)',
+        'On the ground a fresh Unique and its Mythic form look the same (no affixes until picked up). '
+        ..'On: every Unique and every Mythic is picked up whatever the GA sliders say (a plain Unique still respects '
+        ..'"Respect Ingame Loot Filter"); in the bag Rosie sees which is a Mythic and never drops it '
+        ..'(in town, Always keep mythics and your Mythic rules decide). '
+        ..'Off: the pickup GA rules decide on the ground as before.')
+    if e.all_uniques:get() then
+        e.all_uniques_mode:render('Plain Uniques',
+            {'Handle in town (salvage/sell by your rules)','Drop on the ground (no town trip)'},
+            'Handle in town: plain Uniques stay in the bag and your town rules salvage, sell or keep them. '
+            ..'Drop on the ground: outside town, a plain Unique your rules would salvage or sell is dropped right away and '
+            ..'never picked up again (Rosie remembers that exact item). Mythics, locked items and Uniques your keep rules '
+            ..'protect (Unique filter, GA override, Always keep mythics, Mythic Unique filter) are never dropped.')
+    end
     app.refresh_preview()
     local status=app.overlay_status and app.overlay_status() or app.status()
     render_menu_header(status.detail)

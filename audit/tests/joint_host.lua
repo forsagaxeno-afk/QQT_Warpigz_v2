@@ -615,20 +615,31 @@ function J.new(opts)
         function w:get_state() return self.state end
         function w:get_key() return self.key end
         function w:set_key(k) self.key = k end
-        function w:render(...) h.widgets_rendered = (h.widgets_rendered or 0) + 1 end
+        function w:render(label, ...)
+            h.widgets_rendered = (h.widgets_rendered or 0) + 1
+            -- 2.3.0-rc.11: h.menu_labels (a list the test sets) records the
+            -- label of every widget rendered, in order.
+            if h.menu_labels and type(label) == 'string' then h.menu_labels[#h.menu_labels + 1] = label end
+        end
         function w:push() return h.menu_open ~= false end
         function w:pop() end
         return w
     end
     -- QQT restores a widget's stored value at load: opts.persisted maps the
     -- widget hash (get_hash returns its string) to the value it loads with.
-    local persisted = opts.persisted or {}
+    local persisted = copy(opts.persisted or {})
+    -- 2.3.0-rc.11 (Rosie 1.0.8): the rc.10 scenarios predate "Pick up every
+    -- Unique" (shipped ON); they load with it saved OFF, which is rc.10
+    -- behaviour. opts.shipped_defaults loads the shipped defaults instead.
+    if opts.rosie and not opts.shipped_defaults and persisted.Rosie_pickup_all_uniques == nil then
+        persisted.Rosie_pickup_all_uniques = false
+    end
     local function stored(key, default)
         if key == nil or persisted[key] == nil then return default end
         return persisted[key]
     end
     host('checkbox', {new = function(_, d, key) return widget(stored(key, d == true)) end})
-    host('combo_box', {new = function(_, d) return widget(d or 0) end})
+    host('combo_box', {new = function(_, d, key) return widget(stored(key, d or 0)) end})
     host('slider_int', {new = function(_, _, _, d) return widget(d) end})
     host('slider_float', {new = function(_, _, _, d) return widget(d) end})
     host('tree_node', {new = function() return widget(false) end})
@@ -1029,6 +1040,31 @@ function J.new(opts)
             return h.vendor_actor
         end
         lm.get_item_identifier = function(item) return item and item.uid end
+        -- 2.3.0-rc.11: loot_manager.drop_item(item). The item leaves the bag
+        -- and a NEW ground actor appears at the player's position: same SNO,
+        -- rarity, affixes and rolls, a new identifier (uid). h.dropped lists
+        -- {bag = item, ground = actor}. Opt-ins: h.drop_hides_affixes (the
+        -- ground copy lists no affixes), h.drop_fails ('error' raises,
+        -- 'false' returns false, 'stay' returns true but nothing happens).
+        lm.drop_item = function(item)
+            h.drop_calls = (h.drop_calls or 0) + 1
+            if h.drop_fails == 'error' then error('host: drop_item failed') end
+            if h.drop_fails == 'false' then return false end
+            if h.drop_fails == 'stay' then return true end
+            if not take(item, h.inventory) then return false end
+            local fields = {}
+            for k, val in pairs(item) do
+                if type(val) ~= 'function' and k ~= 'uid' and k ~= 'pos' and k ~= 'picked' and k ~= 'on_interact' then fields[k] = val end
+            end
+            if item.affixes then
+                fields.affixes = {}
+                if not h.drop_hides_affixes then for i, a in ipairs(item.affixes) do fields.affixes[i] = a end end
+            elseif h.drop_hides_affixes then fields.affixes = {} end
+            local ground = h.drop(h.place, h.pos:x(), h.pos:y(), fields)
+            h.dropped = h.dropped or {}
+            h.dropped[#h.dropped + 1] = {bag = item, ground = ground, t = h.now}
+            return true
+        end
         lm.is_gold = function() return false end
         lm.is_potion = function() return false end
         lm.is_lootable_item = function() return true end
