@@ -547,6 +547,30 @@ case('census and overlay are throttled during a trip with the menu open (M3)', f
     h.assert_clean('throttle')
 end)
 
+case('live rc: the menu does not jump when the preview fails for single frames', function()
+    local h = new({})
+    enable(h)
+    local lines, per_frame, glitch = 0, {}, false
+    h.G.render_menu_header = function() lines = lines + 1 end
+    local real_player = h.G.get_local_player
+    -- the host briefly reports a player whose is_dead() is not a boolean
+    h.G.get_local_player = function()
+        local p = real_player()
+        if not glitch or not p then return p end
+        return setmetatable({is_dead = function() return nil end}, {__index = p})
+    end
+    for i = 1, 40 do
+        glitch = i % 2 == 0
+        lines = 0
+        h.frame()
+        per_frame[#per_frame + 1] = lines
+    end
+    h.G.get_local_player = real_player
+    local first = per_frame[1]
+    for i, n in ipairs(per_frame) do eq(n, first, 'menu line count frame ' .. i .. ' (was: jumped)') end
+    ok(first > 0, 'menu rendered')
+end)
+
 case('RosiePlugin API from a foreign plugin context resolves no module lazily (QQT per-folder require)', function()
     local h = new()
     enable(h)

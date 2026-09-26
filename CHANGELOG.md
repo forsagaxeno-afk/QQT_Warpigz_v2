@@ -2,6 +2,18 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [2.3.0-rc.4] — 2026-09-26
+
+Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.3.
+
+### Fixed
+
+- Rosie 1.0.2: "the Rosie menu jumps / flickers up and down". When the host reported the player as not alive or the world as not loaded for a single frame, the menu swapped its two count lines (Equipment / Talismans) for one "Item preview unavailable" line and back, so everything below moved by one line. The error line now appears only after 2 s of continuous failure; until then the last counts stay on screen.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py`: all test files × (Lua 5.4 + LuaJIT) pass; new case in `test_rosie_contract.lua` (fails before the fix: 23 vs 22 menu lines on alternate frames).
+
 ## [2.3.0-rc.3] — 2026-09-26
 
 Test build, released as a private draft (not published). Includes everything from 2.3.0-rc.2.

@@ -80,7 +80,7 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.1';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.2';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
         for _,key in ipairs({'trigger_tasks','trigger_tasks_with_teleport'}) do
@@ -146,13 +146,22 @@ function M.new(cached,conflict)
             if not zone or zone=='[sno none]' then error('waiting for the world to load') end
             require('rosie.private.town.core.utils').update_tracker_count(player,true)
         end)
+        -- QQT_Warpigz_v2: a one-frame failure (the host briefly reporting no
+        -- living player or zone) used to swap the two count lines for one
+        -- error line and back, so the whole menu jumped up and down. The
+        -- error line now appears only after PREVIEW_GRACE s of continuous
+        -- failure; until then the last counts stay on screen.
+        local now=get_time_since_inject()
         if ok then
-            app.preview_error=nil;app.preview_failure=nil
+            app.preview_error=nil;app.preview_failure=nil;app.preview_fail_since=nil
         else
             local detail=tostring(why)
-            if app.preview_failure~=detail then console.print('[Rosie] Item preview failed: '..detail) end
-            app.preview_failure=detail
-            app.preview_error='Item preview unavailable: wait for a living character and loaded bags, then reopen this menu.'
+            app.preview_fail_since=app.preview_fail_since or now
+            if now-app.preview_fail_since>=2 then
+                if app.preview_failure~=detail then console.print('[Rosie] Item preview failed: '..detail) end
+                app.preview_failure=detail
+                app.preview_error='Item preview unavailable: wait for a living character and loaded bags, then reopen this menu.'
+            end
         end
         return ok
     end
