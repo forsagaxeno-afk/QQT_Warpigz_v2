@@ -31,6 +31,7 @@ local settings = {
     ancestral_ga_count = 0,
     ancestral_unique_ga_count = 0,
     ancestral_mythic_ga_count = 0,
+    unique_ip_keep = 0,
     ancestral_unique_filter = false,
     ancestral_unique = {},
     ancestral_mythic = {},
@@ -217,6 +218,7 @@ function settings:update_settings(force)
     settings.ancestral_ga_count = gui.elements.ancestral_ga_count_slider:get()
     settings.ancestral_unique_ga_count = gui.elements.ancestral_unique_ga_count_slider:get()
     settings.ancestral_mythic_ga_count = gui.elements.ancestral_mythic_ga_count_slider:get()
+    settings.unique_ip_keep = tonumber(gui.elements.unique_ip_keep_slider:get()) or 0
     settings.ancestral_unique_filter = gui.elements.ancestral_unique_filter_toggle:get()
     settings.ancestral_filter        = gui.elements.ancestral_filter_toggle:get()
     settings.ancestral_affix_count   = gui.elements.ancestral_affix_count_slider:get()

@@ -2,6 +2,25 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.2.4] — 2026-09-27
+
+**QQT_Warpigz_v3 3.2.4**: Rosie 1.0.16 can keep Uniques by item power, never salvages a checked Unique in its Mythic form, and does much less work on talismans. Replace the `Rosie` folder; settings are kept.
+
+### Added
+
+- **Keep Uniques by item power** (Rosie → town Keep settings → *Ancestral*, under *Unique Greater Affix*): *Keep Uniques with Item Power >=* for plain Uniques (0 = off, the default; 900 keeps max-power items; Mythics follow the Mythic rules). They win over the GA sliders, Salvage / Sell and *Pick up every Unique → Plain Uniques: Drop*. An item whose item power the game does not report is not affected.
+
+### Fixed
+
+- **A checked Unique could be salvaged in its Mythic form** (*unchecked Mythic Uniques* = Salvage with *Use Mythic Unique filter* on). A Unique checked in *Unique items* or in *Mythic Uniques to keep* is now kept in both forms, in town and by *Plain Uniques: Drop*; a name checked in the lists also matches its Season 14 re-issue.
+- **Always keep mythics wins** over *unchecked Mythic Uniques* = Salvage / Sell: while it is on, every Mythic (Mythic Uniques included) is kept. The tooltips say so.
+- Rosie logs each item a keep rule keeps once: `[Rosie] Kept <name>: <reason>` (for example `item power 925 >= 900`).
+- **Talismans: less work, no repeated log lines** (live: game crashes while Rosie handles charms and seals; `[Rosie] Charm kept: ...` repeated every 15–50 s). The charm and seal counts are recounted only when the talisman bag or a talisman setting changes (or every 30 s), not every second, so an open bag or menu no longer reads every talisman's affixes each second. `Seal kept` / `Charm kept` / `Kept` lines appear once per item and reason per game session, also across a Rosie reload.
+
+### Validation
+
+- New `test_rosie_keep_checked_324.lua` (town sell / salvage decision and the Drop sorter; 7 cases) and a new `test_rosie_seal_q10.lua` case (bag and menu open with 23 talismans: 4.6 item reads per talisman per second on 3.2.3, 0 on 3.2.4; one keep line across a reload) fail on 3.2.3 and pass on 3.2.4. `test_rosie_contract.lua` now pins the new precedence. Rosie tests pass with `python3 audit/tests/run_tests.py --luajit require` on Lua 5.4 and LuaJIT; `python3 audit/check_release.py --base HEAD` passes.
+
 ## [3.2.3] — 2026-09-27
 
 **QQT_Warpigz_v3 3.2.3**: HelltideRevamped 2.5.2 makes the in-game stats overlay readable and configurable. Replace the `HelltideRevamped` folder; settings are kept (the overlay position resets to the new default once).

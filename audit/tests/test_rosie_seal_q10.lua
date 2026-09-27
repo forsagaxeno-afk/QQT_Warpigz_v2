@@ -406,5 +406,52 @@ case('Q10-8 town service off, menu closed: the Keep box follows a moved bag item
     eq(#h.errors, 0, 'host errors')
 end)
 
+-- 3.2.4 (live: '[Rosie] Charm kept: Talisman_Charm_Unique_Gloves_Unique_Generic_004
+-- (sno=2584011): Unique/Mythic charm ("Use unique/mythic charm filter" is off)'
+-- every 15-50 s, and crashes while Rosie handles talismans).
+case('3.2.4 bag and menu open on the talisman filters: no talisman reads or console lines after the first count; keep line once per session', function()
+    local h = new({place = 'temis'})
+    local utils, tgui = user_setup(h, function(e) e.talisman_charm_action:set(SALVAGE) end)
+    local reads = 0
+    local function counted(it)
+        for _, m in ipairs({'get_affixes', 'get_attribute', 'get_rarity', 'is_locked', 'get_name', 'is_filtered_by_loot_filter'}) do
+            local f = it[m]
+            it[m] = function(self, ...) reads = reads + 1; return f(self, ...) end
+        end
+        return it
+    end
+    h.talismans = {}
+    for i = 1, 20 do h.talismans[i] = counted(seal(h, {affix(ANCESTRAL_01, 'a'), affix(LIFE + i, 'b')})) end
+    for i = 1, 3 do
+        h.talismans[#h.talismans + 1] = counted(h.gear({sno = 2584011, name = 'Talisman_Charm_Unique_Gloves_Unique_Generic_004',
+            rarity = 6, affixes = {affix(LIFE, 'x')}}))
+    end
+    h.G.is_inventory_open = function() return true end
+    h.run(2)
+    local n = 0
+    for _, line in ipairs(h.log) do if tostring(line):find('[Rosie] Charm kept: Talisman_Charm_Unique_Gloves_Unique_Generic_004', 1, true) then n = n + 1 end end
+    eq(n, 1, 'one Charm kept line for three copies\n' .. h.tail())
+    local tracker = h.mod('Rosie', 'rosie.private.town.core.tracker')
+    eq(tracker.salvage_talisman_count, 20, 'the seals are counted')
+    reads = 0
+    local mark, t0 = #h.log, h.now
+    h.run(9)
+    local secs = h.now - t0
+    ok(reads / secs / 23 <= 0.05, 'talisman item reads per item per second after the first count: ' .. reads / secs / 23)
+    eq(#h.log - mark, 0, 'no console line while the bag and menu are open:\n' .. h.tail())
+    -- A talisman setting change recounts at once.
+    tgui.elements.talisman_seal_action:set(SELL)
+    h.run(1)
+    eq(tracker.salvage_talisman_count, 0, 'setting change recounted (salvage)')
+    eq(tracker.sell_talisman_count ~= nil and true, true, 'sell tally present')
+    -- A reload of Rosie does not repeat the keep line.
+    h.reload('Rosie')
+    h.run(3)
+    n = 0
+    for _, line in ipairs(h.log) do if tostring(line):find('[Rosie] Charm kept: Talisman_Charm_Unique_Gloves_Unique_Generic_004', 1, true) then n = n + 1 end end
+    eq(n, 1, 'still one Charm kept line after a reload\n' .. h.tail())
+    eq(#h.errors, 0, 'host errors')
+end)
+
 print(string.format('rosie-seal: %d checks, %d failures', checks, #failures))
 if #failures > 0 then error(#failures .. ' rosie-seal case(s) failed') end

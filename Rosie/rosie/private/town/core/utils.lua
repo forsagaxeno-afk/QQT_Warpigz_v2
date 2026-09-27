@@ -2,6 +2,7 @@
 local json = require 'rosie.private.town.core.json'
 local tracker = require 'rosie.private.town.core.tracker'
 local mythic_form = require 'rosie.private.mythic_form'
+local Blacklist = require 'rosie.private.blacklist'
 local town = require 'rosie.private.town.core.town'
 local catalog_ok, catalog = pcall(require, 'rosie.data.items')
 local current_items = catalog_ok and type(catalog)=='table' and type(catalog.by_id)=='table' and catalog.by_id or {}
@@ -219,7 +220,21 @@ end
 
 -- QQT_Warpigz_v2 (M2): a host error reading one item keeps that item; it
 -- never escapes into the census, a task or the service pulse.
-local kept_logged, kept_logged_n = {}, 0
+-- QQT_Warpigz_v3 3.2.4 (live: the same '[Rosie] Charm kept: ...' line every
+-- 15-50 s): "once" lines are remembered per QQT session in a global table, so
+-- a reload of this module does not reset them.
+function utils.log_once(key, line)
+    local store = rawget(_G, 'QQT_ROSIE_LOGGED_ONCE')
+    if type(store) ~= 'table' or type(store.seen) ~= 'table' then
+        store = {seen = {}, n = 0}
+        rawset(_G, 'QQT_ROSIE_LOGGED_ONCE', store)
+    end
+    if store.seen[key] then return false end
+    if store.n >= 2048 then store.seen, store.n = {}, 0 end
+    store.seen[key], store.n = true, store.n + 1
+    pcall(console.print, line)
+    return true
+end
 function utils.talisman_decision(item)
     local ok, action, why, item_type = pcall(talisman_decide, item)
     if not ok then action, why, item_type = TALISMAN_KEEP, 'host error: ' .. tostring(action):sub(1, 120), nil end
@@ -232,12 +247,11 @@ function utils.talisman_decision(item)
         local category = okt and (kind == 'talisman_seal' and s.talisman_seal_action or kind == 'talisman_charm' and s.talisman_charm_action)
         if category == utils.item_enum.SALVAGE or category == utils.item_enum.SELL then
             local oks, sno = pcall(function() return item:get_sno_id() end)
-            local key = tostring(kind) .. '|' .. tostring(oks and sno) .. '|' .. why
-            if not kept_logged[key] then
-                if kept_logged_n >= 256 then kept_logged, kept_logged_n = {}, 0 end
-                kept_logged[key], kept_logged_n = true, kept_logged_n + 1
+            local key = 'talisman|' .. tostring(kind) .. '|' .. tostring(oks and sno) .. '|' .. why
+            local store = rawget(_G, 'QQT_ROSIE_LOGGED_ONCE')
+            if not (type(store) == 'table' and type(store.seen) == 'table' and store.seen[key]) then
                 local okn, name = pcall(function() return item:get_name() end)
-                console.print(string.format('[Rosie] %s kept: %s (sno=%s): %s', kind == 'talisman_seal' and 'Seal' or 'Charm',
+                utils.log_once(key, string.format('[Rosie] %s kept: %s (sno=%s): %s', kind == 'talisman_seal' and 'Seal' or 'Charm',
                     tostring(okn and name or '?'), tostring(oks and sno or '?'), why))
             end
         end
@@ -770,6 +784,67 @@ function utils.pull_protected(item)
     if not ok then return 'unreadable' end
     return why
 end
+-- QQT_Warpigz_v3 3.2.4 (Rosie 1.0.16, live: a checked Leoric's Crown in its
+-- S15 Mythic form was salvaged by "Unchecked mythic uniques = Salvage"): the
+-- keep rules that win before any sell/salvage rule, in both forms of a Unique.
+local function kept_name(item, sno)
+    local ok, n = pcall(function() return item:get_display_name() end)
+    if not ok or type(n) ~= 'string' or n == '' then
+        local meta = current_items[sno]
+        n = meta and meta.name or ('sno ' .. tostring(sno))
+    end
+    return (n:gsub('[\r\n]', ' '):gsub('{[^}]*}', ''):gsub('%s+$', ''):sub(1, 80))
+end
+local function note_kept(item, sno, why)
+    local okf, _, fp = pcall(Blacklist.fingerprint, item)
+    local key = 'kept|' .. (okf and fp or tostring(sno)) .. '|' .. why
+    local store = rawget(_G, 'QQT_ROSIE_LOGGED_ONCE')
+    if type(store) == 'table' and type(store.seen) == 'table' and store.seen[key] then return end
+    utils.log_once(key, '[Rosie] Kept ' .. kept_name(item, sno) .. ': ' .. why)
+end
+-- A checked name also matches its S14 re-issue (another SNO, same name).
+local function sno_name(sno)
+    local meta = current_items[sno]
+    return utils.mythics[sno] or mythic_form.MYTHIC_SNOS[sno] or (meta and meta.name) or nil
+end
+local function listed(list, sno)
+    if type(list) ~= 'table' then return false end
+    if list[sno] then return true end
+    local name = sno_name(sno)
+    if not name then return false end
+    for id, on in pairs(list) do
+        if on and sno_name(id) == name then return true end
+    end
+    return false
+end
+-- Item power, or nil when the host does not tell it (then no effect). Read
+-- only while "Keep Uniques with Item Power >=" is on (plain Uniques only).
+local function sane_ip(v) return type(v) == 'number' and v == v and v > 0 and v < 2000 and math.floor(v) or nil end
+function utils.get_item_power(item)
+    local ok, v = pcall(function()
+        local f = item.get_item_power
+        if type(f) == 'function' then return f(item) end
+        return nil
+    end)
+    local ip = ok and sane_ip(v) or nil
+    if ip then return ip end
+    ok, v = pcall(function() return item:get_attribute('Item_Power_Total') end)
+    return ok and sane_ip(v) or nil
+end
+local function keep_reason(item, sno, is_unique, is_mythic)
+    local s = utils.settings
+    if is_mythic and s.mythic_always_keep ~= false then return 'Mythic (Always keep mythics)' end
+    if not (is_unique or is_mythic) then return nil end
+    if s.ancestral_unique_filter and listed(s.ancestral_unique, sno) then return 'checked in "Unique items"' end
+    if s.ancestral_unique_filter and listed(s.ancestral_mythic, sno) then return 'checked in "Mythic items"' end
+    if s.mythic_form_filter and listed(s.mythic_form_keep, sno) then return 'checked in "Mythic uniques to keep"' end
+    local need = tonumber(s.unique_ip_keep) or 0
+    if need > 0 and not is_mythic then
+        local ip = utils.get_item_power(item)
+        if ip and ip >= need then return 'item power ' .. ip .. ' >= ' .. need end
+    end
+    return nil
+end
 classify_equipment = function(item,action)
     if not utils.can_modify_item(item) then return false,0,false end
 
@@ -798,6 +873,10 @@ classify_equipment = function(item,action)
     -- A bag Unique whose affixes cannot be read (or list nothing) may be a
     -- Mythic form: never sold or salvaged.
     if rarity==6 and not is_mythic and mythic_form.undecided(item,nil) then return false,0,false end
+    -- 3.2.4: "Always keep mythics" and a checked Unique / Mythic Unique win
+    -- over every sell or salvage rule, the Mythic Unique filter included.
+    local keep_why = keep_reason(item, item_id, is_unique, is_mythic)
+    if keep_why then note_kept(item, item_id, keep_why); return false, 0, false end
     local ga_count,ga_readable = utils.get_item_ga_count(item)
 
     -- QQT_Warpigz_v2: Mythic Unique filter. Checked forms are always kept;
@@ -812,9 +891,9 @@ classify_equipment = function(item,action)
 
     -- QQT_Warpigz_v2 local patch (H3): "Always keep mythics" (default on; the
     -- old WarPigz Alfred's mythic_always_keep key) overrides every rule, the
-    -- loot filter included. Switched off, mythics still never take the
-    -- loot-filter or junk action: only the GA, name-list and mythic rules.
-    if is_mythic and utils.settings.mythic_always_keep ~= false then return false, 0, false end
+    -- loot filter included (checked in keep_reason above). Switched off,
+    -- mythics still never take the loot-filter or junk action: only the GA,
+    -- name-list and mythic rules.
 
     -- loot filter mode: in-game filter is the sole rule
     if utils.settings.loot_filter_mode and not is_mythic then
@@ -963,8 +1042,38 @@ end
 -- (QQT_Warpigz_v3 review): the sell tally feeds tracker.sell_count, which the
 -- sell step's is_done() reads, so a request census (force 'now') and a change
 -- in the number of talismans recount at once.
-local TALISMAN_INTERVAL = 1
-local talisman_tally = {at = nil, n = nil, salvage = 0, stash = 0, sell = 0}
+-- QQT_Warpigz_v3 3.2.4 (live: crashes while Rosie handles talismans): the
+-- tally is recounted only when the talisman bag (count and SNOs) or a
+-- talisman setting changes, on a request census ('now'), or every
+-- TALISMAN_INTERVAL s as a safety net: no affix read every second.
+local TALISMAN_INTERVAL = 30
+local talisman_tally = {at = nil, n = nil, sig = nil, salvage = 0, stash = 0, sell = 0}
+local function flat(v, out)
+    if type(v) ~= 'table' then out[#out + 1] = tostring(v); return end
+    local keys = {}
+    for k in pairs(v) do keys[#keys + 1] = tostring(k) end
+    table.sort(keys)
+    for _, k in ipairs(keys) do
+        out[#out + 1] = k .. '='
+        local x = v[k]; if x == nil then x = v[tonumber(k)] end
+        flat(x, out)
+    end
+end
+local function talisman_signature(items)
+    local s, out = utils.settings, {}
+    local keys = {}
+    for k in pairs(s) do
+        if type(k) == 'string' and (k:find('^talisman_') or k:find('^loot_filter')) then keys[#keys + 1] = k end
+    end
+    table.sort(keys)
+    for _, k in ipairs(keys) do out[#out + 1] = k .. ':'; flat(s[k], out) end
+    out[#out + 1] = tostring(s.mythic_always_keep) .. tostring(s.skip_favorite)
+    for _, item in pairs(items) do
+        local ok, sno = pcall(function() return item:get_sno_id() end)
+        out[#out + 1] = tostring(ok and sno)
+    end
+    return table.concat(out, ',')
+end
 local census_errors = {}
 local function census_error(why)
     local message = tostring(why)
@@ -1013,9 +1122,11 @@ function utils.update_tracker_count(local_player,force)
     local sell_equipment_counter = sell_counter
     local talisman_items = local_player:get_talisman_items()
     local tally = talisman_tally -- QQT_Warpigz_v3 (Q10)
+    local okg, sig = pcall(talisman_signature, talisman_items)
+    if not okg then sig = nil end
     if force == 'now' or tally.at == nil or now - tally.at >= TALISMAN_INTERVAL or now < tally.at
-        or tally.n ~= #talisman_items then
-        tally.at, tally.n, tally.salvage, tally.stash, tally.sell = now, #talisman_items, 0, 0, 0
+        or tally.n ~= #talisman_items or sig == nil or sig ~= tally.sig then
+        tally.at, tally.n, tally.sig, tally.salvage, tally.stash, tally.sell = now, #talisman_items, sig, 0, 0, 0
         for _, item in pairs(talisman_items) do
             local ok, kind = pcall(talisman_census, item)
             if not ok then
