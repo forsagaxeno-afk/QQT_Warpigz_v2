@@ -1,7 +1,8 @@
 -- QQT_Warpigz_v3: data file for the offline web dashboard.
 --
 -- The host cannot serve HTTP (no sockets), so the dashboard is a static page
--- (dashboard/index.html, opened from disk) that re-loads the script
+-- (dashboard/index.html, opened from disk; it opens the last chosen theme
+-- page: forge.html, daylight.html or console.html) that re-loads the script
 -- dashboard/hr_data.js every 5 s. This module rewrites that file every
 -- 'Dashboard update (s)' seconds (5-60, default 10) while 'Web dashboard' is
 -- on and the plugin is enabled:  window.HR_DATA = {...};

@@ -2,6 +2,22 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.2.1] — 2026-09-27
+
+**QQT_Warpigz_v3 3.2.1**: HelltideRevamped 2.5.1 — the web dashboard has a new look, in **three themes** you pick from the bar at the top of the page (remembered in your browser). Replace the `HelltideRevamped` folder; settings are kept.
+
+### Changed
+
+- **Web dashboard redesigned** (`HelltideRevamped/dashboard/index.html` opens your last theme):
+  - **Forge**: warm dark war-table, a sidebar with a cinders gauge and ring countdowns, the map as the main area, stats in tabs.
+  - **Daylight**: light HUD (with its own dark toggle), an hour strip with chest-reset ticks and a "now" needle, an activity timeline, stats as bar charts.
+  - **Console**: amber tactical console, a full-width map with HUD panels over its corners, stats and logs in two columns.
+  Same data and features in every theme (countdowns, cinders vs goal, chest counts, map with pan / zoom / Fit / Border / Coords / Follow / filter / background image, Now, stats, opened this wave, events, history, performance). The 3.2.0 design is gone.
+
+### Validation
+
+- `test_helltide_dashboard` checks all three theme pages (every data field read exists, no external resources) and the entry page.
+
 ## [3.2.0] — 2026-09-27
 
 ![QQT Warpigz Suite v3](https://raw.githubusercontent.com/forsagaxeno-afk/QQT_Warpigz_v2/claude/qqt-diablo4-plugins-orchestrator-4439v5/assets/branding/qqt-warpigz-suite-v3.png)

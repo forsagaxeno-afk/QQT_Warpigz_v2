@@ -348,7 +348,11 @@ free Pandemonium chests are still opened.
   adjustable.
 - **Web dashboard** (off): writes `dashboard\hr_data.js` every 10 s (5-60).
   Open `HelltideRevamped\dashboard\index.html` in a browser straight from the
-  disk (no server, no internet). It reloads by itself every 5 s and shows:
+  disk (no server, no internet). Pick a look with the theme switcher at the
+  top of the page (**Forge** · **Daylight** · **Console**); the browser
+  remembers it and `index.html` opens that theme next time (Forge if it
+  cannot remember, e.g. when it blocks storage for local files). Every theme
+  shows the same data. It reloads by itself every 5 s and shows:
   the chest-reset and Helltide-end countdowns (UTC, from your computer's
   clock), cinders against the current goal, chests this session and all
   time; a map drawn like the in-game map (drag to pan, wheel or +/- to zoom,

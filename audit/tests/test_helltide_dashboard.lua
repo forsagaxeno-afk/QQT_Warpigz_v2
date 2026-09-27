@@ -1,7 +1,7 @@
 -- QQT_Warpigz_v3: web dashboard data (core/hr_dashboard.lua, core/hr_json.lua):
 -- the file is `window.HR_DATA=<valid JSON>;`, bounded to 256 KB (map layers
 -- cut first), written at most every 'Dashboard update' seconds, and never
--- while the option is off. The shipped page reads it back. Runs under Lua
+-- while the option is off. The shipped theme pages read it back. Runs under Lua
 -- 5.4 and LuaJIT.
 local H = dofile(assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/audit/tests/hr_smart_harness.lua')
 local R = H.runner('Helltide dashboard')
@@ -185,32 +185,77 @@ R.case('written at most every "Dashboard update" seconds; trail sampled every 5 
     ok(points >= 6 and points <= 8, 'a trail point every 5 s: ' .. points)
 end)
 
-R.case('option off: zero writes; the page ships and reads the data file', function()
+-- QQT_Warpigz_v3: three theme pages share hr_data.js; index.html redirects to
+-- the last chosen one (localStorage 'hr_dash_theme', Forge by default).
+local THEMES = {'forge.html', 'daylight.html', 'console.html'}
+local function read_page(name)
+    local f = assert(io.open(SUITE_ROOT .. '/HelltideRevamped/dashboard/' .. name, 'r'), name)
+    local page = f:read('*a'); f:close()
+    return page
+end
+
+local function no_external(page, name)
+    for _, bad in ipairs({'src="http', "src='http", 'href="http', "href='http", '<link', '@import', 'url(', '<img',
+        '<iframe', 'fetch(', 'XMLHttpRequest'}) do
+        ok(not page:find(bad, 1, true), name .. ': no external resources: ' .. bad)
+    end
+    for _, word in ipairs({'Senq', 'Licensed', 'lifetime'}) do
+        ok(not page:find(word, 1, true), name .. ': no third-party branding: ' .. word)
+    end
+end
+
+R.case('option off: zero writes; the theme pages ship and read the data file', function()
     local s = session()
     for _ = 1, 600 do s.advance(0.1); s.dash.tick(s.now, s.pos, true) end
     eq(#s.writes, 0, 'dashboard off')
-    local f = assert(io.open(SUITE_ROOT .. '/HelltideRevamped/dashboard/index.html', 'r'))
-    local page = f:read('*a'); f:close()
-    ok(page:find("'hr_data.js?ts='", 1, true) ~= nil, 'reloads hr_data.js with a cache buster')
-    ok(page:find('setInterval(load, 5000)', 1, true) ~= nil, 'every 5 s')
-    ok(page:find('window.HR_DATA', 1, true) ~= nil)
-    ok(page:find('http', 1, true) == nil or not page:find('src="http', 1, true), 'no external resources')
-    ok(not page:find('<link', 1, true), 'no external stylesheet')
-    -- QQT_Warpigz_v3: one page (header, KPI cards, map, now, stats, opened, history, performance).
-    for _, id in ipairs({'id="k-reset"', 'id="k-end"', 'id="k-cind"', 'id="k-sess"', 'id="k-all"', 'id="map"',
-        'id="filter"', 'id="fit"', 'id="border"', 'id="coords"', 'id="follow"', 'id="bgbtn"', 'id="activity"',
-        'id="stats"', 'id="opened"', 'id="events"', 'id="hist"', 'id="perftab"', 'id="refresh"'}) do
-        ok(page:find(id, 1, true) ~= nil, id)
+    for _, name in ipairs(THEMES) do
+        local page = read_page(name)
+        ok(page:find("'hr_data.js?ts='", 1, true) ~= nil, name .. ': reloads hr_data.js with a cache buster')
+        ok(page:find('setInterval(load, 5000)', 1, true) ~= nil, name .. ': every 5 s')
+        ok(page:find('window.HR_DATA', 1, true) ~= nil, name .. ': reads window.HR_DATA')
+        no_external(page, name)
+        -- one page (header, KPI cards, map, now, stats, opened, history, performance).
+        for _, id in ipairs({'id="k-reset"', 'id="k-end"', 'id="k-cind"', 'id="k-sess"', 'id="k-all"', 'id="map"',
+            'id="filter"', 'id="fit"', 'id="border"', 'id="coords"', 'id="follow"', 'id="bgbtn"', 'id="activity"',
+            'id="stats"', 'id="opened"', 'id="events"', 'id="hist"', 'id="perftab"', 'id="refresh"'}) do
+            ok(page:find(id, 1, true) ~= nil, name .. ': ' .. id)
+        end
+        ok(page:find('<title>HelltideRevamped — Live</title>', 1, true) ~= nil, name .. ': title')
+        -- the theme switcher: first thing in <body>, links to all three, marks this one, saves the choice.
+        local nav = page:match('<body>%s*(<nav class="hrsw".-</nav>)')
+        ok(nav ~= nil, name .. ': theme switcher at the top of the page')
+        nav = nav or ''
+        for _, other in ipairs(THEMES) do
+            ok(nav:find('href="' .. other .. '"', 1, true) ~= nil, name .. ': switcher links ' .. other)
+        end
+        ok(nav:find('href="' .. name .. '" data%-theme%-file="[%a]+" class="cur"') ~= nil, name .. ': current theme highlighted')
+        local _, cur = nav:gsub('class="cur"', '')
+        eq(cur, 1, name .. ': exactly one current theme')
+        ok(nav:find('>Forge<', 1, true) and nav:find('>Daylight<', 1, true) and nav:find('>Console<', 1, true), name .. ': labels')
+        ok(page:find("localStorage.setItem('hr_dash_theme'", 1, true) ~= nil, name .. ': saves the choice')
     end
-    ok(page:find('<title>HelltideRevamped — Live</title>', 1, true) ~= nil, 'title')
-    for _, word in ipairs({'Senq', 'Licensed', 'lifetime'}) do
-        ok(not page:find(word, 1, true), 'no third-party branding: ' .. word)
-    end
-    ok(not page:find('<img', 1, true) and not page:find('url(', 1, true), 'no embedded or linked images')
     local keep = io.open(SUITE_ROOT .. '/HelltideRevamped/dashboard/.keep', 'r')
     ok(keep ~= nil, 'the dashboard folder ships'); keep:close()
     keep = io.open(SUITE_ROOT .. '/HelltideRevamped/learned/.keep', 'r')
     ok(keep ~= nil, 'the learned folder ships'); keep:close()
+end)
+
+R.case('index.html opens the last chosen theme (Forge by default, localStorage guarded)', function()
+    local page = read_page('index.html')
+    ok(page:find('<title>HelltideRevamped — Live</title>', 1, true) ~= nil, 'title')
+    ok(page:find("localStorage.getItem('hr_dash_theme')", 1, true) ~= nil, 'reads the saved theme')
+    ok(page:find("location.replace(pick + '.html')", 1, true) ~= nil, 'redirects without a history entry')
+    ok(page:find("var pick = 'forge'", 1, true) ~= nil, 'Forge by default')
+    local try_at = page:find('try {', 1, true)
+    local get_at = page:find('localStorage.getItem', 1, true)
+    local catch_at = page:find('} catch (e)', 1, true)
+    ok(try_at and get_at and catch_at and try_at < get_at and get_at < catch_at, 'localStorage inside try/catch')
+    for _, theme in ipairs({'forge', 'daylight', 'console'}) do
+        ok(page:find(theme .. ': 1', 1, true) ~= nil, 'known theme ' .. theme)
+        ok(page:find('href="' .. theme .. '.html"', 1, true) ~= nil, 'fallback link ' .. theme)
+    end
+    ok(not page:find('hr_data.js?ts=', 1, true), 'the entry page loads no data itself')
+    no_external(page, 'index.html')
 end)
 
 -- ── QQT_Warpigz_v3: the live view (wave, target, goal, opened, road) ─────
@@ -370,7 +415,7 @@ R.case('stats scopes, rupture anchors and a full map stay well under 300 KB', fu
     ok(body:match('"helltide":(%b{})'):find('"earned":300', 1, true) ~= nil)
 end)
 
-R.case('the page only reads fields the data file has (static check), and uses the new ones', function()
+R.case('every theme page only reads fields the data file has (static check), and uses the new ones', function()
     local s = full_session()
     s.tracker.hr_chest_order = {last_plan = {reserve = 250, target_name = 'usz_rewardGizmo_Uber', target_pos = v(5, 5),
         target_key = 'k9', class = 0}}
@@ -385,21 +430,22 @@ R.case('the page only reads fields the data file has (static check), and uses th
     local keys = decode_keys(body)
     ok(body:find('"goal":{"cost":3000,"label":"Cinder run","ready":false}', 1, true) ~= nil, 'saving: the run threshold is the goal')
     ok(body:find('"plan":"Saving cinders for the run at 3000"', 1, true) ~= nil, 'plan text')
-    local f = assert(io.open(SUITE_ROOT .. '/HelltideRevamped/dashboard/index.html', 'r'))
-    local page = f:read('*a'); f:close()
-    local used = {}
-    for field in page:gmatch('[^%w_%.]d%.([%a_][%w_]*)') do used[field] = true end
-    for field in page:gmatch('last%.([%a_][%w_]*)') do used[field] = true end
-    local n = 0
-    for field in pairs(used) do
-        n = n + 1
-        ok(keys[field], 'the page reads d.' .. field .. ', which the data file has')
-    end
-    ok(n >= 20, 'fields found in the page: ' .. n)
-    for _, field in ipairs({'reset_minutes', 'end_minute', 'goal', 'target', 'now', 'opened', 'opened_hour', 'to_open',
-        'road', 'tears', 'maiden', 'in_helltide', 'region', 'helltide', 'session', 'alltime', 'fence_in', 'fence_cell',
-        'atlas', 'chests', 'trail', 'route', 'player', 'history', 'perf', 'events', 'rates', 'cinders'}) do
-        ok(used[field], 'the page uses d.' .. field)
+    for _, name in ipairs(THEMES) do
+        local page = read_page(name)
+        local used = {}
+        for field in page:gmatch('[^%w_%.]d%.([%a_][%w_]*)') do used[field] = true end
+        for field in page:gmatch('last%.([%a_][%w_]*)') do used[field] = true end
+        local n = 0
+        for field in pairs(used) do
+            n = n + 1
+            ok(keys[field], name .. ' reads d.' .. field .. ', which the data file has')
+        end
+        ok(n >= 20, name .. ': fields found in the page: ' .. n)
+        for _, field in ipairs({'reset_minutes', 'end_minute', 'goal', 'target', 'now', 'opened', 'opened_hour', 'to_open',
+            'road', 'tears', 'maiden', 'in_helltide', 'region', 'helltide', 'session', 'alltime', 'fence_in', 'fence_cell',
+            'atlas', 'chests', 'trail', 'route', 'player', 'history', 'perf', 'events', 'rates', 'cinders'}) do
+            ok(used[field], name .. ' uses d.' .. field)
+        end
     end
 end)
 

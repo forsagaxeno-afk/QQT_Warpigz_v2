@@ -269,7 +269,7 @@ After a tear event, the bot collects the drops Rosie wants in the event area, th
 | Option | Default | What it means |
 | --- | --- | --- |
 | **Stats overlay** | ON | A panel on screen: time left, cinders per minute and hour, chests, deaths. You can move it (**Position X / Y**) and pick **Rows**. |
-| **Web dashboard** | OFF | Turn it on. Then open `HelltideRevamped\dashboard\index.html` in your web browser straight from the disk (double-click it). No internet needed. It shows live stats, a map and history. |
+| **Web dashboard** | OFF | Turn it on. Then open `HelltideRevamped\dashboard\index.html` in your web browser straight from the disk (double-click it). No internet needed. It shows live stats, a map and history. Pick a theme at the top of the page: **Forge**, **Daylight** or **Console**; next time `index.html` opens the one you picked. |
 | **Live Helltide zone (internet)** | OFF | Asks helltides.com (or diablo4.life) where the Helltide is this hour, so the bot goes there directly. Only the zone is read; nothing about you is sent. |
 | **Reset all-time stats** | button | Clears the all-time totals. |
 
