@@ -35,6 +35,16 @@ local PRIZE, MYSTERY, GLOVES, RING = 'Warplan_Helltide_HellsPrize', 'usz_rewardG
 local function session(opts)
     local s = H.new(opts)
     s.set('mode', (opts and opts.mode) or 1)
+    -- QQT_Warpigz_v3: the run is "Spend cinders on chests at" (cinder_run) in
+    -- Warplan / WarPigs and the Smart farm goal (farm_goal, on by default) in
+    -- Farm mode. These cases start with the option off at 3000 (the amount
+    -- they were written for; the default is now 2000, asserted below).
+    s.set('farm_goal', false)
+    s.set('cinder_run_at', 3000)
+    function s.run_toggle(on)
+        s.set('cinder_run', on)
+        s.set('farm_goal', on)
+    end
     s.order = s.require('core.hr_chest_order')
     s.atlas = s.require('core.hr_atlas')
     s.fence = s.require('core.hr_fence')
@@ -50,7 +60,7 @@ local function session(opts)
             player = s.pos, cinders = s.cinders, current = current, now = s.now})
     end
     function s.run_on(at)
-        s.set('cinder_run', true)
+        s.run_toggle(true)
         if at then s.set('cinder_run_at', at) end
     end
     return s
@@ -98,9 +108,12 @@ R.case('data: Hell\'s Prize is a known 666 chest (the _PreTorment variant too); 
     eq(enums.chest_types[PRIZE], 666, 'd4data lock cost of Warplan_Helltide_HellsPrize')
     local name, cost = s.targets.classify('Warplan_Helltide_HellsPrize_PreTorment', enums.chest_types)
     eq(name, PRIZE); eq(cost, 666)
-    eq(s.gui.elements.cinder_run:get(), false, 'toggle off by default')
-    eq(s.gui.elements.cinder_run_at:get(), 3000, 'slider default 3000')
-    eq(s.settings.cinder_run, false); eq(s.settings.cinder_run_at, 3000)
+    -- QQT_Warpigz_v3: shipped defaults: Warplan option off, Farm goal on, 2000.
+    local d = H.new({})
+    eq(d.gui.elements.cinder_run:get(), false, 'Warplan toggle off by default')
+    eq(d.gui.elements.farm_goal:get(), true, 'Farm goal on by default')
+    eq(d.gui.elements.cinder_run_at:get(), 2000, 'slider default 2000 (was 3000)')
+    eq(d.settings.cinder_run, false); eq(d.settings.farm_goal, true); eq(d.settings.cinder_run_at, 2000)
     ok(s.settings.set_setting('cinder_run_at', 2500), 'set_setting accepts the slider value')
     eq(s.gui.elements.cinder_run_at:get(), 2500, 'and writes it to the menu')
 end)
@@ -240,7 +253,7 @@ R.case('the run ends below the cheapest known chest and starts again only at the
     p = s.pick({prize, mystery, glove})
     eq(p.name, PRIZE, 'at the threshold again: a new run')
     eq(s.logged('[CINDER RUN] 3100 cinders'), 1)
-    s.set('cinder_run', false)                     -- switched off mid-run
+    s.run_toggle(false)                     -- switched off mid-run
     p = s.pick({prize, mystery, glove})
     ok(p and p.name ~= PRIZE, 'off: back to the normal order')
     eq(s.logged('the option was switched off'), 1)
@@ -391,12 +404,12 @@ R.case('switching the option off ends the run in every mode; on again below the 
         explore(s, true)
         eq(s.logged('[CINDER RUN] 3000 cinders >= 3000'), 1, m[4])
         s.cinders = 2000
-        s.set('cinder_run', false)
+        s.run_toggle(false)
         for _ = 1, 3 do explore(s, true) end
         eq(s.logged('the option was switched off'), 1, m[4] .. ': Done logged once (review: never outside Farm)')
         eq(s.run._state().active, false, m[4] .. ': released')
         s.advance(300); s.cinders = 800; s.logs = {}
-        s.set('cinder_run', true)
+        s.run_toggle(true)
         s.actors = {actor(GLOVES, 20, 9), actor(MYSTERY, 40, 9), actor(PRIZE, 30, 9)}
         explore(s, true)
         eq(s.run.active(), false, m[4] .. ': no stale run at 800')
@@ -412,9 +425,9 @@ R.case('switching the option off ends the run in every mode; on again below the 
     local s = session({cinders = 3000})
     s.run_on(); s.at_minute(20)
     ok(s.pick({actor(MYSTERY, 60, 0)}) ~= nil)
-    s.set('cinder_run', false)
+    s.run_toggle(false)
     s.order.on_reset()
-    s.set('cinder_run', true); s.cinders = 1500
+    s.run_toggle(true); s.cinders = 1500
     eq(s.pick({actor(GLOVES, 30, 0)}), nil, 'no resume after an off + reset: saving')
     eq(s.logged('run resumed'), 0)
 end)
@@ -540,20 +553,25 @@ R.case('overlay and menu: "Cinder run | Plan", Hell\'s Prize, "Saving"; the menu
     end
     s.run_on()
     s.pick({actor(PRIZE, 40, 0)})
-    local l = line('Cinder run | Plan: ')
-    ok(l ~= nil and l:find("target Hell's Prize", 1, true) ~= nil, tostring(l))
+    -- QQT_Warpigz_v3: sectioned overlay (NOW: Plan row, TARGET: Chest row).
+    local l = line('Plan  Cinder run: ')
+    ok(l ~= nil, tostring(l))
+    l = line('Chest  ')
+    ok(l ~= nil and l:find("Hell's Prize  666", 1, true) ~= nil, tostring(l))
     s.cinders = 400; s.order.on_reset()
     s.remembered = {}
     s.pick({})
     ok(line('Saving cinders for the run at 3000') ~= nil, 'saving shown')
-    eq(line('Cinder run |'), nil)
+    eq(line('Cinder run:'), nil)
     s.hr_mode.set_external(true)                  -- WarPigs: no save phase
-    ok(line('Plan: ') ~= nil and line('Saving') == nil, 'WarPigs: not saving')
+    ok(line('Plan  ') ~= nil and line('Saving') == nil, 'WarPigs: not saving')
     eq(s.require('core.hr_cinder_run').saving(), false)
     s.hr_mode.set_external(false)
-    s.set('cinder_run', false)
-    ok(line('Plan: ') ~= nil and line('Saving') == nil and line('Cinder run') == nil, 'off: the plain plan line')
+    s.run_toggle(false)
+    ok(line('Plan  ') ~= nil and line('Saving') == nil and line('Cinder run') == nil, 'off: the plain plan line')
     -- The menu: the entry under Settings, the slider only with the toggle on.
+    -- QQT_Warpigz_v3: Warplan mode (Farm shows the Smart farm goal instead).
+    s.set('mode', 0)
     local e = s.gui.elements
     local seen = {}
     for _, k in ipairs({'cinder_run', 'cinder_run_at'}) do

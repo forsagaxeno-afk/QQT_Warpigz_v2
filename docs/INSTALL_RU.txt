@@ -42,12 +42,17 @@ QQT_Warpigz_v3 (версия в имени архива) — установка
 10. Без WarPigs (обычный фарм: один плагин активности + Rosie + твой боевой скрипт) включай
    ОДНУ активность. Если включены две (например ArkhamAsylum и WonderCity), работает первая,
    вторая ждёт и пишет причину на своём оверлее — телепортов туда-обратно больше нет.
-11. HelltideRevamped 2.4.0, режим Farm: раздел меню "Smart farm (Farm mode)" —
-   Smart chest order, Cinder plan, Road routing, Learn while farming, Stay inside the Helltide
-   (по умолчанию ВКЛ), Event radius, Events until minute (UTC). "Skip legacy Helltide events"
-   (раздел Tears; в 3.0.0 называлась "Prefer tears over legacy Helltide events") — по умолчанию
-   ВКЛ, как в 3.0.0: пока "Hunt tears" ВКЛ, пиры и огненные столбы не делаются; твой выбор
-   из 3.0.0 сохраняется.
+11. HelltideRevamped 2.5.0, режим Farm: один раздел меню "Smart farm", по порядку фарма:
+   1) Цель: "Farm cinders until" (ВКЛ, Cinders 2000) — копить до цели, потом открыть сундуки:
+      Hell's Prize 666 (если взята нода War Plan) > Mystery 250 > остальные. "Spend all in the
+      last (min)" = 5: в последние минуты Helltide тратится всё.
+   2) Как фармить: сначала tears (Hunt tears, Stand on chargeable tears, Fight Realmwalker,
+      Open tear chests, Skip legacy Helltide events — всё ВКЛ).
+   3) Движение и логика: Smart chest order, Road routing, Learn while farming,
+      Stay inside the Helltide, Pin the target on the map.
+   4) Advanced: все тонкие ползунки.
+   Бот больше не стоит минутами у сундука, избивая обычных мобов: после 25 с боя на одном месте
+   идёт дальше по маршруту искать tears (элиток и боссов по-прежнему бьёт).
    Раздел "Live data & stats": Stats overlay (ВКЛ),
    Web dashboard (ВЫКЛ; включи и открой в браузере HelltideRevamped\dashboard\index.html),
    Live Helltide zone (internet) (ВЫКЛ). Выученные точки сундуков лежат в

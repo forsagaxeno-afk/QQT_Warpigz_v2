@@ -37,6 +37,7 @@ local M = {
     SEED_SECS = 300,        -- QQT_Warpigz_v3: plain average before the EWMA
     SEED_MIN = 180,         -- QQT_Warpigz_v3: never averaged over less time
     MYSTERY = 'usz_rewardGizmo_Uber',
+    OPENED_MAX = 40,        -- QQT_Warpigz_v3: opened-chest ring (overlay / dashboard)
 }
 
 local COUNTERS = {'earned', 'spent', 'lost', 'chests', 'mystery', 'silent', 'deaths', 'tears', 'secs', 'helltides'}
@@ -53,6 +54,9 @@ M.alltime = counters()
 M.helltide = nil
 M.history = {}
 M.notes = {}
+-- QQT_Warpigz_v3: the last OPENED_MAX chests opened this session, oldest
+-- first: {name, cost, t (UTC epoch), slot (clock.slot_id), hour, x, y}.
+M.opened = {}
 
 local st = {}
 local function fresh_state()
@@ -276,10 +280,21 @@ function M.tick(now, cinders, in_helltide, zone)
 end
 
 -- ── events ───────────────────────────────────────────────────────────────
-function M.on_chest_opened(name, cost)
+-- QQT_Warpigz_v3: `pos` (optional) records the chest in M.opened.
+function M.on_chest_opened(name, cost, pos)
     if name == 'silent' then add('silent', 1) return end
     if type(cost) == 'number' and cost > 0 then add('chests', 1) end
     if name == M.MYSTERY then add('mystery', 1) end
+    if type(cost) ~= 'number' or cost <= 0 then return end
+    local x, y
+    if pos ~= nil then
+        local ok, px, py = pcall(function() return pos:x(), pos:y() end)
+        if ok and type(px) == 'number' and type(py) == 'number' and px == px and py == py then x, y = px, py end
+    end
+    local list = M.opened
+    list[#list + 1] = {name = tostring(name), cost = cost, t = clock.epoch(), slot = clock.slot_id(),
+        hour = clock.hour_id(), x = x, y = y}
+    while #list > M.OPENED_MAX do table.remove(list, 1) end
 end
 
 function M.on_death() add('deaths', 1) end
@@ -308,6 +323,7 @@ end
 -- Tests: forget everything (a fresh plugin load).
 function M._reset()
     M.session, M.alltime, M.helltide, M.history, M.notes = counters(), counters(), nil, {}, {}
+    M.opened = {} -- QQT_Warpigz_v3
     fresh_state()
 end
 

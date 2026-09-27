@@ -3,8 +3,9 @@
 -- farming by a user who enabled only these plugins). The Dry Steppes patrol
 -- loop (waypoints/jirandai.lua) is the road; a Mystery chest 170 m along it
 -- and two regular chests elsewhere; 400 cinders.
---   * the Mystery chest is opened before any regular chest (cinder plan +
---     smart order) and every chest is opened once (no recall ping-pong);
+--   * the Mystery chest is opened before any regular chest (the Smart farm
+--     goal, here 400, reached: the chest run's order; QQT_Warpigz_v3) and
+--     every chest is opened once (no recall ping-pong);
 --   * the overlay renders with no undefined host global;
 --   * at minute 55 the all-time stats and the learned zone file are written
 --     by HelltideRevamped (in the host's in-memory files).
@@ -86,6 +87,8 @@ case('a Farm Helltide: Mystery first, no ping-pong, overlay, stats and learned d
     local mystery = chest(h, pts, MYSTERY, 44, 12)        -- ~170 m along the loop
     local glove = chest(h, pts, GLOVES, 110, -25)
     local ring = chest(h, pts, RINGS, #pts - 30, 25)      -- behind the start
+    -- QQT_Warpigz_v3: the Smart farm goal (on by default) is reached: 400.
+    h.mod(HR, 'gui').elements.cinder_run_at:set(400)
     h.mod(HR, 'gui').elements.main_toggle:set(true)
 
     local order = h.mod(HR, 'core.hr_chest_order')

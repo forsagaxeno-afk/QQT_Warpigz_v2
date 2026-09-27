@@ -844,7 +844,8 @@ end
 -- QQT_Warpigz_v3: the learned chest atlas (core/hr_atlas.lua) scans this
 -- cached snapshot; the web dashboard reads the remembered chests and target.
 tracker.hr_get_actors = get_cached_actors
-tracker.hr_get_remembered = function() return remembered_chests, remembered_chest_target end
+-- QQT_Warpigz_v3: + the legacy direct chest target (overlay / dashboard target card).
+tracker.hr_get_remembered = function() return remembered_chests, remembered_chest_target, found_chest, found_chest_position end
 
 -- ── [maiden helpers — bodies] ──────────────────────────────────────────────
 -- Forward-declared above (alongside the maiden tunables/state). Bodies live
@@ -1411,7 +1412,10 @@ local function check_events(self)
         end
 
         -- Check if a nearby remembered chest needs fewer cinders than the threshold — if so, stay and farm monsters
-        if not farm_chest_entry and settings.farm_cinder_threshold > 0 then
+        -- QQT_Warpigz_v3: Warplan only. In Farm mode this parked the bot at a
+        -- chest for minutes (ring roam, no time bound, tears only within the
+        -- pass-by distance) instead of hunting tears; Farm has the Smart farm goal.
+        if not farm_chest_entry and settings.farm_cinder_threshold > 0 and not tracker.hr_mode.is_farm() then
             for key, entry in pairs(remembered_chests) do
                 local shortfall = entry.cost - current_cinders
                 if shortfall > 0 and shortfall < settings.farm_cinder_threshold and utils.distance_to(entry.position) <= 50
@@ -1478,6 +1482,8 @@ local function check_events(self)
     -- Priority 3: Kill monsters when enabled
     if settings.kill_monsters then
         local km_target = get_kill_target()
+        -- QQT_Warpigz_v3: Farm: plain monsters are passed by while the patrol moves on (core/hr_mode.lua km_hold).
+        if km_target and tracker.hr_mode.km_skip(km_target, get_time_since_inject()) then km_target = nil end
         if km_target then
             -- Arm the experimental explorer the first time we see a monster in this zone:
             -- means the patrol successfully walked us into populated terrain and grid
@@ -3376,6 +3382,12 @@ local helltide_task = {
     end,
 
     farm_chest_cinders = function(self)
+        -- QQT_Warpigz_v3: never in Farm mode (a mode switch mid-farm releases it).
+        if farm_chest_entry and tracker.hr_mode.is_farm() then
+            remembered_chests[chest_key(farm_chest_entry.name, farm_chest_entry.position)] = farm_chest_entry
+            farm_chest_entry = nil
+            clear_movement()
+        end
         if not farm_chest_entry then
             self.current_state = helltide_state.EXPLORE_HELLTIDE
             return
@@ -3549,6 +3561,11 @@ local helltide_task = {
         end
 
         local target = get_kill_target()
+        -- QQT_Warpigz_v3: Farm: not parked in one spot by a stream of plain
+        -- monsters; the patrol moves on (core/hr_mode.lua km_hold, logged there).
+        if target and tracker.hr_mode.km_hold(get_time_since_inject(), get_player_position(), target) then
+            target = nil
+        end
         if not target then
             if BatmobilePlugin then BatmobilePlugin.clear_target(plugin_label) end
             console.print("[KILL MONSTERS] No targets, resuming patrol")
@@ -4090,7 +4107,7 @@ local helltide_task = {
         if order and key then pcall(order.release, key) end
         if entry and not entry.interacted then return end -- spent before we got there
         local stats, atlas, roads = tracker.hr_stats, tracker.hr_atlas, tracker.hr_roads
-        if stats then pcall(stats.on_chest_opened, name, enums.chest_types[name] or 0) end
+        if stats then pcall(stats.on_chest_opened, name, enums.chest_types[name] or 0, pos) end -- QQT_Warpigz_v3: + pos
         if atlas and pos and name ~= 'silent' then pcall(atlas.mark_opened, pos, name) end
         if roads and entry and entry.route then pcall(roads.on_success, entry.route, pos, name) end
     end,

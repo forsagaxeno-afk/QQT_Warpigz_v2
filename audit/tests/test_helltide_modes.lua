@@ -550,7 +550,8 @@ end)
 -- savings); Pandemonium chests stay free; with the option off nothing changes.
 local function tear_ring_chest(opts)
     local s = session({enabled = true, mode = 1, cinders = 500})
-    if opts.run then s.controls.cinder_run:set(true); s.controls.cinder_run_at:set(3000) end
+    -- QQT_Warpigz_v3: Farm mode: the Smart farm goal is the run's option.
+    if opts.run then s.controls.farm_goal:set(true); s.controls.cinder_run_at:set(3000) end
     s.settings:update_settings()
     normal_rupture(s, 30)
     s.pos = v(29, 0, 0)

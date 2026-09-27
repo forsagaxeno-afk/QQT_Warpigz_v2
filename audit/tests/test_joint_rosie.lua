@@ -481,6 +481,9 @@ end)
 case('R10 standalone HR trap recovery with the only active Helltide: one scan, then back in it', function()
     local HR = 'HelltideRevamped'
     local h = J.new({rosie = true, dirs = {'Batmobile', HR}, place = 'helltide', minute = 10})
+    -- r32 review: the Helltide clock follows the simulated minute, not the
+    -- wall clock (a run across a real UTC hour boundary logged no scan).
+    h.mod(HR, 'core.hr_clock')._now = function() return 1790481600 + h.minute * 60 + math.floor(h.now) % 60 end
     h.P.helltide.helltide = true                   -- the ONLY active helltide
     h.mod(HR, 'gui').elements.main_toggle:set(true)
     h.run(20)

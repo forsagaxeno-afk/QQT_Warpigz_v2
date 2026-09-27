@@ -16,7 +16,8 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = {"README.md": "README.md", "CHANGELOG.md": "CHANGELOG.md", "AUDIT.md": "AUDIT.md",
         "CREDITS.md": "CREDITS.md", "audit/LIVE_CHECKLIST.md": "LIVE_CHECKLIST.md",
-        "docs/INSTALL_RU.txt": "УСТАНОВКА_RU.txt"}
+        "docs/INSTALL_RU.txt": "УСТАНОВКА_RU.txt",
+        "docs/GUIDE_EN.md": "docs/GUIDE_EN.md"}
 SKIP = {".gitignore", "Thumbs.db", ".DS_Store"}
 # QQT_Warpigz_v3: files HelltideRevamped generates on the user's machine
 # (learned chest spots / fence / stats, the web dashboard data) never ship.

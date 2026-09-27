@@ -150,14 +150,54 @@ town for 5 minutes in the middle of every Helltide, searched during the real
 55-59 break, and stopped events at the wrong minute. The hour, the break, the
 events cut-off and the chest resets now follow the UTC minute.
 
-### Smart farm (Farm mode) menu
+### Smart farm menu (Farm mode)
+
+In Farm mode the menu has one **Smart farm** section, in the order of a
+Helltide: the goal, how to farm, how to move, then **Advanced** (tuning).
+Warplan mode (and WarPigs, which always runs Warplan) does not show it; its
+options stay under **Settings**.
+
+**1. Goal: farm cinders, then open chests**
+
+- **Farm cinders until** (on) with **Cinders** (2000): below the goal the bot
+  only farms (tears first, below) and opens no Helltide chest; the chests it
+  passes are remembered and learned. At the goal it goes on a chest run:
+  Hell's Prize (666) > Mystery (250) > the rest, nearest first along the
+  road (details under *Cinder run* below), until the cinders fall below the
+  cheapest chest; then it farms up to the goal again. **Spend all in the
+  last (min)** (5, at least 2): in the last minutes of the Helltide it spends
+  whatever it holds, so no cinders are lost at the hour's end. Untick the
+  goal to open chests as soon as they are affordable (the old way); then
+  **Keep 250 for a Mystery chest** (the former *Cinder plan*, on) is shown.
+  The goal replaces **Farm Cinder Threshold (beta)** in Farm mode: that
+  option (stay next to an almost affordable chest and fight there) parked
+  the bot at a chest for minutes and is now Warplan only.
+
+**2. How to farm: tears first**
+
+- **Hunt tears** (on): tears are the best cinder farm. The bot goes to every
+  tear it finds (Advanced: **Tear search distance**, 110 m) before anything
+  else, then collects the event's drops and walks on. With no tear in
+  sight it farms monsters along the patrol road: after 25 s of fighting in
+  one spot (a stream of plain monsters, e.g. round a chest) it moves on along
+  the road and passes plain monsters until it is 50 m away (at most 45 s;
+  elites, champions and bosses are still fought; your rotation still kills
+  what it passes), so it finds
+  the next tear instead of standing still (`[KILL MONSTERS] Farm: 25 s of
+  fighting in one spot — moving on along the patrol road ...`).
+- **Stand on chargeable tears**, **Fight Realmwalker**, **Open tear chests**
+  (all on) and **Skip legacy Helltide events** (on: no flame pillars /
+  pyres) tune the tear event (see *Tears* above).
+
+**3. Movement and logic**
 
 - **Smart chest order** (on): Mystery chests first, chests you saw before
   learned (predicted) spots, then the nearest by travel (patrol road metres
   for far chests). The current target is kept unless another one is of a
   better kind or less than half as far, and the target changes at most 3
   times a minute: no ping-pong across the map. An affordable chest right next
-  to you (15 m) is opened on the way when the cinder plan allows it.
+  to you (15 m) is opened on the way when the goal (or, goal off, the 250
+  rule) allows it.
   Distances are 3D, like the chest trip itself: a chest on a ledge above you
   is not "right next to you".
 - **Chest resets**: at UTC :00/:15/:20/:30/:40/:45 (helltides.com rotation
@@ -168,16 +208,6 @@ events cut-off and the chest resets now follow the UTC minute.
   closed again after an opening, including after a reset (opened at :10,
   seen closed at :16); whether they respawn within the hour is not
   confirmed yet. A Mystery chest in sight is always a candidate.
-- **Cinder plan** (on): keeps 250 cinders for a Mystery chest you can still
-  reach before the Helltide ends, counting what you are expected to earn
-  until the last minutes start (your recent cinders per minute). A regular
-  chest is opened when the reserve stays, when you carry more than the
-  reserve plus **Max carry above reserve** (150), when the expected income
-  refills the reserve before the last minutes, or in the last **Spend
-  everything in the last (min)** (5) minutes. With 250 in hand and a Mystery
-  you can reach, the Mystery comes first: no regular chest may take the
-  balance below 250 on the way. No more walking past chests with 600
-  cinders; nothing is left unspent at minute 55.
 - **Road routing** (on): chests more than 100 m away are reached along the
   patrol loop the shorter way round, leaving it only for the last stretch
   (at most 80 m). Stuck off the road, the bot walks back to the road and
@@ -201,31 +231,53 @@ events cut-off and the chest resets now follow the UTC minute.
   3 s is not tried again for 3 minutes, and after 2 such trips not again in
   that Helltide. A buff that is back within 3 s (a buff-list refresh) only
   interrupts the trip.
+- **Pin the target on the map** (off): the game's map pin marks the chest the
+  bot is walking to.
+- **Forget learned data (this zone)** clears that zone's file.
+
+**Advanced** (sliders): **Tear search distance** (110), **Pass-by distance**
+(50: while walking to a chest only a tear this close is taken), **Ritual
+stay radius** (12), **Hold-area tolerance** (2), **Linger after last tear**
+(5 s), **Realmwalker wait** (25 s), **Pause tears at cinders** (0 = off; the
+goal already stops new tears while the run has a chest to go to), **Max
+carry above reserve** (150, goal off only), **Event radius** and **Events
+until minute** (legacy events only).
+
+- **Keep 250 for a Mystery chest** (goal off only; the former *Cinder
+  plan*, same setting): keeps 250 cinders for a Mystery chest you can still
+  reach before the Helltide ends, counting what you are expected to earn
+  until the last minutes start (your recent cinders per minute). A regular
+  chest is opened when the reserve stays, when you carry more than the
+  reserve plus **Max carry above reserve** (150), when the expected income
+  refills the reserve before the last minutes, or in the last **Spend
+  all in the last (min)** (5) minutes. With 250 in hand and a Mystery
+  you can reach, the Mystery comes first: no regular chest may take the
+  balance below 250 on the way. No more walking past chests with 600
+  cinders; nothing is left unspent at minute 55.
 - **Event radius** (40 m, Warplan 12 m) and **Events until minute** (45):
   pyres and flame pillars within reach (Farm mode: only when **Skip legacy
-  Helltide events** under Tears is unticked or **Hunt tears** is off; the
+  Helltide events** is unticked or **Hunt tears** is off; the
   skip is on by default, as in 3.0.0, and tears in reach are always taken
   before events). The bot goes to the event it chose
   (not a spent one next to it); the walk is given up after 45 s and the
   whole event after 4 minutes, and an event given up on is skipped for 3
   minutes. New Helltide event skins are logged once with **Draw chest
   status** on (`[EVENT SKIN] ...`).
-- **Pin the target on the map** (off): the game's map pin marks the chest the
-  bot is walking to.
-- **Forget learned data (this zone)** clears that zone's file.
 
-### Cinder run: Spend cinders on chests at (every mode)
+### Cinder run (Farm: the goal; Warplan: Spend cinders on chests at)
 
-**Settings → Spend cinders on chests at** (off by default) with **Cinders**
-(3000). With the option on the bot saves up and then spends, in Farm mode
-and in Warplan / under WarPigs alike:
+In Farm mode the run is the Smart farm goal (**Farm cinders until**, on by
+default). In Warplan mode and under WarPigs it is **Settings → Spend cinders
+on chests at** (off by default, unchanged). Both use the same amount,
+**Cinders** (2000; it was 3000 — a value you set yourself is kept). With the
+run on the bot saves up and then spends:
 
 - **Saving**: below the set amount no Helltide chest is opened. The chests
   you pass are remembered (and learned) so the run can go back to them; the
   log says so once per Helltide (`[CINDER RUN] Saving cinders for the run at
-  3000 (have 420): chests are remembered, not opened; ...`). Cinders are lost
-  when the Helltide ends, so in its last minutes (**Spend everything in the
-  last (min)**, at least 2) the savings are spent in the run's order. Not
+  2000 (have 420): chests are remembered, not opened; ...`). Cinders are lost
+  when the Helltide ends, so in its last minutes (**Spend all in the last
+  (min)**, at least 2; Warplan: under the option) the savings are spent in the run's order. Not
   under WarPigs: its Helltide step (War Plan quest *Helltide Harvest*,
   spend 250 cinders, 750 on Elite, on Tortured Gifts) ends as soon as those
   cinders are spent and WarPigs then leaves the Helltide, so saving would
@@ -260,12 +312,14 @@ at the threshold. Switching the option off ends it at once in every mode
 (`Done: the option was switched off`). A task reset (town trip, death) in
 the same Helltide hour resumes it while a known chest is still affordable,
 in every mode. Hell's Prize chests are opened only by this run; with the
-option off nothing changes. In Farm mode the cinder plan still applies below
-250 (a Mystery you can reach comes before a regular chest). The overlay shows
-`Cinder run | Plan: ...` while it runs and `Saving cinders for the run at
-3000` while it saves. The save phase also holds the Helltide chests next to
-a tear event (Tears menu, *Open tear chests*); the free Pandemonium chests
-are still opened.
+option off nothing changes. With the run on, the 250 reserve rule (*Keep
+250 for a Mystery chest*) is not used: the run's order already puts a
+Mystery before the regular chests. After the run has spent every known
+chest it keeps the rest for the next chest it finds and hunts tears
+meanwhile. The overlay's Plan row shows `Cinder run: ...` while it runs and
+`Saving cinders for the run at 2000` while it saves. The save phase also
+holds the Helltide chests next to a tear event (*Open tear chests*); the
+free Pandemonium chests are still opened.
 
 ### Live data & stats menu
 
@@ -280,16 +334,33 @@ are still opened.
   (a corrected answer naming another zone is still used).
   There is no public source of chest positions in world coordinates, so chest
   positions are learned in game (above). Needs the host's `curl` API.
-- **Stats overlay** (on): Helltide time left and the next chest reset, the
-  zone (`[live]` when confirmed), cinders, cinders per minute and hour,
-  earned / spent / lost, chests (Mystery), deaths per Helltide, session and
-  all time, and the cinder plan's reserve and target. Position and rows
-  (All / Helltide only / Compact) are adjustable.
+- **Stats overlay** (on): a sectioned panel: region and RUNNING / SEARCHING /
+  IDLE; Helltide time left and the chest-reset wave (both with a bar);
+  CINDERS (balance, per minute and hour, a bar to the next goal: the target's
+  cost, the cinder run's threshold or the Mystery reserve, and this Helltide's
+  earned / spent / lost); NOW (activity, movement, in Helltide, plan); TARGET
+  (chest and cost, distance, seen or learned, position); STATS (chests,
+  Mystery, earned, spent, lost, deaths, time and cinders per minute for this
+  Helltide, the session and all time); OPENED THIS WAVE (the last three with
+  age and position, and how many known chests are still to open). Rebuilt at
+  most 4 times a second. Position and rows (All / Helltide only: the STATS
+  table shows this Helltide only / Compact: timers and cinders) are
+  adjustable.
 - **Web dashboard** (off): writes `dashboard\hr_data.js` every 10 s (5-60).
   Open `HelltideRevamped\dashboard\index.html` in a browser straight from the
-  disk (no server, no internet): live numbers and timers, a map of the
-  learned Helltide area, chest spots, your trail and route, the Helltide
-  history and the slowest code sections. It reloads by itself every 5 s.
+  disk (no server, no internet). It reloads by itself every 5 s and shows:
+  the chest-reset and Helltide-end countdowns (UTC, from your computer's
+  clock), cinders against the current goal, chests this session and all
+  time; a map drawn like the in-game map (drag to pan, wheel or +/- to zoom,
+  Fit, Follow, Border, Coords, a site filter) with the zone's patrol road,
+  the learned Helltide border, your position and trail, the target with a
+  line to it, every known chest site (`#id Name cost`, coloured opened /
+  target / seen / learned), ruptures seen this hour and the Blood Maiden;
+  the NOW card (activity, target, source, distance), the stats table (this
+  Helltide / session / all time), the chests opened this wave, recent events,
+  the Helltide history and the slowest code sections. *Background* lets you
+  pick a local map image and calibrate it with two points (kept in that
+  browser only).
 - **Reset all-time stats** clears the all-time totals and the history.
 
 Files are written only while the plugin is enabled: `learned\stats.txt` and

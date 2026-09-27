@@ -55,6 +55,7 @@ local function smart_tick()
     local okc, cinders = pcall(get_helltide_coin_cinders)
     if not okc or type(cinders) ~= 'number' then cinders = nil end
     local in_ht = utils.is_in_helltide()
+    tracker.hr_in_ht = in_ht -- QQT_Warpigz_v3: overlay / dashboard "In Helltide"
     guarded('learned chest atlas', tracker.hr_atlas.tick, now, in_ht)
     guarded('stats', tracker.hr_stats.tick, now, cinders, in_ht, tracker.hr_atlas.current_zone())
     guarded('Helltide fence', tracker.hr_fence.tick, now, in_ht, player_position)
@@ -115,7 +116,7 @@ end
 
 local function render_pulse()
     if not local_player or not player_position or not settings.enabled then return end
-    -- QQT_Warpigz_v3: stats overlay (text rebuilt every 0.5 s, protected).
+    -- QQT_Warpigz_v3: stats overlay (rebuilt every 0.25 s, protected).
     tracker.hr_overlay.render(get_time_since_inject(), player_position)
     if activity_lease.reason then -- QQT_Warpigz_v3
         graphics.text_3d("HelltideRevamped: " .. activity_lease.reason,

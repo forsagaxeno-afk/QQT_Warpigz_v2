@@ -6,6 +6,10 @@
 -- 'Dashboard update (s)' seconds (5-60, default 10) while 'Web dashboard' is
 -- on and the plugin is enabled:  window.HR_DATA = {...};
 -- The payload is bounded to 256 KB (the map layers are cut first).
+-- QQT_Warpigz_v3: + the zone's patrol road (a downsampled polyline built
+-- once per zone and cached), the reset wave, the target card, the cinder
+-- goal, chests opened this wave, chests still to open, rupture anchors seen
+-- this hour, the Maiden altar and named atlas spots (core/hr_view.lua).
 local json = require "core.hr_json"
 local store = require "core.hr_store"
 local stats = require "core.hr_stats"
@@ -16,6 +20,8 @@ local roads = require "core.hr_roads"
 local settings = require "core.settings"
 local tracker = require "core.tracker"
 local perf = require "core.perf"
+local view = require "core.hr_view" -- QQT_Warpigz_v3
+local enums = require "data.enums"   -- QQT_Warpigz_v3
 
 local M = {
     FILE = 'dashboard/hr_data.js',
@@ -26,9 +32,14 @@ local M = {
     FENCE_MAX = 4000,
     ATLAS_MAX = 200,
     HISTORY_MAX = 50,
+    ROAD_MAX = 400,         -- QQT_Warpigz_v3: patrol road points exported (every Nth waypoint)
+    TEARS_MAX = 20,         -- QQT_Warpigz_v3: rupture anchors kept for this hour
+    OPENED_MAX = 20,        -- QQT_Warpigz_v3: chests opened this wave in the file
 }
 
-local st = {write_at = nil, trail = {}, trail_at = nil, writes = 0}
+-- road = {zone, pts (flat x, y list)}: built once per zone (M.road_builds counts it).
+local st = {write_at = nil, trail = {}, trail_at = nil, writes = 0, road = nil, tears = {}}
+M.road_builds = 0
 
 local function period()
     local s = tonumber(settings.dashboard_sec) or 10
@@ -69,12 +80,124 @@ end
 local function atlas_list(limit)
     local out = {}
     local slot = clock.slot_id()
-    for _, s in ipairs(atlas.spots()) do
+    for i, s in ipairs(atlas.spots()) do
         if #out >= limit then break end
-        out[#out + 1] = {type = s.type, x = round(s.x), y = round(s.y), seen = s.seen, miss = s.miss,
-            status = spot_status(s, slot)}
+        out[#out + 1] = {id = i, type = s.type, x = round(s.x), y = round(s.y), seen = s.seen, miss = s.miss,
+            status = spot_status(s, slot), name = view.short_name(s.name), cost = round(s.cost)} -- QQT_Warpigz_v3: + id, name, cost
     end
     return out
+end
+
+-- QQT_Warpigz_v3: the zone's patrol loop as a flat [x, y, ...] list, every
+-- Nth waypoint (at most ROAD_MAX points). Built once per zone.
+local function road_for(zone)
+    if st.road and st.road.zone == zone then return st.road.pts end
+    local pts = {}
+    local file
+    for _, tp in ipairs(enums.helltide_tps) do
+        if tp.name == zone then file = tp.file end
+    end
+    local wps
+    if type(tracker.waypoints) == 'table' and tracker.waypoints_zone == zone and #tracker.waypoints > 0 then
+        wps = tracker.waypoints
+    elseif file then
+        local ok, list = pcall(require, 'waypoints.' .. file)
+        if ok and type(list) == 'table' then wps = list end
+    end
+    if wps and #wps > 1 then
+        local step = math.max(1, math.ceil(#wps / M.ROAD_MAX))
+        for i = 1, #wps, step do
+            local x, y = atlas.xyz(wps[i])
+            if x then pts[#pts + 1] = round(x); pts[#pts + 1] = round(y) end
+        end
+    end
+    M.road_builds = M.road_builds + 1
+    st.road = {zone = zone, pts = pts}
+    return pts
+end
+
+-- QQT_Warpigz_v3: rupture anchors seen this hour (the tear event's session).
+local function tears_now()
+    local hour = clock.hour_id()
+    local keep = {}
+    for _, t in ipairs(st.tears) do
+        if t.hour == hour then t.active = false; keep[#keep + 1] = t end
+    end
+    st.tears = keep
+    local tear = tracker.tear_event
+    local ok, sess = pcall(function() return tear and tear.session and tear.session() end)
+    if ok and type(sess) == 'table' then
+        local x, y = atlas.xyz(sess.anchor or sess.chamber_anchor)
+        if x then
+            local found = nil
+            for _, t in ipairs(keep) do
+                local dx, dy = t.x - x, t.y - y
+                if dx * dx + dy * dy <= 625 then found = t end
+            end
+            if not found then
+                found = {x = round(x), y = round(y), hour = hour, type = tostring(sess.rupture_type or 'Rupture')}
+                keep[#keep + 1] = found
+                while #keep > M.TEARS_MAX do table.remove(keep, 1) end
+            end
+            found.active = true
+        end
+    end
+    local out = {}
+    for i, t in ipairs(keep) do out[i] = {x = t.x, y = t.y, type = t.type, active = t.active} end
+    return out
+end
+
+local function opened_list()
+    local out = {}
+    for _, o in ipairs(view.opened_wave(M.OPENED_MAX)) do
+        local e = {name = view.short_name(o.name), cost = round(o.cost), t = o.t}
+        if o.x then e.x, e.y = round(o.x), round(o.y) end
+        out[#out + 1] = e
+    end
+    return out
+end
+
+local function opened_hour()
+    local out = {}
+    local hour = clock.hour_id()
+    for _, o in ipairs(stats.opened or {}) do
+        if o.hour == hour and o.x then
+            out[#out + 1] = {name = view.short_name(o.name), cost = round(o.cost), x = round(o.x), y = round(o.y),
+                t = o.t, wave = o.slot == clock.slot_id()}
+        end
+    end
+    return out
+end
+
+-- QQT_Warpigz_v3: wave, target, goal, now, opened, still to open.
+local function live_view(data, player_pos, cinders)
+    local w = view.wave()
+    data.wave = {i = w.i, n = w.n, start = w.start, next_min = w.next_min, next_in = round(w.next_in)}
+    local resets = {}
+    for i, m in ipairs(clock.RESET_MINUTES) do resets[i] = m end
+    data.reset_minutes = json.array(resets)
+    data.end_minute = clock.END_MINUTE
+    data.starts_in = round(clock.starts_in())
+    data.in_helltide = tracker.hr_in_ht == true
+    local tgt = view.target(player_pos)
+    if tgt then
+        data.target = {name = tgt.short, raw = tgt.name, cost = tgt.cost, source = tgt.source, mystery = tgt.mystery,
+            road = tgt.road, x = tgt.x and round(tgt.x) or nil, y = tgt.y and round(tgt.y) or nil,
+            dist = tgt.dist and round(tgt.dist) or nil}
+    end
+    local g, rs = view.goal(cinders, tgt)
+    data.goal = {cost = round(g.cost), label = g.label, ready = g.ready}
+    if rs then data.run = {on = rs.on == true, active = rs.active == true, saving = rs.saving == true,
+        threshold = round(rs.threshold)} end
+    local state = tracker.hr_task_state
+    data.now = {activity = view.activity(state), movement = view.movement(state, tgt), plan = view.plan()}
+    data.opened = json.array(opened_list())
+    data.opened_hour = json.array(opened_hour())
+    data.to_open = view.to_open()
+    data.region = view.region(data.zone) or ''
+    local maiden = enums.maiden_positions and enums.maiden_positions[data.zone]
+    local mx, my = atlas.xyz(maiden)
+    if mx then data.maiden = {round(mx), round(my)} end
 end
 
 local function top_perf()
@@ -150,13 +273,17 @@ function M.build(now, player_pos, layers)
             if x and #chests < 60 then
                 chests[#chests + 1] = {type = e.name == 'usz_rewardGizmo_Uber' and 'mystery' or 'regular',
                     x = round(x), y = round(y), status = key == target_key and 'target'
-                        or (e.predicted and 'predicted' or 'remembered')}
+                        or (e.predicted and 'predicted' or 'remembered'),
+                    name = view.short_name(e.name), cost = round(e.cost)} -- QQT_Warpigz_v3: + name, cost
             end
             if key == target_key then route = e.route end
         end
     end
     data.chests = json.array(chests)
+    live_view(data, player_pos, cinders) -- QQT_Warpigz_v3
     if layers < 3 then
+        data.tears = json.array(tears_now()) -- QQT_Warpigz_v3
+        data.road = {zone = data.zone, pts = json.raw(flat_pairs(road_for(data.zone)))} -- QQT_Warpigz_v3
         data.atlas = json.array(atlas_list(M.ATLAS_MAX))
         local trail = {}
         for i, p in ipairs(st.trail) do trail[i] = p end
@@ -202,6 +329,6 @@ function M.tick(now, player_pos, in_helltide)
 end
 
 function M.writes() return st.writes end
-function M._reset() st = {write_at = nil, trail = {}, trail_at = nil, writes = 0} end
+function M._reset() st = {write_at = nil, trail = {}, trail_at = nil, writes = 0, road = nil, tears = {}}; M.road_builds = 0 end
 
 return M

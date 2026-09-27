@@ -1,8 +1,16 @@
 -- QQT_Warpigz_v3 (Q4): cinder run — "Spend cinders on chests at".
 --
--- Off by default. With the option on:
+-- QQT_Warpigz_v3: which option turns it on depends on the effective mode:
+--   * Farm mode: the Smart farm goal "Farm cinders until" (settings.farm_goal,
+--     ON by default): farm (tears first) up to the amount, then the chest
+--     run, then farm again; the last minutes spend the rest;
+--   * Warplan / WarPigs: "Spend cinders on chests at" (settings.cinder_run,
+--     off by default, unchanged).
+-- Both use the amount settings.cinder_run_at (default 2000, was 3000).
+--
+-- With the option on:
 --   * save phase (HR on its own, Farm or Warplan mode): below the set amount
---     of cinders (default 3000) no Helltide chest is opened; the chests seen
+--     of cinders (default 2000) no Helltide chest is opened; the chests seen
 --     are remembered (and learned) so the run can go back to them. In the
 --     last minutes of the Helltide ('Spend everything in the last (min)', at
 --     least 2) the saved cinders are spent by the run's order, so they are
@@ -43,7 +51,7 @@ local M = {
     HELLS_PRIZE = 'Warplan_Helltide_HellsPrize',
     HELLS_PRIZE_COST = 666,
     MYSTERY = 'usz_rewardGizmo_Uber',
-    DEFAULT_AT = 3000,
+    DEFAULT_AT = 2000,      -- QQT_Warpigz_v3: was 3000 (the Smart farm goal default)
     MIN_AT = 250,
     MAX_AT = 10000,
     MIN_COST = 75,          -- the cheapest Helltide chest (no chest known)
@@ -110,9 +118,19 @@ local function log(text)
     if console and console.print then console.print('[CINDER RUN] ' .. text) end
 end
 
--- Option on (and Helltide chests on).
+local function farm_mode()
+    if mode_mod == nil then external() end
+    if not mode_mod or type(mode_mod.is_farm) ~= 'function' then return false end
+    local ok, v = pcall(mode_mod.is_farm)
+    return ok and v == true
+end
+
+-- Option on (and Helltide chests on). QQT_Warpigz_v3: Farm mode: the Smart
+-- farm goal; Warplan / WarPigs: "Spend cinders on chests at".
 function M.on()
-    return settings.cinder_run == true and settings.helltide_chest ~= false
+    if settings.helltide_chest == false then return false end
+    if farm_mode() then return settings.farm_goal == true end
+    return settings.cinder_run == true
 end
 
 function M.threshold()

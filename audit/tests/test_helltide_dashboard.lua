@@ -196,13 +196,211 @@ R.case('option off: zero writes; the page ships and reads the data file', functi
     ok(page:find('window.HR_DATA', 1, true) ~= nil)
     ok(page:find('http', 1, true) == nil or not page:find('src="http', 1, true), 'no external resources')
     ok(not page:find('<link', 1, true), 'no external stylesheet')
-    for _, tab in ipairs({'data-tab="live"', 'data-tab="map"', 'data-tab="history"', 'data-tab="perf"'}) do
-        ok(page:find(tab, 1, true) ~= nil, tab)
+    -- QQT_Warpigz_v3: one page (header, KPI cards, map, now, stats, opened, history, performance).
+    for _, id in ipairs({'id="k-reset"', 'id="k-end"', 'id="k-cind"', 'id="k-sess"', 'id="k-all"', 'id="map"',
+        'id="filter"', 'id="fit"', 'id="border"', 'id="coords"', 'id="follow"', 'id="bgbtn"', 'id="activity"',
+        'id="stats"', 'id="opened"', 'id="events"', 'id="hist"', 'id="perftab"', 'id="refresh"'}) do
+        ok(page:find(id, 1, true) ~= nil, id)
     end
+    ok(page:find('<title>HelltideRevamped — Live</title>', 1, true) ~= nil, 'title')
+    for _, word in ipairs({'Senq', 'Licensed', 'lifetime'}) do
+        ok(not page:find(word, 1, true), 'no third-party branding: ' .. word)
+    end
+    ok(not page:find('<img', 1, true) and not page:find('url(', 1, true), 'no embedded or linked images')
     local keep = io.open(SUITE_ROOT .. '/HelltideRevamped/dashboard/.keep', 'r')
     ok(keep ~= nil, 'the dashboard folder ships'); keep:close()
     keep = io.open(SUITE_ROOT .. '/HelltideRevamped/learned/.keep', 'r')
     ok(keep ~= nil, 'the learned folder ships'); keep:close()
+end)
+
+-- ── QQT_Warpigz_v3: the live view (wave, target, goal, opened, road) ─────
+local function full_session()
+    local s = session({cinders = 180, zone = 'Kehj_Oasis'})
+    s.atlas.set_zone('Kehj_Oasis')
+    s.set('dashboard', true)
+    s.tracker.hr_stats = s.stats
+    s.tracker.hr_atlas = s.atlas
+    s.tracker.hr_in_ht = true
+    s.tracker.hr_task_state = 'MOVING_TO_REMEMBERED_CHEST'
+    s.tracker.hr_get_remembered = function()
+        return {k1 = {name = 'Helltide_RewardChest_Random', cost = 75, position = v(30, 40), route = {}},
+            k2 = {name = 'usz_rewardGizmo_Uber', cost = 250, position = v(-100, 0)},
+            k3 = {name = 'usz_rewardGizmo_Rings', cost = 75, position = v(0, -90), predicted = true}}, 'k1'
+    end
+    return s
+end
+
+local function decode_keys(body)
+    -- Top-level keys of the payload object (depth-1 scan of the JSON text).
+    local keys, depth, i = {}, 0, 1
+    while i <= #body do
+        local c = body:sub(i, i)
+        if c == '"' then
+            local j = i + 1
+            while body:sub(j, j) ~= '"' do if body:sub(j, j) == '\\' then j = j + 1 end; j = j + 1 end
+            if depth == 1 and body:sub(j + 1, j + 1) == ':' then keys[body:sub(i + 1, j - 1)] = true end
+            i = j
+        elseif c == '{' or c == '[' then depth = depth + 1
+        elseif c == '}' or c == ']' then depth = depth - 1 end
+        i = i + 1
+    end
+    return keys
+end
+
+R.case('live view: reset wave, timers, goal, target card, now, still to open', function()
+    local s = full_session()
+    s.at_minute(21, 40)
+    s.pos = v(0, 0)
+    s.dash.tick(s.now, s.pos, true)
+    local body = payload(s.file('dashboard/hr_data.js'))
+    json_check(body)
+    for _, key in ipairs({'"wave":{"i":3,"n":6,"next_in":500,"next_min":30,"start":20}',
+        '"reset_minutes":[0,15,20,30,40,45]', '"end_minute":55', '"starts_in":0', '"in_helltide":true',
+        '"goal":{"cost":75,"label":"Random chest","ready":true}', '"region":"Kehjistan"',
+        '"to_open":{"learned":0,"mystery":1,"regular":1}', '"activity":"Walking to chest"',
+        '"movement":"Patrol road, then off-road"', '"maiden":[121,-747]', '"tears":[]', '"opened":[]'}) do
+        ok(body:find(key, 1, true) ~= nil, 'has ' .. key)
+    end
+    local target = body:match('"target":(%b{})')
+    ok(target ~= nil, 'target card')
+    for _, key in ipairs({'"name":"Random chest"', '"cost":75', '"dist":50', '"source":"seen"', '"x":30', '"y":40',
+        '"road":true', '"mystery":false'}) do
+        ok(target:find(key, 1, true) ~= nil, 'target ' .. key)
+    end
+    -- the cinder goal: short of a Mystery target
+    s.cinders = 100
+    s.tracker.hr_get_remembered = function()
+        return {k2 = {name = 'usz_rewardGizmo_Uber', cost = 250, position = v(-100, 0), predicted = true}}, 'k2'
+    end
+    s.advance(11); s.dash.tick(s.now, s.pos, true)
+    body = payload(s.file('dashboard/hr_data.js'))
+    ok(body:find('"goal":{"cost":250,"label":"Mystery","ready":false}', 1, true) ~= nil, 'Mystery goal not ready')
+    ok(body:match('"target":(%b{})'):find('"source":"learned"', 1, true) ~= nil, 'a predicted chest is a learned target')
+    -- after the Helltide: next one starts in 3 minutes; no target, the plain goal
+    s.tracker.hr_get_remembered = nil
+    s.tracker.hr_task_state = nil
+    s.advance(11); s.at_minute(57)
+    s.dash.tick(s.now, s.pos, false)
+    body = payload(s.file('dashboard/hr_data.js'))
+    json_check(body)
+    ok(body:find('"starts_in":180', 1, true) ~= nil and body:find('"active":false', 1, true) ~= nil, 'between Helltides')
+    ok(body:find('"target":', 1, true) == nil, 'no target')
+    ok(body:find('"activity":"Idle"', 1, true) ~= nil, 'idle')
+end)
+
+R.case('opened this wave: position, age and wave; a reset boundary starts a new list', function()
+    local s = full_session()
+    s.at_minute(16)
+    s.stats.on_chest_opened('usz_rewardGizmo_Uber', 250, v(377.4, -622.2))
+    s.stats.on_chest_opened('usz_rewardGizmo_Gloves', 75, v(310, -659))
+    s.stats.on_chest_opened('silent', 0, v(1, 1))            -- not a cinder chest
+    eq(#s.stats.opened, 2, 'two chests recorded')
+    s.dash.tick(s.now, s.pos, true)
+    local body = payload(s.file('dashboard/hr_data.js'))
+    local opened = body:match('"opened":(%b[])')
+    ok(opened:find('{"cost":75,"name":"Gloves","t":' .. s.epoch .. ',"x":310,"y":-659}', 1, true) ~= nil, opened)
+    ok(opened:find('"name":"Gloves"', 1, true) < opened:find('"name":"Mystery"', 1, true), 'newest first')
+    ok(body:match('"opened_hour":(%b[])'):find('"wave":true', 1, true) ~= nil)
+    s.at_minute(21)                                          -- the :20 reset
+    s.advance(11); s.dash.tick(s.now, s.pos, true)
+    body = payload(s.file('dashboard/hr_data.js'))
+    ok(body:find('"opened":[]', 1, true) ~= nil, 'a new wave starts empty')
+    local hour = body:match('"opened_hour":(%b[])')
+    ok(hour:find('"wave":false', 1, true) ~= nil and hour:find('"name":"Mystery"', 1, true) ~= nil, 'the hour keeps them')
+    for i = 1, 60 do s.stats.on_chest_opened('usz_rewardGizmo_Rings', 75, v(i, i)) end
+    eq(#s.stats.opened, s.stats.OPENED_MAX, 'the ring is bounded')
+    s.advance(11); s.dash.tick(s.now, s.pos, true)
+    local _, n = payload(s.file('dashboard/hr_data.js')):match('"opened":(%b[])'):gsub('"name":', '')
+    eq(n, s.dash.OPENED_MAX, 'the file lists at most OPENED_MAX of this wave')
+end)
+
+R.case('the patrol road: a downsampled polyline built once per zone, kept in every write', function()
+    local s = full_session()
+    for _ = 1, 5 do s.advance(11); s.dash.tick(s.now, s.pos, true) end
+    eq(s.dash.road_builds, 1, 'built once for Kehj_Oasis')
+    local body = payload(s.file('dashboard/hr_data.js'))
+    local pts = body:match('"road":{"pts":(%b[]),"zone":"Kehj_Oasis"}')
+    ok(pts ~= nil, 'road with its zone')
+    local _, commas = pts:gsub(',', '')
+    local n = (commas + 1) / 2
+    ok(n >= 100 and n <= s.dash.ROAD_MAX, 'downsampled road points: ' .. n)
+    ok(pts:find('^%[216,%-601,'), 'starts at the loop start (every Nth point from the first)')
+    s.atlas.set_zone('Step_South')
+    s.advance(11); s.dash.tick(s.now, s.pos, true)
+    s.advance(11); s.dash.tick(s.now, s.pos, true)
+    eq(s.dash.road_builds, 2, 'once more for the next zone')
+    body = payload(s.file('dashboard/hr_data.js'))
+    ok(body:find('"road":{"pts":[', 1, true) and body:find('"zone":"Step_South"}', 1, true), 'Step_South road')
+    s.atlas.set_zone('Naha_Somewhere')                        -- no patrol loop
+    s.advance(11); s.dash.tick(s.now, s.pos, true)
+    ok(payload(s.file('dashboard/hr_data.js')):find('"road":{"pts":[],"zone":"Naha_Somewhere"}', 1, true) ~= nil, 'empty road')
+end)
+
+R.case('stats scopes, rupture anchors and a full map stay well under 300 KB', function()
+    local s = full_session()
+    s.at_minute(10)
+    s.stats.tick(s.now, 0, true, 'Kehj_Oasis'); s.advance(0.3)
+    s.stats.tick(s.now, 300, true, 'Kehj_Oasis')
+    s.stats.on_chest_opened('usz_rewardGizmo_Uber', 250, v(1, 1)); s.stats.on_death()
+    local sess = {anchor = v(500, 500), rupture_type = 'Pandemonium'}
+    s.tracker.tear_event = {session = function() return sess end}
+    for i = 1, 200 do s.atlas.observe(i % 7 == 0 and 'usz_rewardGizmo_Uber' or 'usz_rewardGizmo_Amulet', 125, v(i * 11, -i * 7), true) end
+    s.fence.seed('Kehj_Oasis', (function()
+        local wps = {}
+        for i = 1, 4000 do wps[i] = v((i % 80) * 20, math.floor(i / 80) * 20) end
+        return wps
+    end)())
+    for i = 1, 50 do s.stats.history[i] = {hour_id = H.HOUR - i * 3600, zone = 'Kehj_Oasis', earned = 900, spent = 800,
+        lost = 0, chests = 9, mystery = 1, deaths = 0, secs = 3300} end
+    for i = 1, 300 do s.pos = v(i, i); s.advance(5.1); s.dash.tick(s.now, s.pos, true) end
+    sess = {anchor = v(900, 100), rupture_type = 'Pandemonium'}
+    s.advance(11); s.dash.tick(s.now, s.pos, true)
+    local text = s.file('dashboard/hr_data.js')
+    ok(#text < 300 * 1024, 'full payload size ' .. #text)
+    local body = payload(text)
+    json_check(body)
+    ok(body:find('"fence_in":[', 1, true) ~= nil, 'the full map fits')
+    local tears = body:match('"tears":(%b[])')
+    ok(tears:find('{"active":false,"type":"Pandemonium","x":500,"y":500}', 1, true) ~= nil, tears)
+    ok(tears:find('{"active":true,"type":"Pandemonium","x":900,"y":100}', 1, true) ~= nil, tears)
+    local sc = body:match('"session":(%b{})')
+    ok(sc:find('"chests":1', 1, true) and sc:find('"mystery":1', 1, true) and sc:find('"deaths":1', 1, true)
+        and sc:find('"earned":300', 1, true), sc)
+    ok(body:match('"alltime":(%b{})'):find('"chests":1', 1, true) ~= nil)
+    ok(body:match('"helltide":(%b{})'):find('"earned":300', 1, true) ~= nil)
+end)
+
+R.case('the page only reads fields the data file has (static check), and uses the new ones', function()
+    local s = full_session()
+    s.tracker.hr_chest_order = {last_plan = {reserve = 250, target_name = 'usz_rewardGizmo_Uber', target_pos = v(5, 5),
+        target_key = 'k9', class = 0}}
+    s.tracker.hr_cinder_run = {status = function() return {on = true, active = false, saving = true, threshold = 3000} end}
+    s.tracker.tear_event = {session = function() return {anchor = v(50, 50)} end}
+    s.stats.history[1] = {hour_id = H.HOUR - 3600, zone = 'Kehj_Oasis', earned = 1, spent = 1, lost = 0, chests = 1,
+        mystery = 0, deaths = 0, secs = 60}
+    s.pos = v(0, 0)
+    s.dash.tick(s.now, s.pos, true)
+    local body = payload(s.file('dashboard/hr_data.js'))
+    json_check(body)
+    local keys = decode_keys(body)
+    ok(body:find('"goal":{"cost":3000,"label":"Cinder run","ready":false}', 1, true) ~= nil, 'saving: the run threshold is the goal')
+    ok(body:find('"plan":"Saving cinders for the run at 3000"', 1, true) ~= nil, 'plan text')
+    local f = assert(io.open(SUITE_ROOT .. '/HelltideRevamped/dashboard/index.html', 'r'))
+    local page = f:read('*a'); f:close()
+    local used = {}
+    for field in page:gmatch('[^%w_%.]d%.([%a_][%w_]*)') do used[field] = true end
+    for field in page:gmatch('last%.([%a_][%w_]*)') do used[field] = true end
+    local n = 0
+    for field in pairs(used) do
+        n = n + 1
+        ok(keys[field], 'the page reads d.' .. field .. ', which the data file has')
+    end
+    ok(n >= 20, 'fields found in the page: ' .. n)
+    for _, field in ipairs({'reset_minutes', 'end_minute', 'goal', 'target', 'now', 'opened', 'opened_hour', 'to_open',
+        'road', 'tears', 'maiden', 'in_helltide', 'region', 'helltide', 'session', 'alltime', 'fence_in', 'fence_cell',
+        'atlas', 'chests', 'trail', 'route', 'player', 'history', 'perf', 'events', 'rates', 'cinders'}) do
+        ok(used[field], 'the page uses d.' .. field)
+    end
 end)
 
 R.finish()

@@ -15,6 +15,7 @@ local MYSTERY, GLOVES, RING = 'usz_rewardGizmo_Uber', 'usz_rewardGizmo_Gloves', 
 local function session(opts)
     local s = H.new(opts)
     s.set('mode', 1) -- Farm
+    s.set('farm_goal', false) -- QQT_Warpigz_v3: goal off (the pre-goal smart order + cinder plan path)
     s.order = s.require('core.hr_chest_order')
     s.atlas = s.require('core.hr_atlas')
     s.fence = s.require('core.hr_fence')

@@ -2,6 +2,36 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.2.0] — 2026-09-27
+
+![QQT Warpigz Suite v3](https://raw.githubusercontent.com/forsagaxeno-afk/QQT_Warpigz_v2/claude/qqt-diablo4-plugins-orchestrator-4439v5/assets/branding/qqt-warpigz-suite-v3.png)
+
+**QQT_Warpigz_v3 3.2.0**: HelltideRevamped 2.5.0 gets a simpler **Smart farm** menu that follows the way you farm a Helltide, a live **web dashboard** with a map, a redesigned **in-game overlay**, and a fix for the bot fighting ordinary monsters next to a chest for minutes. New: a step-by-step English user guide, `docs/GUIDE_EN.md`. Only the `HelltideRevamped` folder changed; replace it (or all ten folders). Settings are kept.
+
+### Changed
+
+- **One "Smart farm" menu in Farm mode**, in the order you play:
+  1. **Goal**: *Farm cinders until* (new, **on**, *Cinders* **2000**; a value you saved earlier is kept), then open chests in this order: Hell's Prize (666, when you took that War Plan node) > Mystery (250) > the rest, nearest first. *Spend all in the last (min)* (5) spends what you hold before the Helltide ends. With the goal off, *Keep 250 for a Mystery chest* and *Max carry above reserve* work as before.
+  2. **How to farm: tears first**: *Hunt tears*, *Stand on chargeable tears*, *Fight Realmwalker*, *Open tear chests*, *Skip legacy Helltide events*.
+  3. **Movement and logic**: *Smart chest order*, *Road routing*, *Learn while farming*, *Stay inside the Helltide*, *Pin the target on the map*, *Forget learned data*.
+  4. **Advanced**: every tuning slider (tear search and pass-by distance, ritual stay radius, hold-area tolerance, linger, Realmwalker wait, pause tears at cinders, max carry, event radius, events until minute).
+  When WarPigs runs Helltide, the menu says so and shows the Warplan options (*Spend cinders on chests at* keeps its own *Spend all in the last (min)*).
+- **In-game overlay** redesigned: Helltide ends, wave, cinders (+/min, /hr, bar to the goal, earned / spent / lost), Now, Target, Stats (this Helltide / session / all time), Opened this wave. Rebuilt at most 4 times a second.
+- **Web dashboard** (`HelltideRevamped/dashboard/index.html`, open it from disk after turning on *Web dashboard*): chest-reset and Helltide-end countdowns, cinders vs goal, chest counts, a map (patrol road, learned Helltide border, player trail, target line, chests labelled with id, name, cost and coordinates; pan, zoom, Fit, Border, Coords, Follow, site filter, optional background image calibrated by two clicks), Now panel, stats table, chests opened this wave, history and performance.
+
+### Fixed
+
+- **Farm mode: the bot no longer fights ordinary monsters next to a chest for minutes.** *Farm Cinder Threshold* (farm around an almost affordable chest, with no time limit and no tear search) also ran in Farm mode; it is now Warplan only. And a steady stream of plain monsters could hold the bot in one spot for 4–5 minutes: after 25 s of fighting within 45 m of one spot it now moves on along the patrol road (plain monsters skipped for up to 45 s or 50 m; elites, champions and bosses are still fought), so it keeps finding tears.
+- The overlay and dashboard no longer show a finished cinder run's plan or target under WarPigs / Warplan.
+
+### Needs a live check
+
+- Map orientation on the dashboard (world drawn rotated 45°), overlay fit at your resolution, the 25 s / 45 m / 50 m move-on numbers in real monster density, whether 2000 cinders is reachable in a typical hour.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py --luajit require`: 84 test files × (Lua 5.4 + LuaJIT), 168 runs, 0 failures. New: `test_helltide_smart_farm_flow`, `test_helltide_overlay`; extended `test_helltide_dashboard`.
+
 ## [3.1.1] — 2026-09-27
 
 **QQT_Warpigz_v3 3.1.1** is a bug-fix release on top of 3.1.0: two minor issues found by the post-release integration audit. Upgrade by replacing the `SilentRaven` and `Rosie` folders (or all ten, as for 3.1.0); settings are kept.

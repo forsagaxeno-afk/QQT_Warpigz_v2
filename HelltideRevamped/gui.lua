@@ -1,5 +1,6 @@
 local gui = {}
-local version = "v2.4.0"
+local tracker = require "core.tracker" -- QQT_Warpigz_v3: tracker.hr_external (WarPigs drives: Warplan)
+local version = "v2.5.0"
 local plugin_label = "helltide_revamped"
 
 local function create_checkbox(value, key)
@@ -56,7 +57,7 @@ gui.elements = {
     maiden_disable_cinders = slider_int:new(0, 1000, 0, get_hash(plugin_label .. "_maiden_disable_cinders")),
     manage_orbwalker = create_checkbox(false, plugin_label .. "manage_orbwalker"),
     -- Pandemonium Ruptures (Farm mode only), ported from upstream HR 2.5.0.
-    ruptures_tree = tree_node:new(3),
+    -- QQT_Warpigz_v3: shown in Smart farm (the "Tears (Farm mode)" tree is gone).
     hunt_rift_toggle = create_checkbox(true, plugin_label .. "hunt_rift_toggle"),
     -- QQT_Warpigz_v3 (rc.2, user approved): on by default again under the
     -- original 3.0.0 menu id (rc.1 had moved it to a "_v3" id, default off):
@@ -93,9 +94,17 @@ gui.elements = {
     event_radius = slider_int:new(12, 80, 40, get_hash(plugin_label .. "_event_radius")),
     event_until_min = slider_int:new(30, 55, 45, get_hash(plugin_label .. "_event_until_min")),
     map_pin = create_checkbox(false, plugin_label .. "map_pin"),
-    -- QQT_Warpigz_v3 (Q4): cinder run (every mode).
+    -- QQT_Warpigz_v3 (Q4): cinder run. 'cinder_run' is the Warplan / WarPigs
+    -- option "Spend cinders on chests at" (id and default unchanged).
     cinder_run = create_checkbox(false, plugin_label .. "cinder_run"),
-    cinder_run_at = slider_int:new(250, 10000, 3000, get_hash(plugin_label .. "_cinder_run_at")),
+    -- QQT_Warpigz_v3: Smart farm goal (Farm mode): "Farm cinders until N,
+    -- then open chests". A new id, on by default: the goal IS the cinder run
+    -- in Farm mode (core/hr_cinder_run.lua on()); the amount is the shared
+    -- run threshold 'cinder_run_at' (same meaning in both modes, the stored
+    -- value is kept; default 3000 -> 2000, the amount the Farm flow aims at).
+    farm_goal = create_checkbox(true, plugin_label .. "farm_goal"),
+    cinder_run_at = slider_int:new(250, 10000, 2000, get_hash(plugin_label .. "_cinder_run_at")),
+    advanced_tree = tree_node:new(2), -- QQT_Warpigz_v3: Smart farm > Advanced
     forget_zone = button:new(get_hash(plugin_label .. "_forget_zone")),
     -- QQT_Warpigz_v3: live data & stats.
     live_tree = tree_node:new(1),
@@ -119,45 +128,19 @@ local function clamp_combo(el, items)
     if ok and type(v) == "number" and (v < 0 or v >= #items) then pcall(el.set, el, 0) end
 end
 
-local function render_ruptures()
-    local e = gui.elements
-    -- QQT_Warpigz_v2 (2.2.1): Season 15 calls these Tears; the Season 14
-    -- only options (Surging/Colossal filters and priority, Deathtoll Chamber,
-    -- scan log) are no longer shown and stay at fixed values (core/settings.lua).
-    if not e.ruptures_tree:push("Tears (Farm mode)") then return end
-    e.hunt_rift_toggle:render("Hunt tears",
-        "Farm mode: go to tears first: kill the cultists, close the golden tears, open the chests, then go back to chests/monsters. Rosie's pickup waits while you are at the tear event until it is over (Realmwalker killed, or none within 10 s after the rupture completes); then the bot collects the event's drops before it moves on. The walk to a tear and back after a death are never paused.") -- QQT_Warpigz_v3 (Q3, rc.2 review)
-    if e.hunt_rift_toggle:get() then
-        e.rupture_replace_local_events:render("Skip legacy Helltide events",
-            "On by default. Farm mode: never walk to flame pillars / ravenous soul pyres while hunting tears (Event radius and Events until minute then do nothing). Untick it to run those events too; tears in reach are always taken before events.") -- QQT_Warpigz_v3 (rc.2)
-        e.rupture_max_cinders:render("  Pause hunt at cinders",
-            "Stop looking for NEW ruptures once you hold this many cinders so they get spent on chests first (0 = always hunt). A rupture already in progress is finished.", 1)
-        e.tear_search_dist:render("  Search distance", "Scan this far for ritual rings, rupture gizmos and active tears", 5)
-        e.tear_passby_dist:render("  Pass-by distance", "While walking to a remembered chest or farming cinders, detour for ruptures this close", 1)
-        e.tear_event_radius:render("  Ritual stay radius", "Stay within this distance of the rupture anchor while closing tears", 1)
-        e.tear_circle_radius:render("  Hold-area tolerance", "How far from the ritual circle centre before walking back", 1)
-        e.rupture_linger_sec:render("  Linger after last tear", "Seconds to stay in the ring after the tears are gone (more kills, rupture rewards)", 1)
-        e.rupture_do_realmwalker:render("  Fight Realmwalker",
-            "Wait for and kill the Realmwalker when it spawns after tears.")
-        if e.rupture_do_realmwalker:get() then
-            e.rupture_rw_wait_sec:render("    Realmwalker wait (sec)", "How long to wait for the Realmwalker to spawn", 1)
-        end
-        -- QQT_Warpigz_v3 (Q2): the bot now stays until the tear closes.
-        e.tear_use_charge_ring:render("  Stand on chargeable tears",
-            "Walk onto each golden tear and stay inside its circle while your rotation kills the adds, until the tear closes (at most 90 s inside one tear), then the next tear. No chest or Rosie pickup detour meanwhile.")
-        e.rupture_open_chests:render("  Open tear chests",
-            "Open Pandemonium chests (free) and affordable helltide chests inside the ritual ring, once the tear you stand in is closed. Requires Open Helltide Chest.") -- QQT_Warpigz_v3 (Q2)
-    end
-    e.ruptures_tree:pop()
-end
-
--- QQT_Warpigz_v3 (Q4): cinder run (core/hr_cinder_run.lua), Farm and Warplan.
+-- QQT_Warpigz_v3: Warplan / WarPigs: the cinder run option (Settings,
+-- Warplan mode only; Farm mode has the Smart farm goal instead).
 local function render_cinder_run()
     local e = gui.elements
     e.cinder_run:render("Spend cinders on chests at",
-        "Off by default. On: below this many cinders no Helltide chest is opened (they are remembered; the last minutes of the Helltide, 'Spend everything in the last (min)' but at least 2, spend the savings; not under WarPigs, whose Helltide step ends once its War Plan cinders are spent). Holding at least this many cinders starts a chest run (Farm and Warplan / WarPigs): Hell's Prize first (666, War Plan node Hell's Prize), then Mystery chests (250), then the rest nearest first, using the chests in sight, remembered and learned spots. No new tears are hunted while the run has a chest to go to. The run ends when the cinders fall below the cheapest known chest. Hell's Prize chests are opened only by this run. Requires Open Helltide Chest.") -- QQT_Warpigz_v3 (Q4): save phase
+        "Warplan mode (and WarPigs). Off by default. On: holding at least this many cinders starts a chest run: Hell's Prize first (666, War Plan node Hell's Prize), then Mystery chests (250), then the rest nearest first, using the chests in sight, remembered and learned spots. The run ends when the cinders fall below the cheapest known chest. Manual Warplan: below the amount no Helltide chest is opened (they are remembered; the last minutes of the Helltide spend the savings). Under WarPigs nothing is saved: its Helltide step ends once its War Plan cinders are spent. Hell's Prize chests are opened only by this run. Requires Open Helltide Chest.")
     if e.cinder_run:get() then
         e.cinder_run_at:render("  Cinders", "Start the chest run at this many cinders", 1)
+        -- QQT_Warpigz_v3: the save phase's end (core/hr_cinder_run.lua
+        -- dump_minutes) was set in the Smart farm tree, which Warplan no
+        -- longer shows; kept reachable here.
+        e.dump_min:render("  Spend all in the last (min)",
+            "In the last minutes of the Helltide the cinders held are spent on chests in the run order, even below the amount (at least 2 min)", 1)
     end
 end
 
@@ -168,29 +151,84 @@ local function has_curl()
     return type(c) == "table" and type(c.http_get) == "function"
 end
 
+-- QQT_Warpigz_v3: Farm mode, one section in the order of the Helltide flow:
+-- 1. the goal (farm cinders, then the chest run), 2. how to farm (tears
+-- first), 3. movement and logic, then the tuning sliders under Advanced.
+local function header(text)
+    if type(render_menu_header) == "function" then render_menu_header(text) end
+end
+
+local function render_advanced()
+    local e = gui.elements
+    if not e.advanced_tree:push("Advanced") then return end
+    e.tear_search_dist:render("Tear search distance",
+        "How far the bot looks for tears (ritual rings, rupture stones, open tears) while patrolling or fighting. Higher finds more tears, lower keeps it on the road.", 5)
+    e.tear_passby_dist:render("Pass-by distance",
+        "While it walks to a chest the bot only turns aside for a tear this close", 1)
+    e.tear_event_radius:render("Ritual stay radius",
+        "While closing tears the bot stays within this distance of the ritual", 1)
+    e.tear_circle_radius:render("Hold-area tolerance",
+        "How far the bot may drift from the ritual circle centre before it walks back", 1)
+    e.rupture_linger_sec:render("Linger after last tear",
+        "Seconds the bot stays in the ring after the last tear is gone (more kills, rupture rewards)", 1)
+    e.rupture_rw_wait_sec:render("Realmwalker wait (sec)",
+        "How long the bot waits for the Realmwalker to spawn after the tears (Fight Realmwalker)", 1)
+    e.rupture_max_cinders:render("Pause tears at cinders",
+        "0 = off (recommended: the goal already stops new tears while the chest run has a chest to go to). Otherwise no NEW tear is started once you hold this many cinders; a tear in progress is finished.", 1)
+    e.max_carry:render("Max carry above reserve",
+        "Goal off only: with 'Keep 250 for a Mystery chest', regular chests are opened anyway once you hold more than 250 plus this many cinders", 1)
+    e.event_radius:render("Event radius (m)",
+        "Legacy events (pyres / flame pillars) only: walk to one up to this far. Only used when 'Skip legacy Helltide events' is off or tears are not hunted (Warplan: 12 m)", 1)
+    e.event_until_min:render("Events until minute (UTC)",
+        "Legacy events only: start one only before this minute of the hour (Warplan: 45)", 1)
+    e.advanced_tree:pop()
+end
+
 local function render_smart_farm()
     local e = gui.elements
-    if not e.smart_tree:push("Smart farm (Farm mode)") then return end
-    e.smart_order:render("Smart chest order",
-        "Farm mode: Mystery chests first, chests you saw before learned (predicted) spots, nearest first along the patrol road, no ping-pong across the map. After each chest reset (UTC :00/:15/:20/:30/:40/:45) fresh Mystery chests come first again. Warplan / WarPigs keep the plain order.")
-    e.cinder_plan:render("Cinder plan",
-        "Farm mode: keep 250 cinders for a known Mystery chest you can still reach, counting what you are expected to earn before the Helltide ends. Regular chests are opened when the reserve stays, when income refills it, when you carry too many, or in the last minutes.")
-    if e.cinder_plan:get() then
-        e.max_carry:render("  Max carry above reserve", "Open regular chests anyway once you hold more than the reserve plus this many cinders", 1)
-        e.dump_min:render("  Spend everything in the last (min)", "In the last minutes of the Helltide every affordable chest is opened", 1)
+    if not e.smart_tree:push("Smart farm") then return end
+    header("1. Goal: farm cinders, then open chests")
+    e.farm_goal:render("Farm cinders until",
+        "On by default. Below this many cinders the bot only farms (tears first) and opens no Helltide chest: the chests it sees are remembered and learned. At the goal it goes to open chests: Hell's Prize (666) > Mystery (250) > the rest nearest first, along the road, then farms again until the goal. In the last minutes of the Helltide it spends whatever it holds, so no cinders are lost. Off: chests are opened as soon as they are affordable (the old way). Requires Open Helltide Chest.")
+    if e.farm_goal:get() then
+        e.cinder_run_at:render("  Cinders", "The goal: the chest run starts at this many cinders (default 2000)", 1)
+        e.dump_min:render("  Spend all in the last (min)",
+            "In the last minutes of the Helltide every cinder is spent on chests, even below the goal (at least 2 min)", 1)
+    else
+        e.cinder_plan:render("Keep 250 for a Mystery chest",
+            "Goal off only. Keep 250 cinders for a known Mystery chest you can still reach (counting what you will earn before the Helltide ends); regular chests are opened when the 250 stays, when you carry too many (Advanced), or in the last minutes.")
+        if e.cinder_plan:get() then
+            e.dump_min:render("  Spend all in the last (min)", "In the last minutes of the Helltide every affordable chest is opened", 1)
+        end
     end
+    header("2. How to farm: tears first")
+    e.hunt_rift_toggle:render("Hunt tears",
+        "Tears are the best cinder farm: the bot goes to every tear it finds before anything else, kills the cultists, closes the golden tears, then collects the event's drops (Rosie's pickup waits until the event is over) and goes on. No tear in sight: it farms monsters along the patrol road (never parked in one spot) until the next tear shows up.") -- QQT_Warpigz_v3 (Q3, rc.2 review)
+    if e.hunt_rift_toggle:get() then
+        -- QQT_Warpigz_v3 (Q2): the bot stays until the tear closes.
+        e.tear_use_charge_ring:render("  Stand on chargeable tears",
+            "Walk onto each golden tear and stay inside its circle while your rotation kills the adds, until the tear closes (at most 90 s per tear), then the next tear.")
+        e.rupture_do_realmwalker:render("  Fight Realmwalker",
+            "Wait for the Realmwalker after the tears and kill it (Advanced: how long to wait)")
+        e.rupture_open_chests:render("  Open tear chests",
+            "Open the free Pandemonium chests in the ritual ring once the tear you stand in is closed (Helltide chests there only when the goal allows). Requires Open Helltide Chest.") -- QQT_Warpigz_v3 (Q2)
+        e.rupture_replace_local_events:render("  Skip legacy Helltide events",
+            "On by default: never walk to flame pillars / ravenous soul pyres, tears pay more. Off: those events are run too (Advanced: event radius and minute); tears in reach still come first.") -- QQT_Warpigz_v3 (rc.2)
+    end
+    header("3. Movement and logic")
+    e.smart_order:render("Smart chest order",
+        "Mystery chests first, chests you saw before learned (predicted) spots, nearest first along the patrol road, no ping-pong across the map. After each chest reset (UTC :00/:15/:20/:30/:40/:45) fresh Mystery chests come first again.")
     e.road_routing:render("Road routing",
         "Reach far chests along the patrol road and leave it only for the last stretch. Stuck off the road: back to the road and another way (up to 3); the way that worked is remembered.")
     e.learn:render("Learn while farming",
-        "Remember chest spots, the Helltide boundary and spots where the bot got stuck (HelltideRevamped\\learned). Learned chest spots are routed to on later runs without blind exploring.")
+        "Remember chest spots, the Helltide boundary and spots where the bot got stuck (HelltideRevamped\\learned). The chest run also goes to learned chest spots.")
     e.fence:render("Stay inside the Helltide",
         "Skip chests and events outside the learned Helltide area; a trip that leaves the Helltide is cancelled and not tried again at once.")
-    e.event_radius:render("Event radius (m)", "Farm mode: walk to pyres / flame pillars up to this far (Warplan: 12 m)", 1)
-    e.event_until_min:render("Events until minute (UTC)", "Farm mode: start legacy events only before this minute (Warplan: 45)", 1)
     e.map_pin:render("Pin the target on the map", "Put the game's map pin on the chest the bot is walking to")
     e.forget_zone:render("Forget learned data (this zone)",
         "Delete the learned chest spots, boundary and stuck spots of the zone you are in", 0)
     if e.forget_zone:get() then gui.request_forget = true end
+    render_advanced()
     e.smart_tree:pop()
 end
 
@@ -235,9 +273,14 @@ function gui.render()
     gui.elements.main_toggle:render("Enable", "Enable the bot")
     gui.elements.mode:render("Mode", gui.mode,
         "Warplan: farm cinders, open chests as soon as affordable and keep moving (no ruptures, maiden or chaos rifts).\n" ..
-        "Farm: Pandemonium ruptures first, then chests when cinders suffice, else monsters, until the helltide ends.\n" ..
+        "Farm: tears first and monsters along the road until the cinder goal, then a chest run (Hell's Prize > Mystery > the rest), again until the helltide ends (Smart farm).\n" ..
         "When WarPigs (or any plugin) enables Helltide the mode is always Warplan.")
-    if gui.elements.mode:get() == 1 then render_ruptures() end
+    -- QQT_Warpigz_v3: the menu follows the EFFECTIVE mode (core/hr_mode.lua):
+    -- an external enable (WarPigs) always runs Warplan.
+    local external = tracker.hr_external == true
+    local farm = gui.elements.mode:get() == 1 and not external
+    if external then header("Enabled by WarPigs: Warplan mode (Smart farm is not used)") end
+    if farm then render_smart_farm() end -- QQT_Warpigz_v3: one Smart farm section (Farm mode)
 
     if gui.elements.settings_tree:push("Settings") then
         gui.elements.manage_orbwalker:render("Manage orbwalker", "When enabled, this script will toggle orbwalker clear during helltide tasks. Off by default — leaves orbwalker fully under your rotation's control.")
@@ -245,7 +288,7 @@ function gui.render()
         gui.elements.salvage_toggle:render("Salvage with alfred", "Enable salvaging items with alfred")
         gui.elements.silent_chest_toggle:render("Open Silent Chest (key required)", "Open silent chest")
         gui.elements.helltide_chest_toggle:render("Open Helltide Chest", "Open helltide chest")
-        render_cinder_run() -- QQT_Warpigz_v3 (Q4)
+        if not farm then render_cinder_run() end -- QQT_Warpigz_v3 (Q4): Warplan; Farm has the Smart farm goal
         gui.elements.ore_toggle:render("Collect Ore", "Collect ore")
         gui.elements.herb_toggle:render("Collect Herb", "Collect herb")
         gui.elements.shrine_toggle:render("Use Shrine", "Use shrine")
@@ -258,15 +301,23 @@ function gui.render()
             gui.elements.kill_monsters_rarity:render("  Rarity floor", gui.kill_rarity, "Only route to monsters of this rarity or higher. 'All' = include normal trash, 'Rare+' = elites and up, 'Champion+' = champions and bosses, 'Boss only' = bosses.")
         end
         gui.elements.experimental_explorer_toggle:render("Experimental Explorer", "Zone-wide grid coverage instead of Batmobile frontier. Tracks chest locations across the full helltide hour. Resets only when helltide ends.")
-        gui.elements.farm_cinder_threshold:render("Farm Cinder Threshold (beta)", "Stay near a remembered chest and kill monsters when you are within this many cinders of affording it (0 = disabled)")
+        if not farm then -- QQT_Warpigz_v3: Warplan only (Farm mode ignores it: tears first, see Smart farm)
+            gui.elements.farm_cinder_threshold:render("Farm Cinder Threshold (beta)", "Warplan mode only. Stay near a remembered chest and kill monsters when you are within this many cinders of affording it (0 = disabled). Farm mode never waits at a chest: it hunts tears and farms along the road until its goal.")
+        end
         gui.elements.do_maiden_toggle:render("Do Maiden (Farm mode only)", "Walk to the maiden altar, insert hearts (up to 3) and stay pinned to fight the maiden. Requires Helltide Coin Hearts in your inventory. Ignored in Warplan mode and whenever WarPigs drives Helltide.")
         if gui.elements.do_maiden_toggle:get() then
             gui.elements.maiden_disable_cinders:render("Disable Maiden at Cinders", "Stop running maiden once you reach this cinder count (0 = never disable). Useful so the bot can spend cinders before saving more for chests.", 1)
         end
+        if not farm then -- QQT_Warpigz_v3: the learned atlas works in every mode (Farm: Smart farm)
+            gui.elements.learn:render("Learn while farming",
+                "Remember chest spots, the Helltide boundary and spots where the bot got stuck (HelltideRevamped\\learned); the cinder run also goes to learned chest spots.")
+            gui.elements.forget_zone:render("Forget learned data (this zone)",
+                "Delete the learned chest spots, boundary and stuck spots of the zone you are in", 0)
+            if gui.elements.forget_zone:get() then gui.request_forget = true end
+        end
         gui.elements.settings_tree:pop()
     end
 
-    render_smart_farm() -- QQT_Warpigz_v3
     render_live_stats() -- QQT_Warpigz_v3
 
     if gui.elements.debug_tree:push("Debug settings") then

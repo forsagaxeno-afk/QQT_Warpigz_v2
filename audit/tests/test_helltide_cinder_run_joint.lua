@@ -82,6 +82,9 @@ local function helltide(opts)
     h.assert_clean('load')
     local e = h.mod(HR, 'gui').elements
     e.mode:set(opts.mode or 1)
+    -- QQT_Warpigz_v3: Farm: the Smart farm goal (on by default) is the run's
+    -- option; Warplan / WarPigs: "Spend cinders on chests at".
+    e.farm_goal:set(opts.run ~= nil)
     if opts.run then
         e.cinder_run:set(true)
         e.cinder_run_at:set(opts.run)
@@ -154,10 +157,16 @@ case('standalone Farm from 0 cinders: saves up to the threshold, then the Hell\'
     ok(done, 'Hell\'s Prize and Mystery opened: ' .. order_of(h) .. '\n' .. h.tail(40))
     ok(peak_before >= 1000, 'saved up to the threshold before the first chest (peak ' .. peak_before .. ')')
     local pi = index_of(PRIZE)
-    ok(pi <= 2 and pi < index_of(MYSTERY), 'the Hell\'s Prize first, then the Mystery: ' .. order_of(h))
-    if pi == 2 then                                 -- only a chest on the way may come first
-        ok(h.logged('On the way: ' .. h.opened[1].skin) >= 1, order_of(h) .. '\n' .. h.tail(40))
+    -- QQT_Warpigz_v3: only chests on the way may come first (the run's target
+    -- stays affordable after each). The walk to the Hell's Prize can pass
+    -- both the Rings and the Mystery (a slower Batmobile path under CPU load:
+    -- the old "at most one before it" check failed there, at 3.1.1 too).
+    for i = 1, pi - 1 do
+        ok(h.logged('On the way: ' .. h.opened[i].skin) >= 1,
+            'only chests on the way before the Hell\'s Prize: ' .. order_of(h) .. '\n' .. h.tail(40))
     end
+    ok(pi < index_of(MYSTERY) or h.logged('On the way: ' .. MYSTERY) >= 1,
+        'the Hell\'s Prize first, then the Mystery: ' .. order_of(h))
     eq(h.logged('[CINDER RUN] Saving cinders for the run at 1000'), 1, 'the save phase logged once\n' .. h.tail(30))
     eq(h.logged('>= 1000'), 1, 'the run start logged once')
 end)

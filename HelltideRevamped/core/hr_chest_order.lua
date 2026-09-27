@@ -253,7 +253,10 @@ function M.pick(ctx)
         minutes_left = minutes_left,
         mystery_known = mystery_known,
         farm_mode = hr_mode.is_farm(),
-        plan_on = settings.cinder_plan ~= false,
+        -- QQT_Warpigz_v3: with the Smart farm goal on the run decides (no chest
+        -- below the goal, then Hell's Prize > Mystery > rest); the 250 reserve
+        -- ("Keep 250 for a Mystery chest") is the goal-off rule only.
+        plan_on = settings.cinder_plan ~= false and not run.on(),
         max_carry = settings.max_carry,
         dump_min = settings.dump_min,
     }
