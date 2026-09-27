@@ -71,8 +71,9 @@ task.Execute = function ()
 
     scan_log_objectives()
 
-    -- stop exploring after seeing boss
-    if tracker.boss_trigger_time ~= nil then
+    -- stop exploring while a live boss is engaged (QQT_Warpigz_v3: seen by
+    -- kill_monster's scan within the last seconds, not sticky for the floor)
+    if tracker.boss_gate_active() then
         task.status = status_enum['IDLE']
         return
     end

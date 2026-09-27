@@ -50,7 +50,11 @@ function task.Execute()
     -- ---- Detected death ----
     if s.state == STATE.IDLE then
         console.print("[Reaper] Player died – calling revive_at_checkpoint.")
-        -- Reset run state so we re-summon and re-walk path after respawn
+        -- Reset run state so we re-walk to the altar after respawn.
+        -- QQT_Warpigz_v3: tracker.summoned_this_run is kept on purpose: the
+        -- summon (and the spent key) outlive a death in the same lair, so
+        -- navigate_to_boss / interact_altar hand back to Kill Monsters at the
+        -- arena instead of re-walking from the entrance or skipping the boss.
         tracker.altar_activated = false
         tracker.altar_interact_time = nil
         -- Signal navigate_to_boss to re-walk path on respawn
@@ -95,7 +99,9 @@ function task.Execute()
             if boss then
                 local zone = utils.get_zone()
                 if utils.in_boss_zone(boss) then
-                    console.print("[Reaper] Respawned in boss zone – will re-walk to altar.")
+                    console.print(tracker.summon_committed(zone)
+                        and "[Reaper] Respawned in boss zone – summon still active, returning to the fight."
+                        or "[Reaper] Respawned in boss zone – will re-walk to altar.")
                     -- nav_to_boss will handle path walk since path_exhausted=false after reset
                 else
                     console.print("[Reaper] Respawned outside boss zone – will re-teleport.")

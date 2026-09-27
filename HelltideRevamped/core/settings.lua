@@ -30,7 +30,7 @@ local settings = {
     mode = 1,
     -- Pandemonium Ruptures (Farm mode, core/hr_tear_event.lua).
     hunt_rift = true,
-    rupture_replace_local_events = true,
+    rupture_replace_local_events = false, -- QQT_Warpigz_v3: Farm events on by default
     rupture_prioritize_surging = false, -- S14 option, not shown (2.2.1)
     rupture_hunt_normal = true,
     rupture_hunt_surging = true,
@@ -48,6 +48,28 @@ local settings = {
     rupture_open_chests = true,
     tear_use_charge_ring = true,
     log_tear_candidates = false,
+    -- QQT_Warpigz_v3: smart farm (Farm mode; Warplan / WarPigs bypass the
+    -- plan, the order, road routing and the event radius).
+    cinder_plan = true,
+    max_carry = 150,
+    dump_min = 5,
+    smart_order = true,
+    road_routing = true,
+    learn = true,
+    fence = true,
+    event_radius = 40,
+    event_until_min = 45,
+    map_pin = false,
+    -- QQT_Warpigz_v3: live data & stats (every mode).
+    live_api = false,
+    live_source = 0,        -- 0 = helltides.com, 1 = diablo4.life
+    live_poll_min = 5,
+    overlay = true,
+    overlay_x = 2,
+    overlay_y = 30,
+    overlay_rows = 0,       -- 0 = All, 1 = Helltide only, 2 = Compact
+    dashboard = false,
+    dashboard_sec = 10,
 }
 
 -- Keep external writes and the persisted GUI value in sync. A false setting
@@ -74,6 +96,13 @@ local setting_controls = {
     rupture_rw_wait_sec = "rupture_rw_wait_sec", rupture_chamber_linger_sec = "rupture_chamber_linger_sec",
     rupture_open_chests = "rupture_open_chests", tear_use_charge_ring = "tear_use_charge_ring",
     log_tear_candidates = "log_tear_candidates",
+    -- QQT_Warpigz_v3: smart farm, live data & stats (controls named like the keys).
+    cinder_plan = "cinder_plan", max_carry = "max_carry", dump_min = "dump_min",
+    smart_order = "smart_order", road_routing = "road_routing", learn = "learn", fence = "fence",
+    event_radius = "event_radius", event_until_min = "event_until_min", map_pin = "map_pin",
+    live_api = "live_api", live_source = "live_source", live_poll_min = "live_poll_min",
+    overlay = "overlay", overlay_x = "overlay_x", overlay_y = "overlay_y", overlay_rows = "overlay_rows",
+    dashboard = "dashboard", dashboard_sec = "dashboard_sec",
 }
 -- Settings synced 1:1 from their control in update_settings (mode + ruptures).
 -- QQT_Warpigz_v2 (2.2.1): the Season 14 only options (tear type filters and
@@ -84,6 +113,11 @@ local synced_controls = {
     "tear_search_dist", "tear_passby_dist", "tear_event_radius", "tear_circle_radius",
     "rupture_linger_sec", "rupture_do_realmwalker",
     "rupture_rw_wait_sec", "rupture_open_chests", "tear_use_charge_ring",
+    -- QQT_Warpigz_v3
+    "cinder_plan", "max_carry", "dump_min", "smart_order", "road_routing", "learn", "fence",
+    "event_radius", "event_until_min", "map_pin",
+    "live_api", "live_source", "live_poll_min", "overlay", "overlay_x", "overlay_y", "overlay_rows",
+    "dashboard", "dashboard_sec",
 }
 
 function settings.set_setting(name, value)

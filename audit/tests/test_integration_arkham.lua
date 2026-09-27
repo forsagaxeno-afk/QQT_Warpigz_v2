@@ -161,10 +161,17 @@ local function session(opts)
             return {enabled = al.enabled, need_trigger = al.need_trigger, inventory_full = al.inventory_full,
                 need_repair = al.need_repair, trigger_tasks = al.trigger_tasks, teleport = al.teleport,
                 teleport_done = al.teleport_done, teleport_failed = al.teleport_failed,
-                restock_count = al.restock_count, paused = al.paused}
+                restock_count = al.restock_count, paused = al.paused,
+                -- QQT_Warpigz_v3: Rosie-shaped request fields (nil for the plain mock).
+                external_trigger = al.external_trigger, running = al.running,
+                owner = al.owner, external_caller = al.owner}
         end,
         trigger_tasks = function(caller, cb)
             al.triggers[#al.triggers + 1] = {t = s.now, caller = caller, teleport = false}; al.cb = cb
+            if opts.rosie_like then -- lifecycle.request: busy before it returns
+                al.external_trigger, al.running, al.owner = true, true, caller
+                al.teleport, al.teleport_done, al.teleport_failed = false, false, false
+            end
         end,
         trigger_tasks_with_teleport = function(caller, cb)
             al.triggers[#al.triggers + 1] = {t = s.now, caller = caller, teleport = true}; al.cb = cb
@@ -174,6 +181,7 @@ local function session(opts)
     function s.alfred_pickup() al.trigger_tasks = true end
     function s.alfred_complete()
         al.trigger_tasks = false; al.teleport_done = al.teleport
+        if opts.rosie_like then al.external_trigger, al.running, al.teleport = false, false, false end
         local cb = al.cb; al.cb = nil
         if cb then cb() end
     end
@@ -630,6 +638,122 @@ test('A5-1 WarPigs disabled, unreadable or absent: the standalone advisory trip 
     s.wp.enabled = false
     s.run_for(1)
     assert(#s.alfred.triggers == 1, 'advisory trip once WarPigs is switched off')
+end)
+
+-------------------------------------------------------------------------------
+-- QQT_Warpigz_v3 R6-A1: a plain in-pit trip hops to town even though the
+-- provider (Rosie) reports the accepted request as live work at once.
+local TEMIS_WP, CERRIGAR = 0x1CE51E, {'Scos_Cerrigar_World', 'Scos_Cerrigar', 8}
+test('R6-A1 plain in-pit trip with a Rosie-shaped provider teleports to town exactly once', function()
+    local s = session({rosie_like = true})
+    s.api.enable(); s.frames(3)
+    s.alfred.need_trigger = true; s.alfred.inventory_full = true -- no floor loot: plain trip
+    s.run_for(2)
+    assert(#s.alfred.triggers == 1 and not s.alfred.triggers[1].teleport, 'plain trigger from the pit')
+    assert(s.alfred.running == true and s.alfred.external_trigger == true, 'mock reports live work at once')
+    assert(#s.waypoints == 1 and s.waypoints[1].sno == TEMIS_WP,
+        'no town hop while the provider reports its own accepted request (waypoints=' .. #s.waypoints .. ')')
+    s.go(TOWN); s.run_for(10)
+    assert(#s.waypoints == 1, 'hop repeated in town: ' .. #s.waypoints)
+    s.alfred.inventory_full = false; s.alfred.need_trigger = false
+    s.alfred_complete(); s.run_for(2)
+    assert(s.task() ~= 'alfred_running', 'trip did not end after the callback')
+end)
+
+test('R6-A1 a provider teleporting on its own is never doubled by the manual hop', function()
+    local s = session({rosie_like = true})
+    s.api.enable(); s.frames(3)
+    local orig = s.env.AlfredTheButlerPlugin.trigger_tasks
+    s.env.AlfredTheButlerPlugin.trigger_tasks = function(caller, cb)
+        orig(caller, cb); s.alfred.teleport = true -- provider owns the hop
+    end
+    s.alfred.need_trigger = true; s.alfred.inventory_full = true
+    s.run_for(5)
+    assert(#s.alfred.triggers == 1 and #s.waypoints == 0, 'manual hop over a provider teleport')
+end)
+
+-------------------------------------------------------------------------------
+-- QQT_Warpigz_v3 R6-A2: in-pit tasks yield movement to an active Looter.
+test('R6-A2 explore/kill yield Batmobile to an active Looter inside the pit (bounded, resumes)', function()
+    local s = session()
+    s.api.enable(); s.frames(5)
+    assert(s.task() == 'explore_pit', 'exploring: ' .. s.task())
+    s.looting = true
+    s.frames(1)
+    local held = s.now
+    s.run_for(5)
+    assert(s.count('resume', 'arkham_asylum', held + 0.01) == 0 and s.count('set_target', 'arkham_asylum', held + 0.01) == 0,
+        'Arkham drove Batmobile while Looter was collecting (resume=' .. s.count('resume', 'arkham_asylum', held + 0.01) .. ')')
+    assert(s.bm.paused and not s.batmobile_autodriving(), 'Batmobile left driving during the pickup')
+    assert(s.tm.get_current_task().status == 'yield to Looter', 'yield is not visible')
+    s.looting = false
+    s.frames(3)
+    assert(s.task() == 'explore_pit' and s.count('resume', 'arkham_asylum', s.now - 0.25) > 0, 'exploration did not resume')
+    -- A Looter that never goes idle holds at most 15 s.
+    s.looting = true
+    s.frames(1)
+    local stuck = s.now
+    s.run_for(14)
+    assert(s.count('resume', 'arkham_asylum', stuck + 0.01) == 0, 'released before the bound')
+    s.run_for(3)
+    assert(s.task() == 'explore_pit' and s.count('resume', 'arkham_asylum', stuck + 15) > 0, 'Looter held the pit forever')
+    assert(s.logged('pit task (pickup yield) proceeds'), 'bounded pickup yield is logged')
+    s.looting = false
+end)
+
+test('R6-A2 pickup yield: never outside the pit, never with a live boss in melee range, never over the forced exit', function()
+    local t = session({town = true})
+    t.actors = {actor('TWN_Kehj_IronWolves_PitKey_Crafter', 30)}
+    t.api.enable(); t.looting = true
+    t.run_for(2)
+    assert(t.task() == 'enter_pit', 'town tasks held by Looter: ' .. t.task())
+    local s = session()
+    s.api.enable(); s.frames(3)
+    s.enemies = {actor('Boss', 3, {boss = true, health = 500})}
+    s.looting = true
+    s.run_for(2)
+    assert(s.task() == 'kill_boss', 'boss fight yielded to loot: ' .. s.task())
+    s.enemies = {}
+    s.run_for(1)
+    assert(s.tm.get_current_task().status == 'yield to Looter', 'yield once the boss is out of range')
+    s.now = s.tracker.pit_start_time + 700
+    s.frame()
+    assert(s.task() == 'exit_pit', 'forced exit blocked by the pickup yield')
+end)
+
+-------------------------------------------------------------------------------
+-- QQT_Warpigz_v3 R6-A3: Rosie services Temis only; a Cerrigar home town
+-- still hops to Temis for the trip (standalone Alfred keeps the home town).
+test('R6-A3 Home town Cerrigar with Rosie: full bags in Cerrigar hop to Temis for the trip', function()
+    local s = session({town = true, rosie_like = true})
+    s.env.RosiePlugin = {}
+    s.go(CERRIGAR)
+    s.gui.elements.town:set(1)
+    s.api.enable(); s.frames(2)
+    s.alfred.need_trigger = true; s.alfred.inventory_full = true
+    s.run_for(2)
+    assert(#s.alfred.triggers == 1 and not s.alfred.triggers[1].teleport, 'plain trip from Cerrigar')
+    assert(#s.waypoints == 1 and s.waypoints[1].sno == TEMIS_WP,
+        'no hop to Temis from a Cerrigar home town (waypoints=' .. #s.waypoints .. ')')
+    assert(s.logged('Rosie services Temis only'), 'service-town line not logged')
+    s.go(TOWN); s.run_for(5)
+    assert(#s.waypoints == 1 and s.task() == 'alfred_running', 'Temis counts as the service town')
+    -- In the pit with a Cerrigar home town the hop also goes to Temis.
+    local p = session({rosie_like = true})
+    p.env.RosiePlugin = {}
+    p.gui.elements.town:set(1)
+    p.api.enable(); p.frames(3)
+    p.alfred.need_trigger = true; p.alfred.inventory_full = true
+    p.run_for(2)
+    assert(#p.waypoints == 1 and p.waypoints[1].sno == TEMIS_WP, 'pit hop did not go to Temis')
+    -- Standalone AlfredTheButler (no Rosie): the home town is the service town.
+    local a = session({town = true})
+    a.go(CERRIGAR)
+    a.gui.elements.town:set(1)
+    a.api.enable(); a.frames(2)
+    a.alfred.need_trigger = true; a.alfred.inventory_full = true
+    a.run_for(2)
+    assert(#a.alfred.triggers == 1 and #a.waypoints == 0, 'standalone Alfred in its home town must not hop')
 end)
 
 -------------------------------------------------------------------------------

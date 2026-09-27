@@ -40,6 +40,62 @@ rules.skill_catalog = {
 rules.skill_by_id = {}
 for _, s in ipairs(rules.skill_catalog) do rules.skill_by_id[s.id] = s end
 
+-- QQT_Warpigz_v3: skills found by their spell NAME (get_name_for_spell)
+-- instead of a fixed id, e.g. the Warlock's Rampage (id, name string and
+-- cast mode need live confirmation). Each gets a stable slot at the END of
+-- skill_catalog (saved rule combos keep their indices) with id 0 until an
+-- equipped spell's lower-case name contains `match`; skill_by_id then gains
+-- that id. Revamp rule engine only: the legacy per-class chain is unchanged.
+rules.name_catalog = {
+    { match = 'rampage', name = 'Rampage', needs_raycast = false, range = 15 },
+}
+rules.named_entries = {}
+for _, s in ipairs(rules.name_catalog) do
+    local entry = { id = 0, name = s.name, needs_raycast = s.needs_raycast, range = s.range, match = s.match }
+    rules.named_entries[#rules.named_entries + 1] = entry
+    rules.skill_catalog[#rules.skill_catalog + 1] = entry
+end
+rules.NAMED_TTL = 10
+local static_ids = {}
+for id in pairs(rules.skill_by_id) do static_ids[id] = true end
+local named_checked_at = nil
+
+-- Resolve the name-matched entries against the equipped spells (protected,
+-- at most every NAMED_TTL seconds unless forced).
+rules.resolve_named = function (force)
+    local okt, now = pcall(get_time_since_inject)
+    now = (okt and type(now) == 'number') and now or 0
+    if not force and named_checked_at and now - named_checked_at < rules.NAMED_TTL and now >= named_checked_at then
+        return
+    end
+    named_checked_at = now
+    if type(get_equipped_spell_ids) ~= 'function' then return end
+    local ok, equipped = pcall(get_equipped_spell_ids)
+    if not ok or type(equipped) ~= 'table' then return end
+    local name_of = nil
+    for _, id in pairs(equipped) do
+        if type(id) == 'number' and id > 0 and not static_ids[id] then
+            if name_of == nil then
+                name_of = type(get_name_for_spell) == 'function' and get_name_for_spell or false
+            end
+            if not name_of then return end
+            local okn, name = pcall(name_of, id)
+            if okn and type(name) == 'string' and name ~= '' then
+                local lower = name:lower()
+                for _, entry in ipairs(rules.named_entries) do
+                    if entry.id ~= id and lower:find(entry.match, 1, true) then
+                        if entry.id ~= 0 and rules.skill_by_id[entry.id] == entry then
+                            rules.skill_by_id[entry.id] = nil
+                        end
+                        entry.id = id
+                        rules.skill_by_id[id] = entry
+                    end
+                end
+            end
+        end
+    end
+end
+
 -- Condition types. The combo at index 1 ("none") is the natural default,
 -- meaning a condition row is empty / has no effect.
 rules.condition_types = {
@@ -98,6 +154,7 @@ end
 rules.equipped_movement_skills = function ()
     local out = {}
     if type(get_equipped_spell_ids) ~= 'function' then return out end
+    rules.resolve_named() -- QQT_Warpigz_v3: name-matched skills (Rampage)
     local ok, equipped = pcall(get_equipped_spell_ids)
     if not ok or type(equipped) ~= 'table' then return out end
     local equipped_set = {}

@@ -13,6 +13,9 @@ function external.get_status()
         enabled = settings.enabled, running = tracker.running,
         pending = tracker.external_trigger, owner = tracker.external_caller,
         managed_by = tracker.managed_by, ready = tracker.ready,
+        -- QQT_Warpigz_v3: the user's auto-fire choice (Rosie's return-leg
+        -- hand-off respects it). Additive.
+        auto_fire = settings.auto_fire == true,
         last_reason = tracker.last_reason, last_result = tracker.last_result,
         last_result_t = tracker.last_result_t, all_task_done = tracker.all_task_done,
         state = tracker.state, attempts = tracker.attempts,

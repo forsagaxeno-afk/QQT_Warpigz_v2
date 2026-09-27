@@ -11,6 +11,7 @@
 -- Status APIs are read through the exported globals only; no module of
 -- another plugin is required from here.
 local log = require 'silent_raven.log'
+local tracker = require 'silent_raven.tracker'
 local M = {}
 
 -- Unreadable companion status: busy for at most UNKNOWN_LIMIT seconds, then
@@ -81,6 +82,12 @@ local function alfred_reason(now, live_only)
     end
     known('alfred')
     if s.enabled == false then known('hard'); return nil end
+    -- QQT_Warpigz_v3: the Alfred/Rosie trip that queued the current request
+    -- (Rosie's return-leg hand-off) waits for it: its live work is ours.
+    if (tracker.running or tracker.external_trigger) and tracker.external_caller ~= nil
+        and tracker.external_caller == s.name then
+        known('hard'); return nil
+    end
     if alfred_live_work(s) then known('hard'); return 'alfred_busy' end
     if live_only then return nil end
     if s.inventory_full == true or s.need_repair == true then

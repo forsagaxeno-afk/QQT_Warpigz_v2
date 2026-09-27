@@ -11,13 +11,41 @@ local function complete()
     if tracker.service_pulls~=false and #(tracker.pending_pulls or {})>0 and not tracker.stash_pull_done and not tracker.stash_pull_failed then return false end
     return not tracker.return_required or tracker.teleport_done or tracker.teleport_failed
 end
+-- QQT_Warpigz_v3: a failed service step (sell_failed, salvage_failed, ...)
+-- no longer ends the trip at once: this task runs first on every pulse, so
+-- finishing on the first failure skipped repair, stash and the return portal
+-- and left the character in Temis. The remaining steps already accept X_done
+-- or X_failed; the trip finishes (as failed, with the first failure) once
+-- complete() is true. Only a failure that stops the remaining steps finishes
+-- at once: the trip never started its service (trigger_tasks false) or never
+-- reached town (outbound teleport_failed). Host errors, the 240 s and pause
+-- bounds and cancellation finish directly in lifecycle/controller.
+local function stops_now(failure)
+    if failure==nil then return false end
+    return not tracker.trigger_tasks or not tracker.visited_town
+end
 function task.shouldExecute()
-    return tracker.external_pause or not tracker.trigger_tasks or lifecycle.failure()~=nil or complete()
+    return tracker.external_pause or not tracker.trigger_tasks or stops_now(lifecycle.failure()) or complete()
 end
 function task.Execute()
     local player=get_local_player()
     if not player or player:is_dead() or tracker.external_pause then task.status='Paused'; return end
     local failure=lifecycle.failure()
+    if failure and not stops_now(failure) and not complete() then
+        -- QQT_Warpigz_v3: continue with the remaining steps and the return.
+        task.status='Continuing after '..failure
+        return
+    end
+    -- QQT_Warpigz_v3: every service leg done and only the way back failed
+    -- (no TownPortal): the service itself completed; never a fail_streak.
+    if failure=='teleport_failed' and tracker.failure_reason==nil and tracker.trigger_tasks
+        and tracker.visited_town and complete() then
+        if not tracker.return_missing_logged then
+            tracker.return_missing_logged=true
+            console.print('[Rosie] return portal missing: town service completed; the caller travels back itself')
+        end
+        failure=nil
+    end
     if failure then task.status='Failed: '..failure; lifecycle.finish(false,failure); return end
     if tracker.trigger_tasks and complete() then
         if tracker.need_trigger then

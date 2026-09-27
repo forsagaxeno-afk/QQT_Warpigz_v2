@@ -57,6 +57,7 @@ local function fixture(opts)
     f.edges = opts.blocked and BLOCKED_TREE or VALID
     WarPigsPlugin, WarPugPlugin, AlfredTheButlerPlugin, PLUGIN_alfred_the_butler = nil, nil, nil, nil
     SilentRavenPlugin, PLUGIN_silent_raven, LooteerPlugin = nil, nil, nil
+    ArkhamAsylumPlugin, WonderCityPlugin, HelltideRevampedPlugin, InfernalHordesPlugin, ReaperPlugin = nil, nil, nil, nil, nil
     console = { print = function(m) f.logs[#f.logs + 1] = string.format('%.1f %s', f.now, m) end }
     get_time_since_inject = function() return f.now end
     get_local_player = function() if f.player then return { is_dead = function() return f.dead end } end end
@@ -451,6 +452,41 @@ case('WPG-9 every test-sequence press registers', function()
     kb:press(); pulse(); pulse(2); equal(#f.clicks, 2, 'first test sequence')
     kb:press(); pulse(); pulse(2); equal(#f.clicks, 4, 'second press runs a second sequence')
     pulse(); pulse(3); equal(#f.clicks, 4, 'no repeat without a press')
+end)
+
+-- QQT_Warpigz_v3 (night orchestration): with WarPigs off, an enabled
+-- standalone activity plugin (Arkham farming the Pit through Temis, a
+-- persisted toggle) owns movement. WarPug must not start a session against
+-- it, and a session it interrupts pauses instead of halting when the
+-- activity teleports out of Temis (was: APPROACH_TABLE, then HALTED until the
+-- user re-toggled WarPug; the next War Plan night created no plan).
+case('standalone activity plugin holds WarPug instead of halting it', function()
+    local f = fixture({ ready = false }); f.dist = 10
+    local ark_on = true
+    ArkhamAsylumPlugin = { get_status = function() return { enabled = ark_on } end }
+    f.run(10)
+    equal(f.state(), 'IDLE', 'no session while Arkham runs'); equal(f.moves, 0, 'no WarPug moves')
+    truthy(tostring(f.p.get_status_line()):find('ArkhamAsylum running', 1, true), 'status: ' .. tostring(f.p.get_status_line()))
+    f.zone = 'Kehj_Caldeum'; f.run(10)            -- Arkham teleports to the Pit
+    equal(f.halted_at, nil, 'never halted')
+    f.run(300)                                     -- hours of standalone farming
+    equal(count_log(f, 'ArkhamAsylum running'), 1, 'the activity hold is logged once')
+    -- A session under way when an activity starts pauses and survives its trip.
+    local g = fixture({ ready = false }); g.dist = 10
+    ArkhamAsylumPlugin = nil
+    g.tick(); equal(g.state(), 'APPROACH_TABLE')
+    ReaperPlugin = { status = function() return { enabled = true } end }
+    g.tick(); equal(g.state(), 'IDLE', 'paused for the activity')
+    g.zone = 'Kehj_Caldeum'; g.run(30)
+    equal(g.halted_at, nil, 'an activity trip out of Temis does not halt the session')
+    g.zone = 'Skov_Temis'; ReaperPlugin = nil
+    g.run(15); truthy(g.state() ~= 'IDLE' and g.state() ~= 'HALTED', 'resumed: ' .. g.state())
+    equal(g.halted_at, nil)
+    -- Disabled activity exports do not hold WarPug.
+    local h = fixture()
+    WonderCityPlugin = { get_status = function() return { enabled = false } end }
+    h.tick(); equal(h.state(), 'FIND_PATH', 'a disabled activity does not hold')
+    ArkhamAsylumPlugin, ReaperPlugin, WonderCityPlugin = nil, nil, nil
 end)
 
 if #failures > 0 then error('WarPug integration failures:\n' .. table.concat(failures, '\n')) end

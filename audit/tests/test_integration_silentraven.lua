@@ -789,6 +789,76 @@ case('SRV-4 joint with the real WarPug planner', function()
     eq(c.status().last_result, 'success', 'SR claimed after WarPug finished')
 end)
 
+-- QQT_Warpigz_v3 LOC: auto-fire readiness does not depend on the client
+-- language (a Russian client never auto-fired; the keybind did claim).
+local RU_READY, RU_COLLECT = 'Вернитесь к Древу Шёпота', 'Соберите Мрачную Благосклонность (3/10)'
+case('LOC auto-fire claims a ready bounty with localized objective text', function()
+    local c = harness({ auto_fire = true, setup = function(c) c.text = RU_READY end })
+    c.run(3)
+    eq(c.status().last_result, 'success', 'auto-fire claimed'); eq(c.status().last_reason, 'auto'); eq(c.accepts, 1)
+    c = harness({ setup = function(c) c.text = RU_READY end })
+    c.run(1)
+    eq(c.status().ready, true, 'get_status().ready without an English hint')
+end)
+case('LOC localized incomplete counter is collecting: no auto-fire, no NPC probe', function()
+    local c = harness({ auto_fire = true, setup = function(c) c.text = RU_COLLECT end })
+    c.run(5)
+    eq(c.status().ready, false); eq(c.status().running, false); eq(c.interacts, 0); eq(c.accepts, 0)
+    local snap = c.sr_require('silent_raven.whispers').quest_snapshot()
+    eq(snap.collecting, true, 'n/m with n < m'); eq(snap.ready, false)
+    c.text = 'Collect Grim Favor (10/10)'
+    eq(c.sr_require('silent_raven.whispers').quest_snapshot().ready, false, 'English collect phrase keeps the old reading')
+    c.text = 'Return to the Tree of Whispers'
+    snap = c.sr_require('silent_raven.whispers').quest_snapshot()
+    eq(snap.ready, true); eq(snap.inferred, false, 'an English hint confirms readiness')
+end)
+case('LOC an inferred readiness costs one bounded probe per Temis visit', function()
+    local c = harness({ auto_fire = true, setup = function(c) c.text = 'Неизвестная цель'; c.no_panel = true end })
+    c.run(20)
+    eq(c.status().last_result, 'skipped_not_ready', 'no panel: probe ends without retries')
+    eq(c.count('run finished'), 1); eq(c.status().attempts, 0, 'finished')
+    eq(c.tracker.last_zone_handled, 'Skov_Temis', 'visit latched')
+    c.run(30)
+    eq(c.count('run finished'), 1, 'no second probe in the same visit'); eq(c.accepts, 0)
+end)
+case('LOC get_status exposes the auto-fire setting', function()
+    eq(harness({ auto_fire = true }).status().auto_fire, true)
+    eq(harness({}).status().auto_fire, false)
+end)
+
+-- QQT_Warpigz_v3 DBG: the 'Debug logging' toggle prints FSM transitions and
+-- auto-fire hold changes (edge-triggered); off prints none of them.
+case('DBG debug logging prints state changes and hold changes only when enabled', function()
+    local c = harness({ auto_fire = true, setup = function(c) c.gui.elements.debug_toggle:set(true) end })
+    c.run(3)
+    eq(c.status().last_result, 'success')
+    eq(c.count('run started (auto)'), 1); eq(c.count('state START -> WALK_NPC'), 1)
+    eq(c.count('state WALK_NPC -> INTERACT_NPC'), 1); ok(c.count('-> API_CLAIMING') == 1, 'claim transition')
+    c = harness({ auto_fire = true })
+    c.run(3)
+    eq(c.status().last_result, 'success'); eq(c.count('state '), 0, 'debug off: no transition lines')
+    c = harness({ auto_fire = true, alfred = { enabled = true, running = true },
+        setup = function(c) c.gui.elements.debug_toggle:set(true) end })
+    c.run(5)
+    eq(c.count('auto-fire held: alfred_busy'), 1, 'hold logged once per change')
+end)
+
+-- QQT_Warpigz_v3 OWN: a request queued by Rosie's return-leg hand-off is not
+-- held by that same trip (Alfred live work of the owner): stall recovery runs.
+case('OWN the owning Alfred trip is not alfred_busy for its own request', function()
+    local busy = { enabled = true, running = true, trigger_tasks = true, name = 'alfred_the_butler' }
+    local c = harness({ at = ARRIVAL, walk = true, alfred = busy })
+    c.stale = { 2560, -470 }     -- leftover route leading away from the Raven
+    eq(c.api.trigger_tasks('alfred_the_butler', function(result) c.result = result end), true, 'queued')
+    c.run(12)
+    eq(c.result, 'success', 'claimed'); eq(c.count('walk stalled'), 1, 'stall recovery ran')
+    local c2 = harness({ alfred = busy })
+    eq(c2.start(), true)
+    c2.frame()
+    local clear, why = c2.coordination.companions('run')
+    eq(clear, false, 'a foreign owner still sees Alfred busy'); eq(why, 'alfred_busy')
+end)
+
 if #failures > 0 then
     error('SilentRaven integration regressions failed (' .. #failures .. '/' .. cases .. '):\n  ' ..
         table.concat(failures, '\n  '))

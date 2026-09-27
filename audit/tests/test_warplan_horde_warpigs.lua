@@ -35,7 +35,7 @@ local function fixture(opts)
     local e = setmetatable({}, {__index = _G}); e._G = e
     e.console = {print = function(m) f.logs[#f.logs + 1] = string.format('%.1f %s', f.now, tostring(m)) end}
     e.os = setmetatable({date = function(fmt, ...)
-        if fmt == '%M' then return string.format('%02d', f.minute) end
+        if fmt == '%M' or fmt == '!%M' then return string.format('%02d', f.minute) end -- QQT_Warpigz_v3: UTC minute
         return os.date(fmt, ...)
     end}, {__index = os})
     e.attributes = {PLAYER_IN_TOWN_LEVEL_AREA = 'town'}
@@ -810,7 +810,9 @@ case('W5-2 joint: Alfred\'s own teleport trip mid-wave: HordeDev kept, no Temis 
         local completed = log_at(h, 'War Plan horde complete; no new cycle')
         truthy(completed, label .. ': completed')
         for _, c in ipairs(wp_horde_calls(h, 'disable')) do
-            truthy(c.t >= completed, string.format('%s: HordeDev released only after its completion (disable at %.1f, '
+            -- QQT_Warpigz_v3: log times are rounded to 0.1 s; a disable in the
+            -- completion's own frame (logged after it) reads as 1192.6999...
+            truthy(c.t >= completed - 1e-6, string.format('%s: HordeDev released only after its completion (disable at %.1f, '
                 .. 'completed %.1f)', label, c.t, completed))
         end
         eq(#wp_horde_calls(h, 'enable'), 1, label .. ': one enable')

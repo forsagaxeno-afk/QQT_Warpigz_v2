@@ -2,6 +2,7 @@ local utils = require "core.utils"
 local enums = require "data.enums"
 local explorer = require "core.explorer"
 local tracker = require "core.tracker"
+local loot_guard = require "core.loot_guard"
 
 -- Batmobile pause-mode movement along the known waypoint path
 local plugin_label = "infernal_horde"
@@ -69,6 +70,18 @@ local micro_applied        = false
 -- plugin paused, loading) is not "no progress" for the stuck watchdog.
 local YIELD_GAP_S          = 1.0
 local last_execute_time    = nil
+-- QQT_Warpigz_v3: 'Executing' is logged once per walking episode (a gap of
+-- YIELD_GAP_S starts a new one) and the cooldown countdown at most once per
+-- second; both were printed on every ~0.1 s pulse.
+local cooldown_logged_at   = nil
+-- QQT_Warpigz_v3: a companion town trip (Rosie's own automatic service or any
+-- caller's) owns the player's movement and teleports. The Library teleport
+-- waits for it instead of cancelling it mid-service (HordeDev with 'Use
+-- alfred' off and Rosie's automatic service fought every ~125 s and the bag
+-- never emptied). Only readable live Alfred work holds (an unreadable status
+-- or a busy Looter does not). Bounded: Rosie's service timeout is 240 s.
+local COMPANION_HOLD_MAX_S = 300
+local companion_hold       = {since = nil, logged = false, over = false}
 
 local function reset_progress_tracker()
     last_progress_pos  = nil
@@ -159,14 +172,19 @@ end
 -- Task execute function (without self)
 function walking_to_horde_task.Execute()
     if tracker.entry_mode == 'warplan' then return end -- F-H1 (forced paths too)
-    console.print("Executing Walking to Horde task")
 
     local current_time = get_time_since_inject()
     local player_pos = get_player_position()
+    local new_episode = not last_execute_time or current_time - last_execute_time > YIELD_GAP_S
     if last_execute_time and current_time - last_execute_time > YIELD_GAP_S then
         reset_progress_tracker()
     end
+    if new_episode then
+        console.print("Executing Walking to Horde task")
+        companion_hold.since, companion_hold.logged, companion_hold.over = nil, false, false
+    end
     last_execute_time = current_time
+    walking_to_horde_task.hold = nil
 
     -- Stuck recovery: only arms once the post-teleport cooldown has elapsed
     -- (during cooldown the player is supposed to be standing still).
@@ -202,6 +220,22 @@ function walking_to_horde_task.Execute()
             and current_time - walking_to_horde_task.last_teleport_time < walking_to_horde_task.teleport_wait_time then
             return false
         end
+        -- QQT_Warpigz_v3: never teleport away from a live companion trip.
+        if not companion_hold.over and loot_guard.alfred_may_own_movement(true) then
+            companion_hold.since = companion_hold.since or current_time
+            if current_time - companion_hold.since < COMPANION_HOLD_MAX_S then
+                walking_to_horde_task.hold = "waiting for the town service before the Library teleport"
+                if not companion_hold.logged then
+                    companion_hold.logged = true
+                    console.print("[walking_to_horde] A companion town trip owns movement; Library teleport waits for it")
+                end
+                return false
+            end
+            companion_hold.over = true
+            console.print(string.format("[walking_to_horde] Companion still busy after %ds; teleporting to the Library anyway",
+                COMPANION_HOLD_MAX_S))
+        end
+        companion_hold.since = nil
         -- Teleport to the Library waypoint
         teleport_to_waypoint(enums.waypoints.LIBRARY)
 
@@ -316,7 +350,8 @@ function walking_to_horde_task.Execute()
                 end
             end
         end
-    else
+    elseif not cooldown_logged_at or current_time - cooldown_logged_at >= 1 then
+        cooldown_logged_at = current_time
         console.print("Waiting for teleport cooldown... " .. string.format("%.2f", walking_to_horde_task.teleport_wait_time - (current_time - walking_to_horde_task.last_teleport_time)) .. " seconds left")
     end
 

@@ -250,4 +250,17 @@ function utils.try_movement_spell(target_pos)
     return false
 end
 
+-- QQT_Warpigz_v3: a SilentRaven Whisper claim (its own auto-fire or keybind,
+-- or a queued request) owns Temis movement and clicks until it finishes,
+-- bounded by SilentRaven (100 s run, 120 s pause). Town steps (walks,
+-- interactions, the teleport out of Temis) wait; a paused queued request
+-- does not hold them.
+utils.raven_claim_active = function ()
+    local raven = SilentRavenPlugin or PLUGIN_silent_raven
+    if type(raven) ~= 'table' or type(raven.get_status) ~= 'function' then return false end
+    local ok, s = pcall(raven.get_status)
+    return ok and type(s) == 'table' and s.enabled == true
+        and (s.running == true or (s.pending == true and s.paused ~= true))
+end
+
 return utils

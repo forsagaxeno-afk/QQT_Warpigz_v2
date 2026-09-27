@@ -19,6 +19,38 @@ local forced_hold = {since = nil, logged = false}
 local function alfred_owns_control(known_only)
     return alfred_task and alfred_task.is_busy and alfred_task.is_busy(known_only)
 end
+-- QQT_Warpigz_v3 (C5/C6): while the Looter picks up drops inside the
+-- Undercity, WonderCity stops moving (Rosie keeps its native path) for at
+-- most LOOT_HOLD_MAX seconds per looting episode (one log line when
+-- exceeded; then no new hold for LOOT_HOLD_COOLDOWN, so an item the Looter
+-- cannot take never stalls the run). Never during a live boss fight or the
+-- forced exit. Tasks get on_yield(held seconds) when the hold ends.
+local LOOT_HOLD_MAX, LOOT_HOLD_COOLDOWN = 12, 30
+local loot_hold = {since = nil, logged = false, cooldown_until = -math.huge}
+local loot_hold_task = {name = 'loot_hold', status = 'waiting for Looter'}
+loot_hold_task.Execute = function ()
+    utils.stop_movement()
+    settings.orb_set_clear(true)
+    loot_hold_task.status = string.format('waiting for Looter (%.0fs)',
+        math.max(0, LOOT_HOLD_MAX - (get_time_since_inject() - (loot_hold.since or get_time_since_inject()))))
+end
+local function loot_hold_wanted(now)
+    if not (utils.player_in_undercity() and not tracker.boss_alive and utils.looter_busy_known()) then
+        loot_hold.since, loot_hold.logged = nil, false
+        return false
+    end
+    if now < loot_hold.cooldown_until then return false end
+    loot_hold.since = loot_hold.since or now
+    if now - loot_hold.since < LOOT_HOLD_MAX then return true end
+    if not loot_hold.logged then
+        loot_hold.logged = true
+        console.print(string.format('[WonderCity] Looter busy for %ds - continuing the run (the item may be one it cannot take)',
+            LOOT_HOLD_MAX))
+    end
+    loot_hold.since = nil
+    loot_hold.cooldown_until = now + LOOT_HOLD_COOLDOWN
+    return false
+end
 local REWARD_WAIT_LOG_AFTER = 60
 local reward_wait_task = {name = 'finish_undercity', status = 'waiting for reward chest', since = nil, logged = false}
 reward_wait_task.Execute = function ()
@@ -74,8 +106,9 @@ local function execute(task)
     running = true
     if active_task ~= task then
         local now = get_time_since_inject()
-        if active_task == alfred_task and yield_started then
-            -- C5: shift chest/obols/enticement/walk windows by the yield.
+        if (active_task == alfred_task or active_task == loot_hold_task) and yield_started then
+            -- C5: shift chest/obols/enticement/walk windows by the yield
+            -- (Alfred, or the Looter hold: QQT_Warpigz_v3).
             local yielded = now - yield_started
             if yielded > 0 then
                 for _, t in ipairs(tasks) do
@@ -83,7 +116,7 @@ local function execute(task)
                 end
             end
         end
-        yield_started = task == alfred_task and now or nil
+        yield_started = (task == alfred_task or task == loot_hold_task) and now or nil
         -- A companion can acquire movement between scheduler pulses. Its
         -- active route must survive cleanup of our previously selected task;
         -- only what WonderCity owns is handed back (WCY-5: its autonomous
@@ -136,6 +169,7 @@ task_manager.execute_tasks = function ()
         pending_navigation_reset = false
     end
     reward_phase.observe()
+    if tracker.save_run_state then tracker.save_run_state() end -- QQT_Warpigz_v3: survives a script reload
     if utils.player_in_undercity() and utils.exit_forced() then
         -- Only positive Alfred evidence may hold the deadline (WCY-6), and
         -- only for a bounded time.
@@ -170,6 +204,10 @@ task_manager.execute_tasks = function ()
             execute(obols_task)
         elseif exit_task.shouldExecute() then execute(exit_task)
         else execute(reward_wait_task) end
+        return
+    end
+    if not alfred_owns_control() and loot_hold_wanted(get_time_since_inject()) then
+        execute(loot_hold_task)
         return
     end
     current_task = {name = 'Idle', status = 'Idle'}

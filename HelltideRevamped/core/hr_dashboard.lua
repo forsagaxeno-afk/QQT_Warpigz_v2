@@ -1,0 +1,207 @@
+-- QQT_Warpigz_v3: data file for the offline web dashboard.
+--
+-- The host cannot serve HTTP (no sockets), so the dashboard is a static page
+-- (dashboard/index.html, opened from disk) that re-loads the script
+-- dashboard/hr_data.js every 5 s. This module rewrites that file every
+-- 'Dashboard update (s)' seconds (5-60, default 10) while 'Web dashboard' is
+-- on and the plugin is enabled:  window.HR_DATA = {...};
+-- The payload is bounded to 256 KB (the map layers are cut first).
+local json = require "core.hr_json"
+local store = require "core.hr_store"
+local stats = require "core.hr_stats"
+local clock = require "core.hr_clock"
+local atlas = require "core.hr_atlas"
+local fence = require "core.hr_fence"
+local roads = require "core.hr_roads"
+local settings = require "core.settings"
+local tracker = require "core.tracker"
+local perf = require "core.perf"
+
+local M = {
+    FILE = 'dashboard/hr_data.js',
+    MAX_BYTES = 256 * 1024,
+    TRAIL_MAX = 300,
+    TRAIL_EVERY = 5,
+    ROUTE_MAX = 40,
+    FENCE_MAX = 4000,
+    ATLAS_MAX = 200,
+    HISTORY_MAX = 50,
+}
+
+local st = {write_at = nil, trail = {}, trail_at = nil, writes = 0}
+
+local function period()
+    local s = tonumber(settings.dashboard_sec) or 10
+    if s ~= s or s < 5 then return 5 end
+    if s > 60 then return 60 end
+    return s
+end
+
+local function round(v) return math.floor((tonumber(v) or 0) + 0.5) end
+
+local function scope(t)
+    t = t or {}
+    return {earned = round(t.earned), spent = round(t.spent), lost = round(t.lost), chests = round(t.chests),
+        mystery = round(t.mystery), deaths = round(t.deaths), tears = round(t.tears), secs = round(t.secs),
+        helltides = round(t.helltides)}
+end
+
+local function history()
+    local out = {}
+    local list = stats.history or {}
+    for i = math.max(1, #list - M.HISTORY_MAX + 1), #list do
+        local h = list[i]
+        out[#out + 1] = {hour = h.hour_id or 0, zone = tostring(h.zone or '?'), earned = round(h.earned),
+            spent = round(h.spent), lost = round(h.lost), chests = round(h.chests), mystery = round(h.mystery),
+            deaths = round(h.deaths), secs = round(h.secs)}
+    end
+    return out
+end
+
+local function spot_status(spot, slot)
+    if spot.opened_slot == slot then return 'opened' end
+    if spot.used_slot == slot then return 'spent' end
+    if spot.miss_slot == slot then return 'missed' end
+    if spot.live_slot == slot then return 'seen' end
+    return 'predicted'
+end
+
+local function atlas_list(limit)
+    local out = {}
+    local slot = clock.slot_id()
+    for _, s in ipairs(atlas.spots()) do
+        if #out >= limit then break end
+        out[#out + 1] = {type = s.type, x = round(s.x), y = round(s.y), seen = s.seen, miss = s.miss,
+            status = spot_status(s, slot)}
+    end
+    return out
+end
+
+local function top_perf()
+    local rows = {}
+    if type(perf.data) ~= 'table' then return rows end
+    for name, d in pairs(perf.data) do
+        if type(d) == 'table' and type(d.max) == 'number' then
+            rows[#rows + 1] = {name = tostring(name), max_ms = d.max * 1000,
+                avg_ms = (d.count or 0) > 0 and (d.total or 0) / d.count * 1000 or 0, count = d.count or 0}
+        end
+    end
+    table.sort(rows, function(a, b) return a.max_ms > b.max_ms end)
+    local out = {}
+    for i = 1, math.min(10, #rows) do out[i] = rows[i] end
+    return out
+end
+
+local function notes()
+    local out = {}
+    for _, n in ipairs(stats.notes or {}) do out[#out + 1] = {t = n.t, msg = n.msg} end
+    return out
+end
+
+local function flat_pairs(list)
+    local parts = {}
+    for i = 1, #list do parts[i] = tostring(list[i]) end
+    return '[' .. table.concat(parts, ',') .. ']'
+end
+
+-- Build the payload text (window.HR_DATA=...;). `layers` = 1 full, 2 no
+-- fence cells, 3 no fence / atlas / trail.
+function M.build(now, player_pos, layers)
+    layers = layers or 1
+    local task = tracker.hr_task_state
+    local live = tracker.hr_live
+    local order = tracker.hr_chest_order
+    local target = order and order.last_plan
+    local cinders = 0
+    local okc, c = pcall(get_helltide_coin_cinders)
+    if okc and type(c) == 'number' then cinders = c end
+    local data = {
+        v = 1,
+        t = clock.epoch(),
+        zone = atlas.current_zone() or '',
+        live_zone = live and live.zone_name and live.zone_name() or '',
+        state = tostring(task or ''),
+        mode = tracker.hr_mode and tracker.hr_mode.effective() or '',
+        cinders = cinders,
+        minutes_left = clock.minutes_left(),
+        next_reset = clock.next_reset_in(),
+        active = clock.active(),
+        rates = {per_min = stats.rate_min(), per_hr = stats.rate_hr()},
+        helltide = scope(stats.helltide),
+        session = scope(stats.session),
+        alltime = scope(stats.alltime),
+        history = json.array(history()),
+        plan = target and {reserve = target.reserve or 0, target = target.target_name or '',
+            mystery_known = target.mystery_known or 0} or nil,
+        perf = json.array(top_perf()),
+        events = json.array(notes()),
+    }
+    local px, py = atlas.xyz(player_pos)
+    if px then data.player = {round(px), round(py)} end
+    local chests, route = {}, nil
+    local remembered, target_key
+    if type(tracker.hr_get_remembered) == 'function' then
+        local okr, r, k = pcall(tracker.hr_get_remembered)
+        if okr then remembered, target_key = r, k end
+    end
+    if type(remembered) == 'table' then
+        for key, e in pairs(remembered) do
+            local x, y = atlas.xyz(e.position)
+            if x and #chests < 60 then
+                chests[#chests + 1] = {type = e.name == 'usz_rewardGizmo_Uber' and 'mystery' or 'regular',
+                    x = round(x), y = round(y), status = key == target_key and 'target'
+                        or (e.predicted and 'predicted' or 'remembered')}
+            end
+            if key == target_key then route = e.route end
+        end
+    end
+    data.chests = json.array(chests)
+    if layers < 3 then
+        data.atlas = json.array(atlas_list(M.ATLAS_MAX))
+        local trail = {}
+        for i, p in ipairs(st.trail) do trail[i] = p end
+        data.trail = json.array(trail)
+    end
+    data.route = json.array(type(route) == 'table' and roads.points(route, M.ROUTE_MAX) or {})
+    local text = json.encode(data)
+    if layers == 1 then
+        -- Fence cells as one flat [cx, cy, ...] list (20 m cells).
+        text = text:sub(1, -2) .. ',"fence_cell":' .. fence.CELL .. ',"fence_in":'
+            .. flat_pairs(fence.cells(nil, M.FENCE_MAX)) .. '}'
+    end
+    return 'window.HR_DATA=' .. text .. ';\n'
+end
+
+function M.tick(now, player_pos, in_helltide)
+    if settings.dashboard ~= true then return false end
+    if in_helltide and player_pos and (not st.trail_at or now - st.trail_at >= M.TRAIL_EVERY or now < st.trail_at) then
+        st.trail_at = now
+        local x, y = atlas.xyz(player_pos)
+        if x then
+            st.trail[#st.trail + 1] = {round(x), round(y)}
+            while #st.trail > M.TRAIL_MAX do table.remove(st.trail, 1) end
+        end
+    end
+    if st.write_at and now - st.write_at < period() and now >= st.write_at then return false end
+    st.write_at = now
+    local text
+    for layers = 1, 3 do
+        local ok, built = pcall(M.build, now, player_pos, layers)
+        if not ok then
+            stats.note('[HelltideRevamped] dashboard data failed: ' .. tostring(built))
+            return false
+        end
+        text = built
+        if #text <= M.MAX_BYTES then break end
+        text = nil
+    end
+    if not text then return false end
+    local ok = store.write(M.FILE, {text})
+    if ok then st.writes = st.writes + 1 end
+    return ok
+end
+
+function M.writes() return st.writes end
+function M._reset() st = {write_at = nil, trail = {}, trail_at = nil, writes = 0} end
+
+return M

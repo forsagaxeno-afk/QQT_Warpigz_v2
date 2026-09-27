@@ -23,7 +23,18 @@ local ROUND_STALL=6
 local PROGRESS=0.5
 local REST=8
 local MAX_ROUNDS=3
-M.limits={reach=REACH,round_interacts=ROUND_INTERACTS,round_stall=ROUND_STALL,rest=REST,max_rounds=MAX_ROUNDS}
+-- QQT_Warpigz_v3 (night audit R5, live 12-39 s Helltide waits): a resting
+-- drop is woken as soon as nothing else is wanted, so N drops that
+-- interaction cannot take kept busy set for about N x 13-18 s in one
+-- episode. An episode (pickup busy, ending after EPISODE_QUIET s without a
+-- step) gets EPISODE_BUDGET s without a drop leaving the ground; then every
+-- remaining drop rests REST x MAX_ROUNDS s (not woken meanwhile), pickup
+-- reports not busy and it is logged once. A drop picked up restarts the budget.
+local EPISODE_BUDGET=20
+local EPISODE_QUIET=2
+local episode={since=nil,last=nil,capped_until=0}
+M.limits={reach=REACH,round_interacts=ROUND_INTERACTS,round_stall=ROUND_STALL,rest=REST,max_rounds=MAX_ROUNDS,
+    episode_budget=EPISODE_BUDGET}
 local function key(item)
     local ok,id=pcall(loot_manager.get_item_identifier,item)
     if not ok then return nil end
@@ -51,7 +62,12 @@ function M.observe(items)
     end
     -- An unreadable list or identity cannot prove that a previous drop vanished.
     if complete then
-        for id in pairs(entries) do if not seen[id] then entries[id]=nil end end
+        for id in pairs(entries) do
+            if not seen[id] then
+                entries[id]=nil
+                if episode.since then episode.since=get_time_since_inject() end -- QQT_Warpigz_v3: progress
+            end
+        end
     end
     return complete
 end
@@ -78,6 +94,7 @@ function M.resting(item)
     return e~=nil and e.rounds<MAX_ROUNDS and get_time_since_inject()<e.rest_until
 end
 function M.wake(item)
+    if get_time_since_inject()<episode.capped_until then return end -- QQT_Warpigz_v3: budget rest
     local id=key(item); local e=id and entries[id]
     if e then e.rest_until=0 end
 end
@@ -94,12 +111,31 @@ local function fail_round(e,now,why,item,d)
         why=='stall' and 'no progress toward it' or 'interactions did not pick it up',d or -1))
     e.interacts=0;e.best=nil;e.best_at=nil;e.working=false;e.next=0
 end
+-- QQT_Warpigz_v3: true when this episode's budget is spent (see the header).
+local function episode_spent(now,e)
+    if not episode.last or now-episode.last>=EPISODE_QUIET or now<(episode.last or now) then episode.since=now end
+    episode.last=now
+    if now-episode.since<EPISODE_BUDGET then return false end
+    local rest=REST*MAX_ROUNDS
+    local count=0
+    for _,entry in pairs(entries) do
+        if entry.rounds<MAX_ROUNDS then entry.rest_until=math.max(entry.rest_until or 0,now+rest);count=count+1 end
+    end
+    if e.rounds<MAX_ROUNDS and e.rest_until<now+rest then e.rest_until=now+rest;count=count+1 end
+    e.interacts=0;e.best=nil;e.best_at=nil;e.working=false;e.next=0
+    episode.capped_until=now+rest
+    episode.since,episode.last=nil,nil
+    console.print(string.format('[Rosie pickup] busy %ds without picking anything up; resting %d drop(s) for %ds',
+        EPISODE_BUDGET,count,rest))
+    return true
+end
 function M.step(item)
     if M.blocked(item) then M.release_movement(); return false end
     local id=key(item); local now=get_time_since_inject()
     if not id then M.release_movement(); return false end
     local e=entries[id]
     if not e then e={rounds=0,rest_until=0,interacts=0,next=0};entries[id]=e end
+    if episode_spent(now,e) then M.release_movement(); return false end
     if movement_owned and movement_key~=id then M.release_movement() end
     local d=Utils.distance_to(item)
     if d==math.huge then M.release_movement(); return false end
@@ -135,5 +171,8 @@ function M.step(item)
     e.working=true
     return true
 end
-function M.reset(clear_movement) M.release_movement(clear_movement); entries={} end
+function M.reset(clear_movement)
+    M.release_movement(clear_movement); entries={}
+    episode.since,episode.last,episode.capped_until=nil,nil,0 -- QQT_Warpigz_v3
+end
 return M

@@ -440,5 +440,58 @@ case('R8 reloads mid-trip in the War Plan Pit: Rosie (next request served), then
     eq(#h.inventory, 0)
 end)
 
+-- QQT_Warpigz_v3 night findings, standalone Helltide farming (HR + Rosie +
+-- Batmobile, no WarPigs).
+case('R9 standalone HR, bags full, Rosie trips fail: HR farms on instead of re-asking a stuck Rosie', function()
+    local HR = 'HelltideRevamped'
+    local h = J.new({rosie = true, dirs = {'Batmobile', HR}, place = 'helltide'})
+    h.P.helltide.helltide = true
+    h.instrument_exports()
+    h.mod('Rosie', 'rosie.private.town.gui').elements.use_keybind:set(true) -- no automatic service
+    ok(h.as('Rosie', function() return h.G.RosiePlugin.enable() end), 'Rosie enabled')
+    local e = h.mod(HR, 'gui').elements
+    e.salvage_toggle:set(true)
+    e.main_toggle:set(true)
+    h.run(10)
+    h.remove_actor(h.blacksmith)                   -- every trip fails
+    h.inventory = h.inventory or {}
+    for _ = 1, 25 do h.inventory[#h.inventory + 1] = h.gear() end
+    ok(h.run_until(function() return h.logged('[Rosie] failed') > 0 end, 300), 'first trip failed\n' .. h.tail())
+    local t0, ticks, alfred_ticks = h.now, 0, 0
+    h.run(300, function()
+        ticks = ticks + 1
+        if h.mod(HR, 'core.task_manager').get_current_task().name == 'alfred_running' then alfred_ticks = alfred_ticks + 1 end
+    end)
+    local calls = h.count(h.api_calls, function(c) return c.t > t0 and c.name == 'trigger_tasks_with_teleport' end)
+    ok(calls <= 3, 'requests after the failure (one per Rosie cooldown at most): ' .. calls)
+    ok(alfred_ticks / ticks < 0.4, string.format('alfred_running held %.0f%% of the time', 100 * alfred_ticks / ticks))
+    -- Three failures latch Rosie until an explicit Run town service: HR
+    -- farms on in the helltide for good, without a hold.
+    ok(h.run_until(function() return h.logged('[Rosie] failed') >= 3 end, 300), 'third failure\n' .. h.tail())
+    h.run(60)
+    eq(h.place, h.P.helltide, 'farming in the helltide, not ' .. tostring(h.place.key) .. '\n' .. h.tail())
+    eq(h.as(HR, function() return h.G.HelltideRevampedPlugin.status().hold end), nil, 'HR holds')
+    local t1 = h.now
+    h.run(60)
+    eq(h.count(h.api_calls, function(c) return c.t > t1 and c.name == 'trigger_tasks_with_teleport' end), 0,
+        'requests to a latched Rosie')
+    ok(h.logged('Town service unavailable') >= 1, 'the latch is logged')
+end)
+
+case('R10 standalone HR trap recovery with the only active Helltide: one scan, then back in it', function()
+    local HR = 'HelltideRevamped'
+    local h = J.new({rosie = true, dirs = {'Batmobile', HR}, place = 'helltide', minute = 10})
+    h.P.helltide.helltide = true                   -- the ONLY active helltide
+    h.mod(HR, 'gui').elements.main_toggle:set(true)
+    h.run(20)
+    local bm = h.G.BatmobilePlugin
+    local orig, fire = bm.is_giving_up, true
+    bm.is_giving_up = function(...) if fire then fire = false; return true end return orig(...) end
+    local t0, inside = h.now, 0
+    h.run(300, function() if h.place == h.P.helltide and h.now > t0 + 5 then inside = inside + 0.1 end end)
+    ok(inside > 150, string.format('%.0f s of 300 s back in the only helltide\n%s', inside, h.tail()))
+    eq(h.logged('no other Helltide found'), 1, 'the skip is bounded to one scan')
+end)
+
 if #failures > 0 then error(table.concat(failures, '\n')) end
 print('Joint Rosie checks: ' .. checks)

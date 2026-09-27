@@ -585,6 +585,7 @@ local dispatch = {
     unmapped       = {},  -- WarPlans quests matching no map key (this tick)
     unmapped_logged = {}, -- quest name -> true (logged once)
     paused         = {},  -- W5-4: plugin -> {since} while paused by the user (owned, in_run)
+    reaper_foreign = {},  -- QQT_Warpigz_v3: {since, seen} hold of a manual Reaper run (in_run)
 }
 
 -- Log `message` once per change for `key`.
@@ -775,7 +776,11 @@ end
 -- hold the warplan teleport in POST_ALFRED_SETTLE when incoming is helltide
 -- and we'd otherwise teleport into a helltide that doesn't exist yet.
 local function helltide_active()
-    local m = tonumber(os.date('%M'))
+    -- QQT_Warpigz_v3: the Helltide hour follows UTC (as HelltideRevamped's
+    -- core/hr_clock.lua); the local minute is off by 30 in half-hour zones.
+    local ok, v = pcall(os.date, '!%M')
+    local m = ok and tonumber(v) or nil
+    if not m then m = tonumber(os.date('%M')) end
     if not m then return true end
     if m >= 55 and m <= 59 then return false end
     return true
@@ -950,12 +955,54 @@ end
 
 -- One Reaper boss-lair entry. `boss_id` also keys the failure backoff so
 -- aliases of the same boss share it.
+-- QQT_Warpigz_v3: a Reaper that is on while its boss quest is wanted but
+-- reports it is not a run_once run (external_run == false: manual toggle, a
+-- persisted main_toggle after a reload) plays its own GUI rotation and would
+-- spend the keys on the wrong boss. It is released while the quest is still
+-- wanted (the disable phase treats it as changed; reaper_run_once_disable_when
+-- lets it go) and the normal enable edge then sends run_once(plan boss) after
+-- TRANSITION_GAP. A manual run in a committed phase (in_run == true) is held
+-- at most REAPER_ADOPTED_HOLD, logged once. Only external_run == false counts:
+-- a legacy Reaper (nil) and WarPigs' own run_once (true) are not affected.
+function dispatch.reaper_foreign_run_finished(now)
+    local F = dispatch.reaper_foreign
+    local st = dispatch.status_of(_G.ReaperPlugin)
+    if not (st and st.enabled == true and st.external_run == false) then
+        F.since, F.seen = nil, nil
+        dispatch.notes.reaper_foreign = nil
+        return false
+    end
+    if st.in_run ~= true then
+        F.since, F.seen = nil, nil
+        -- Once per episode (a disable that cannot be confirmed asks again).
+        dispatch.note('reaper_foreign', 'ReaperPlugin is running its own boss rotation (not a WarPigs run_once) '
+            .. 'while a War Plan boss quest is up — stopping it; the plan boss is dispatched next')
+        return true
+    end
+    -- A new hold episode (the disable phase asks every tick).
+    if not F.seen or now - F.seen > 5 then
+        F.since, dispatch.notes.reaper_foreign = now, nil
+    end
+    F.seen = now
+    if now - F.since < dispatch.REAPER_ADOPTED_HOLD then
+        dispatch.note('reaper_foreign', 'ReaperPlugin is in a run of its own boss rotation (in_run, not a WarPigs '
+            .. 'run_once) — letting it finish (at most ' .. string.format('%.0f', dispatch.REAPER_ADOPTED_HOLD)
+            .. 's) before the plan boss')
+        return false
+    end
+    dispatch.note('reaper_foreign', string.format('ReaperPlugin still in its own run %.0fs later — stopping it '
+        .. '(bounded hold); the plan boss is dispatched next', dispatch.REAPER_ADOPTED_HOLD))
+    return true
+end
+
 local function reaper_entry(boss_id)
     return {
         plugin = 'ReaperPlugin',
         boss_id = boss_id,
         enable = function(p) return reaper_run_boss(p, boss_id) end,
         disable_when = reaper_run_once_disable_when,
+        -- QQT_Warpigz_v3: a Reaper on its own GUI rotation is not the plan run.
+        run_finished = function(now) return dispatch.reaper_foreign_run_finished(now) end,
         max_disable_defer_seconds = 300,
     }
 end
@@ -1362,7 +1409,12 @@ end
 local function plugin_enable(entry, reason)
     local p = _G[entry.plugin]
     if not p then
-        log('cannot enable ' .. entry.plugin .. ' — plugin not loaded')
+        -- QQT_Warpigz_v3: once per episode (the enable edge fires every tick
+        -- while the quest is visible); dispatch.stalled_enable shows it (C6).
+        if enable_blocked[entry.plugin] ~= 'not loaded' then
+            log('cannot enable ' .. entry.plugin .. ' — plugin not loaded')
+            enable_blocked[entry.plugin] = 'not loaded'
+        end
         return
     end
     -- WPD-6: a refused Reaper run_once (busy) is retried on its cooldown only;
@@ -1403,7 +1455,10 @@ local function plugin_enable(entry, reason)
     elseif type(p.enable) == 'function' then
         ok, err = pcall(p.enable)
     else
-        log('cannot enable ' .. entry.plugin .. ' — no enable function')
+        if enable_blocked[entry.plugin] ~= 'no enable function' then   -- QQT_Warpigz_v3: once per episode
+            log('cannot enable ' .. entry.plugin .. ' — no enable function')
+            enable_blocked[entry.plugin] = 'no enable function'
+        end
         return
     end
     if not ok then
@@ -2061,7 +2116,18 @@ end
 
 -- Cold-start adoption (tick): in War Plan mode a HordeDev that is on outside
 -- the Horde and not in a run is not adopted (hwe_run_finished stops it).
+-- QQT_Warpigz_v3: a Reaper that reports it is not a run_once run
+-- (external_run == false: its persisted main_toggle came back after a QQT
+-- reload or a host crash and it plays its own GUI boss rotation) is not
+-- adopted either: reaper_foreign_run_finished releases it and the normal
+-- enable edge sends run_once(plan boss). external_run == true (a run_once
+-- still under way, WarPigs reloaded alone) and a legacy Reaper without the
+-- field (nil) are adopted as before.
 function dispatch.adoptable(plugin_name)
+    if plugin_name == 'ReaperPlugin' then   -- QQT_Warpigz_v3
+        local st = dispatch.status_of(_G.ReaperPlugin)
+        return not (st and st.external_run == false)
+    end
     if plugin_name ~= 'InfernalHordesPlugin' or not dispatch.horde_warplan() or dispatch.inside_horde() then
         return true
     end
@@ -2195,6 +2261,16 @@ function dispatch.stalled_enable(wants_)
         if dispatch.unconfirmed[plugin_name] and not owned[plugin_name] then
             return string.format('%s enable not confirmed (retrying every %.0fs)', plugin_name, dispatch.ENABLE_RETRY)
         end
+        -- QQT_Warpigz_v3: a War Plan step whose plugin is missing (C6).
+        if not owned[plugin_name] then
+            local p = _G[entry.plugin or plugin_name]   -- as plugin_enable reads it
+            if p == nil then
+                return plugin_name .. ' not loaded — this War Plan step cannot run'
+            end
+            if type(p) == 'table' and not entry.enable and type(p.enable) ~= 'function' then
+                return plugin_name .. ' has no enable function — this War Plan step cannot run'
+            end
+        end
         -- C6: the War Plan Horde entry is waiting (stable text for the watchdog).
         local H = dispatch.hwe
         if plugin_name == 'InfernalHordesPlugin' and not owned[plugin_name] and dispatch.horde_warplan()
@@ -2214,6 +2290,12 @@ function dispatch.forget_unwanted(wants_)
     end
     for plugin_name in pairs(dispatch.unconfirmed) do
         if not wants_[plugin_name] or owned[plugin_name] then dispatch.unconfirmed[plugin_name] = nil end
+    end
+    -- QQT_Warpigz_v3: a missing plugin is logged again when its step returns.
+    for plugin_name, why in pairs(enable_blocked) do
+        if not wants_[plugin_name] and (why == 'not loaded' or why == 'no enable function') then
+            enable_blocked[plugin_name] = nil
+        end
     end
     -- War Plan Horde entry: the delivery belongs to one want; an enabled
     -- HordeDev ends it (its mode is kept while it is owned).
@@ -2332,6 +2414,7 @@ function dispatch.reset()
     dispatch.disable_reason, dispatch.watchdog, dispatch.reaper_backoff = {}, {}, {}
     dispatch.unmapped, dispatch.hold_reasons, dispatch.unconfirmed = {}, {}, {}
     dispatch.paused = {}
+    dispatch.reaper_foreign = {}   -- QQT_Warpigz_v3
     dispatch.delivered = false
     dispatch.hwe = dispatch.hwe_new(dispatch.hwe.fired_at)
     -- C1 / WPT-3: the next session starts without Alfred holds or latches.
@@ -2505,16 +2588,27 @@ function orchestrator.tick()
                 max_owner    = plugin_name
             end
         end
+        local demoted = {}
         if max_priority > 0 then
             for plugin_name in pairs(wants) do
                 local p = PLUGIN_PRIORITY[plugin_name] or 0
                 if p < max_priority then
-                    log(string.format('preempting %s (priority %d) — %s (priority %d) also matched',
+                    -- QQT_Warpigz_v3 (C6): once per episode, re-logged when
+                    -- the winner changes (was logged every tick).
+                    dispatch.note('preempt:' .. plugin_name, string.format(
+                        'preempting %s (priority %d) — %s (priority %d) also matched',
                         plugin_name, p, max_owner, max_priority))
-                    wants[plugin_name]          = nil
-                    matched_reason[plugin_name] = nil
+                    demoted[plugin_name] = true
                 end
             end
+            for plugin_name in pairs(demoted) do
+                wants[plugin_name]          = nil
+                matched_reason[plugin_name] = nil
+            end
+        end
+        -- QQT_Warpigz_v3: a plugin not demoted this tick ends its episode.
+        for plugin_name in pairs(PLUGIN_PRIORITY) do
+            if not demoted[plugin_name] then dispatch.notes['preempt:' .. plugin_name] = nil end
         end
     end
 
@@ -2840,7 +2934,8 @@ function orchestrator.tick()
         local opt_out = incoming_entry
             and incoming_entry.same_activity_continuation == false
         if opt_out then
-            log(string.format(
+            -- QQT_Warpigz_v3 (C6): once per continuation window (was every tick).
+            dispatch.note('optout', string.format(
                 '%s: same-activity continuation OPT-OUT (entry sets same_activity_continuation=false) — proceeding to full transition',
                 last_disabled_plugin))
         else
@@ -2853,6 +2948,8 @@ function orchestrator.tick()
             last_disabled_plugin         = nil
             last_disabled_reason         = nil
         end
+    else
+        dispatch.notes.optout = nil   -- QQT_Warpigz_v3: the continuation window ended
     end
 
     -- ── TELEPORT TRANSITION (optional) ──────────────────────────────────────

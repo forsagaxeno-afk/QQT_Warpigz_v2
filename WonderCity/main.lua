@@ -4,12 +4,15 @@ local gui              = require 'gui'
 local settings         = require 'core.settings'
 local task_manager     = require 'core.task_manager'
 local external         = require 'core.external'
+local activity_lease   = require 'core.activity_lease' -- QQT_Warpigz_v3
 local enter_undercity  = require 'tasks.enter_undercity'  -- for grid dims + slot positions
 
 local local_player, player_position
 local debounce_time = nil
 local debounce_timeout = 0
 local next_revive_time = -math.huge
+
+local lease_log = function (msg) console.print('[WonderCity] ' .. msg) end -- QQT_Warpigz_v3
 
 local update_locals = function  ()
     local_player = get_local_player()
@@ -20,6 +23,13 @@ local main_pulse = function  ()
     debounce_time = get_time_since_inject()
     settings:update_settings()
     if not settings.enabled or not settings.get_keybind_state() then
+        task_manager.release_control()
+        activity_lease.release('WonderCityPlugin') -- QQT_Warpigz_v3
+        return
+    end
+    -- QQT_Warpigz_v3: standalone (WarPigs off) with another activity plugin
+    -- enabled: hold instead of teleporting against it.
+    if activity_lease.check('WonderCityPlugin', lease_log) then
         task_manager.release_control()
         return
     end
@@ -117,6 +127,11 @@ local render_pulse = function  ()
     end
     if not (settings.get_keybind_state()) then return end
     if not local_player or not settings.enabled then return end
+    if activity_lease.reason then -- QQT_Warpigz_v3
+        local msg = "WonderCity: " .. activity_lease.reason
+        graphics.text_2d(msg, vec2:new(get_screen_width()/2 - (#msg * 5.5), 80), 20, color_white(255))
+        return
+    end
     local current_task = task_manager.get_current_task()
     if current_task then
         local msg = "WonderCity: " .. current_task.name

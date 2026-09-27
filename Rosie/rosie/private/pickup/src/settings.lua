@@ -207,14 +207,60 @@ function Settings.update()
       -- Debug
       draw_wanted_items = gui.elements.debug.draw_wanted_toggle:get()
    }
+   -- QQT_Warpigz_v3: the pickup enable edge clears other plugins' pauses.
+   local was_enabled=settings.enabled
    for key,value in pairs(next_settings) do settings[key]=value end
    if not settings.enabled then settings.looting=false end
+   if settings.enabled and not was_enabled then Settings.clear_foreign_pauses('pickup enabled') end
 end
 
-function Settings.is_paused() return paused or next(pause_owners)~=nil end
+-- QQT_Warpigz_v3: a named pause (acquire_pause) belongs to its caller, but a
+-- caller that stops or reloads mid-pause (HordeDev off during a pylon) could
+-- never give it back, and pickup stayed "Paused by HordeDev." until the host
+-- restarted (Rosie off/on and a Rosie reload kept it). Each owner now records
+-- when it last acquired the pause; any owner but Rosie's own town trip is
+-- dropped after FOREIGN_PAUSE_TTL seconds (HordeDev's longest pause is 20 s),
+-- logged once. A Rosie reload restores only Rosie's own pause, and only while
+-- its town trip is still busy; the pickup/Rosie enable edge clears the others.
+local OWN_PAUSE='Rosie'
+Settings.FOREIGN_PAUSE_TTL=60
+local function pause_now()
+   local ok,now=pcall(get_time_since_inject)
+   return ok and type(now)=='number' and now or 0
+end
+function Settings.clear_foreign_pauses(reason)
+   local dropped={}
+   for caller in pairs(pause_owners) do
+      if caller~=OWN_PAUSE then dropped[#dropped+1]=caller end
+   end
+   if #dropped==0 then return 0 end
+   table.sort(dropped)
+   for _,caller in ipairs(dropped) do pause_owners[caller]=nil end
+   console.print('[Rosie] pickup pause by '..table.concat(dropped,', ')..' cleared ('..tostring(reason)..')')
+   return #dropped
+end
+local function expire_pauses()
+   local now=nil
+   for caller,since in pairs(pause_owners) do
+      if caller~=OWN_PAUSE then
+         now=now or pause_now()
+         if type(since)~='number' or now<since then pause_owners[caller]=now
+         elseif now-since>=Settings.FOREIGN_PAUSE_TTL then
+            pause_owners[caller]=nil
+            console.print(string.format('[Rosie] pickup pause by %s expired after %ds without a release; pickup resumes',
+               caller,Settings.FOREIGN_PAUSE_TTL))
+         end
+      end
+   end
+end
+function Settings.is_paused()
+   if next(pause_owners)~=nil then expire_pauses() end
+   return paused or next(pause_owners)~=nil
+end
 function Settings.acquire_pause(caller)
    if type(caller)~='string' or caller=='' then return false end
-   pause_owners[caller]=true; settings.looting=false; return true
+   -- A repeated acquire refreshes the owner's time (a live, re-taken pause).
+   pause_owners[caller]=pause_now(); settings.looting=false; return true
 end
 function Settings.release_pause(caller)
    if type(caller)~='string' or caller=='' then return false end
@@ -224,12 +270,27 @@ function Settings.pause_state()
    local owners={}; for caller in pairs(pause_owners) do owners[caller]=true end
    return {paused=paused,owners=owners}
 end
+local function town_trip_busy()
+   -- Only an already loaded lifecycle (never load it out of order here).
+   local ok,busy=pcall(function()
+      local loaded=type(package)=='table' and package.loaded
+      local life=type(loaded)=='table' and loaded['rosie.private.town.core.lifecycle']
+      return type(life)=='table' and type(life.busy)=='function' and life.busy()
+   end)
+   return ok and busy==true
+end
 function Settings.restore_pause_state(state)
    if type(state)~='table' then return end
    paused=state.paused==true
    if type(state.owners)=='table' then
+      local dropped={}
       for caller in pairs(state.owners) do
-         if type(caller)=='string' and caller~='' then pause_owners[caller]=true end
+         if caller==OWN_PAUSE and town_trip_busy() then pause_owners[caller]=pause_now()
+         elseif type(caller)=='string' and caller~='' then dropped[#dropped+1]=caller end
+      end
+      if #dropped>0 then
+         table.sort(dropped)
+         console.print('[Rosie] reload: pickup pause by '..table.concat(dropped,', ')..' not restored')
       end
    end
 end

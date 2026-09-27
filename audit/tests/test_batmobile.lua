@@ -95,6 +95,9 @@ test('traversal approach returns the validated height and accepts exploration ro
     eq(n.get_closeby_node(v(5,0,8),0.5):z(),8)
     local trav={get_position=function() return v(5,0,8) end,get_skin_name=function() return 'Traversal_Gizmo_Up' end}
     f.env.actors_manager.get_all_actors=function() return {trav} end
+    -- QQT_Warpigz_v3: try_traversal_route only takes a gizmo on the player's
+    -- floor (|dz| <= 3), so the player stands on the z=8 plane of the mock.
+    f.player.pos=v(0,0,8)
     eq(n.try_traversal_route(f.player,f.player.pos),true,'nil destination is valid for explorer traversal')
 end)
 
@@ -229,6 +232,34 @@ test('main tolerates absent player, avoids duplicate drive, and preserves crossi
     f.env.get_current_world=function() return nil end
     callback();eq(moves,before_moves,'loading blocks freeroam and pathfinding')
     eq(n.last_update,16,'loading retains the existing unstuck grace')
+end)
+
+-- QQT_Warpigz_v3: skills matched by spell name (the Warlock's Rampage).
+test('rule engine: a Rampage found by its spell name joins the equipped skills and is cast',function()
+    local f=fixture()
+    local rules=f.require('core.movement_rules')
+    local slot=#rules.skill_catalog
+    eq(rules.skill_catalog[slot].name,'Rampage','stable combo slot at the end of the catalog')
+    eq(rules.skill_catalog[slot].id,0,'unresolved until equipped')
+    local name_calls=0
+    f.env.get_equipped_spell_ids=function() return {337031,2400001} end
+    f.env.get_name_for_spell=function(id) name_calls=name_calls+1;return id==2400001 and 'Warlock_Rampage_Charge' or 'x' end
+    local names={}
+    for _,s in ipairs(rules.equipped_movement_skills()) do names[#names+1]=s.name end
+    eq(table.concat(names,','),'Evade,Rampage','Rampage joins the equipped list')
+    eq(rules.skill_by_id[2400001].name,'Rampage');eq(rules.skill_by_id[2400001].range,15)
+    eq(rules.skill_by_id[2400001].needs_raycast,false)
+    eq(name_calls,1,'only unknown equipped ids are looked up by name')
+    rules.equipped_movement_skills();eq(name_calls,1,'cached for 10 s')
+    local engine=f.require('core.movement_engine')
+    local sid,need_rc,rng=engine.pick({{enabled=true,skill_id=rules.skill_catalog[slot].id,conditions={}}},
+        {local_player=f.player,player_pos=v(0,0),path={v(12,0)},min_spell_dist=3})
+    eq(sid,2400001,'the rule casts the resolved Rampage id');eq(need_rc,false);eq(rng,15)
+    -- A host without get_name_for_spell: nothing is added, nothing fails.
+    local g=fixture();local r2=g.require('core.movement_rules')
+    g.env.get_equipped_spell_ids=function() return {2400001} end
+    g.env.get_name_for_spell=nil
+    eq(#r2.equipped_movement_skills(),0);eq(r2.skill_by_id[2400001],nil)
 end)
 
 print(string.format('Batmobile regression suite: %d tests, %d assertions', tests, checks))

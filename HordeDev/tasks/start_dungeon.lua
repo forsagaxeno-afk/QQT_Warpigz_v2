@@ -47,7 +47,18 @@ function task:reset()
     self.started, self.source_world, self.next_confirm, self.quiet_until = nil, nil, nil, nil
     self.confirms, self.evidence_since, self.evidence_key = 0, nil, nil
     self.entry_started, self.use_retry_at = nil, nil
+    self.companion_seen = false
     tracker.sigil_activation_pending, tracker.horde_entry_pending = false, false
+end
+
+-- QQT_Warpigz_v3: a companion town trip (set by main.lua while it holds a
+-- pending transaction for it) took the player out of Caldeum and BSK. The
+-- activation cannot finish there; it ends without a FAULT and the compass is
+-- treated as used on an abandoned run (horde_opened), so main.lua's
+-- abandoned-run recovery resets the old instance and starts the next cycle.
+-- s: a loaded read_world() snapshot.
+function task.left_for_companion(owner, s)
+    return owner.companion_seen == true and not s.inside and not s.outside
 end
 
 function task:fail(message)
@@ -88,6 +99,12 @@ function task:activation_update(now)
     if now<self.quiet_until then return end
     local s=self.read_world()
     if not s then self.evidence_since,self.evidence_key=nil,nil;return end
+    if task.left_for_companion(self,s) then
+        console.print("[start_dungeon] A town trip took the player away during the sigil activation; ending it for a new run")
+        self:reset()
+        tracker.horde_opened=true -- QQT_Warpigz_v3: abandoned-run recovery takes it from here
+        return
+    end
     if s.inside then
         local key="inside:"..tostring(s.id)
         if self.evidence_key~=key then self.evidence_key,self.evidence_since=key,now end

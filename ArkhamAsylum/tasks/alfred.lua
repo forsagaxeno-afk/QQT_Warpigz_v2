@@ -31,10 +31,29 @@ local floor_has_loot = function ()
     return not ok or present == true -- unreadable floor still gets a brief loot window
 end
 
+-- QQT_Warpigz_v3: the town Alfred services. The bundled provider Rosie
+-- services Temis only (its town list is {'Temis'}), so with Rosie loaded a
+-- Cerrigar home town still hops to Temis for the trip; the home town keeps
+-- driving pit entry/exit (teleport_cerrigar brings Arkham home afterwards).
+-- A standalone AlfredTheButler keeps the home town, as before.
+local ROSIE_ZONE, ROSIE_WAYPOINT = 'Skov_Temis', 0x1CE51E
+local rosie_town_logged = false
+local function service_town()
+    if type(rawget(_G, 'RosiePlugin')) ~= 'table' then
+        return settings.town_zone, settings.town_waypoint
+    end
+    if settings.town_zone ~= ROSIE_ZONE and not rosie_town_logged then
+        rosie_town_logged = true
+        console.print('[arkham] Rosie services Temis only; using Temis for town trips')
+    end
+    return ROSIE_ZONE, ROSIE_WAYPOINT
+end
+
 local teleport_with_debounce = function ()
     if task.debounce_time + task.debounce_timeout > get_time_since_inject() then return end
     task.debounce_time = get_time_since_inject()
-    pcall(teleport_to_waypoint, settings.town_waypoint)
+    local _, waypoint = service_town() -- QQT_Warpigz_v3
+    pcall(teleport_to_waypoint, waypoint)
     return true -- a thrown binding may already have submitted the channel
 end
 
@@ -188,9 +207,15 @@ local function waiting_for_request(status)
 end
 -- The plain-trigger branch owns a town hop only after the call returned
 -- acceptance. Never retry a with-teleport or uncertain/foreign request.
+-- QQT_Warpigz_v3: the accepted plain request itself is live work (Rosie
+-- reports external_trigger/running from the first frame), so gating on
+-- live_work never hopped and Arkham stood in the pit until Rosie's 240 s
+-- timeout. Skip only while the provider is teleporting on its own.
 local function retry_manual_teleport(status)
     if not manual_teleport or task.status ~= status_enum.WAITING
-        or get_alfred() ~= request_plugin or not status or status.paused or live_work(status) then return end
+        or get_alfred() ~= request_plugin or not status or status.paused
+        or (status.teleport == true and status.teleport_done ~= true and status.teleport_failed ~= true)
+    then return end
     local caller = status.external_caller or status.owner
     if caller and caller ~= '' and caller ~= plugin_label then manual_teleport = false; return end
     local ok, ready = pcall(function()
@@ -202,7 +227,7 @@ local function retry_manual_teleport(status)
             and not name:lower():find('loading', 1, true)
     end)
     if not ok or not ready then return end
-    if utils.player_in_zone(settings.town_zone) then manual_teleport = false; return end
+    if utils.player_in_zone((service_town())) then manual_teleport = false; return end -- QQT_Warpigz_v3
     if manual_attempts >= 3 then return end
     if teleport_with_debounce() then
         manual_attempts = manual_attempts + 1
@@ -399,9 +424,13 @@ task.Execute = function ()
         -- return for it, use the teleport variant (Alfred handles the
         -- round-trip). Else do a plain trigger and teleport ourselves
         -- via teleport_with_debounce so we don't double-channel.
-        if utils.player_in_zone(settings.town_zone) then
+        -- QQT_Warpigz_v3: 'in town' means the service town; from another
+        -- town (Cerrigar home with Rosie) a with-teleport trip would end
+        -- teleport_failed (no return portal between towns), so hop instead.
+        local zone = service_town()
+        if utils.player_in_zone(zone) then
             trigger_alfred(false)
-        elseif not floor_has_loot() or not settings.return_for_loot then
+        elseif utils.player_in_zone(settings.town_zone) or not floor_has_loot() or not settings.return_for_loot then
             if trigger_alfred(false) and task.status == status_enum.WAITING then
                 manual_teleport, manual_attempts = true, 0
                 retry_manual_teleport(get_alfred_status())

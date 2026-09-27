@@ -102,6 +102,8 @@ local function note_hold(reason, now)
     if not tracker.hold_since or now - (tracker.hold_seen_t or -math.huge) > 1 then
         tracker.hold_since, tracker.hold_logged = now, false
     end
+    -- QQT_Warpigz_v3: 'Debug logging' prints each change of the hold reason.
+    if reason ~= tracker.hold_reason then log.debug(settings, 'auto-fire held: ' .. tostring(reason)) end
     tracker.hold_reason, tracker.hold_seen_t = reason, now
     if not tracker.hold_logged and now - tracker.hold_since >= HOLD_LOG_S then
         tracker.hold_logged = true

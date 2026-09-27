@@ -332,4 +332,13 @@ task.reset = function ()
     speed_charge_progress_time = -1
 end
 
+-- QQT_Warpigz_v3 (C5): time spent yielding to Alfred or the Looter is not
+-- "no movement" for the speed-mode stuck and charge no-progress windows.
+task.on_yield = function (seconds)
+    if speed_stuck_pos then speed_stuck_time = speed_stuck_time + seconds end
+    if speed_charge_progress_time > 0 then
+        speed_charge_progress_time = speed_charge_progress_time + seconds
+    end
+end
+
 return task

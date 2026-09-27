@@ -1196,6 +1196,130 @@ case('H5-3 stale salvage / run flags outside Cerrigar, or a switch to War Plan e
     eq(f:logged('keeping the current run'), 0, 'latched fault: full restart')
 end)
 
+-- ── QQT_Warpigz_v3: standalone farming (no WarPigs) ────────────────────────
+case('V3 a run left outside BSK is reset once by the pulse and by a toggle off', function()
+    -- main_pulse recovery (after the 2 s settle), with the old instance reset
+    local s = horde({aether = 0})
+    s.P.enable(); s:run(3)
+    local tr = s.loaded['core.tracker']
+    tr.horde_opened, tr.sigil_used, tr.has_entered = true, true, true
+    s:town('Skov_Temis'); s:run(1)
+    eq(tr.horde_opened, true, 'not before the settle window')
+    s:run(2)
+    eq(tr.horde_opened, false, 'abandoned run reset')
+    eq(tr.sigil_used, false); eq(tr.has_entered, false)
+    eq(s:logged('resetting it for a new run'), 1)
+    eq(s.resets, 1, 'old instance reset from the overworld')
+    -- toggle off inside the settle window: stop_run clears it too
+    local t = horde({aether = 0})
+    t.P.enable(); t:run(3)
+    local tt = t.loaded['core.tracker']
+    tt.horde_opened, tt.sigil_used, tt.has_entered = true, true, true
+    t:town('Skov_Temis'); t:run(0.4)
+    t.gui.elements.main_toggle:set(false); t:run(0.4)
+    eq(tt.horde_opened, false, 'toggle off clears the abandoned run')
+    eq(t:logged('Clearing a Horde run left outside BSK on stop'), 1)
+    -- never while the player is in BSK, nor for HordeDev's own Alfred trip
+    local u = horde({aether = 0})
+    u.P.enable(); u:run(3)
+    u.loaded['core.tracker'].horde_opened = true
+    u:run(5)
+    eq(u.loaded['core.tracker'].horde_opened, true, 'in BSK: the run is kept')
+    eq(u:logged('resetting it for a new run'), 0)
+    -- nor while a live Rosie trip may still bring the player back into BSK
+    local st = {enabled = true, running = true}
+    local v = horde({aether = 0, globals = {AlfredTheButlerPlugin = {get_status = function() return st end}}})
+    v.P.enable(); v:run(3)
+    local vt = v.loaded['core.tracker']
+    vt.horde_opened, vt.sigil_used = true, true
+    v:town('Skov_Temis'); v:run(30)
+    eq(vt.horde_opened, true, 'kept while the town trip is live')
+    st.running = false
+    v:run(3)
+    eq(vt.horde_opened, false, 'reset once the trip ended outside BSK')
+end)
+
+case("V3 'Use alfred' off still yields to live Alfred work under any caller", function()
+    local st = {enabled = true, running = true}
+    local s = horde({aether = 0, globals = {AlfredTheButlerPlugin = {get_status = function() return st end}}})
+    s.P.enable(); s.P.setSettings('use_alfred', false)
+    s.actors = {actor('Monster', 5, 0, {enemy = true, health = 100})}
+    s:run(5)
+    eq(s:task_name(), 'alfred_running', "HordeDev yields to Rosie's own trip")
+    eq(s.P.status().hold, 'Alfred busy')
+    st.running = false
+    s:run(1)
+    eq(s:task_name(), 'Infernal Horde', 'resumes once the trip is over')
+    -- walking_to_horde never teleports to the Library while the trip is live
+    local w = horde({aether = 0, globals = {AlfredTheButlerPlugin = {get_status = function() return st end}}})
+    w.P.enable(); w:town('Skov_Temis')
+    st.running = true
+    local walk = w.loaded['tasks.walking_to_horde']
+    for _ = 1, 10 do w.now = w.now + 0.2; walk.Execute() end
+    eq(#w.teleports, 0, 'no Library teleport during the trip')
+    truthy(walk.hold, 'walking hold is visible')
+    st.running = false
+    w.now = w.now + 0.2; walk.Execute()
+    eq(#w.teleports, 1, 'Library teleport after the trip')
+end)
+
+local function pausing_looter()
+    local L = {owners = {}}
+    L.get_enabled = function() return true end
+    L.is_actively_looting = function() return false end
+    L.acquire_pause = function(caller) L.owners[caller] = true; return true end
+    L.release_pause = function(caller) L.owners[caller] = nil; return true end
+    return L
+end
+
+case('V3 the pylon pause of Rosie pickup never outlives its episode', function()
+    local L = pausing_looter()
+    local s = horde({aether = 0, globals = {LooteerPlugin = L}})
+    s.P.enable(); s:run(1)
+    local lg = s.loaded['core.loot_guard']
+    lg.pylon_pending()
+    eq(L.owners.HordeDev, true, 'pause taken')
+    s.gui.elements.main_toggle:set(false); s:run(0.4)
+    eq(L.owners.HordeDev, nil, 'toggle off (task_manager.stop -> cancel_pending) releases it')
+    -- held while the wave task does not run (player out of BSK): bounded
+    s.gui.elements.main_toggle:set(true); s:run(0.4)
+    lg.pylon_pending()
+    eq(L.owners.HordeDev, true)
+    s:town('Skov_Temis')
+    s:run(30)
+    eq(L.owners.HordeDev, nil, 'released after its bound whichever task runs')
+    -- a reloaded HordeDev releases the previous instance's pause
+    local R = pausing_looter()
+    R.owners.HordeDev = true
+    local r = horde({aether = 0, globals = {LooteerPlugin = R}})
+    r:run(0.4) -- HordeDev off: released anyway
+    eq(R.owners.HordeDev, nil, 'stale pause of a previous instance released')
+end)
+
+case('V3 a town trip during the RESET exit holds it (no timeout) and the reset is sent from town', function()
+    local st = {enabled = true, running = false}
+    local s = horde({aether = 0, globals = {AlfredTheButlerPlugin = {get_status = function() return st end}}})
+    s.P.enable()
+    s.actors = {actor('Stash', 1.5, 0)}
+    s.loaded['core.tracker'].finished_chest_looting = true
+    s.on_leave = function() s.outside_at = s.now + 2 end
+    s:run(1)
+    eq(s.loaded['core.tracker'].reset_exit_pending, true, 'RESET committed')
+    s:run(3, 0.2, function() if s.outside_at and s.now >= s.outside_at then s.outside_at = nil; s:outside() end end)
+    -- Rosie's automatic trip starts before the reset is sent and ends in town
+    st.running = true
+    s:town('Skov_Temis')
+    s:run(120)
+    eq(s:task_name(), 'Waiting for town service', 'the transaction waits for the trip')
+    eq(s.P.status().fault, nil, 'no timeout while the trip runs')
+    eq(s.leaves, 1, 'no Leave Dungeon through the trip')
+    st.running = false
+    s:run(10)
+    eq(s.P.status().fault, nil, 'no fault after the trip')
+    eq(s.loaded['tasks.exit_horde'].reset_phase, 'DONE', 'RESET finished from town')
+    eq(s.resets, 1, 'reset sent once')
+end)
+
 for _, failure in ipairs(failures) do print('FAIL ' .. failure) end
 print(string.format('HordeDev integration: %d checks, %d failures', checks, #failures))
 assert(#failures == 0, 'HordeDev integration regressions failed')

@@ -1,6 +1,8 @@
 local utils    = {}
 local enums = require "data.enums"
 local tracker = require "core.tracker"
+local hr_clock = require "core.hr_clock" -- QQT_Warpigz_v3
+local hr_mode = require "core.hr_mode"   -- QQT_Warpigz_v3
 
 function utils.distance_to(target)
     local player_pos = get_player_position()
@@ -81,6 +83,10 @@ end
 -- need_stash_* are advisory; tasks/alfred.lua never starts a trip for them
 -- inside a helltide (HLT-1/HLT-2/R12).
 function utils.alfred_hard_need(s)
+    -- QQT_Warpigz_v3: a stuck Alfred/Rosie refuses every trip while it keeps
+    -- publishing inventory_full; no hard need then (is_inventory_full returns
+    -- false, not the 33-item fallback, because inventory_full is a boolean).
+    if s.stuck == true then return false end
     return s.inventory_full == true or s.need_repair == true
 end
 
@@ -116,6 +122,15 @@ function utils.alfred_available()
     local status = utils.read_alfred_status()
     if not status then return nil end
     return status.enabled
+end
+
+-- QQT_Warpigz_v3: true while town service refused or failed our trip
+-- (Rosie "stuck"). The latch lives in tasks/alfred.lua, which publishes it as
+-- tracker.alfred_town_blocked; false when that task is not loaded.
+function utils.alfred_town_blocked()
+    local blocked = tracker.alfred_town_blocked
+    if type(blocked) ~= "function" then return false end
+    return blocked(utils.read_alfred_status()) == true
 end
 
 -- True only for a hard Alfred need. The local item count is a fallback for a
@@ -201,24 +216,30 @@ function utils.player_in_town()
     end
 end
 
+-- QQT_Warpigz_v3: the Helltide hour follows the UTC minute (core/hr_clock.lua).
+-- os.date("%M") was the LOCAL minute: 30 minutes off in a half-hour time zone.
 function utils.helltide_active()
-    local minute = tonumber(os.date("%M"))
-    -- No helltide at this time.
-    if minute >= 55 and minute <=59 then
-        return false
-    else
-        return true
-    end
+    -- No helltide in minutes 55-59.
+    return hr_clock.active()
 end
 
 function utils.do_events()
-    local minute = tonumber(os.date("%M"))
-    -- Don't do events at this time. Events are bugged and do not end
-    if minute >= 45 then
-        return false
-    else
-        return true
-    end
+    -- Don't do events late in the hour: events are bugged and do not end.
+    -- Warplan keeps minute 45; Farm mode uses 'Events until minute'.
+    return hr_clock.events_ok(hr_mode.event_until())
+end
+
+-- QQT_Warpigz_v3: a SilentRaven Whisper claim (its own auto-fire or keybind,
+-- or a queued request) owns Temis movement and clicks until it finishes,
+-- bounded by SilentRaven (100 s run, 120 s pause). Town steps (walks,
+-- interactions, the teleport out of Temis) wait; a paused queued request
+-- does not hold them.
+utils.raven_claim_active = function ()
+    local raven = SilentRavenPlugin or PLUGIN_silent_raven
+    if type(raven) ~= 'table' or type(raven.get_status) ~= 'function' then return false end
+    local ok, s = pcall(raven.get_status)
+    return ok and type(s) == 'table' and s.enabled == true
+        and (s.running == true or (s.pending == true and s.paused ~= true))
 end
 
 return utils

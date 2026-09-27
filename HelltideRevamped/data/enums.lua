@@ -12,12 +12,14 @@ local enums = {
         usz_rewardGizmo_Uber = 250,
         Helltide_RewardChest_Random = 75,
     },
+    -- QQT_Warpigz_v3: live_id = the zone id of the optional live Helltide
+    -- zone source (core/hr_live.lua). Nahantu and Skovos have no patrol loop.
     helltide_tps = {
-        {name = "Frac_Tundra_S", id = 0xACE9B, file = "menestad", maiden = "menestad_to_maiden", region = "Frac_"},
-        {name = "Scos_Coast", id = 0x27E01, file = "marowen", maiden = "marowen_to_maiden", region = "Scos_"},
-        {name = "Kehj_Oasis", id = 0xDEAFC, file = "ironwolfs", maiden = "ironwolfs_to_maiden", region = "Kehj_"},
-        {name = "Hawe_Verge", id = 0x9346B, file = "wejinhani", maiden = "wejinhani_to_maiden", region = "Hawe_"},
-        {name = "Step_South", id = 0x462E2, file = "jirandai", maiden = "jirandai_to_maiden", region = "Step_"}
+        {name = "Frac_Tundra_S", id = 0xACE9B, file = "menestad", maiden = "menestad_to_maiden", region = "Frac_", live_id = "fractured_peaks"},
+        {name = "Scos_Coast", id = 0x27E01, file = "marowen", maiden = "marowen_to_maiden", region = "Scos_", live_id = "scosglen"},
+        {name = "Kehj_Oasis", id = 0xDEAFC, file = "ironwolfs", maiden = "ironwolfs_to_maiden", region = "Kehj_", live_id = "kehjistan"},
+        {name = "Hawe_Verge", id = 0x9346B, file = "wejinhani", maiden = "wejinhani_to_maiden", region = "Hawe_", live_id = "hawezar"},
+        {name = "Step_South", id = 0x462E2, file = "jirandai", maiden = "jirandai_to_maiden", region = "Step_", live_id = "dry_steppes"}
     },
     -- Hardcoded maiden altar positions per helltide zone. Lifted from the archived
     -- helltide_maiden_auto plugin (verified against the last waypoint of each

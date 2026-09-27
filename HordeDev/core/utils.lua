@@ -326,7 +326,16 @@ function utils.alfred_live_work(s)
         or (s.teleport == true and s.teleport_done ~= true and s.teleport_failed ~= true)
 end
 
+-- QQT_Warpigz_v3: a stuck Alfred/Rosie (failed trips latched, stash full,
+-- or its retry cooldown) refuses every request while it keeps publishing
+-- inventory_full / need_repair; no trip is wanted until it recovers (the
+-- chests and the run continue with a full bag instead of standing still).
+function utils.alfred_stuck(s)
+    return type(s) == 'table' and s.stuck == true
+end
+
 function utils.alfred_hard_need(s)
+    if utils.alfred_stuck(s) then return false end -- QQT_Warpigz_v3
     return s.inventory_full == true or s.need_repair == true
 end
 
@@ -361,6 +370,7 @@ end
 -- (inventory_full / need_repair) always can.
 function utils.alfred_trip_wanted(s, completed_at)
     if s.enabled ~= true then return false end
+    if utils.alfred_stuck(s) then return false end -- QQT_Warpigz_v3
     if utils.alfred_hard_need(s) then return true end
     if s.need_trigger ~= true then return false end
     return not (completed_at and get_time_since_inject() - completed_at < ALFRED_STICKY_GRACE)

@@ -141,6 +141,33 @@ function M.pylon_done()
     pylon.pause_spent, pylon.yield_since, pylon.yield_over, pylon.logged = false, nil, false, false
 end
 
+-- QQT_Warpigz_v3: Rosie keeps a pause until its owner releases it (and
+-- restores it across its own reload), so HordeDev's pylon pause must never
+-- outlive the episode that took it:
+--  * bound_pause(): held 5 s past PYLON_PAUSE_MAX (the wave task, which
+--    normally releases it, did not run: preempted, player out of BSK), it
+--    is released here;
+--  * release_stale_pause(): a reloaded HordeDev starts with paused_at = nil
+--    and so could never release the previous instance's pause. Called on
+--    every update until Rosie's export is seen once (Rosie may load after
+--    HordeDev); release_pause is idempotent in Rosie.
+function M.bound_pause()
+    if pylon.paused_at and get_time_since_inject() - pylon.paused_at >= PYLON_PAUSE_MAX + 5 then
+        release_pause()
+        pylon.pause_spent, pylon.yield_over = true, true
+    end
+end
+
+local stale_pause_checked = false
+function M.release_stale_pause()
+    if stale_pause_checked then return end
+    local looter = LooteerPlugin
+    if type(looter) ~= 'table' or type(looter.release_pause) ~= 'function' then return end
+    stale_pause_checked = true
+    if pylon.paused_at then return end -- our own live pause (bounded above)
+    pcall(looter.release_pause, PAUSE_CALLER)
+end
+
 function M.reset()
     quiet_since = nil
     exit_committed = false
@@ -156,11 +183,19 @@ end
 -- our next update observes their ownership. Release our flag without clearing it.
 function M.companion_may_own_movement()
     if M.busy() then return true end
+    return M.alfred_may_own_movement()
+end
+
+-- QQT_Warpigz_v3: the Alfred/Rosie town-service half of the check above
+-- (a trip under any caller, including Rosie's own automatic service).
+-- readable_only: an unreadable status is not live work (callers that would
+-- otherwise hold on it without a bound).
+function M.alfred_may_own_movement(readable_only)
     local alfred = AlfredTheButlerPlugin or PLUGIN_alfred_the_butler
     if not alfred then return false end
-    if type(alfred.get_status) ~= 'function' then return true end
+    if type(alfred.get_status) ~= 'function' then return not readable_only end
     local ok, status = pcall(alfred.get_status)
-    if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return true end
+    if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return not readable_only end
     if not status.enabled then return false end
     -- C1: a teleport latched after a finished or failed trip is not live work.
     return status.trigger_tasks == true or status.external_trigger == true or status.running == true

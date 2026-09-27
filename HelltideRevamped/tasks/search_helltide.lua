@@ -57,6 +57,28 @@ local SEARCH_CYCLE_COOLDOWN_S = 45.0
 local cycle_tp_count      = 0    -- TPs attempted in the current scan cycle
 local last_cycle_end_time = nil  -- when the last full scan completed with no result
 
+-- QQT_Warpigz_v3 (C6): a waypoint the character cannot use (not unlocked, a
+-- Nahantu waypoint without the expansion) or whose landing zone differs from
+-- the enum pinned the search on it for the rest of the hour (re-fired every
+-- 6 s). After a refused teleport or TP_MAX_FIRES fires without a teleport
+-- buff or arrival the entry is skipped until the hour ends.
+local TP_MAX_FIRES = 3
+local unreachable_tps = {}
+local function mark_unreachable(tp)
+    if unreachable_tps[tp.id] then return end
+    unreachable_tps[tp.id] = true
+    console.print("[HelltideRevamped] waypoint " .. tostring(tp.file) .. " unreachable — skipping this hour")
+end
+-- QQT_Warpigz_v3: a channel that started (teleport buff) but left the player
+-- in the zone it was fired from was interrupted (a hit, a move), not refused:
+-- it does not count toward TP_MAX_FIRES, at most TP_MAX_INTERRUPTS times per
+-- destination (the only active Helltide must not be skipped for the hour).
+local TP_MAX_INTERRUPTS = 5
+local function current_zone_name()
+    local world = get_current_world()
+    return world and world:get_current_zone_name() or nil
+end
+
 local function detect_helltide_zone()
     for _, tp in ipairs(enums.helltide_tps) do
         if utils.player_in_region(tp.region) then
@@ -103,7 +125,30 @@ local search_helltide_task = {
         if recovery.revive_if_dead(lp) then
             return
         end
+        -- QQT_Warpigz_v3: no teleport (idle, scan, return to the Helltide)
+        -- and no idle salvage request while SilentRaven claims a Whisper
+        -- reward (bounded by SilentRaven).
+        if (utils.raven_claim_active and utils.raven_claim_active()) then
+            if not self._raven_logged then
+                self._raven_logged = true
+                console.print("[HelltideRevamped] SilentRaven is claiming a Whisper reward - waiting before teleporting")
+            end
+            return
+        end
+        self._raven_logged = nil
 
+        -- QQT_Warpigz_v3: the trap recovery (helltide.lua) asks for a fresh
+        -- scan. The helltide task took the tick on arrival, so our state may
+        -- still be WAITING_FOR_TELEPORT for the abandoned zone, with the
+        -- previous scan's count.
+        if tracker.search_restart then
+            tracker.search_restart = nil
+            cycle_tp_count, last_cycle_end_time = 0, nil
+            self._teleport_fired_at, self._tp_fires = nil, nil
+            tracker.teleporting = false
+            tracker.clear_key("wait_in_town")
+            self.current_state = search_helltide_state.SEARCHING_HELLTIDE
+        end
         if tracker.helltide_end then
             self:reset()
         elseif self.current_state == search_helltide_state.SEARCHING_HELLTIDE then
@@ -133,6 +178,7 @@ local search_helltide_task = {
                 console.print("[HelltideRevamped] Helltide hour ended, clearing confirmed zone: " .. confirmed_helltide_tp.file)
                 confirmed_helltide_tp = nil
             end
+            unreachable_tps = {} -- QQT_Warpigz_v3: retried next hour
             console.print("Helltide is not active, wait until helltide starts")
             if not utils.player_in_zone(settings.town_zone) then
                 local now = get_time_since_inject()
@@ -152,6 +198,7 @@ local search_helltide_task = {
                 -- need; the dedicated Alfred task keeps caller/callback
                 -- ownership. Advisory restock never costs an off-window trip.
                 if settings.salvage and not idle_salvage_requested and not tracker.alfred_paused_skip
+                    and not utils.alfred_town_blocked() -- QQT_Warpigz_v3
                     and utils.alfred_available() == true and utils.is_inventory_full() == true
                 then
                     tracker.needs_salvage = true
@@ -183,7 +230,8 @@ local search_helltide_task = {
             self.current_state = search_helltide_state.FOUND_HELLTIDE
         elseif self:arrival_grace() then
             return
-        elseif confirmed_helltide_tp and not tracker.skip_cached_zone then
+        elseif confirmed_helltide_tp and not tracker.skip_cached_zone
+            and not unreachable_tps[confirmed_helltide_tp.id] then -- QQT_Warpigz_v3
             -- We know where this hour's helltide is — go back directly
             console.print("[HelltideRevamped] Returning to known helltide zone: " .. confirmed_helltide_tp.file)
             current_city_index = index_of_tp(confirmed_helltide_tp)
@@ -191,7 +239,10 @@ local search_helltide_task = {
             last_cycle_end_time = nil
             tracker.wait_in_town = nil  -- reset arrival timer so we don't use a stale one
             self._teleport_fired_at = nil
+            self._tp_fires = nil -- QQT_Warpigz_v3
             self.current_state = search_helltide_state.WAITING_FOR_TELEPORT
+        elseif self:live_hint() then -- QQT_Warpigz_v3: opt-in live zone (core/hr_live.lua)
+            return
         else
             local now = get_time_since_inject()
             if last_cycle_end_time then
@@ -214,25 +265,51 @@ local search_helltide_task = {
         if world and world:get_name() ~= "Limbo" and not tracker.teleporting then
             -- Check the completed count before choosing the next destination;
             -- otherwise the last waypoint is skipped on every scan cycle.
-            if cycle_tp_count >= #enums.helltide_tps then
-                last_cycle_end_time = get_time_since_inject()
+            -- QQT_Warpigz_v3: a cycle visits each usable destination once: it
+            -- skips unreachable waypoints and the abandoned zone (otherwise the
+            -- first town is visited twice).
+            local n = #enums.helltide_tps
+            local abandoned = tracker.skip_cached_zone and confirmed_helltide_tp or nil
+            local function skipped(tp)
+                return unreachable_tps[tp.id] or (abandoned and tp.id == abandoned.id)
+            end
+            local cycle_len = 0
+            for _, tp in ipairs(enums.helltide_tps) do
+                if not skipped(tp) then cycle_len = cycle_len + 1 end
+            end
+            if cycle_tp_count >= cycle_len then
+                -- QQT_Warpigz_v3: the trap-recovery skip lasts one scan cycle.
+                -- D4 runs one Helltide region at a time, so a cycle without a
+                -- different one means the abandoned zone is the only one: go
+                -- back now (the "Returning to known helltide zone" branch runs
+                -- before the cooldown gate; search's helltide_task:reset()
+                -- starts that session fresh) instead of cycling the other
+                -- towns until minute 55.
+                if abandoned and not unreachable_tps[abandoned.id] then
+                    tracker.skip_cached_zone = false
+                    console.print("[HelltideRevamped] no other Helltide found — returning to " .. abandoned.file)
+                    last_cycle_end_time = nil
+                else
+                    tracker.skip_cached_zone = false
+                    last_cycle_end_time = get_time_since_inject()
+                end
                 self.current_state = search_helltide_state.SEARCHING_HELLTIDE
                 return
             end
-            if current_city_index > #enums.helltide_tps then
+            if current_city_index > n then
                 current_city_index = 1
             else
-                current_city_index = (current_city_index % #enums.helltide_tps) + 1
+                current_city_index = (current_city_index % n) + 1
             end
             -- Skip the cached zone when trap-recovery told us to find a
-            -- different helltide.  Advance one more step if the cycle landed
-            -- on the abandoned zone.  (One iteration is enough: zones are
-            -- distinct entries in helltide_tps.)
-            if tracker.skip_cached_zone and confirmed_helltide_tp
-                and enums.helltide_tps[current_city_index].id == confirmed_helltide_tp.id
-            then
-                console.print("[HelltideRevamped] skipping abandoned zone " .. confirmed_helltide_tp.file)
-                current_city_index = (current_city_index % #enums.helltide_tps) + 1
+            -- different helltide, and every unreachable waypoint.
+            for _ = 1, n do
+                local tp = enums.helltide_tps[current_city_index]
+                if not skipped(tp) then break end
+                if abandoned and tp.id == abandoned.id then
+                    console.print("[HelltideRevamped] skipping abandoned zone " .. abandoned.file)
+                end
+                current_city_index = (current_city_index % n) + 1
             end
             -- Track how many TPs we've tried this cycle; once all are exhausted,
             -- record the time and fall back to SEARCHING so the cooldown gate fires.
@@ -240,6 +317,7 @@ local search_helltide_task = {
             console.print("Teleporting to: " .. tostring(enums.helltide_tps[current_city_index].file))
             tracker.wait_in_town = nil
             self._teleport_fired_at = nil
+            self._tp_fires = nil -- QQT_Warpigz_v3
             self.current_state = search_helltide_state.WAITING_FOR_TELEPORT
         else
             console.print("Currently in loading screen. Waiting before attempting teleport.")
@@ -252,27 +330,62 @@ local search_helltide_task = {
             if not tracker.check_time("wait_in_town", 4) then
                 return
             end
+            -- QQT_Warpigz_v3: a live-zone teleport that shows no Helltide
+            -- after the wait refutes the hint for this hour.
+            if self._live_tp and self._live_tp.id == enums.helltide_tps[current_city_index].id
+                and not utils.is_in_helltide() and tracker.hr_live then
+                pcall(tracker.hr_live.refute, self._live_hour, self._live_zone)
+            end
+            self._live_tp, self._live_hour, self._live_zone = nil, nil, nil
             tracker.teleporting = false
             self._teleport_fired_at = nil
+            self._tp_fires = nil -- QQT_Warpigz_v3
             self.current_state = search_helltide_state.SEARCHING_HELLTIDE
         else
             if utils.is_teleporting() then
                 tracker.teleporting = true
+                self._tp_channel = true -- QQT_Warpigz_v3
                 return
             else
                 local now = get_time_since_inject()
                 if (not self._teleport_fired_at or now - self._teleport_fired_at >= IDLE_TELEPORT_DEBOUNCE_S)
                     and not loot_hold()
                 then
-                    teleport_to_waypoint(enums.helltide_tps[current_city_index].id)
+                    -- QQT_Warpigz_v3 (C6): bounded per destination; the API
+                    -- returns false when the teleport is refused. The old
+                    -- "fail teleport, retry" fallback sat after this return
+                    -- and could never run.
+                    local tp = enums.helltide_tps[current_city_index]
+                    local zone_now = current_zone_name()
+                    if not self._tp_fires then self._tp_interrupts = 0 end
+                    if self._tp_channel and self._tp_fires and self._tp_zone == zone_now
+                        and (self._tp_interrupts or 0) < TP_MAX_INTERRUPTS then
+                        self._tp_interrupts = (self._tp_interrupts or 0) + 1
+                        self._tp_fires = self._tp_fires - 1
+                        console.print(string.format("[HelltideRevamped] teleport to %s interrupted — trying again (%d/%d)",
+                            tostring(tp.file), self._tp_interrupts, TP_MAX_INTERRUPTS))
+                    end
+                    self._tp_channel = nil
+                    local fired = false
+                    if (self._tp_fires or 0) < TP_MAX_FIRES then
+                        self._tp_zone = zone_now
+                        fired = teleport_to_waypoint(tp.id) ~= false
+                    end
+                    if not fired then
+                        mark_unreachable(tp)
+                        -- Not a visit: the cycle length shrinks by this entry.
+                        cycle_tp_count = math.max(0, cycle_tp_count - 1)
+                        self._teleport_fired_at, self._tp_fires = nil, nil
+                        tracker.teleporting = false
+                        tracker.clear_key('wait_in_town')
+                        self.current_state = search_helltide_state.TELEPORTING
+                        return
+                    end
+                    self._tp_fires = (self._tp_fires or 0) + 1
                     self._teleport_fired_at = now
                 end
                 return
             end
-            -- fail teleport, retry
-            tracker.clear_key('wait_in_town')
-            self.current_state = search_helltide_state.TELEPORTING
-            return
         end
     end,
 
@@ -285,6 +398,32 @@ local search_helltide_task = {
             return
         end
         console.print("Found helltide")
+    end,
+
+    -- QQT_Warpigz_v3: the opt-in live Helltide zone (core/hr_live.lua) names
+    -- this hour's region: teleport straight there instead of the town cycle.
+    -- Never to an unusable waypoint or the zone a trap recovery abandoned;
+    -- refuted (no buff on arrival) it is ignored for the rest of the hour.
+    live_hint = function(self)
+        local live = tracker.hr_live
+        if not live then return false end
+        -- The first answer of the hour is on its way: hold (at most 5 s).
+        local okw, waiting = pcall(live.waiting, get_time_since_inject())
+        if okw and waiting then return true end
+        local ok, tp = pcall(live.zone_tp)
+        if not ok or type(tp) ~= 'table' or unreachable_tps[tp.id] then return false end
+        if tracker.skip_cached_zone and confirmed_helltide_tp and confirmed_helltide_tp.id == tp.id then return false end
+        if self._live_tp and self._live_tp.id == tp.id then return false end
+        local okh, hour = pcall(function() return tracker.hr_clock and tracker.hr_clock.hour_id() end)
+        local okz, zone = pcall(live.zone_name)
+        self._live_tp, self._live_hour, self._live_zone = tp, okh and hour or nil, okz and zone or nil
+        console.print("[HelltideRevamped] Live Helltide zone: " .. tostring(tp.file) .. " — teleporting there directly")
+        current_city_index = index_of_tp(tp)
+        tracker.wait_in_town = nil
+        self._teleport_fired_at = nil
+        self._tp_fires = nil
+        self.current_state = search_helltide_state.WAITING_FOR_TELEPORT
+        return true
     end,
 
     -- HLT-7: true while a fresh external arrival without the buff is inside
@@ -322,8 +461,13 @@ local search_helltide_task = {
         tracker.clear_key("wait_in_town")
         tracker.external_enable_at = nil
         loot_hold_since, loot_hold_logged = nil, false
+        tracker.skip_cached_zone = false -- QQT_Warpigz_v3: never carried into a new session
+        tracker.search_restart = nil
+        unreachable_tps = {} -- QQT_Warpigz_v3
+        self._tp_fires = nil
         self._farming_reset = false
         self._teleport_fired_at = nil
+        self._live_tp, self._live_hour, self._live_zone = nil, nil, nil -- QQT_Warpigz_v3
         self.current_state = search_helltide_state.SEARCHING_HELLTIDE
     end,
 
@@ -333,9 +477,12 @@ local search_helltide_task = {
         cycle_tp_count = 0
         last_cycle_end_time = nil
         self._teleport_fired_at = nil
+        self._tp_fires = nil -- QQT_Warpigz_v3
         self._farming_reset = false
         tracker.teleporting = false
         tracker.clear_key("wait_in_town")
+        tracker.skip_cached_zone = false -- QQT_Warpigz_v3
+        self._live_tp, self._live_hour, self._live_zone = nil, nil, nil -- QQT_Warpigz_v3
         self.current_state = search_helltide_state.SEARCHING_HELLTIDE
     end
 }

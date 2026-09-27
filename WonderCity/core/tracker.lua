@@ -49,6 +49,48 @@ local tracker = {
     resume_until = nil,
 }
 local RESUME_WINDOW = 300
+-- QQT_Warpigz_v3: the explorers stay idle for a boss only while kill_monster's
+-- scan saw a live (not skipped) is_boss() enemy within this many seconds.
+-- boss_trigger_time (first sight) still drives boss_delay; it no longer
+-- gates exploring by itself (a dead miniboss or a revive far from the boss
+-- left the floor idle until reset_timeout).
+local BOSS_GATE_SECONDS = 10
+tracker.boss_seen_at = nil
+tracker.note_boss_seen = function ()
+    tracker.boss_seen_at = get_time_since_inject()
+end
+tracker.boss_gate_active = function ()
+    return tracker.boss_seen_at ~= nil and get_time_since_inject() - tracker.boss_seen_at <= BOSS_GATE_SECONDS
+end
+-- QQT_Warpigz_v3: reward-phase state survives a script reload (tracker
+-- state is module-local and resets on reload; the reward chest may be gone
+-- by then). Kept in one shared global, keyed by the Undercity world.
+local RUN_STATE_GLOBAL, RUN_STATE_MAX_AGE = 'WonderCity_run_state', 120
+local RUN_STATE_FIELDS = {'undercity_start_time', 'reward_seen', 'done', 'chest_interacted', 'chest_last_pos',
+    'completion_reason', 'reward_opened_time', 'chest_failed', 'chest_first_seen', 'kill_dismissed_at',
+    'floor_generation', 'enticement'}
+tracker.save_run_state = function ()
+    if not tracker.in_undercity or tracker.world_key == nil then return end
+    local state = rawget(_G, RUN_STATE_GLOBAL)
+    if type(state) ~= 'table' then state = {}; rawset(_G, RUN_STATE_GLOBAL, state) end
+    state.world_key, state.saved_at = tracker.world_key, get_time_since_inject()
+    for _, field in ipairs(RUN_STATE_FIELDS) do state[field] = tracker[field] end
+end
+local function restore_run_state(key)
+    local state = rawget(_G, RUN_STATE_GLOBAL)
+    if type(state) ~= 'table' or state.world_key ~= key then return false end
+    -- Only a reload moments ago (never a stale state of a recycled world id).
+    if type(state.saved_at) ~= 'number' or get_time_since_inject() - state.saved_at > RUN_STATE_MAX_AGE then return false end
+    for _, field in ipairs(RUN_STATE_FIELDS) do
+        if state[field] ~= nil then tracker[field] = state[field] end
+    end
+    if type(tracker.enticement) ~= 'table' then tracker.enticement = {} end
+    if type(tracker.floor_generation) ~= 'number' then tracker.floor_generation = 0 end
+    -- A reward chest seen before the reload counts as seen now, so its
+    -- disappearance completes the reward phase (bounded, CRT-1).
+    if tracker.reward_seen and not tracker.done then tracker.chest_last_seen = get_time_since_inject() end
+    return true
+end
 
 tracker.reset_floor_state = function ()
     tracker.exit_trigger_time = nil
@@ -76,6 +118,7 @@ tracker.reset_floor_state = function ()
     tracker.boss_kill_seen, tracker.boss_alive_at = nil, nil
     tracker.kill_dismissed_at = nil
     tracker.last_boss_name, tracker.last_boss_health, tracker.last_boss_at = nil, nil, nil
+    tracker.boss_seen_at = nil -- QQT_Warpigz_v3
 end
 
 tracker.forget_resume = function ()
@@ -95,6 +138,14 @@ tracker.observe_world = function (alfred_trip)
     if tracker.world_key == key then return nil end
     local now = get_time_since_inject()
     local inside = zone:match('X1_Undercity_') ~= nil
+    -- QQT_Warpigz_v3: first world seen after a script reload is the Undercity
+    -- we were in: resume its run (deadline, reward state) instead of a fresh run.
+    if tracker.world_key == nil and inside and restore_run_state(key) then
+        tracker.world_key, tracker.in_undercity = key, true
+        console.print('[WonderCity:tracker] reloaded inside ' .. key .. ' — resuming the run'
+            .. (tracker.done and ' (reward already opened)' or (tracker.reward_seen and ' (reward chest seen)' or '')))
+        return 'resume'
+    end
     local kind = inside and (tracker.in_undercity and 'floor' or 'run') or 'outside'
     if kind == 'run' and tracker.resume_key == key and tracker.resume_until and now < tracker.resume_until then
         kind = 'resume'
@@ -109,6 +160,7 @@ tracker.observe_world = function (alfred_trip)
         end
         -- Floor state belongs to the Undercity we may still come back to.
         if tracker.resume_key ~= nil then return kind end
+        rawset(_G, RUN_STATE_GLOBAL, nil) -- QQT_Warpigz_v3: the run is over
     end
     if inside then tracker.forget_resume() end
     if kind == 'resume' then

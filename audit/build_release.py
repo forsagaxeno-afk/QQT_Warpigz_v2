@@ -7,6 +7,7 @@ user documents, and <out>/RELEASE_NOTES.md from the matching CHANGELOG entry.
 Used by .github/workflows/release.yml; runs locally the same way.
 """
 import argparse
+import fnmatch
 import json
 from pathlib import Path
 import re
@@ -17,6 +18,15 @@ DOCS = {"README.md": "README.md", "CHANGELOG.md": "CHANGELOG.md", "AUDIT.md": "A
         "CREDITS.md": "CREDITS.md", "audit/LIVE_CHECKLIST.md": "LIVE_CHECKLIST.md",
         "docs/INSTALL_RU.txt": "УСТАНОВКА_RU.txt"}
 SKIP = {".gitignore", "Thumbs.db", ".DS_Store"}
+# QQT_Warpigz_v3: files HelltideRevamped generates on the user's machine
+# (learned chest spots / fence / stats, the web dashboard data) never ship.
+GENERATED = ("HelltideRevamped/learned/*.txt", "HelltideRevamped/learned/*.tmp",
+             "HelltideRevamped/dashboard/hr_data.js", "HelltideRevamped/dashboard/*.tmp")
+
+
+def generated(path):
+    rel = path.relative_to(ROOT).as_posix()
+    return any(fnmatch.fnmatch(rel, pattern) for pattern in GENERATED)
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--out", default="dist")
@@ -30,7 +40,7 @@ package = out / f"{name}.zip"
 with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
     for folder in manifest["components"]:
         for path in sorted((ROOT / folder).rglob("*")):
-            if path.is_file() and path.name not in SKIP and "__pycache__" not in path.parts:
+            if path.is_file() and path.name not in SKIP and "__pycache__" not in path.parts and not generated(path):
                 archive.write(path, f"{name}/scripts/{path.relative_to(ROOT).as_posix()}")
     for source, target in DOCS.items():
         archive.write(ROOT / source, f"{name}/{target}")

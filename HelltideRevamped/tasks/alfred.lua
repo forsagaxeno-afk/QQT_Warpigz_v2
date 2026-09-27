@@ -127,6 +127,49 @@ local function paused_hold(status)
     tracker.alfred_paused_skip = true
     return false
 end
+-- QQT_Warpigz_v3: town service unavailable for now. Rosie refuses requests
+-- (`false, why`) while lifecycle.stuck(): 120 s after a failed trip, and until
+-- an explicit Run town service after 3 failures or a full stash; it keeps
+-- publishing inventory_full meanwhile. Without this latch standalone HR asked
+-- again every 5 s and stood still for the rest of the session. The latch
+-- (tracker.alfred_stuck_skip, like alfred_paused_skip) is set on a refusal or
+-- a failed/cancelled trip and clears when a readable status publishes
+-- stuck == false or a request is accepted again. A provider that never
+-- publishes `stuck` gets one more request every STUCK_RETRY. While blocked HR
+-- farms on with full bags instead of holding. helltide.lua and
+-- search_helltide.lua read it through core/utils.lua (tracker.alfred_town_blocked).
+local STUCK_RETRY = 120 -- Rosie's RETRY_COOLDOWN
+local function town_block(why)
+    tracker.needs_salvage = false
+    if tracker.alfred_stuck_skip then return end
+    tracker.alfred_stuck_skip = get_time_since_inject()
+    console.print('[HelltideRevamped] Town service unavailable (' .. tostring(why or 'refused') ..
+        ') — farming on without it until Alfred/Rosie accepts again')
+end
+local function town_unblock()
+    if tracker.alfred_stuck_skip == nil then return end
+    tracker.alfred_stuck_skip = nil
+    console.print('[HelltideRevamped] Town service available again')
+end
+-- status: a readable status table, or nil while it is unreadable.
+local function town_blocked(status)
+    if status and status.stuck == true then return true end
+    local since = tracker.alfred_stuck_skip
+    if not since then return false end
+    if status and status.stuck == false then
+        town_unblock()
+        return false
+    end
+    if get_time_since_inject() - since >= STUCK_RETRY then
+        -- One more request (false = expired, not cleared): a refusal latches
+        -- again, an acceptance logs "available again".
+        tracker.alfred_stuck_skip = false
+        return false
+    end
+    return true
+end
+tracker.alfred_town_blocked = town_blocked
+
 local function clear_request()
     request_plugin, request_started, quiet_since = nil, nil, nil
 end
@@ -158,11 +201,19 @@ local function waiting_for_request(status)
     return true
 end
 
-local function reset(token)
+local function reset(token, result)
     if token ~= generation or task.status ~= status_enum.WAITING or get_alfred() ~= request_plugin then return end
     -- Completion updates HR state only. Both supplied Alfred forks can park
     -- indefinitely if a callback introduces an external pause.
-    tracker.has_salvaged = true
+    -- QQT_Warpigz_v3: the old fork contract (Rosie legacy_callback) passes
+    -- nil on success and 'failed'/'cancelled' otherwise. A failed trip is not
+    -- a salvage: latch "town unavailable" (town_block) instead
+    -- of return_from_salvage and an immediate re-request of a refused trip.
+    if result == 'failed' or result == 'cancelled' then
+        town_block('trip ' .. result)
+    else
+        tracker.has_salvaged = true
+    end
     tracker.needs_salvage = false
     task.status = status_enum['IDLE']
     clear_request()
@@ -180,11 +231,16 @@ local function trigger_alfred()
     local token = generation
     task.status = status_enum.WAITING
     request_plugin, request_started, quiet_since = a, get_time_since_inject(), nil
-    local ok, accepted = pcall(a.trigger_tasks_with_teleport, plugin_label, function() reset(token) end)
+    -- QQT_Warpigz_v3: forward the completion result (nil / 'failed' / 'cancelled').
+    local ok, accepted, why = pcall(a.trigger_tasks_with_teleport, plugin_label, function(result) reset(token, result) end)
     if ok and accepted == false then
         if token == generation and task.status == status_enum.WAITING then retire_request() end
+        -- QQT_Warpigz_v3: a refusal (Rosie while stuck) means "unavailable
+        -- for now", not "ask again in 5 s": farm on until it is available.
+        town_block(why)
         return false
     end
+    if ok then town_unblock() end -- QQT_Warpigz_v3: accepted again
     -- A throwing call may already have queued work. Reserve this generation
     -- until callback or stable readable idle reconciles the uncertain result.
     if not ok then return false end
@@ -213,6 +269,13 @@ local function decide()
     -- supplied legacy status; teleport covers its with-teleport queue window.
     local alfred_busy = live_work(status)
     if alfred_busy then return true, 'Alfred busy' end
+
+    -- QQT_Warpigz_v3: town service refused/failed (stuck): farm on, no hold,
+    -- no request, before the retry gate and every need check below.
+    if town_blocked(status) then
+        tracker.needs_salvage = false
+        return false
+    end
 
     -- Hold while we have a cycle in flight (set by Execute below).
     if get_time_since_inject() < retry_after then return true, 'Alfred retry delay' end
@@ -306,7 +369,8 @@ function task.Execute()
         return
     end
 
-    if task.status == status_enum['IDLE'] then
+    -- QQT_Warpigz_v3: never re-ask a provider that refused/failed (stuck).
+    if task.status == status_enum['IDLE'] and not town_blocked(status) then
         trigger_alfred()
     end
 end
@@ -324,6 +388,9 @@ function task.reset()
     -- grace (last_completion_at) is kept on purpose (C1: cancel never erases it).
     watch.paused_since, watch.paused_logged = nil, false
     tracker.alfred_paused_skip = nil
+    -- QQT_Warpigz_v3: a new session asks again (a still-stuck Rosie keeps
+    -- publishing stuck = true, which blocks by itself).
+    tracker.alfred_stuck_skip = nil
     note_hold(nil)
 end
 

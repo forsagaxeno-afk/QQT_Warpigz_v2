@@ -1,5 +1,5 @@
 local plugin_label = 'batmobile'
-local plugin_version = '2.1.0'
+local plugin_version = '2.2.0'
 console.print("Lua Plugin - Batmobile - Leoric - v" .. plugin_version)
 
 local mrul    = require 'core.movement_rules'
@@ -140,6 +140,7 @@ end
 local function _build_skill_labels()
     local items = { '(none)' }
     local equipped_set = {}
+    if mrul.resolve_named then mrul.resolve_named() end -- QQT_Warpigz_v3: Rampage by name
     if type(get_equipped_spell_ids) == 'function' then
         local ok, eq = pcall(get_equipped_spell_ids)
         if ok and type(eq) == 'table' then

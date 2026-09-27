@@ -469,25 +469,64 @@ function J.new(opts)
         end
     end
     BASE.os = setmetatable({date = function(fmt, ...)
-        if fmt == '%M' then return string.format('%02d', h.minute) end
+        -- QQT_Warpigz_v3: HelltideRevamped reads the UTC minute ('!%M',
+        -- core/hr_clock.lua) and so does WarPigs (with a '%M' fallback). Both follow h.minute.
+        if fmt == '%M' or fmt == '!%M' then return string.format('%02d', h.minute) end
+        if fmt == '!%S' then return '00' end
         return os.date(fmt, ...)
     end, time = os_time, clock = os.clock, getenv = function() return nil end}, {__index = function(_, k)
         h.missing['os.' .. tostring(k)] = (h.missing['os.' .. tostring(k)] or 0) + 1
     end})
     -- Plugins may read their own data files; writes stay in memory.
+    -- QQT_Warpigz_v3: a later read of a written path returns the last
+    -- written text (h.mem_files[path]; tests may seed it), so persistence
+    -- round-trips; every other read goes to the real file.
+    local mem_files = {}
+    h.mem_files = mem_files
+    local function mem_reader(text)
+        local pos, f = 1, {}
+        local function next_line()
+            if pos > #text then return nil end
+            local e = text:find('\n', pos, true)
+            local line
+            if e then line, pos = text:sub(pos, e - 1), e + 1 else line, pos = text:sub(pos), #text + 1 end
+            return line
+        end
+        function f:lines() return next_line end
+        function f:read(fmt)
+            if fmt == '*a' or fmt == '*all' or fmt == 'a' then
+                local rest = text:sub(pos); pos = #text + 1; return rest
+            end
+            return next_line()
+        end
+        function f:seek(whence, offset)
+            if whence == 'end' then pos = #text + 1; return #text end
+            if whence == 'set' then pos = (offset or 0) + 1 end
+            return pos - 1
+        end
+        function f:close() return true end
+        return f
+    end
     BASE.io = {open = function(path, mode)
         mode = mode or 'r'
         if mode:find('[wa+]') then
             local owner = code_owner(2)
             local rec = {path = path, mode = mode, owner = owner and owner.name, t = h.now, data = {}}
             h.file_writes[#h.file_writes + 1] = rec
+            if h.fail_writes and h.fail_writes(path) then return nil, 'write refused by the test' end
             local f = {}
-            function f:write(...) for i = 1, select('#', ...) do rec.data[#rec.data + 1] = tostring((select(i, ...))) end return self end
-            function f:close() return true end
+            function f:write(...)
+                for i = 1, select('#', ...) do rec.data[#rec.data + 1] = tostring((select(i, ...))) end
+                mem_files[path] = table.concat(rec.data)
+                return self
+            end
+            function f:close() mem_files[path] = table.concat(rec.data); return true end
             function f:flush() return true end
             function f:setvbuf() return true end
+            mem_files[path] = ''
             return f
         end
+        if mem_files[path] ~= nil then return mem_reader(mem_files[path]) end
         return io.open(path, mode)
     end, lines = io.lines, write = function() end, read = function() return nil end}
 
@@ -829,7 +868,9 @@ function J.new(opts)
     host('get_helltide_coin_cinders', function() return h.cinders end)
     host('get_glyphs', function() return {} end)
     host('upgrade_glyph', function() end)
-    host('get_equipped_spell_ids', function() return {} end)
+    -- QQT_Warpigz_v3: h.spells / h.spell_names model the equipped bar.
+    host('get_equipped_spell_ids', function() return h.spells or {} end)
+    host('get_name_for_spell', function(id) return (h.spell_names or {})[id] or '' end)
     host('interact_object', function(a)
         note_call(h.interactions, {actor = a, skin = a and a.skin})
         if a and a.on_interact then a.on_interact(h, a) end

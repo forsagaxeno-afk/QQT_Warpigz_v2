@@ -3,9 +3,12 @@
 --
 --  Finds the summoning altar inside the boss zone and
 --  interacts with it to spawn the boss.
---  Keeps retrying as long as the altar is present.
---  Success = altar disappears from the actor list after an
---  interact attempt.
+--  Success = the altar disappears from the actor list, or stops
+--  being interactable, after a click on an interactable altar.
+--  QQT_Warpigz_v3: retries are bounded (clicks that leave the altar
+--  interactable, a listed altar that never becomes interactable),
+--  a non-interactable altar is never clicked, and a summon that is
+--  still committed after a death hands straight back to the fight.
 -- ============================================================
 
 local utils        = require "core.utils"
@@ -30,6 +33,19 @@ local unstuck_timeout   = 5
 
 local last_interact_time = 0
 local INTERACT_COOLDOWN  = 2.0  -- seconds between interact attempts
+
+-- QQT_Warpigz_v3: bounds. A click that leaves the altar interactable did not
+-- summon (no key in the bags, pool counter drifted, wrong tier). After
+-- MAX_FAILED_CLICKS such clicks or CLICK_BOUND_SECS since the first one a
+-- manual rotation resyncs its pools once (0 runs left for the tier: skip the
+-- boss; stock left: one more bound, then skip); an external run fails at
+-- once (rotation.failed, so C2 reports 'failed'). A listed altar that is not
+-- interactable is never clicked; it gets NOT_READY_BOUND to re-arm.
+local MAX_FAILED_CLICKS = 5
+local CLICK_BOUND_SECS  = 30
+local NOT_READY_BOUND   = 30
+local COMMIT_RANGE      = 15   -- post-death hand-over range (Kill Monsters' tether)
+local attempt = { clicks = 0, since = nil, phase = 0, not_ready_since = nil }
 
 local function check_if_stuck()
     local pos = get_player_position()
@@ -71,8 +87,26 @@ local function any_chest_visible()
     return false
 end
 
+local function clear_attempt()
+    attempt.clicks, attempt.since, attempt.phase, attempt.not_ready_since = 0, nil, 0, nil
+end
+
+-- QQT_Warpigz_v3: status text while a bound runs (C6 display in main.lua).
+function task.status_text()
+    local t = get_time_since_inject()
+    if attempt.not_ready_since then
+        return string.format("altar not interactable yet (%ds/%ds)",
+            math.floor(t - attempt.not_ready_since), NOT_READY_BOUND)
+    end
+    if attempt.clicks > 1 and tracker.altar_interact_time then
+        return string.format("altar not accepting summon (%d/%d)", attempt.clicks - 1, MAX_FAILED_CLICKS)
+    end
+    return nil
+end
+
 function task.reset()
     navigation_owner.release()
+    clear_attempt()
     last_interact_time = 0
     last_pos = nil
     last_move_time = 0
@@ -122,10 +156,78 @@ function task.shouldExecute()
         if os.time() < tracker.chest_opened_time + 6 then return false end
     end
 
-    -- Keep running while last_interact_time is set (waiting for altar to disappear)
-    if last_interact_time > 0 or tracker.altar_interact_time then return true end
+    -- Keep running while this run's click waits for the altar to react.
+    -- QQT_Warpigz_v3: only the per-run tracker stamp counts; the module-level
+    -- last_interact_time survives reset_run and made a stale click of the
+    -- previous run look like a fresh summon.
+    if tracker.altar_interact_time then return true end
 
     return utils.get_altar() ~= nil
+end
+
+-- QQT_Warpigz_v3: the summon of this run is committed (see core/tracker.lua).
+local function mark_summoned(t)
+    if BatmobilePlugin then BatmobilePlugin.stop_long_path(plugin_label) end
+    tracker.altar_activated     = true
+    tracker.altar_activate_time = t
+    tracker.altar_interact_time = nil
+    tracker.summoned_this_run   = true
+    tracker.summon_zone         = utils.get_zone()
+    last_interact_time = 0
+    clear_attempt()
+end
+
+-- QQT_Warpigz_v3: bounded give-up (see the constants above).
+local function give_up(reason, t, may_resync)
+    local boss = rotation.current()
+    if may_resync and not rotation.external and attempt.phase == 0 and boss then
+        rotation.resync_pools()
+        local tier = boss.key_tier or boss.run_type or "lair"
+        local runs = rotation.runs_for_tier(tier)
+        if runs > 0 then
+            console.print(string.format("[Reaper] %s — inventory still has %d %s run(s); one more try.",
+                reason, runs, tier))
+            attempt.phase, attempt.clicks, attempt.since = 1, 0, t
+            return
+        end
+    end
+    console.print(string.format("[Reaper] %s — skipping %s.", reason, tostring(boss and boss.label)))
+    if BatmobilePlugin then BatmobilePlugin.stop_long_path(plugin_label) end
+    rotation.advance(reason)
+    tracker.reset_run()
+    task.reset()
+end
+
+local function remember_altar(altar)
+    local ok, pos = pcall(function() return altar:get_position() end)
+    if ok and pos then tracker.altar_pos = pos end
+end
+
+-- Walk to the altar (Batmobile long path when far). Returns true while moving.
+local function approach(altar)
+    local dist = utils.distance_to(altar)
+    if dist <= 2.5 then return false end
+    if BatmobilePlugin and dist > 15 then
+        navigation_owner.claim()
+        if not BatmobilePlugin.is_long_path_navigating() then
+            console.print(string.format("[Reaper] Altar at dist=%.1f — starting long path.", dist))
+            local ok = BatmobilePlugin.navigate_long_path(plugin_label, altar:get_position())
+            if ok then navigation_owner.route_started() end
+            if not ok then
+                console.print("[Reaper] Long path failed — using direct move.")
+                pathfinder.request_move(altar:get_position())
+            end
+        else
+            BatmobilePlugin.update(plugin_label)
+            BatmobilePlugin.move(plugin_label)
+        end
+    else
+        if BatmobilePlugin and BatmobilePlugin.is_long_path_navigating() then
+            BatmobilePlugin.stop_long_path(plugin_label)
+        end
+        pathfinder.request_move(altar:get_position())
+    end
+    return true
 end
 
 function task.Execute()
@@ -134,24 +236,48 @@ function task.Execute()
     local t     = get_time_since_inject()
     local altar, readable = utils.get_altar()
     if readable == false then return end -- unavailable actor stream is not activation
+    if altar then remember_altar(altar) end
+    local interactable = altar ~= nil and utils.is_interactable(altar)
 
     -- Altar gone after an interact attempt — success. Live 2.1.2 (Grigoire):
     -- the altar can also stay listed but stop being interactable once the
     -- boss spawns; that is the same success, not a reason to click again.
-    local clicked = last_interact_time > 0 or tracker.altar_interact_time ~= nil
-    local spent = altar and clicked and not utils.is_interactable(altar)
-    if not altar or spent then
-        if clicked then
-            console.print(spent and "[Reaper] Altar no longer interactable — activated successfully."
-                or "[Reaper] Altar gone — activated successfully.")
-            if BatmobilePlugin then BatmobilePlugin.stop_long_path(plugin_label) end
-            tracker.altar_activated     = true
-            tracker.altar_activate_time = t
-            tracker.altar_interact_time = nil
-            last_interact_time = 0
-        end
+    -- QQT_Warpigz_v3: only a click of this run counts (tracker stamp, cleared
+    -- by reset_run/revive), and only interactable altars are ever clicked.
+    local clicked = tracker.altar_interact_time ~= nil
+    if clicked and not interactable then
+        console.print(altar and "[Reaper] Altar no longer interactable — activated successfully."
+            or "[Reaper] Altar gone — activated successfully.")
+        mark_summoned(t)
         return
     end
+    if not altar then return end
+
+    if not interactable then
+        -- QQT_Warpigz_v3: after a death inside the same lair the summon is
+        -- still live (boss up, altar spent): walk back and fight.
+        if tracker.summon_committed(utils.get_zone()) then
+            attempt.not_ready_since = nil
+            if utils.distance_to(altar) <= COMMIT_RANGE then
+                console.print("[Reaper] Summon still active after respawn — back to the fight.")
+                mark_summoned(t)
+                return
+            end
+            approach(altar)
+            return
+        end
+        -- Never click a spent altar (a phantom 'success' idled Reaper in
+        -- Kill Monsters for the rest of the session). Wait, bounded, for it
+        -- to re-arm.
+        attempt.not_ready_since = attempt.not_ready_since or t
+        if t - attempt.not_ready_since >= NOT_READY_BOUND then
+            give_up("Altar did not become interactable", t, false)
+            return
+        end
+        approach(altar)
+        return
+    end
+    attempt.not_ready_since = nil
 
     -- ---- Unstuck logic ----
     if check_if_stuck() then
@@ -172,30 +298,7 @@ function task.Execute()
         unstuck_start = 0
     end
 
-    local dist = utils.distance_to(altar)
-    if dist > 2.5 then
-        if BatmobilePlugin and dist > 15 then
-            navigation_owner.claim()
-            if not BatmobilePlugin.is_long_path_navigating() then
-                console.print(string.format("[Reaper] Altar at dist=%.1f — starting long path.", dist))
-                local ok = BatmobilePlugin.navigate_long_path(plugin_label, altar:get_position())
-                if ok then navigation_owner.route_started() end
-                if not ok then
-                    console.print("[Reaper] Long path failed — using direct move.")
-                    pathfinder.request_move(altar:get_position())
-                end
-            else
-                BatmobilePlugin.update(plugin_label)
-                BatmobilePlugin.move(plugin_label)
-            end
-        else
-            if BatmobilePlugin and BatmobilePlugin.is_long_path_navigating() then
-                BatmobilePlugin.stop_long_path(plugin_label)
-            end
-            pathfinder.request_move(altar:get_position())
-        end
-        return
-    end
+    if approach(altar) then return end
 
     -- Close enough — stop any active long path before interacting
     if BatmobilePlugin and BatmobilePlugin.is_long_path_navigating() then
@@ -205,9 +308,19 @@ function task.Execute()
     -- Enforce cooldown between attempts
     if (t - last_interact_time) < INTERACT_COOLDOWN then return end
 
+    -- QQT_Warpigz_v3: every click after the first one of a bound means the
+    -- previous click left the altar interactable (no summon).
+    if not clicked then clear_attempt() end
+    if attempt.clicks >= MAX_FAILED_CLICKS or (attempt.since and t - attempt.since >= CLICK_BOUND_SECS) then
+        give_up("Altar did not accept the summon (no key?)", t, true)
+        return
+    end
+
     console.print("[Reaper] Interacting with altar.")
     interact_object(altar)
     last_interact_time = t
+    attempt.clicks = attempt.clicks + 1
+    attempt.since = attempt.since or t
     tracker.altar_interact_time = tracker.altar_interact_time or t
 end
 

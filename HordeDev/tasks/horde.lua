@@ -16,6 +16,23 @@ local bm_pulse_time = -math.huge
 local BM_PULSE_INTERVAL = 0.1
 local holding_wave_objective = false
 
+-- QQT_Warpigz_v3: the wave task pulses at ~10 Hz. Its status lines are
+-- printed only when they change (the joint host measured ~2900 lines per
+-- horde, mostly the same line every pulse; console spam crashed the host
+-- this week). `say` drops a line equal to the previous one (the locked-door
+-- lines have their own slot: they follow another line in the same pulse).
+local last_said, last_door_said = nil, nil
+local function say(message, door)
+    if door then
+        if message == last_door_said then return end
+        last_door_said = message
+    else
+        if message == last_said then return end
+        last_said = message
+    end
+    console.print(message)
+end
+
 -- Chaos Rift portal actor names recorded in d4data. These are not town
 -- portals, choice gizmos, VFX or the BSK lunatic proximity spawner.
 local chaos_portal_names = {
@@ -166,7 +183,7 @@ function bomber:shoot_in_circle()
     
     -- First, navigate to the horde center position
     if player_position:dist_to(horde_center_position) > 15 then
-        console.print("Moving to horde center position")
+        say("Moving to horde center position")
         bomber:bomb_to(horde_center_position)
         return
     end
@@ -368,17 +385,13 @@ function bomber:move_in_pattern(move_positions, run_victory_lap)
         horde_right_position,    -- From Middle to Right side
         horde_center_position,
     }
-    
-    console.print("Starting move_in_pattern function")
 
+    -- QQT_Warpigz_v3: no per-call trace lines (9-12 per pulse before); only
+    -- a move_index change is logged.
     -- Prüfen, ob ein Ziel gefunden wurde
     if bomber:get_target() then
-        console.print("Target found, stopping movement in pattern.")
         return 
     end
-
-    console.print("Current move_index: " .. tostring(move_index))
-    console.print("Total positions: " .. tostring(#move_positions))
 
     if move_index > #move_positions then
         if run_victory_lap then
@@ -389,34 +402,18 @@ function bomber:move_in_pattern(move_positions, run_victory_lap)
     end
 
     local target_position = move_positions[move_index]
-    console.print("Current target position: " .. position_to_string(target_position))
-
-    -- Extract position components for printing
-    local function position_to_string(pos)
-        return string.format("x: %.2f, y: %.2f, z: %.2f", pos:x(), pos:y(), pos:z())
-    end
-
-    local player_pos = get_player_position()
-    console.print("Current player position: " .. position_to_string(player_pos))
-
     local distance_to_target = utils.distance_to(target_position)
-    console.print("Distance to target: " .. tostring(distance_to_target))
 
     if not reached_target then
         if distance_to_target > 2 then
-            console.print("Moving to position " .. position_to_string(target_position))
             bomber:bomb_to(target_position)
-            console.print("Move command issued")
             target_reach_time = 0
         else
-            console.print("Close to target. target_reach_time: " .. tostring(target_reach_time))
             if target_reach_time == 3 then 
                reached_target = true
                target_reach_time = get_time_since_inject()
-               console.print("Reached target position " .. position_to_string(target_position))
             else
                target_reach_time = target_reach_time + 1
-               console.print("Incrementing target_reach_time to " .. tostring(target_reach_time))
             end
         end
     else
@@ -424,13 +421,18 @@ function bomber:move_in_pattern(move_positions, run_victory_lap)
         reached_target = false
         console.print("Moving to the next position in the pattern. New move_index: " .. tostring(move_index))
     end
-
-    console.print("Ending move_in_pattern function")
 end
 
 local last_enemy_check_time = 0
 local enemy_check_interval = 0.000001 -- Interval in seconds to check for enemies
 local pylon_interact_time = nil
+-- QQT_Warpigz_v3: the regular-pylon path stamped tracker.wait_for_pylon (the
+-- 'Pick Pylon delay') on the first pylon of a run and never cleared it, so
+-- pylons 2..N were clicked without the delay. The stamp now belongs to one
+-- pylon episode and is cleared when no pylon is up any more.
+local regular_pylon_wait = false
+-- QQT_Warpigz_v3: the current target is logged when its name changes.
+local last_target_name = nil
 
 -- Main function to handle the bomber's actions based on the current game state
 function bomber:main_pulse()
@@ -441,7 +443,7 @@ function bomber:main_pulse()
     tracker.horde_idle_since = nil
 
     if get_local_player():is_dead() then
-        console.print("Player is dead. Reviving at checkpoint.")
+        say("Player is dead. Reviving at checkpoint.")
         revive_at_checkpoint()
         return
     end
@@ -455,17 +457,20 @@ function bomber:main_pulse()
         tracker.victory_lap = false
         if not settings.party_mode then
             if loot_guard.pylon_pending() then return end -- bounded yield to a busy Looter
-            console.print("Targeting Pylon and interacting with it.")
+            last_target_name = nil
             if utils.distance_to(pylon) > 2 then
+                say("Targeting Pylon and interacting with it.")
                 pylon_interact_time = nil
                 bomber:bomb_to(pylon:get_position())
             else
+                regular_pylon_wait = true
                 if not tracker.check_time("wait_for_pylon", settings.pick_pylon_delay) then
-                    console.print("Waiting for pylon to be interactable.")
+                    say("Waiting for pylon to be interactable.")
                     return
                 end
                 -- Retry interact every 2 seconds (matching Bartuc pattern)
                 if not pylon_interact_time or get_current_time() - pylon_interact_time >= 2 then
+                    last_said = nil
                     console.print("Interacting with pylon.")
                     local pylon_name = pylon:get_skin_name()
                     if pylon_name:match("^Warplans_BSK_ReplicatorGizmo_") then
@@ -484,7 +489,7 @@ function bomber:main_pulse()
             last_enemy_check_time = current_time
             return
         else
-            console.print("Party mode enabled. Waiting for pylon selection")
+            say("Party mode enabled. Waiting for pylon selection")
             -- reset move index on new wave
             move_index = 1
             return
@@ -493,16 +498,22 @@ function bomber:main_pulse()
 
     pylon_interact_time = nil
     loot_guard.pylon_done()
+    if regular_pylon_wait then
+        regular_pylon_wait = false
+        tracker.clear_key("wait_for_pylon")
+    end
     local target = bomber:get_target()
     if target then
         local name = target:get_skin_name()
+        if name ~= last_target_name then
+            last_target_name = name
+            say("Target: " .. name)
+        end
         if utils.distance_to(target) > 1.5 then
             if settings.movement_spell_to_objective and is_objective(target) then
-                console.print("Movement spell to target: " .. name)  -- Print target name
                 bomber:bomb_to(target:get_position())
                 explorer:movement_spell_to_target(target:get_position())
             else
-                console.print("Moving to target: " .. name)  -- Print target name
                 bomber:bomb_to(target:get_position())
             end
         else
@@ -519,7 +530,6 @@ function bomber:main_pulse()
                 explorer.is_task_running = true
             else
                 holding_wave_objective = false
-                console.print("Target " .. name .. " in range. Performing circular shooting.")
                 bomber:shoot_in_circle()
             end
         end
@@ -528,7 +538,7 @@ function bomber:main_pulse()
     elseif bomber:all_waves_cleared() or (utils.get_bartuc_pylon() or utils.get_boss_pylon()) then
         local aether = utils.get_aether_actor()
         if aether then
-            console.print("All waves cleared. Targeting Aether actor.")
+            say("All waves cleared. Targeting Aether actor.")
             bomber:bomb_to(aether:get_position())
             return
         end
@@ -564,7 +574,7 @@ function bomber:main_pulse()
                         return
                     end
                 end
-                console.print("Doing a victory lap from right.")
+                say("Doing a victory lap.")
                 bomber:move_in_pattern(tracker.victory_positions, true)
                 return
             end
@@ -583,7 +593,7 @@ function bomber:main_pulse()
                         return
                     end
                     if not tracker.check_time("wait_for_pylon", settings.pick_pylon_delay) then
-                        console.print("Waiting for Bartuc pylon to be interactable.")
+                        say("Waiting for Bartuc pylon to be interactable.")
                         return
                     end
                     -- Start timer when first attempting to interact
@@ -595,6 +605,7 @@ function bomber:main_pulse()
                     if not bartuc_last_interact_time or get_current_time() - bartuc_last_interact_time >= 3 then
                         interact_object(boss_pylon)
                         bartuc_last_interact_time = get_current_time()
+                        last_said = nil
                         console.print("Interacting with Bartuc pylon (every 3 seconds).")
                     end
                     -- Give up after timeout
@@ -623,13 +634,14 @@ function bomber:main_pulse()
                     return
                 end
                 if not tracker.check_time("wait_for_pylon", settings.pick_pylon_delay) then
-                    console.print("Waiting for council pylon to be interactable.")
+                    say("Waiting for council pylon to be interactable.")
                     return
                 end
                 -- Only interact every 3 seconds
                 if not council_last_interact_time or get_current_time() - council_last_interact_time >= 3 then
                     interact_object(boss_pylon)
                     council_last_interact_time = get_current_time()
+                    last_said = nil
                     console.print("Interacting with council pylon (every 3 seconds).")
                 end
                 tracker.clear_key("wait_for_pylon")
@@ -639,15 +651,15 @@ function bomber:main_pulse()
             bartuc_failed = false
             tracker.horde_idle_since = idle_since or current_time
             if get_player_pos():dist_to(horde_boss_room_position) > 2 then
-                console.print("Moving to boss room position.")
+                say("Moving to boss room position.")
                 bomber:bomb_to(horde_boss_room_position)
             else
-                console.print("In boss room. Performing circular shooting.")
+                say("In boss room. Performing circular shooting.")
                 bomber:shoot_in_circle()
             end
         end
     else
-        console.print("shoot in circle Moving in pattern.")
+        say("shoot in circle Moving in pattern.")
         bomber:move_in_pattern()
     end
 
@@ -655,10 +667,10 @@ function bomber:main_pulse()
     if locked_door then
         tracker.horde_idle_since = nil
         if utils.distance_to(locked_door) > 2 then
-            console.print("Moving to locked door position.")
+            say("Moving to locked door position.", true)
             bomber:bomb_to(locked_door:get_position())             
         else
-            console.print("Interacting with locked door.")
+            say("Interacting with locked door.", true)
             interact_object(locked_door)
         end
         last_enemy_check_time = current_time
@@ -727,6 +739,11 @@ local task = {
         move_index, reached_target, target_reach_time = 1, false, 0
         tracker.interacting_pylon = false
         tracker.clear_key("wait_for_pylon")
+        regular_pylon_wait, last_target_name, last_said, last_door_said = false, nil, nil, nil
+        -- QQT_Warpigz_v3: every task_manager.stop() path (toggle off edge,
+        -- disable()) ends a pylon episode, so HordeDev's pause of Rosie
+        -- pickup never outlives it ('Paused by HordeDev.' forever).
+        loot_guard.pylon_done()
     end,
 
     Execute = function()

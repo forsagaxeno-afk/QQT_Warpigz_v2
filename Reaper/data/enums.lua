@@ -104,10 +104,13 @@ enums.positions = {
         ["Boss_WT4_S2VampireLord"]  = vec3:new(-10.556, -10.419, -3.120),
         ["Boss_WT4_Duriel"]         = vec3:new(-3.616,   -2.309,  -3.689),
         ["Boss_WT3_PenitentKnight"] = vec3:new( 2.0051,   1.5871,  2.0),
-        ["Boss_WT4_Andariel"]       = vec3:new( 8.2821,  -8.7344, -6.223),
+        -- QQT_Warpigz_v3: Andariel/Harbinger seeds moved to the recorded altar
+        -- endpoints (paths/andariel_*.lua, paths/harbinger_*.lua); the old
+        -- seeds were 12-19 m off (Kill Monsters tether anchor).
+        ["Boss_WT4_Andariel"]       = vec3:new(-9.412,   -8.858,  -6.217),
         ["Boss_WT4_MegaDemon"]      = vec3:new( 4.9245,   5.3086,  0.127),
         ["_Varshan"]                = vec3:new(-3.2805,  -3.1949, -3.304),
-        ["Boss_WT5_Harbinger"]      = vec3:new( 2.9,     15.0,    0.0),
+        ["Boss_WT5_Harbinger"]      = vec3:new(-9.511,   15.585,  0.177),
     },
 }
 

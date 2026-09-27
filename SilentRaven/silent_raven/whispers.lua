@@ -80,24 +80,46 @@ local function quest_name_matches(name)
     return false
 end
 
+-- QQT_Warpigz_v3: an objective counter 'n/m' (any client language) with
+-- n < m is still collecting.
+local function counter_incomplete(text)
+    local n, m = text:match('(%d+)%s*/%s*(%d+)')
+    n, m = tonumber(n), tonumber(m)
+    return n ~= nil and m ~= nil and n < m
+end
+
 -- Tri-state read. A failed quest read is unknown, never evidence of a claim.
+-- QQT_Warpigz_v3: readiness does not depend on the client language. The
+-- English hints still confirm it; otherwise a Bounty_Meta_* quest whose
+-- objective text was read and shows no incomplete counter (and no English
+-- "collect grim favor") is ready with inferred = true. A wrong inference
+-- costs one bounded NPC probe per Temis visit (fsm PANEL_TIMEOUT ->
+-- skipped_not_ready, which latches the visit).
 M.quest_snapshot = function ()
     if type(get_quests) ~= 'function' then return nil end
     local ok, quests = pcall(get_quests)
     if not ok or type(quests) ~= 'table' then return nil end
-    local result = { present = false, ready = false, collecting = false }
+    local result = { present = false, ready = false, collecting = false, inferred = false }
+    local meta_read, meta_incomplete = false, false
     for _, quest in pairs(quests) do
         local name = safe_method(quest, 'get_name')
         if type(name) ~= 'string' then return nil end
         if quest_name_matches(name) then
             result.present = true
+            local meta = name:sub(1, 12) == 'Bounty_Meta_'
             local objectives = safe_method(quest, 'get_objectives')
             if type(objectives) == 'table' then
                 for _, objective in pairs(objectives) do
                     local text = type(objective) == 'table' and objective.text or nil
-                    if type(text) == 'string' then
+                    if type(text) == 'string' and text ~= '' then
                         text = text:lower()
-                        if text:find('collect grim favor', 1, true) then result.collecting = true end
+                        local collecting = text:find('collect grim favor', 1, true) ~= nil
+                        if meta then
+                            meta_read = true
+                            if counter_incomplete(text) then collecting = true end
+                            if collecting then meta_incomplete = true end
+                        end
+                        if collecting then result.collecting = true end
                         for _, hint in ipairs(TURN_IN_OBJECTIVE_HINTS) do
                             if text:find(hint, 1, true) then result.ready = true end
                         end
@@ -105,6 +127,9 @@ M.quest_snapshot = function ()
                 end
             end
         end
+    end
+    if not result.ready and meta_read and not meta_incomplete then
+        result.ready, result.inferred = true, true
     end
     return result
 end

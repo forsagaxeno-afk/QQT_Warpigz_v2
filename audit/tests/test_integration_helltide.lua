@@ -134,9 +134,11 @@ local function session(opts)
     env.attributes = {PLAYER_IN_TOWN_LEVEL_AREA = 1}
     env.orbwalker = {set_clear_toggle = function(on) s.orb.clear = on end,
         set_block_movement = function(on) s.orb.block = on end}
-    -- utils.helltide_active()/do_events() read the local minute.
+    -- utils.helltide_active()/do_events() read the minute; QQT_Warpigz_v3:
+    -- in UTC (core/hr_clock.lua), so the scripted clock answers both forms.
     env.os = setmetatable({date = function(fmt, ...)
-        if fmt == '%M' then return string.format('%02d', s.minute) end
+        if fmt == '%M' or fmt == '!%M' then return string.format('%02d', s.minute) end
+        if fmt == '!%S' then return '00' end
         return os.date(fmt, ...)
     end}, {__index = os})
     env.BatmobilePlugin = batmobile
@@ -234,11 +236,24 @@ local function chest_session(opts)
     return s
 end
 
+-- QQT_Warpigz_v3: the in-Helltide Looter hold is bounded (15 s without a new
+-- bag item). Cases that model a long but productive Looter pickup add one
+-- item every `every` seconds while it is busy.
+local function loot_progress(s, every)
+    local prev, next_at = s.before_tick, s.now + every
+    s.before_tick = function()
+        if prev then prev() end
+        if not s.looting then next_at = s.now + every
+        elseif s.now >= next_at then s.items, next_at = s.items + 1, s.now + every end
+    end
+end
+
 -- ── CRT-4 / L11: Looter yield vs. chest stuck windows ─────────────────────
 case('CRT-4/L11 Looter busy longer than the chest window, then idle: chest approached, not blacklisted', function()
     local s = chest_session()
     s.tick(0.5)
     eq(s.helltide.current_state, 'MOVING_TO_HELLTIDE_CHEST', 'chest selected')
+    loot_progress(s, 5)                          -- QQT_Warpigz_v3: a productive pickup
     s.looting = true
     s.tick(26)                                   -- live log: 25.7 s of approach_stall retries
     eq(#s.sets_after(s.now - 25), 0, 'HR issued no movement while the Looter owned it')
@@ -279,6 +294,7 @@ case('CRT-4 remembered-chest recall: Looter yield does not trip the recall stuck
     eq(s.helltide.current_state, 'MOVING_TO_REMEMBERED_CHEST', 'recall selected')
     local issued = #s.bm.long_paths
     ok(issued >= 1, 'long path issued')
+    loot_progress(s, 5)                          -- QQT_Warpigz_v3: a productive pickup
     s.looting = true
     s.tick(30)
     s.looting = false
@@ -742,6 +758,7 @@ case('C6 a Looter hold over a minute is logged once a minute and published in st
     local s = session({enabled = true})
     s.load_main()
     s.tick(1)
+    loot_progress(s, 10)                         -- QQT_Warpigz_v3: a productive pickup
     s.looting = true
     s.tick(70)
     eq(s.logged('Holding for 60s: waiting for Looter to finish'), 1)
@@ -761,6 +778,247 @@ case('C6 a Looter hold over a minute is logged once a minute and published in st
     a.alfred_live = false
     a.tick(1)
     eq(a.plugin.status().hold, nil)
+end)
+
+-- ── QQT_Warpigz_v3: standalone HR + Rosie night findings ──────────────────
+-- Rosie-shaped provider: refuses (`false, why`) while stuck, publishes
+-- inventory_full meanwhile, completes a trip 10 s after an accepted request
+-- with nil (success) or 'failed' (old fork callback contract). opts.legacy
+-- drops the `stuck` field (a fork that only refuses).
+local function rosie_like(s, opts)
+    opts = opts or {}
+    s.full, s.stuck = true, opts.stuck == true
+    local a = {}
+    a.get_status = function()
+        local st = {enabled = true, inventory_full = s.full, need_repair = false, need_trigger = s.full,
+            trigger_tasks = s.alfred_busy == true}
+        if not opts.legacy then st.stuck = s.stuck end
+        return st
+    end
+    a.trigger_tasks_with_teleport = function(_, cb)
+        s.triggers[#s.triggers + 1] = s.now
+        if s.stuck or s.refuse then return false, 'Last town service failed (salvage_failed)' end
+        s.alfred_busy, s.alfred_cb, s.alfred_cb_at = true, cb, s.now + 10
+        return true
+    end
+    s.before_tick = function()
+        if s.alfred_cb_at and s.now >= s.alfred_cb_at then
+            local cb = s.alfred_cb
+            s.alfred_busy, s.alfred_cb, s.alfred_cb_at = false, nil, nil
+            if s.trip_fails then
+                if not opts.legacy then s.stuck = true end
+                cb('failed', {success = false, outcome = 'failed'})
+            else
+                s.full = false
+                cb(nil, {success = true, outcome = 'completed'})
+            end
+        end
+    end
+    s.env.AlfredTheButlerPlugin = a
+    return a
+end
+
+local function helltide_share(s, seconds)
+    local before_h, before_all = s.task_ticks.helltide or 0, 0
+    for _, n in pairs(s.task_ticks) do before_all = before_all + n end
+    s.tick(seconds)
+    local after_all = 0
+    for _, n in pairs(s.task_ticks) do after_all = after_all + n end
+    return ((s.task_ticks.helltide or 0) - before_h) / math.max(1, after_all - before_all)
+end
+
+case('v3 Rosie stuck (refuses, bags full): standalone HR farms on, never asks, never holds', function()
+    local s = session({salvage = true})
+    rosie_like(s, {stuck = true})
+    local share = helltide_share(s, 60)
+    eq(#s.triggers, 0, 'requests to a stuck Rosie')
+    ok(share > 0.9, 'helltide share ' .. share)
+    eq(s.tm.get_current_task().name ~= 'alfred_running', true, 'Alfred task holds the farm')
+    eq(s.tracker.needs_salvage, false)
+    eq(s.helltide.hold_reason, nil)
+end)
+
+case('v3 a failed Rosie trip is not a salvage: no re-request while stuck, one when Rosie recovers', function()
+    local s = session({salvage = true})
+    rosie_like(s)
+    s.trip_fails = true
+    s.tick(5)
+    eq(#s.triggers, 1, 'hard need triggers')
+    s.tick(10)                                   -- trip fails, Rosie stuck (RETRY_COOLDOWN)
+    eq(s.tracker.has_salvaged, false, 'a failed trip counted as a salvage')
+    eq(s.logged('Town service unavailable (trip failed)'), 1)
+    local share = helltide_share(s, 60)
+    eq(#s.triggers, 1, 'refused re-requests after the failed trip')
+    ok(share > 0.9, 'helltide share ' .. share)
+    s.stuck, s.trip_fails = false, false          -- cooldown over
+    s.tick(3)
+    eq(#s.triggers, 2, 'asks again once Rosie is no longer stuck')
+    eq(s.logged('Town service available again'), 1)
+    s.tick(12)
+    eq(s.full, false, 'second trip serviced the bags')
+end)
+
+case('v3 legacy fork that refuses without `stuck`: one retry per 120 s, then accepted', function()
+    local s = session({salvage = true})
+    rosie_like(s, {legacy = true})
+    s.refuse = true
+    s.tick(60)
+    eq(#s.triggers, 1, 'refusals re-requested every 5 s')
+    eq(s.tm.get_current_task().name ~= 'alfred_running', true)
+    s.tick(65)
+    eq(#s.triggers, 2, 'one more request after the 120 s latch')
+    s.refuse = false
+    s.tick(125)
+    eq(#s.triggers, 3, 'accepted request after the next latch')
+    eq(s.logged('Town service available again'), 1)
+    s.tick(12)
+    eq(s.full, false)
+end)
+
+-- World model for the real search task: teleport_to_waypoint lands in that
+-- entry's zone; the buff is present only in s.active_zone. `refuse[id]`
+-- returns false (not unlocked), `ignore[id]` does nothing (silent failure).
+local ZONE_OF = {[0xACE9B] = 'Frac_Tundra_S', [0x27E01] = 'Scos_Coast', [0xDEAFC] = 'Kehj_Oasis',
+    [0x9346B] = 'Hawe_Verge', [0x462E2] = 'Step_South', [0x1CE51E] = TOWN_ZONE}
+local function world_sim(s, active_zone, refuse, ignore)
+    s.active_zone, s.fires = active_zone, {}
+    refuse, ignore = refuse or {}, ignore or {}
+    s.env.teleport_to_waypoint = function(id)
+        s.teleports[#s.teleports + 1] = {at = s.now, id = id}
+        s.fires[id] = (s.fires[id] or 0) + 1
+        if refuse[id] then return false end
+        if ignore[id] then return nil end
+        s.zone = ZONE_OF[id] or TOWN_ZONE
+        s.in_helltide = s.zone == s.active_zone and s.minute < 55
+        return true
+    end
+end
+
+case('v3 trap recovery with the only active Helltide: one scan of the others, then back (real search task)', function()
+    local s = session({in_helltide = false, zone = TOWN_ZONE})
+    world_sim(s, 'Hawe_Verge')
+    s.tick(60)
+    eq(s.zone, 'Hawe_Verge', 'search found the helltide')
+    s.tick(5)
+    s.bm.giving_up = true
+    s.tick(0.2)
+    eq(s.zone, TOWN_ZONE, 'give-up teleport to town')
+    eq(s.tracker.skip_cached_zone, true)
+    local visited_before = s.fires[0x9346B] or 0
+    s.tick(90)
+    eq(s.logged('no other Helltide found — returning to wejinhani'), 1, 'bounded skip')
+    eq(s.zone, 'Hawe_Verge', 'back in the only active Helltide')
+    eq(s.in_helltide, true)
+    eq(s.fires[0x9346B], visited_before + 1)
+    eq(s.tracker.skip_cached_zone, false)
+    local share = helltide_share(s, 60)
+    ok(share > 0.9, 'farming the Helltide again: ' .. share)
+    -- A stale flag never carries over into a new session.
+    s.tracker.skip_cached_zone = true
+    s.search:cancel_pending()
+    eq(s.tracker.skip_cached_zone, false, 'cancel_pending kept skip_cached_zone')
+end)
+
+case('v3 search skips a waypoint the character cannot use (refused, or silently ignored) until the hour ends', function()
+    local s = session({in_helltide = false, zone = TOWN_ZONE})
+    world_sim(s, 'Scos_Coast', {[0xACE9B] = true})
+    s.tick(40)
+    eq(s.fires[0xACE9B], 1, 'refused Menestad re-fired')
+    eq(s.logged('waypoint menestad unreachable — skipping this hour'), 1)
+    eq(s.zone, 'Scos_Coast', 'search moved on to the active Helltide')
+    eq(s.in_helltide, true)
+
+    local q = session({in_helltide = false, zone = TOWN_ZONE})
+    world_sim(q, 'Kehj_Oasis', nil, {[0xACE9B] = true})
+    q.tick(60)
+    eq(q.fires[0xACE9B], 3, 'silent failure fires per destination')
+    eq(q.logged('waypoint menestad unreachable'), 1)
+    eq(q.zone, 'Kehj_Oasis', 'search reached the active Helltide')
+    -- The hour ends: the next hour tries the waypoint again.
+    q.minute, q.in_helltide = 57, false
+    q.tick(30)
+    q.minute, q.active_zone = 5, 'Scos_Coast'   -- the cycle passes Menestad before Marowen
+    q.tick(80)
+    ok(q.fires[0xACE9B] > 3, 'unreachable set not cleared at the hour end')
+    eq(q.zone, 'Scos_Coast')
+end)
+
+case('v3 an interrupted teleport channel (buff seen, zone unchanged) does not mark the waypoint unreachable', function()
+    local s = session({in_helltide = false, zone = TOWN_ZONE})
+    world_sim(s, 'Kehj_Oasis')
+    local real = s.env.teleport_to_waypoint
+    local interrupts, channel_until = 0, nil
+    s.env.teleport_to_waypoint = function(id)
+        if id == 0xDEAFC and interrupts < 4 then      -- hit while channelling, 4 times
+            interrupts = interrupts + 1
+            s.teleports[#s.teleports + 1] = {at = s.now, id = id}
+            s.fires[id] = (s.fires[id] or 0) + 1
+            s.teleporting, channel_until = true, s.now + 1.5
+            return true
+        end
+        return real(id)
+    end
+    s.before_tick = function()
+        if channel_until and s.now >= channel_until then s.teleporting, channel_until = false, nil end
+    end
+    s.tick(120)
+    eq(s.logged('waypoint ironwolfs unreachable'), 0, 'not skipped for the hour')
+    eq(s.logged('teleport to ironwolfs interrupted'), 4)
+    eq(s.fires[0xDEAFC], 5, 'the fifth channel went through')
+    eq(s.zone, 'Kehj_Oasis', 'the active Helltide was reached')
+    eq(s.in_helltide, true)
+    -- A waypoint that keeps being interrupted is still bounded.
+    local q = session({in_helltide = false, zone = TOWN_ZONE})
+    world_sim(q, 'Step_South')
+    local qreal = q.env.teleport_to_waypoint
+    local q_until = nil
+    q.env.teleport_to_waypoint = function(id)
+        if id == 0xDEAFC then
+            q.teleports[#q.teleports + 1] = {at = q.now, id = id}
+            q.fires[id] = (q.fires[id] or 0) + 1
+            q.teleporting, q_until = true, q.now + 1.5
+            return true
+        end
+        return qreal(id)
+    end
+    q.before_tick = function()
+        if q_until and q.now >= q_until then q.teleporting, q_until = false, nil end
+    end
+    q.tick(180)
+    eq(q.fires[0xDEAFC], 8, '3 fires + 5 interruptions')
+    eq(q.logged('waypoint ironwolfs unreachable'), 1)
+    eq(q.zone, 'Step_South', 'the search moved on')
+end)
+
+case('v3 in-Helltide Looter hold is bounded without bag progress, named in the resume log', function()
+    local s = session()
+    s.tick(1)
+    s.looting = true
+    s.tick(14)
+    eq(s.helltide.hold_reason, 'waiting for Looter to finish', 'held at first')
+    s.tick(4)
+    eq(s.logged('Looter busy 15s without progress — farming on'), 1)
+    eq(s.logged('s yield (Looter)'), 1)
+    eq(s.helltide.hold_reason, nil, 'still holding with no progress')
+    local share = helltide_share(s, 40)
+    ok(share > 0.9, 'farming while the Looter stays busy: ' .. share)
+    eq(s.logged('Looter busy'), 1, 'logged once')
+    -- Busy drops: the next pickup is held again (fresh window).
+    -- QQT_Warpigz_v3 (night audit R5): only after 2 s without busy; a
+    -- one-frame gap between two drops no longer re-arms the window.
+    s.looting = false
+    s.tick(2.5)
+    s.looting = true
+    s.tick(5)
+    eq(s.helltide.hold_reason, 'waiting for Looter to finish', 'fresh hold after busy dropped')
+    -- A productive pickup (bag count rises) is never cut off.
+    s.looting = false
+    s.tick(0.5)
+    loot_progress(s, 8)
+    s.looting = true
+    s.tick(40)
+    eq(s.helltide.hold_reason, 'waiting for Looter to finish', 'productive multi-item pickup cut off')
+    eq(s.logged('Looter busy'), 1)
 end)
 
 print(string.format('Helltide integration: %d cases, %d checks, %d failures', cases, checks, #failures))

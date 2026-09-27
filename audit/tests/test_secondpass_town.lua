@@ -30,6 +30,9 @@ local function caller(folder, mode)
         if mode=='throw_after_queue' then c.status.pending=true;error('queued, then threw') end
         if mode=='sync' then c.status.need_trigger=false;cb();return nil end
         if mode=='pending' then c.status.teleport=true end
+        if mode=='rosie' then -- QQT_Warpigz_v3: lifecycle.request is busy before it returns
+            c.status.pending,c.status.external_trigger,c.status.running,c.status.owner=true,true,true,'arkham_asylum'
+        end
         return nil
     end
     c.api.trigger_tasks=function(...)c.method='plain';return trigger(...)end
@@ -48,7 +51,11 @@ for _, folder in ipairs(folders) do
         eq(pcall(c.task.Execute),true,'trigger exception is contained')
         eq(c.task.status,mode=='reject' and 'idle' or 'waiting for alfred to complete','throw retains uncertainty; explicit rejection retires')
         c.now=105;c.task.shouldExecute();c.task.Execute()
-        eq(c.calls,mode=='reject' and 2 or 1,'uncertain request is not resubmitted at retry boundary')
+        -- QQT_Warpigz_v3: HelltideRevamped latches an explicit refusal as
+        -- "town unavailable for now" (Rosie while stuck) and farms on; it
+        -- asks again only when the provider recovers (120 s without `stuck`).
+        local retried=mode=='reject' and folder~='HelltideRevamped'
+        eq(c.calls,retried and 2 or 1,'uncertain request is not resubmitted at retry boundary')
         if mode=='throw_after_queue' then
             c.now=120;c.task.shouldExecute();c.task.Execute();eq(c.calls,1,'pending-only queued work is not overwritten')
             eq(c.task.status,'waiting for alfred to complete')
@@ -134,12 +141,21 @@ do
     local c=caller('ArkhamAsylum','nil');c.in_town=false;c.floor_loot=true;c.task.Execute()
     eq(c.method,'teleport');c.now=103;c.task.Execute();eq(c.teleports,0,'Alfred round-trip never receives a local retry')
 end
-for _, blocker in ipairs({'unknown','pending','foreign','loading','arrived'}) do
+-- QQT_Warpigz_v3: 'pending' was a blocker here, but Rosie reports our own
+-- accepted plain request as pending/external_trigger/running from the first
+-- frame, so that gate meant no hop at all (R6-A1). Only a provider that is
+-- teleporting by itself (teleport, not done/failed) blocks the own hop now.
+for _, blocker in ipairs({'unknown','self_teleport','foreign','loading','arrived'}) do
     local c=caller('ArkhamAsylum','nil');c.in_town=false;c.task.Execute();c.now=103
-    if blocker=='unknown' then c.status_error=true elseif blocker=='pending' then c.status.pending=true
+    if blocker=='unknown' then c.status_error=true elseif blocker=='self_teleport' then c.status.teleport=true
     elseif blocker=='foreign' then c.status.external_caller='Other' elseif blocker=='loading' then c.loading=true
     else c.in_town=true end
     c.task.Execute();eq(c.teleports,1,'local retry yields on '..blocker)
+end
+do -- own request reported as live work (Rosie shape) still retries the hop
+    local c=caller('ArkhamAsylum','rosie');c.in_town=false
+    c.task.Execute();eq(c.teleports,1,'own accepted request hops at once');c.now=103
+    c.task.Execute();eq(c.teleports,2,'own live request does not block the retry')
 end
 
 local function bridge_session()

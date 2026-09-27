@@ -112,6 +112,22 @@ function M.release_peers()
     release('path',function() return pathfinder.clear_stored_path() end)
     return M.retry_cleanup(true)
 end
+-- QQT_Warpigz_v3: the player stands in any town (not only Rosie's Temis).
+-- The host's town flag first; a known town-zone list when it is unreadable.
+local TOWN_ZONES={Skov_Temis=true,Naha_Kurast=true,Kehj_Caldeum=true,Scos_Cerrigar=true,
+    Frac_Kyovashad=true,Hawe_Zarbinzet=true,Kehj_Gea_Kul=true,Step_Jirandai=true}
+function M.in_any_town()
+    if utils.is_in_town() then return true end
+    local ok,flag=pcall(function()
+        local attrs=rawget(_G,'attributes')
+        if type(attrs)~='table' or attrs.PLAYER_IN_TOWN_LEVEL_AREA==nil then return nil end
+        return get_local_player():get_attribute(attrs.PLAYER_IN_TOWN_LEVEL_AREA)
+    end)
+    if ok and type(flag)=='number' then return flag==1 end
+    local world=get_current_world()
+    local zone=world and world:get_current_zone_name()
+    return TOWN_ZONES[zone]==true
+end
 function M.request(caller,callback,teleport,manual)
     if retired then return false,'This Rosie instance has reloaded.' end
     if #pending_cleanup>0 then return false,'Waiting for owned resources to release.' end
@@ -127,6 +143,7 @@ function M.request(caller,callback,teleport,manual)
     tracker.request_id=(tracker.request_id or 0)+1
     finished=false
     tracker.failure_reason=nil; tracker.outcome='pending'
+    tracker.return_missing_logged=nil -- QQT_Warpigz_v3
     tracker.request_world=world:get_world_id()
     tracker.request_zone=world:get_current_zone_name()
     tracker.request_name=world:get_name()
@@ -137,9 +154,14 @@ function M.request(caller,callback,teleport,manual)
     tracker.manual_trigger=manual==true
     tracker.external_trigger_callback=nil
     tracker.teleport=teleport==true and not utils.is_in_town()
-    tracker.return_required=tracker.teleport
+    -- QQT_Warpigz_v3: Rosie serves Temis only. A request made in another
+    -- town (Kurast for WonderCity) still hops to Temis, but a town-to-town
+    -- waypoint leaves no TownPortal back: the caller's own travel returns it,
+    -- so the return leg is not part of this trip (never a teleport_failed).
+    tracker.return_required=tracker.teleport and not M.in_any_town()
     tracker.visited_town=utils.is_in_town()
     tracker.service_elapsed=0; tracker.pause_elapsed=0; last_tick=nil
+    tracker.raven_wait=nil -- QQT_Warpigz_v3
     local held,why=pcall(M.hold_peers)
     if not held then
         local reason='Cannot acquire service ownership: '..tostring(why)
@@ -158,6 +180,7 @@ function M.finish(success,reason,kind)
     tracker.external_trigger_callback=nil
     tracker.external_trigger,tracker.manual_trigger,tracker.trigger_tasks=false,false,false
     tracker.teleport=false
+    tracker.raven_wait=nil -- QQT_Warpigz_v3
     -- Only the trip's own caller can hold a pause during a trip (M.pause).
     if tracker.external_pause and (tracker.pause_caller==nil or tracker.pause_caller==tracker.external_caller) then
         tracker.external_pause=false; tracker.pause_caller=nil
@@ -269,7 +292,9 @@ function M.tick()
     end
     M.hold_peers()
     if utils.is_in_town() then tracker.visited_town=true end
-    tracker.service_elapsed=(tracker.service_elapsed or 0)+elapsed
+    -- QQT_Warpigz_v3: waiting for the SilentRaven hand-off (teleport.lua,
+    -- bounded there) is not service time.
+    if not tracker.raven_wait then tracker.service_elapsed=(tracker.service_elapsed or 0)+elapsed end
     if tracker.service_elapsed>=240 then M.finish(false,'Town service or return timed out (240s)'); return false end
     return true
 end

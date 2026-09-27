@@ -1,5 +1,5 @@
 -- ============================================================
---  Reaper  v1.10.1
+--  Reaper  v1.10.2
 --  by Magoogle
 --
 --  Flow per run:
@@ -24,6 +24,8 @@ local belial_chest = require "tasks.belial_chest"
 local revive       = require "tasks.revive"
 local alfred_task  = require "tasks.alfred"
 local dungeon_reset = require "tasks.dungeon_reset"
+local interact_altar = require "tasks.interact_altar" -- QQT_Warpigz_v3 (status text)
+local activity_lease = require "core.activity_lease" -- QQT_Warpigz_v3
 
 -- Home town now resolved per pulse from settings.town_zone / settings.town_waypoint
 -- (driven by the gui.town combo_box). Defaults to Temis to match Arkham/Alfred.
@@ -135,6 +137,12 @@ local function on_enable()
 
     rotation.build(settings)
 
+    -- QQT_Warpigz_v3: a manual Belial target is skipped while the Belial
+    -- Chest sequence is off (see boss_rotation.build); say so plainly.
+    if not rotation.initialized and settings.boss_rotation_mode == "manual"
+            and refuse_external(settings.boss_target) then
+        return false, "belial_chest_disabled"
+    end
     if not rotation.initialized then
         console.print("[Reaper] No keys / husks available for the selected bosses. Stopping.")
         return false, "no keys or husks for the selected bosses"
@@ -195,6 +203,7 @@ end
 -- C6: why Reaper is holding (Alfred or Looter), for status and overlay.
 local function hold_reason()
     return alfred_task.hold_reason() or utils.loot_hold_reason()
+        or interact_altar.status_text() -- QQT_Warpigz_v3: bounded altar retries
 end
 
 on_update(function()
@@ -214,10 +223,17 @@ on_update(function()
     -- frame, so its callback still reports exactly once)
     if not enabled and (enabled_last_frame or run.active) then
         stop()
+        activity_lease.release('ReaperPlugin') -- QQT_Warpigz_v3
         return
     end
 
     if not enabled then return end
+
+    -- QQT_Warpigz_v3: standalone (WarPigs off) with another activity plugin
+    -- enabled: hold (no startup, no boss teleport) instead of running against it.
+    if activity_lease.check('ReaperPlugin', function(msg) console.print('[Reaper] ' .. msg) end) then
+        return
+    end
 
     -- Startup: attempt on_enable once inventory is ready
     if not startup_done then
@@ -296,8 +312,12 @@ on_render(function()
     end
 
     local x, y = 20, 60
-    graphics.text_2d("=== REAPER  v1.10.1  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
+    graphics.text_2d("=== REAPER  v1.10.2  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
     y = y + 20
+    if activity_lease.reason then -- QQT_Warpigz_v3
+        graphics.text_2d(activity_lease.reason, vec2:new(x, y), 13, color_yellow(255))
+        y = y + 16
+    end
 
     if boss then
         graphics.text_2d(
@@ -472,6 +492,6 @@ ReaperPlugin = {
 }
 
 console.print("=============================================")
-console.print("  Reaper  v1.10.1  by Magoogle  - Loaded")
+console.print("  Reaper  v1.10.2  by Magoogle  - Loaded")
 console.print("  Enable in menu to start reaping")
 console.print("=============================================")

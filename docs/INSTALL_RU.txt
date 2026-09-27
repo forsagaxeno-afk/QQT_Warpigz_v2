@@ -39,6 +39,20 @@ QQT_Warpigz_v3 (версия в имени архива) — установка
    орда из War Plan заходит через телепорт War Plan, компас не тратится.
    "Allow compass entry if the War Plan teleport fails" — ВЫКЛ (по умолчанию).
 9. Ставь на паузу WarPigs, а не хоткей отдельного плагина.
+10. Без WarPigs (обычный фарм: один плагин активности + Rosie + твой боевой скрипт) включай
+   ОДНУ активность. Если включены две (например ArkhamAsylum и WonderCity), работает первая,
+   вторая ждёт и пишет причину на своём оверлее — телепортов туда-обратно больше нет.
+11. HelltideRevamped 2.3.0, режим Farm: новый раздел меню "Smart farm (Farm mode)" —
+   Smart chest order, Cinder plan, Road routing, Learn while farming, Stay inside the Helltide
+   (по умолчанию ВКЛ), Event radius, Events until minute (UTC), "Skip legacy Helltide events"
+   (по умолчанию ВЫКЛ, т.е. события делаются). Раздел "Live data & stats": Stats overlay (ВКЛ),
+   Web dashboard (ВЫКЛ; включи и открой в браузере HelltideRevamped\dashboard\index.html),
+   Live Helltide zone (internet) (ВЫКЛ). Выученные точки сундуков лежат в
+   HelltideRevamped\learned\ — при обновлении эту папку можно сохранить. Под WarPigs (Warplan)
+   всё это не используется. Координат сундуков в интернете нет: сундуки бот видит сам и
+   запоминает. Час Helltide считается по UTC.
+12. Batmobile: в Movement Rules можно выбрать Rampage (Warlock); Evade в анти-застревании
+   теперь следует галочке "Use evade".
 
 После первой сессии пришли лог — особенно строки из LIVE_CHECKLIST.md
 (где приземляет телепорт War Plan, "[SilentRaven] reward diagnostics", "[WarPigs] ... held ...").

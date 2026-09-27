@@ -121,6 +121,15 @@ task.Execute = function ()
     local local_player = get_local_player()
     if not local_player then return end
     BatmobilePlugin.pause(plugin_label)
+    -- QQT_Warpigz_v3: no walk, obelisk or portal step while SilentRaven
+    -- claims; an entry already committed (pit opened) goes on.
+    if not task.committed() and (utils.raven_claim_active and utils.raven_claim_active()) then
+        if task.status ~= status_enum['WAITING'] .. 'for SilentRaven' then
+            BatmobilePlugin.clear_target(plugin_label)
+            task.status = status_enum['WAITING'] .. 'for SilentRaven'
+        end
+        return
+    end
 
     local player_pos = local_player:get_position()
     local portal_activator = get_portal_activator()

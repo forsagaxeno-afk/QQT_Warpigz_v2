@@ -29,6 +29,32 @@ local function update_locals()
     end
 end
 
+-- QQT_Warpigz_v3: the debug explorer (freeroam) drove on while a Looter
+-- (Rosie pickup) walked to a drop, so drops a few metres off the route were
+-- never picked up. It now yields navigator.move() while the Looter reports
+-- active pickup, at most FREEROAM_YIELD_MAX s per busy episode, then drives
+-- FREEROAM_DRIVE s before yielding again (a stuck pickup never freezes it).
+local FREEROAM_YIELD_MAX, FREEROAM_DRIVE = 10, 5
+local freeroam_yield = {since = nil, drive_until = nil}
+local function freeroam_yields_to_looter()
+    local looter = rawget(_G, 'LooteerPlugin')
+    local busy = false
+    if type(looter) == 'table' and type(looter.is_actively_looting) == 'function' then
+        local ok, active = pcall(looter.is_actively_looting)
+        busy = ok and active == true
+    end
+    if not busy then freeroam_yield.since, freeroam_yield.drive_until = nil, nil; return false end
+    local now = get_time_since_inject()
+    if freeroam_yield.drive_until then
+        if now < freeroam_yield.drive_until then return false end
+        freeroam_yield.drive_until, freeroam_yield.since = nil, nil
+    end
+    freeroam_yield.since = freeroam_yield.since or now
+    if now - freeroam_yield.since < FREEROAM_YIELD_MAX then return true end
+    freeroam_yield.drive_until = now + FREEROAM_DRIVE
+    return false
+end
+
 local function main_pulse()
     local loading = utils.player_loading()
     if loading then
@@ -146,7 +172,7 @@ local function main_pulse()
         navigator.update()
         tracker.timer_update = os.clock() - start_update
         local start_move = os.clock()
-        navigator.move()
+        if not freeroam_yields_to_looter() then navigator.move() end -- QQT_Warpigz_v3
         tracker.timer_move = os.clock() - start_move
     end
 end

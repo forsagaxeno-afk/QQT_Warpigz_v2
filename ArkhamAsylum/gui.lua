@@ -1,5 +1,5 @@
 local plugin_label = 'arkham_asylum'
-local plugin_version = '2.1.0'
+local plugin_version = '2.1.1'
 console.print("Lua Plugin - Arkham Asylum - Leoric - v" .. plugin_version)
 
 local gui = {}
@@ -124,7 +124,8 @@ gui.render = function ()
         gui.elements.keybind_toggle:render('Toggle Keybind', 'Toggle the bot for quick enable')
     end
     if gui.elements.pit_settings_tree:push('Pit Settings') then
-        gui.elements.town:render('Home town', gui.town, 'Town to teleport to / start the run from. Match this to your Alfred town setting.')
+        -- QQT_Warpigz_v3: Rosie services Temis only; say so where the town is picked.
+        gui.elements.town:render('Home town', gui.town, 'Town to teleport to / start the run from. With Rosie, town trips (sell/salvage/stash/repair) always go to Temis, the only town Rosie services; with a standalone Alfred, match this to your Alfred town setting.')
         gui.elements.batmobile_priority:render('Batmobile priority', gui.batmobile_priority, 'Select whether to priortize direction or distance while exploring')
         if gui.elements.batmobile_priority:get() == 1 then
             render_menu_header('[EXPERIMENTAL] Priortizing distance will use more processing power. ' ..

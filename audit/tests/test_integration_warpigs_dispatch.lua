@@ -26,7 +26,10 @@ local function fixture(opts)
     local e = setmetatable({}, {__index = _G}); e._G = e
     e.console = {print = function(m) f.logs[#f.logs + 1] = tostring(m) end}
     e.os = setmetatable({date = function(fmt, ...)
-        if fmt == '%M' then return string.format('%02d', f.minute) end
+        -- QQT_Warpigz_v3: WarPigs reads the UTC minute ('!%M'); f.local_minute
+        -- (when set) answers the local '%M' so a test can make them differ.
+        if fmt == '!%M' then return string.format('%02d', f.minute) end
+        if fmt == '%M' then return string.format('%02d', f.local_minute or f.minute) end
         return os.date(fmt, ...)
     end}, {__index = os})
     e.attributes = {PLAYER_IN_TOWN_LEVEL_AREA = 'town'}
@@ -427,6 +430,18 @@ case('WPD-8 helltide off-window holds the warplan teleport without Alfred', func
     truthy(f.until_true(function() return f.teleports >= 1 end, 10), 'teleport once the hour turns')
 end)
 
+-- QQT_Warpigz_v3: the off-window follows the UTC minute, not the local one
+-- (half-hour time zones: local :27 is UTC :57).
+case('WPD-8b helltide off-window follows the UTC minute (half-hour time zone)', function()
+    local f = fixture({teleport = true})
+    f.minute = 57; f.local_minute = 27
+    f.plugin('HelltideRevampedPlugin')
+    f.quests = {'WarPlans_QST_Helltide_TorturedGifts'}
+    f.run(60); eq(f.teleports, 0, 'UTC minute 57: no warplan teleport although the local minute is 27')
+    f.minute = 0; f.local_minute = 30
+    truthy(f.until_true(function() return f.teleports >= 1 end, 10), 'teleport once the UTC hour turns (local :30)')
+end)
+
 -- ── WPT-6: warplan errors and silent no-ops are bounded ─────────────────────
 case('WPT-6 a throwing or silent warplan teleport is bounded and releases the gate', function()
     local f = fixture({teleport = true})
@@ -678,6 +693,64 @@ case('R3 an adopted Reaper run that reports in_run is held when its quest vanish
     eq(legacy.disables, 1, 'legacy Reaper released at once')
 end)
 
+-- QQT_Warpigz_v3 (night orchestration): a Reaper whose persisted main_toggle
+-- came back after a QQT reload plays its own GUI rotation (external_run ==
+-- false). WarPigs must not adopt it as the plan run: it stops it once and
+-- then sends run_once(plan boss) (was: adopted, 0 run_once, keys spent on
+-- the GUI boss).
+case('R3b a persisted manual Reaper is stopped and the plan boss is dispatched', function()
+    local f = fixture()
+    local reaper = f.plugin('ReaperPlugin', {in_run = false, external_run = false}); reaper.enabled = true
+    local bosses = {}
+    reaper.run_once = function(boss)
+        if reaper.enabled then return false, 'busy' end
+        bosses[#bosses + 1] = boss
+        reaper.enabled = true; reaper.st.external_run = true; reaper.st.in_run = true
+        return true
+    end
+    f.quests = {'WarPlans_QST_BossLair_Andariel'}
+    f.run(60)
+    eq(f.logged('adopted active ReaperPlugin'), 0, 'a manual Reaper run is not adopted')
+    eq(reaper.disables, 1, 'the manual rotation is stopped once')
+    eq(#bosses, 1, 'one run_once for the plan boss')
+    eq(bosses[1], 'andariel')
+    eq(f.logged('refused'), 0, 'no busy refusal loop')
+    eq(f.logged('running its own boss rotation'), 1, 'logged once')
+    -- A manual run in a committed phase (in_run) is let finish, bounded.
+    local g = fixture()
+    local busy = g.plugin('ReaperPlugin', {in_run = true, external_run = false}); busy.enabled = true
+    local runs = 0
+    busy.run_once = function()
+        if busy.enabled then return false, 'busy' end
+        runs = runs + 1; busy.enabled = true; busy.st.external_run = true
+        return true
+    end
+    g.quests = {'WarPlans_QST_BossLair_Andariel'}
+    g.run(280)
+    eq(busy.disables, 0, 'a manual run in its chest phase is not cut at once')
+    eq(g.logged('letting it finish'), 1, 'hold logged once')
+    truthy(g.until_true(function() return busy.disables == 1 end, 30), 'hold bounded (REAPER_ADOPTED_HOLD)')
+    truthy(g.until_true(function() return runs == 1 end, 10), 'plan boss dispatched after the hold')
+    -- WarPigs' own run_once (external_run == true) and a legacy Reaper
+    -- (external_run nil) are never stopped by this rule.
+    local h = fixture()
+    local own = h.plugin('ReaperPlugin', {in_run = false})
+    own.run_once = function()
+        if own.enabled then return false, 'busy' end
+        own.enabled = true; own.st.external_run = true; own.st.in_run = true
+        return true
+    end
+    h.quests = {'WarPlans_QST_BossLair_Andariel'}
+    h.run(60)
+    eq(own.disables, 0, 'own run_once kept'); eq(own.enabled, true)
+    local k = fixture()
+    local legacy = k.plugin('ReaperPlugin'); legacy.enabled = true
+    k.quests = {'WarPlans_QST_BossLair_Andariel'}
+    k.run(60)
+    eq(k.logged('adopted active ReaperPlugin'), 1, 'legacy Reaper adopted as before')
+    eq(legacy.disables, 0)
+end)
+
 -- R4 (critic probe_p2 P2): a refusal that repeats forever is visible (C6).
 case('R4 a Reaper run_once refused forever is shown with boss and reason', function()
     local f = fixture()
@@ -807,6 +880,58 @@ case('F-W5 "deferring enable — post-disable cooldown" is logged once per episo
     wc.enabled = false
     truthy(f.until_true(function() return ark.enables == 1 end, 10), 'Pit after the gap')
     eq(f.logged('deferring enable of ArkhamAsylumPlugin — post-disable cooldown'), 1, 'new episode logged once')
+end)
+
+-- QQT_Warpigz_v3 (night orchestration, C6): a War Plan step whose plugin is
+-- not loaded is logged once per episode and shown in the status line (was:
+-- one line per 0.5 s tick and 'WarPigs: watching quests').
+case('R2b a missing plugin is logged once and shown in the status line', function()
+    for _, spec in ipairs({{'WarPlans_QST_BossLair_Andariel', 'ReaperPlugin'},
+                           {'WarPlans_QST_Undercity', 'WonderCityPlugin'}}) do
+        local f = fixture()
+        f.quests = {spec[1]}
+        f.run(70)
+        eq(f.logged('cannot enable ' .. spec[2] .. ' — plugin not loaded'), 1, spec[2] .. ' logged once in 70 s')
+        local line = f.o.get_status_line()
+        truthy(line:find(spec[2] .. ' not loaded', 1, true), 'status line: ' .. line)
+        f.quests = {}; f.run(2)
+        f.quests = {spec[1]}; f.run(2)
+        eq(f.logged('cannot enable ' .. spec[2] .. ' — plugin not loaded'), 2, 'a new episode logs again')
+    end
+    local g = fixture()
+    g.e.WonderCityPlugin = {status = function() return {enabled = false} end}   -- no enable()
+    g.quests = {'WarPlans_QST_Undercity'}
+    g.run(70)
+    eq(g.logged('no enable function'), 1, 'no-enable logged once')
+    local line = g.o.get_status_line()
+    truthy(line:find('WonderCityPlugin has no enable function', 1, true), 'status line: ' .. line)
+end)
+
+-- QQT_Warpigz_v3 (night orchestration, C6): overlapping mapped quests log the
+-- preemption once per episode (was: one line per tick for every demoted plugin).
+case('R1b preemption is logged once per episode', function()
+    local f = fixture()
+    local ark = f.plugin('ArkhamAsylumPlugin')
+    local hr = f.plugin('HelltideRevampedPlugin')
+    f.quests = {'WarPlans_QST_ThePit', 'WarPlans_QST_Helltide_TorturedGifts'}
+    f.run(300)
+    eq(f.logged('preempting'), 1, 'one preemption line in 300 s')
+    truthy(ark.enabled or hr.enabled, 'the winner runs')
+    local winner = ark.enabled and 'ArkhamAsylumPlugin' or 'HelltideRevampedPlugin'
+    f.quests = {winner == 'ArkhamAsylumPlugin' and 'WarPlans_QST_ThePit' or 'WarPlans_QST_Helltide_TorturedGifts'}
+    f.run(2)
+    f.quests = {'WarPlans_QST_ThePit', 'WarPlans_QST_Helltide_TorturedGifts'}
+    f.run(10)
+    eq(f.logged('preempting'), 2, 'a new overlap episode logs again')
+    -- The same-activity OPT-OUT line is logged once per continuation window.
+    local g = fixture({teleport = true, world = 'Sanctuary', zone = 'Kehj_Caldeum', town = false})
+    g.o.quest_plugin_map.WarPlans_QST_ThePit.same_activity_continuation = false
+    local pit = g.plugin('ArkhamAsylumPlugin'); pit.enabled = true
+    g.quests = {'WarPlans_QST_ThePit'}; g.tick()
+    pit.enabled = false   -- Arkham stops by itself; its quest is still up
+    g.run(30)
+    g.o.quest_plugin_map.WarPlans_QST_ThePit.same_activity_continuation = nil
+    eq(g.logged('continuation OPT-OUT'), 1, 'OPT-OUT logged once per window')
 end)
 
 if #failures > 0 then error(#failures .. ' WarPigs dispatch regressions failed:\n' .. table.concat(failures, '\n')) end

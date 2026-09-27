@@ -51,6 +51,9 @@ task.Execute = function ()
     local local_player = get_local_player()
     if not local_player then return end
     BatmobilePlugin.pause(plugin_label)
+    -- QQT_Warpigz_v3: never stop SilentRaven's walk or teleport out of Temis
+    -- while it claims a Whisper reward.
+    if (utils.raven_claim_active and utils.raven_claim_active()) then task.status = status_enum['WAITING'] .. 'for SilentRaven'; return end
     teleport_with_debounce()
 end
 

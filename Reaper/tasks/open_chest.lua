@@ -20,6 +20,9 @@ local CHEST_INTERACT_COOLDOWN = 0.5  -- min seconds between EGB chest interact a
 local WAIT_GONE_SECS          = 10   -- if chest still here after this → out of mats
 local WAIT_COMPLETE_SECS      = 3    -- pause after chest before next run
 local OUT_OF_MATS_RETRIES     = 3    -- times chest can fail to despawn before stopping
+-- QQT_Warpigz_v3: 'retrying open' cycles (manual rotation with stock left)
+-- per run. Before, the cycle repeated forever while keys/husks remained.
+local MAX_REOPEN_CYCLES       = 1
 
 -- ---- State ----
 local phase              = "IDLE"
@@ -28,6 +31,7 @@ local phase_yield        = 0    -- tracker.companion_yield when the phase began 
 local last_interact_time = 0
 local last_chest_pos     = nil
 local no_despawn_count   = 0    -- counts consecutive failures to despawn
+local reopen_cycles      = 0    -- QQT_Warpigz_v3: 'retrying open' cycles this run
 
 local function set_phase(p)
     phase       = p
@@ -120,6 +124,7 @@ function task.reset()
     last_interact_time = 0
     last_chest_pos = nil
     no_despawn_count = 0
+    reopen_cycles = 0
     last_pos = nil
     last_move_t = 0
 end
@@ -129,6 +134,7 @@ function task.shouldExecute()
         if phase ~= "IDLE" then
             set_phase("IDLE")
             no_despawn_count = 0
+            reopen_cycles = 0
         end
         return false
     end
@@ -185,7 +191,9 @@ function task.Execute()
             console.print("[Chest] Belial chest interacted – signalling UI task.")
             if not settings.belial_chest_enabled then
                 -- RPR-8: nothing confirms the Ritual of Lies dialog, so the chest
-                -- stays closed and the bounded retry below fails this run.
+                -- stays closed; the bounded retry below (MAX_REOPEN_CYCLES,
+                -- QQT_Warpigz_v3) fails this run. A manual rotation skips
+                -- Belial at build while the sequence is off.
                 console.print("[Chest] Belial chest sequence is OFF (Reaper > Belial Chest) — the reward dialog will not be confirmed.")
             end
         end
@@ -202,6 +210,7 @@ function task.Execute()
         if chest == nil then
             -- Chest gone – run is complete (no theme chest to chase any more).
             no_despawn_count = 0
+            reopen_cycles = 0
             set_phase("WAIT_COMPLETE")
             return
         end
@@ -222,14 +231,16 @@ function task.Execute()
             -- BUT: external (orchestrator-injected) rotations are explicit
             -- one-shots — never extend the run from inventory, even if the
             -- chest is misbehaving. Otherwise the altar can re-fire.
-            if boss and not rotation.external then
+            -- QQT_Warpigz_v3: at most MAX_REOPEN_CYCLES such retries per run.
+            if boss and not rotation.external and reopen_cycles < MAX_REOPEN_CYCLES then
                 rotation.resync_pools()
                 local tier = boss.key_tier or boss.run_type or "lair"
                 local has_stock = rotation.runs_for_tier(tier) > 0
                 if has_stock then
+                    reopen_cycles = reopen_cycles + 1
                     console.print(string.format(
-                        "[Chest] Chest still present but inventory has %s stock for %s — retrying open.",
-                        tier, boss.label))
+                        "[Chest] Chest still present but inventory has %s stock for %s — retrying open (%d/%d).",
+                        tier, boss.label, reopen_cycles, MAX_REOPEN_CYCLES))
                     set_phase("MAIN")
                     return
                 end
@@ -238,6 +249,7 @@ function task.Execute()
             console.print("[Chest] Chest didn't despawn after retries — out of required key/husks for this boss, skipping.")
             rotation.advance("Reward chest remained closed after retries")
             tracker.reset_run()
+            reopen_cycles = 0
             set_phase("IDLE")
         else
             -- Try interacting again
@@ -266,6 +278,7 @@ function task.Execute()
         console.print(string.format("[Chest] Run complete — boss=%s  run_type=%s",
             tostring(boss and boss.id), tostring(boss and boss.run_type)))
         tracker.chest_opened = true
+        reopen_cycles = 0
         rotation.consume_run()
         tracker.reset_run()
         set_phase("IDLE")

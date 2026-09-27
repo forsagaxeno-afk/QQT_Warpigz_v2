@@ -5,6 +5,8 @@ local tracker = require 'silent_raven.tracker'
 local rewards = require 'silent_raven.rewards'
 local stats = require 'silent_raven.stats'
 local coordination = require 'silent_raven.coordination'
+-- QQT_Warpigz_v3: the settings module (holds .debug) for the debug log.
+local sr_settings = require 'silent_raven.settings'
 local M = {}
 local MAX_ATTEMPTS, WALK_TIMEOUT, PANEL_TIMEOUT, RUN_TIMEOUT = 3, 20, 10, 100
 local TELEPORT_RETRY_SECONDS, TELEPORT_SPELL_ID = 6, 186139
@@ -27,7 +29,13 @@ local YIELD_PREFIX = 'yield:'
 local AUTO_DUMP_LIMIT = 5
 local session = { dumps = 0 }
 local function clock() return (get_time_since_inject and get_time_since_inject()) or 0 end
-local function transition(state, now) tracker.state, tracker.state_t = state, now end
+-- QQT_Warpigz_v3: 'Debug logging' prints each state change (edge-triggered).
+local function transition(state, now)
+    if tracker.state ~= state then
+        log.debug(sr_settings, 'state ' .. tostring(tracker.state) .. ' -> ' .. state .. ' (' .. tostring(tracker.last_reason) .. ')')
+    end
+    tracker.state, tracker.state_t = state, now
+end
 local function stop_owned()
     if tracker.movement_owned then whispers.stop_movement(); tracker.movement_owned = false end
 end
@@ -381,6 +389,7 @@ function M.start(settings, reason, with_tp, callback)
     tracker.run_started_t = clock()
     tracker.companion_yield = reason == 'auto' or reason == 'manual'
     tracker.state, tracker.state_t = with_tp and not whispers.in_whisper_town() and 'TELEPORTING' or 'START', clock()
+    log.debug(sr_settings, 'run started (' .. tostring(tracker.last_reason) .. ') -> ' .. tracker.state) -- QQT_Warpigz_v3
 end
 function M.tick(settings)
     if not tracker.running then return end
@@ -473,8 +482,10 @@ function M.tick(settings)
         end
         if now - tracker.state_t >= PANEL_TIMEOUT then
             -- An untranslated, incomplete meta quest gets one bounded probe.
+            -- QQT_Warpigz_v3: so does a readiness inferred without an
+            -- English hint (whispers.quest_snapshot): no retry loop.
             local snapshot = whispers.quest_snapshot()
-            if snapshot and not snapshot.ready then
+            if snapshot and (not snapshot.ready or snapshot.inferred) then
                 tracker.last_reason = 'no_reward_panel'; finish('skipped_not_ready')
             else retry('panel_timeout', now) end
             return

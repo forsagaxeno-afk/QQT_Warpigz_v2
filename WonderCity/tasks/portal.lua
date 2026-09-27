@@ -23,6 +23,24 @@ local task = {
 -- (RUSH_PORTAL_RANGE), not only within check_distance. Logged once per run.
 local RUSH_PORTAL_RANGE = 150
 local rush_logged_run = nil
+-- QQT_Warpigz_v3 (C6, loot_obols rule): a PortalSwitch or warp pad Batmobile
+-- rejects (set_target()==false) or that we get no PROGRESS_STEP m closer to
+-- in NO_PROGRESS_SECONDS is skipped for the rest of the floor.
+local NO_PROGRESS_SECONDS, PROGRESS_STEP = 12, 1
+local skip = {generation = nil, keys = {}}
+local approach = {key = nil, best = nil, time = nil, last = nil}
+local PROGRESS_GAP = 2 -- a longer gap (another task ran) starts a fresh window
+local function target_key(actor)
+    local pos = actor:get_position()
+    return tostring(tracker.floor_generation) .. '|' .. tostring(actor:get_skin_name()) .. ':'
+        .. string.format('%.0f:%.0f', pos:x(), pos:y())
+end
+local function is_skipped(actor)
+    if skip.generation ~= tracker.floor_generation then
+        skip.generation, skip.keys = tracker.floor_generation, {}
+    end
+    return skip.keys[target_key(actor)] == true
+end
 local get_portal = function ()
     local local_player = get_local_player()
     if not local_player then return end
@@ -31,7 +49,7 @@ local get_portal = function ()
     for _, actor in pairs(actors) do
         if actor:is_interactable() then
             local actor_name = actor:get_skin_name()
-            if actor_name == 'X1_Undercity_PortalSwitch' then
+            if actor_name == 'X1_Undercity_PortalSwitch' and not is_skipped(actor) then
                 local dist = utils.distance(local_player, actor)
                 if dist <= range then
                     if settings.rush_boss_portal and dist > settings.check_distance
@@ -52,7 +70,7 @@ local get_portal_warp_pad = function ()
     local actors = actors_manager:get_ally_actors()
     for _, actor in pairs(actors) do
         local actor_name = actor:get_skin_name()
-        if actor_name == 'X1_Undercity_WarpPad' then
+        if actor_name == 'X1_Undercity_WarpPad' and not is_skipped(actor) then
             local dist = utils.distance(local_player, actor)
             if dist <= settings.check_distance then
                 return actor
@@ -122,15 +140,43 @@ task.Execute = function ()
         return
     end
     if target ~= nil then
+        -- QQT_Warpigz_v3 (C6): bounded approach.
+        local key, dist, now = target_key(target), utils.distance(local_player, target), get_time_since_inject()
+        local why = nil
+        if approach.last and now - approach.last > PROGRESS_GAP then approach.best = nil end
+        approach.last = now
+        if approach.key ~= key or approach.best == nil then
+            approach.key, approach.best, approach.time = key, dist, now
+        elseif dist < approach.best - PROGRESS_STEP then
+            approach.best, approach.time = dist, now
+        elseif now - approach.time >= NO_PROGRESS_SECONDS then
+            why = string.format('no progress for %ds at %.0fm', NO_PROGRESS_SECONDS, dist)
+        end
         BatmobilePlugin.pause(plugin_label)
         BatmobilePlugin.update(plugin_label)
-        BatmobilePlugin.set_target(plugin_label, target)
+        if why == nil and BatmobilePlugin.set_target(plugin_label, target) == false then
+            why = 'Batmobile rejected the target'
+        end
+        if why ~= nil then
+            skip.keys[key] = true
+            approach.key, approach.best, approach.time = nil, nil, nil
+            console.print('[WonderCity:portal] ' .. key .. ' unreachable (' .. why .. ') - skipping it on this floor')
+            utils.stop_movement()
+            task.status = 'portal unreachable - continuing'
+            return
+        end
         BatmobilePlugin.move(plugin_label)
         task.status = status_enum['WALKING']
     end
 end
 
+-- C5: time spent yielding (Alfred, Looter) is not 'no progress' time.
+task.on_yield = function (seconds)
+    if approach.time then approach.time = approach.time + seconds end
+end
+
 task.reset = function ()
+    approach.key, approach.best, approach.time = nil, nil, nil
     task.portal_found = false
     task.portal_exit = -1
     task.last_interact_time = -math.huge

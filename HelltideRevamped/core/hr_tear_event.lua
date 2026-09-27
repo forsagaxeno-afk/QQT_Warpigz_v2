@@ -875,6 +875,11 @@ H.RIFT_STAY_ACTIVE = function(self, states, s, r)
         return
     end
     if now() - s.no_tear_since >= (settings.rupture_linger_sec or 5) then
+        -- QQT_Warpigz_v3: one completed tear event for the stats (main.lua sets the hook).
+        if not s.completed_counted and type(M.on_complete) == "function" then
+            s.completed_counted = true
+            pcall(M.on_complete, s.rupture_type)
+        end
         if realmwalker_chain(s) then
             s.rw_wait_started = now()
             log(string.format("[RIFT] %s rupture complete — waiting for Realmwalker", s.rupture_type))

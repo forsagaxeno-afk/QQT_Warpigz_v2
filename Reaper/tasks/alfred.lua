@@ -35,6 +35,7 @@ local generation = 0
 local request_plugin, request_started, quiet_since
 local retry_after = -math.huge
 local RETRY_DELAY, PICKUP_WINDOW, QUIET_WINDOW = 5, 8, 2
+local REFUSED_RETRY = 30 -- QQT_Warpigz_v3
 -- C1/C6 bounds: an unreadable status holds like busy for UNKNOWN_HOLD, then
 -- Alfred counts as unavailable; a pause Reaper does not own holds Reaper's
 -- own hard request for PAUSED_HOLD_MAX; any hold past HOLD_LOG_SECS is
@@ -42,7 +43,8 @@ local RETRY_DELAY, PICKUP_WINDOW, QUIET_WINDOW = 5, 8, 2
 local UNKNOWN_HOLD, PAUSED_HOLD_MAX, HOLD_LOG_SECS = 10, 60, 60
 local watch = { unknown_since = nil, unknown_logged = false, live_seen = false,
     paused_since = nil, paused_logged = false,
-    hold = nil, hold_since = nil, hold_logged = false, yield_at = nil, advisory_logged = -math.huge }
+    hold = nil, hold_since = nil, hold_logged = false, yield_at = nil, advisory_logged = -math.huge,
+    stuck_note = nil }
 
 -- C1 canonical live-work predicate (a teleport latched after a finished or
 -- failed trip is not live work).
@@ -165,7 +167,8 @@ local function note_hold(reason)
 end
 
 function task.hold_reason()
-    if not watch.hold then return nil end
+    -- QQT_Warpigz_v3: a stuck Alfred/Rosie is shown (Reaper farms on).
+    if not watch.hold then return watch.stuck_note end
     return string.format("%s (%ds)", watch.hold, math.floor(get_time_since_inject() - watch.hold_since))
 end
 
@@ -178,6 +181,34 @@ function task.reset()
     -- session re-evaluates a foreign pause from scratch.
     watch.paused_since, watch.paused_logged = nil, false
     watch.hold, watch.yield_at = nil, nil
+    watch.stuck_note = nil
+end
+
+-- QQT_Warpigz_v3: Rosie reports stuck = true after a failed trip whose need
+-- remains (full stash, 3 failures): it hides need_trigger and refuses every
+-- request until an explicit retry. Reaper then never starts a trip, keeps
+-- farming, logs once and shows 'Alfred stuck (<reason>)'.
+local function note_stuck(status)
+    if status == nil or status.stuck ~= true then
+        if watch.stuck_note then console.print("[Reaper] Alfred available again") end
+        watch.stuck_note = nil
+        return false
+    end
+    local note = "Alfred stuck (" .. tostring(status.stuck_reason or "town service failed") .. ")"
+    if watch.stuck_note ~= note then
+        watch.stuck_note = note
+        console.print("[Reaper] " .. note .. " — farming on without town service")
+    end
+    return true
+end
+
+-- QQT_Warpigz_v3: the legacy AlfredTheButler-main fork reports its work
+-- through individual flags. Detect it from the data, not from the global
+-- name: Rosie publishes the same table as AlfredTheButlerPlugin and as
+-- PLUGIN_alfred_the_butler, and reports need_trigger itself.
+local function legacy_provider(status)
+    local legacy_api = PLUGIN_alfred_the_butler
+    return legacy_api ~= nil and legacy_api ~= AlfredTheButlerPlugin and status.need_trigger == nil
 end
 
 local function trigger_alfred()
@@ -201,7 +232,12 @@ local function trigger_alfred()
         last_completion_at = get_time_since_inject()
     end)
     if ok and accepted == false then
-        if token == generation and task.status == status_enum.WAITING then retire_request() end
+        if token == generation and task.status == status_enum.WAITING then
+            retire_request()
+            -- QQT_Warpigz_v3: an explicit refusal (Rosie while stuck) is not
+            -- retried every 5 s; each retry restarted Reaper's navigation.
+            retry_after = get_time_since_inject() + REFUSED_RETRY
+        end
         return false
     end
     -- A host method can enqueue before throwing. Keep its request reserved
@@ -225,6 +261,7 @@ local function evaluate()
     end
     if not status.enabled then
         if task.status == status_enum.WAITING then retire_request() end
+        watch.stuck_note = nil -- QQT_Warpigz_v3
         return false
     end
 
@@ -233,11 +270,17 @@ local function evaluate()
     -- Never fight Alfred's movement or teleport, whoever started it.
     if live_work(status) then return true, "Alfred busy" end
 
-    if not settings.use_alfred then return false end
+    if not settings.use_alfred then watch.stuck_note = nil; return false end
     -- C1/RPR-4: a pause Reaper does not own is idle for Reaper.
     if status.paused then return false end
+    -- QQT_Warpigz_v3: never ask a stuck provider (it refuses anyway).
+    if note_stuck(status) then return false end
     local now = get_time_since_inject()
-    if now < retry_after then return true end
+    -- QQT_Warpigz_v3: the retry delay after a refusal/retired request only
+    -- postpones the next request; Reaper farms meanwhile. Before, it kept
+    -- alfred_running selected with no hold reason (C6) and re-triggered
+    -- every 5 s forever while Rosie was stuck.
+    if now < retry_after then return false end
 
     -- Start maintenance between runs; a live boss/chest sequence owns the dungeon.
     if tracker.altar_activated or tracker.chest_opened_time then return false end
@@ -245,7 +288,7 @@ local function evaluate()
     -- need_trigger is the unified signal across both forks. The legacy
     -- AlfredTheButler-main fork (PLUGIN_alfred_the_butler) reports its work
     -- through individual flags instead.
-    local legacy = PLUGIN_alfred_the_butler ~= nil
+    local legacy = legacy_provider(status) -- QQT_Warpigz_v3
     if hard_need(status) and (status.need_trigger or legacy) then return true end
     local advisory = status.need_trigger == true
         or (legacy and type(status.restock_count) == "number" and status.restock_count > 0)
@@ -271,14 +314,18 @@ function task.shouldExecute()
 end
 
 function task.Execute()
+    local now = get_time_since_inject()
+    local continuing = watch.yield_at ~= nil and now - watch.yield_at <= 1.0
     -- Stop our autonomous route before handing movement to Alfred. If Alfred
     -- is already busy, navigation_owner leaves Alfred's own goal alone.
-    navigate_to_boss.reset()
-    interact_altar.reset()
+    -- QQT_Warpigz_v3: once per yield, not every tick (console flood).
+    if not continuing then
+        navigate_to_boss.reset()
+        interact_altar.reset()
+    end
     settings.orb_set_block(false)
     -- C5: account the yield so chest timeouts exclude it.
-    local now = get_time_since_inject()
-    if watch.yield_at and now - watch.yield_at <= 1.0 then
+    if continuing then
         tracker.companion_yield = (tracker.companion_yield or 0) + (now - watch.yield_at)
     end
     watch.yield_at = now
@@ -291,6 +338,7 @@ function task.Execute()
 
     if waiting_for_request(status) then return end
     if live_work(status) or status.paused or not settings.use_alfred or now < retry_after then return end
+    if status.stuck == true then return end -- QQT_Warpigz_v3
 
     -- Don't overwrite another caller's in-flight cycle.
     if task.status == status_enum.IDLE then

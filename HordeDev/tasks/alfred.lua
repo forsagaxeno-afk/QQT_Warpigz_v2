@@ -209,15 +209,37 @@ local function decide()
     end
     if awaiting_return(status) then return true, 'waiting for the Alfred return portal' end
 
-    -- HRD-6 / C1: the user's use_alfred choice comes before any Alfred hold,
-    -- so an odd or unreadable Alfred cannot stall waves, chests or exit.
+    -- QQT_Warpigz_v3: never fight Alfred's movement or teleport, whoever
+    -- started it and whatever 'Use alfred' says (as Reaper does). Rosie
+    -- starts its own automatic town service on need_trigger regardless of
+    -- HordeDev's setting; with 'Use alfred' off HordeDev used to teleport to
+    -- the Library in the middle of it, the trip failed, the bag stayed full
+    -- and the horde was abandoned. Only a readable, enabled, live status
+    -- holds (bounded by Alfred's own service timeout and failure latch).
+    if status and status.enabled and live_work(status) then return true, 'Alfred busy' end
+
+    -- HRD-6 / C1: the user's use_alfred choice comes before any other Alfred
+    -- hold, so an odd or unreadable Alfred cannot stall waves, chests or exit.
     if not settings.use_alfred then quiet_since = nil; return false end
 
     if not status then quiet_since = nil; return true, 'Alfred status unreadable' end -- bounded (UNKNOWN_GRACE)
     if not status.enabled then return false end
 
-    -- Yield while Alfred is busy under any caller.
-    if live_work(status) then return true, 'Alfred busy' end
+    -- QQT_Warpigz_v3: a stuck Alfred/Rosie (failed trips latched, stash full,
+    -- retry cooldown) refuses every request while it still publishes
+    -- inventory_full; asking again every RETRY_DELAY held the Horde forever
+    -- with no visible hold. Drop the salvage need and continue (logged once
+    -- per stuck episode, C6); a recovered Alfred is asked again.
+    if status.stuck == true then
+        tracker.needs_salvage = false
+        if not held.stuck_logged then
+            held.stuck_logged = true
+            console.print("[alfred] Rosie stuck: " .. tostring(status.stuck_reason or 'town service refused')
+                .. "; farming on without town trips")
+        end
+        return false
+    end
+    held.stuck_logged = false
 
     -- Hold while we have our own cycle in flight.
     if get_time_since_inject() < retry_after then return true end
@@ -266,6 +288,7 @@ function task.Execute()
     if task.status == status_enum.WAITING then waiting_for_request(status); return end
     if trip.returning_since or not settings.use_alfred or not tracker.needs_salvage then return end
     if status.paused or get_time_since_inject() < retry_after then return end
+    if status.stuck == true then tracker.needs_salvage = false; return end -- QQT_Warpigz_v3
 
     -- Don't overwrite another caller's in-flight cycle.
     if live_work(status) then return end

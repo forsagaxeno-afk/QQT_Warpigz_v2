@@ -1,0 +1,256 @@
+<!doctype html>
+<!-- QQT_Warpigz_v3: HelltideRevamped offline dashboard. Open this file from
+     disk (double-click). It reloads hr_data.js from this folder every 5 s;
+     HelltideRevamped rewrites that file while "Web dashboard" is on.
+     No server, no internet, no external files. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Helltide Dashboard</title>
+<style>
+:root {
+  --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1b19; --muted: #6b655e; --line: #ddd6cc;
+  --accent: #b3261e; --accent2: #7a4bc2; --ok: #2e7d32; --warn: #b26a00; --cell: #d9c7b0;
+  --trail: #3b6ea8; --route: #b3261e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15120f; --panel: #1f1b17; --ink: #ece6dd; --muted: #a39a8f; --line: #3a332c;
+    --accent: #ef6a5b; --accent2: #b28cf0; --ok: #7cc47f; --warn: #e3a14a; --cell: #4a3b2c;
+    --trail: #7fb0e6; --route: #ef6a5b;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; padding: 14px 16px 6px; }
+h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
+#status { color: var(--muted); font-size: 13px; }
+#status.stale { color: var(--warn); }
+nav { display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+nav button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+  padding: 8px 12px; font: inherit; cursor: pointer; white-space: nowrap; }
+nav button.on { color: var(--ink); border-bottom-color: var(--accent); }
+main { padding: 16px; max-width: 1200px; }
+section { display: none; } section.on { display: block; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.kpi .v { font-size: 22px; font-variant-numeric: tabular-nums; }
+.kpi .l { color: var(--muted); font-size: 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; }
+.card h2 { margin: 0 0 8px; font-size: 14px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+#events { list-style: none; margin: 0; padding: 0; font-size: 13px; max-height: 320px; overflow-y: auto; }
+#events li { padding: 3px 0; border-bottom: 1px solid var(--line); }
+#events time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
+#map { width: 100%; height: min(70vh, 720px); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 12px; margin-top: 8px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.empty { color: var(--muted); padding: 24px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Helltide Dashboard</h1>
+  <span id="status">Waiting for hr_data.js — turn on "Web dashboard" in HelltideRevamped (Live data &amp; stats).</span>
+</header>
+<nav>
+  <button data-tab="live" class="on">Live</button>
+  <button data-tab="map">Map</button>
+  <button data-tab="history">History</button>
+  <button data-tab="perf">Performance</button>
+</nav>
+<main>
+  <section id="live" class="on">
+    <div class="kpis" id="kpis"></div>
+    <div class="grid2">
+      <div class="card"><h2>Cinders</h2><table id="scopes"></table></div>
+      <div class="card"><h2>Recent events</h2><ul id="events"></ul></div>
+    </div>
+  </section>
+  <section id="map-tab" data-name="map">
+    <svg id="map" role="img" aria-label="Helltide map"></svg>
+    <div class="legend">
+      <span><i class="sw" style="background:var(--cell)"></i>Helltide area (learned)</span>
+      <span><i class="sw" style="background:var(--accent2)"></i>Mystery spot</span>
+      <span><i class="sw" style="background:var(--ok)"></i>Chest spot seen</span>
+      <span><i class="sw" style="background:var(--warn)"></i>Predicted</span>
+      <span><i class="sw" style="background:var(--muted)"></i>Opened / spent / missed</span>
+      <span><i class="sw" style="background:var(--route)"></i>Route / target</span>
+      <span><i class="sw" style="background:var(--trail)"></i>Trail</span>
+    </div>
+  </section>
+  <section id="history" data-name="history">
+    <div class="card"><h2>Earned per Helltide</h2><svg id="spark" width="100%" height="60"></svg></div>
+    <div class="card" style="margin-top:12px"><table id="hist"></table></div>
+  </section>
+  <section id="perf" data-name="perf">
+    <div class="card"><h2>Slowest sections (max ms since load)</h2><table id="perftab"></table></div>
+  </section>
+</main>
+<script>
+(function () {
+  'use strict';
+  var last = null, loadedAt = 0;
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]; }); };
+  var num = function (v) { v = Number(v); return isFinite(v) ? v : 0; };
+  var arr = function (v) { return Array.isArray(v) ? v : []; };
+  var mmss = function (s) { s = Math.max(0, Math.round(num(s))); return Math.floor(s / 60) + ':' + ('0' + s % 60).slice(-2); };
+  var fmt = function (v, d) { return num(v).toFixed(d || 0); };
+  var shortName = function (n) { n = String(n || '').replace(/^usz_rewardGizmo_/, ''); return n === 'Uber' ? 'Mystery' : n; };
+
+  document.querySelectorAll('nav button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('nav button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      document.querySelectorAll('section').forEach(function (s) {
+        var name = s.getAttribute('data-name') || s.id;
+        s.classList.toggle('on', name === b.getAttribute('data-tab'));
+      });
+      if (last) render(last);
+    });
+  });
+
+  function kpi(label, value) { return '<div class="kpi"><div class="v">' + value + '</div><div class="l">' + label + '</div></div>'; }
+
+  function renderLive(d) {
+    var age = Date.now() / 1000 - num(d.t);
+    var left = Math.max(0, num(d.minutes_left) * 60 - Math.max(0, age));
+    var reset = Math.max(0, num(d.next_reset) - Math.max(0, age));
+    var h = d.helltide || {}, r = d.rates || {};
+    $('kpis').innerHTML =
+      kpi(d.active ? 'Helltide time left' : 'No Helltide', d.active ? mmss(left) : '—') +
+      kpi('Next chest reset', mmss(reset)) +
+      kpi('Zone' + (d.live_zone ? ' (live: ' + esc(d.live_zone) + ')' : ''), esc(d.zone || '—')) +
+      kpi('Cinders', fmt(d.cinders)) +
+      kpi('Cinders / min', fmt(r.per_min, 1)) +
+      kpi('Cinders / hour', fmt(r.per_hr)) +
+      kpi('Chests this Helltide', fmt(h.chests) + ' <small>(Mystery ' + fmt(h.mystery) + ')</small>') +
+      kpi('Mode / state', esc(d.mode || '') + ' <small>' + esc(d.state || '') + '</small>') +
+      (d.plan ? kpi('Plan', 'reserve ' + fmt(d.plan.reserve) + (d.plan.target ? ' <small>→ ' + esc(shortName(d.plan.target)) + '</small>' : '')) : '');
+    var rows = [['Helltide', d.helltide], ['Session', d.session], ['All time', d.alltime]];
+    $('scopes').innerHTML = '<tr><th></th><th>Earned</th><th>Spent</th><th>Lost</th><th>Chests</th><th>Mystery</th><th>Tears</th><th>Deaths</th><th>Minutes</th></tr>' +
+      rows.map(function (row) { var s = row[1] || {};
+        return '<tr><td>' + row[0] + '</td><td>' + fmt(s.earned) + '</td><td>' + fmt(s.spent) + '</td><td>' + fmt(s.lost) +
+          '</td><td>' + fmt(s.chests) + '</td><td>' + fmt(s.mystery) + '</td><td>' + fmt(s.tears) + '</td><td>' + fmt(s.deaths) +
+          '</td><td>' + fmt(num(s.secs) / 60) + '</td></tr>'; }).join('');
+    var ev = arr(d.events).slice().reverse();
+    $('events').innerHTML = ev.length ? ev.map(function (e) {
+      var t = new Date(num(e.t) * 1000);
+      return '<li><time>' + ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) + '</time>' + esc(e.msg) + '</li>';
+    }).join('') : '<li class="empty">No events yet.</li>';
+  }
+
+  function renderMap(d) {
+    var svg = $('map'), cell = num(d.fence_cell) || 20, pts = [], i;
+    var fence = arr(d.fence_in);
+    for (i = 0; i + 1 < fence.length; i += 2) { pts.push([fence[i] * cell, fence[i + 1] * cell]); pts.push([(fence[i] + 1) * cell, (fence[i + 1] + 1) * cell]); }
+    arr(d.atlas).forEach(function (s) { pts.push([s.x, s.y]); });
+    arr(d.chests).forEach(function (c) { pts.push([c.x, c.y]); });
+    arr(d.trail).forEach(function (p) { pts.push(p); });
+    arr(d.route).forEach(function (p) { pts.push(p); });
+    if (Array.isArray(d.player)) pts.push(d.player);
+    if (!pts.length) { svg.innerHTML = '<text x="20" y="30" fill="currentColor">No map data yet.</text>'; return; }
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    pts.forEach(function (p) { minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]); minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]); });
+    var pad = 30, w = Math.max(60, maxX - minX) + pad * 2, h = Math.max(60, maxY - minY) + pad * 2;
+    var X = function (x) { return (x - minX + pad).toFixed(1); };
+    var Y = function (y) { return (maxY - y + pad).toFixed(1); };   // world y points up
+    var k = Math.max(w, h) / 700, out = [];
+    svg.setAttribute('viewBox', '0 0 ' + w.toFixed(0) + ' ' + h.toFixed(0));
+    svg.style.color = getComputedStyle(document.body).color;
+    for (i = 0; i + 1 < fence.length; i += 2) {
+      out.push('<rect x="' + X(fence[i] * cell) + '" y="' + Y((fence[i + 1] + 1) * cell) + '" width="' + cell + '" height="' + cell + '" fill="var(--cell)" opacity=".55"/>');
+    }
+    var line = function (list, color, dash) {
+      if (!list || list.length < 2) return;
+      out.push('<polyline fill="none" stroke="' + color + '" stroke-width="' + (2 * k).toFixed(1) + '"' + (dash ? ' stroke-dasharray="' + (6 * k).toFixed(1) + '"' : '') +
+        ' points="' + list.map(function (p) { return X(p[0]) + ',' + Y(p[1]); }).join(' ') + '"/>');
+    };
+    line(arr(d.trail), 'var(--trail)', false);
+    line(arr(d.route), 'var(--route)', true);
+    var colors = {predicted: 'var(--warn)', seen: 'var(--ok)', opened: 'var(--muted)', spent: 'var(--muted)', missed: 'var(--muted)'};
+    arr(d.atlas).forEach(function (s) {
+      var r = (s.type === 'mystery' ? 7 : 4.5) * k;
+      out.push('<circle cx="' + X(s.x) + '" cy="' + Y(s.y) + '" r="' + r.toFixed(1) + '" fill="' + (colors[s.status] || 'var(--warn)') + '"' +
+        (s.type === 'mystery' ? ' stroke="var(--accent2)" stroke-width="' + (2.5 * k).toFixed(1) + '"' : '') +
+        '><title>' + esc(s.type + ' ' + s.status + ' (seen ' + s.seen + ', missed ' + s.miss + ')') + '</title></circle>');
+    });
+    arr(d.chests).forEach(function (c) {
+      var r = (c.status === 'target' ? 9 : 6) * k;
+      out.push('<rect x="' + (X(c.x) - r / 2).toFixed(1) + '" y="' + (Y(c.y) - r / 2).toFixed(1) + '" width="' + r.toFixed(1) + '" height="' + r.toFixed(1) +
+        '" fill="none" stroke="' + (c.status === 'target' ? 'var(--route)' : (c.type === 'mystery' ? 'var(--accent2)' : 'currentColor')) + '" stroke-width="' + (2 * k).toFixed(1) +
+        '"><title>' + esc(c.type + ' ' + c.status) + '</title></rect>');
+    });
+    if (Array.isArray(d.player)) out.push('<circle cx="' + X(d.player[0]) + '" cy="' + Y(d.player[1]) + '" r="' + (6 * k).toFixed(1) + '" fill="var(--trail)" stroke="var(--panel)" stroke-width="' + (2 * k).toFixed(1) + '"><title>You</title></circle>');
+    svg.innerHTML = out.join('');
+  }
+
+  function renderHistory(d) {
+    var hist = arr(d.history);
+    if (!hist.length) { $('hist').innerHTML = '<tr><td class="empty">No finished Helltide yet.</td></tr>'; $('spark').innerHTML = ''; return; }
+    $('hist').innerHTML = '<tr><th>Hour (UTC)</th><th>Zone</th><th>Earned</th><th>Spent</th><th>Lost</th><th>Chests</th><th>Mystery</th><th>Deaths</th><th>Minutes</th><th>/min</th></tr>' +
+      hist.slice().reverse().map(function (h) {
+        var t = new Date(num(h.hour) * 1000), mins = num(h.secs) / 60;
+        var when = t.getUTCFullYear() + '-' + ('0' + (t.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + t.getUTCDate()).slice(-2) + ' ' + ('0' + t.getUTCHours()).slice(-2) + ':00';
+        return '<tr><td>' + when + '</td><td>' + esc(h.zone) + '</td><td>' + fmt(h.earned) + '</td><td>' + fmt(h.spent) + '</td><td>' + fmt(h.lost) +
+          '</td><td>' + fmt(h.chests) + '</td><td>' + fmt(h.mystery) + '</td><td>' + fmt(h.deaths) + '</td><td>' + fmt(mins) + '</td><td>' + (mins > 0 ? fmt(num(h.earned) / mins, 1) : '—') + '</td></tr>';
+      }).join('');
+    var W = 600, H = 60, max = Math.max.apply(null, hist.map(function (h) { return num(h.earned); }).concat([1]));
+    var step = hist.length > 1 ? W / (hist.length - 1) : W;
+    $('spark').setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    $('spark').setAttribute('preserveAspectRatio', 'none');
+    $('spark').innerHTML = '<polyline fill="none" stroke="var(--accent)" stroke-width="2" points="' +
+      hist.map(function (h, i) { return (i * step).toFixed(1) + ',' + (H - 4 - (H - 8) * num(h.earned) / max).toFixed(1); }).join(' ') + '"/>';
+  }
+
+  function renderPerf(d) {
+    var rows = arr(d.perf);
+    $('perftab').innerHTML = rows.length ? '<tr><th>Section</th><th>Max ms</th><th>Avg ms</th><th>Calls</th></tr>' + rows.map(function (p) {
+      return '<tr><td>' + esc(p.name) + '</td><td>' + fmt(p.max_ms, 1) + '</td><td>' + fmt(p.avg_ms, 2) + '</td><td>' + fmt(p.count) + '</td></tr>';
+    }).join('') : '<tr><td class="empty">No timings yet.</td></tr>';
+  }
+
+  function render(d) {
+    renderLive(d);
+    var tab = document.querySelector('nav button.on').getAttribute('data-tab');
+    if (tab === 'map') renderMap(d);
+    if (tab === 'history') renderHistory(d);
+    if (tab === 'perf') renderPerf(d);
+  }
+
+  function setStatus() {
+    var s = $('status');
+    if (!last) return;
+    var age = Math.max(0, Date.now() / 1000 - num(last.t));
+    s.textContent = 'Updated ' + Math.round(age) + ' s ago · ' + (last.zone || 'no zone') + ' · ' + (last.state || '');
+    s.className = age > 90 ? 'stale' : '';
+  }
+
+  function load() {
+    var old = document.getElementById('hr-data');
+    if (old) old.parentNode.removeChild(old);
+    var s = document.createElement('script');
+    s.id = 'hr-data';
+    s.src = 'hr_data.js?ts=' + Date.now();
+    s.onload = function () {
+      // A half-written file throws while loading and leaves HR_DATA as it was.
+      var d = window.HR_DATA;
+      if (d && d !== last && d.v === 1) { last = d; loadedAt = Date.now(); render(d); }
+      setStatus();
+    };
+    s.onerror = function () { if (last) setStatus(); };
+    document.head.appendChild(s);
+  }
+  load();
+  setInterval(load, 5000);
+  setInterval(function () { if (last) { renderLive(last); setStatus(); } }, 1000);
+})();
+</script>
+</body>
+</html>

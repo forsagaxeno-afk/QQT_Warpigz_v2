@@ -56,6 +56,31 @@ utils.is_looting = function ()
     end
     return true -- no readable ownership contract
 end
+-- QQT_Warpigz_v3: positive, readable evidence that the Looter is picking
+-- something up right now (C5 yield). Unlike is_looting() an unreadable or
+-- unknown contract is NOT busy here: this gates a movement hold.
+utils.looter_busy_known = function ()
+    local looter = LooteerPlugin
+    if type(looter) ~= 'table' then return false end
+    local ok, value
+    if type(looter.get_enabled) == 'function' then
+        ok, value = pcall(looter.get_enabled)
+        if not ok or value ~= true then return false end
+    end
+    if type(looter.is_actively_looting) == 'function' then
+        ok, value = pcall(looter.is_actively_looting)
+        if ok and type(value) == 'boolean' then return value end
+    end
+    if type(looter.is_idle) == 'function' then
+        ok, value = pcall(looter.is_idle)
+        if ok and type(value) == 'boolean' then return not value end
+    end
+    if type(looter.getSettings) == 'function' then
+        ok, value = pcall(looter.getSettings, 'looting')
+        return ok and value == true
+    end
+    return false
+end
 -- Use get_all_actors() — the brazier and entrance portal are not in the ally
 -- list, so get_ally_actors() silently returned nil and the task stuck on idle.
 utils.get_spirit_brazier = function ()
@@ -97,8 +122,9 @@ utils.get_undercity_chest = function ()
 end
 utils.get_enticement_count = function ()
     local count = 0
-    for name, _ in pairs(tracker.enticement) do
-        if name:match('SpiritHearth_Switch') then
+    for name, state in pairs(tracker.enticement) do
+        -- QQT_Warpigz_v3: an unreachable (skipped) switch is not an interacted one.
+        if state == true and name:match('SpiritHearth_Switch') then
             count = count + 1
         end
     end
@@ -184,6 +210,19 @@ utils.release_movement = function (companion_owns)
     end
     if companion_owns then utils.stop_own_long_path() else utils.stop_movement() end
     if type(bat.set_priority) == 'function' then bat.set_priority('wonder_city', 'direction') end
+end
+
+-- QQT_Warpigz_v3: a SilentRaven Whisper claim (its own auto-fire or keybind,
+-- or a queued request) owns Temis movement and clicks until it finishes,
+-- bounded by SilentRaven (100 s run, 120 s pause). The town steps (brazier
+-- walk, home-town teleport out of Temis) wait; a paused queued request does
+-- not hold them.
+utils.raven_claim_active = function ()
+    local raven = SilentRavenPlugin or PLUGIN_silent_raven
+    if type(raven) ~= 'table' or type(raven.get_status) ~= 'function' then return false end
+    local ok, s = pcall(raven.get_status)
+    return ok and type(s) == 'table' and s.enabled == true
+        and (s.running == true or (s.pending == true and s.paused ~= true))
 end
 
 return utils

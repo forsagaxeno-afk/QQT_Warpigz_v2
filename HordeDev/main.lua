@@ -12,6 +12,7 @@ local enter_horde_task = require "tasks.enter_horde"
 local open_chests_task = require "tasks.open_chests"
 local alfred_task = require "tasks.alfred"
 local warplan = require "core.warplan"
+local activity_lease = require "core.activity_lease" -- QQT_Warpigz_v3
 local HORDE_ZONE = "S05_BSK_Prototype02"
 
 local local_player, player_position
@@ -185,6 +186,52 @@ local function hold_text()
     return type(current) == 'table' and current.hold or nil
 end
 
+-- QQT_Warpigz_v3 (standalone farming): a compass run left behind outside
+-- BSK by anything but HordeDev's own exit (a Rosie trip that failed or timed
+-- out in town, a relog/disconnect, Rosie's service with 'Use alfred' off)
+-- kept horde_opened/sigil_used/has_entered set. start_dungeon needs
+-- `not horde_opened`, enter_horde stops on has_entered and walking stops at
+-- the gate, so HordeDev idled at the Caldeum gate for good (no fault, hold or
+-- log) until a reload. Keyed on horde_opened (the Teleport exit clears it but
+-- keeps has_entered, whose teleport_complete chests_done() still reads).
+-- Not while: a transaction is pending, War Plan entry, a loading screen or
+-- the player in BSK, HordeDev's own Alfred trip or built-in Cerrigar salvage
+-- (both leave BSK with the run open on purpose), or live, readable Alfred
+-- work (a Rosie trip that may bring the player back into BSK). A busy Looter
+-- or an unreadable Alfred status does not hold it: neither moves the player
+-- back into the Horde, and either can last indefinitely.
+local ABANDON_SETTLE_S = 2
+local abandoned_since = nil
+local function abandoned_run()
+    if transaction_pending() or tracker.horde_opened ~= true or warplan.active() then return false end
+    if world_unloaded() or utils.player_in_zone(HORDE_ZONE) then return false end
+    if alfred_task.trip_in_progress() or builtin_salvage_pending() then return false end
+    return not loot_guard.alfred_may_own_movement(true)
+end
+
+-- Overworld only: a native dungeon reset is never sent from inside another
+-- dungeon (Leave Dungeon lands in Sanctuary; so do the towns).
+local function in_overworld()
+    local world = get_current_world()
+    local name = world and world:get_name()
+    return type(name) == 'string' and name:find("Sanctuary", 1, true) == 1
+end
+
+-- main_pulse: reset an abandoned run once it has held ABANDON_SETTLE_S (a
+-- zone read can lag a pulse behind an arrival), with one log line; the old
+-- instance is reset before the next compass.
+local function recover_abandoned_run()
+    if not abandoned_run() then abandoned_since = nil; return end
+    local now = get_time_since_inject()
+    abandoned_since = abandoned_since or now
+    if now - abandoned_since < ABANDON_SETTLE_S then return end
+    abandoned_since = nil
+    console.print("[HordeDev] The Horde run was left outside HordeDev's exit (town trip, relog); resetting it for a new run")
+    if task_manager.stop then task_manager.stop() end
+    reset_run_state()
+    if in_overworld() and type(reset_all_dungeons) == 'function' then pcall(reset_all_dungeons) end
+end
+
 -- HRD-4: a latched fault ("restart HordeDev") is cleared by any stop: the GUI
 -- toggle / keybind off edge and disable(). A healthy pending transaction
 -- survives a pause and resumes when re-activated; a chest fault is restarted
@@ -193,13 +240,21 @@ end
 -- has_salvaged / needs_salvage flags (cleared by tasks/alfred.lua's cancel)
 -- survive the pause, so a resume or a kept re-enable in Cerrigar finishes the
 -- salvage and walks back into the Horde instead of starting a new cycle.
+-- QQT_Warpigz_v3: an abandoned compass run (see abandoned_run) is cleared by
+-- a stop too, so a toggle off/on recovers it (read before task_manager.stop(),
+-- which cancels HordeDev's own Alfred trip).
 local function stop_run()
     local fault = current_fault(transaction_pending())
     local salvage = builtin_salvage_pending()
+    local abandoned = abandoned_run()
     local has_salvaged, needs_salvage = tracker.has_salvaged, tracker.needs_salvage
     if task_manager.stop then task_manager.stop() end
+    abandoned_since = nil
     if fault then
         console.print("[HordeDev] Clearing latched fault on stop: " .. fault)
+        reset_run_state()
+    elseif abandoned then
+        console.print("[HordeDev] Clearing a Horde run left outside BSK on stop")
         reset_run_state()
     elseif salvage then
         tracker.has_salvaged, tracker.needs_salvage = has_salvaged, needs_salvage
@@ -227,12 +282,54 @@ local function extend_pending_deadlines(dt)
     if enter_horde_task.started then enter_horde_task.started = enter_horde_task.started + dt end
 end
 
+-- QQT_Warpigz_v3: a companion town trip (Rosie's automatic service, or any
+-- caller's; readable live Alfred work only) during a cross-world transaction
+-- (RESET, sigil activation, portal entry). The transaction owns the queue, so
+-- HordeDev used to call Leave Dungeon / confirm the sigil / walk to the
+-- portal through Rosie's trip, and its deadline ran on while Rosie had the
+-- player in town (then FAULT: 'Leave Dungeon/reset timed out'). Now the
+-- transaction waits, visibly, with its deadline extended like a death's, and
+-- is told a companion moved the player (see exit_horde.run_reset,
+-- start_dungeon.left_for_companion).
+local COMPANION_WAIT_TASK = "Waiting for town service"
+local COMPANION_WAIT_TEXT = "a town trip owns movement; the Horde transaction continues after it"
+-- Bounded for an Alfred fork whose live flags never clear (Rosie's own
+-- service times out at 240 s): past it the transaction's own timeout runs.
+local COMPANION_HOLD_MAX = 300
+local companion = {last = nil, logged = false, since = nil}
+local function companion_holds_transaction()
+    if not loot_guard.alfred_may_own_movement(true) then
+        companion.last, companion.logged, companion.since = nil, false, nil
+        return false
+    end
+    local now = get_time_since_inject()
+    companion.since = companion.since or now
+    if now - companion.since >= COMPANION_HOLD_MAX then
+        if companion.last then
+            companion.last = nil
+            console.print(string.format("[HordeDev] Town trip still live after %ds; the Horde transaction continues", COMPANION_HOLD_MAX))
+        end
+        return false
+    end
+    if companion.last then extend_pending_deadlines(now - companion.last) end
+    companion.last = now
+    if tracker.reset_exit_pending then exit_horde_task.companion_seen = true end
+    if tracker.sigil_activation_pending then start_dungeon_task.companion_seen = true end
+    if tracker.horde_entry_pending then enter_horde_task.companion_seen = true end
+    if not companion.logged then
+        companion.logged = true
+        console.print("[HordeDev] A town trip started during a pending Horde transaction; waiting for it")
+    end
+    return true
+end
+
 local function main_pulse()
     settings:update_settings()
     local active = settings.enabled and utils.get_keybind_state()
     if not active then
         if was_active then stop_run() end
         was_active = false
+        activity_lease.release('InfernalHordesPlugin') -- QQT_Warpigz_v3
         return
     end
     was_active = true
@@ -240,6 +337,15 @@ local function main_pulse()
     if waiting_for_warpigs() then
         movement.stop()
         if task_manager.hold then task_manager.hold(WARPIGS_WAIT_TASK, WARPIGS_WAIT_TEXT) end
+        return
+    end
+    -- QQT_Warpigz_v3: standalone (WarPigs off) with another activity plugin
+    -- enabled: hold instead of teleporting against it.
+    local lease_hold = activity_lease.check('InfernalHordesPlugin',
+        function(msg) console.print('[HordeDev] ' .. msg) end)
+    if lease_hold then
+        movement.stop()
+        if task_manager.hold then task_manager.hold(lease_hold, lease_hold) end
         return
     end
     local pending = transaction_pending()
@@ -275,6 +381,12 @@ local function main_pulse()
         dead_since = nil
         next_revive_time = -math.huge
     end
+    if pending and companion_holds_transaction() then
+        if task_manager.hold then task_manager.hold(COMPANION_WAIT_TASK, COMPANION_WAIT_TEXT) end
+        return
+    elseif not pending then
+        companion.last, companion.logged, companion.since = nil, false, nil
+    end
     if settings.manage_orbwalker and orbwalker.get_orb_mode() ~= 3 then
         orbwalker.set_clear_toggle(true);
     end
@@ -287,6 +399,7 @@ local function main_pulse()
         reset_run_state()
         tracker.enable_time = get_time_since_inject()
     end
+    recover_abandoned_run() -- QQT_Warpigz_v3
     warplan.update(open_chests_task.current_state)
     task_manager.execute_tasks()
 end
@@ -490,7 +603,12 @@ InfernalHordesPlugin = {
 on_update(function()
     update_locals()
     meteor.initialize()
+    -- QQT_Warpigz_v3: a pause of Rosie pickup left by a previous HordeDev
+    -- instance (reload) is released once Rosie is seen; HordeDev's own pylon
+    -- pause is bounded whichever task runs.
+    loot_guard.release_stale_pause()
     main_pulse()
+    loot_guard.bound_pause()
 end)
 
 on_render_menu(gui.render)

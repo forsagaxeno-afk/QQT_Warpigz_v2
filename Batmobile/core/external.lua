@@ -410,6 +410,11 @@ external.clear_traversal_blacklist = function(caller)
     -- path is a traversal blacklist too; leaving it made every consumer's
     -- traversal recovery a silent no-op for up to a minute.
     navigator.all_trav_blocked_until = 0
+    -- QQT_Warpigz_v3: the long-term trap-escape / inert-gizmo list too.
+    -- Leaving it kept a 300 s block that HR try_traversal_recovery and
+    -- Arkham's explore_pit/push_monsters recoveries could not lift; an inert
+    -- gizmo (60 s entry) is simply retried and abandoned again if still dead.
+    navigator.trap_blacklisted_trav = {}
 end
 
 -- Trap-recovery query.  Returns true once the navigator has been stuck in a

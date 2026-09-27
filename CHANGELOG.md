@@ -2,6 +2,113 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.1.0-rc.1] — 2026-09-27
+
+Test build, released as a private draft (not published). Includes everything from 3.0.0. An overnight audit of every plugin, each checked **standalone for plain farming** (the activity plugin + Rosie + your own combat script, no WarPigs / WarPug) as well as under WarPigs, plus the HelltideRevamped *Smart farm*. Components: WarPigs 1.1.4, WarPug 1.0.14, Batmobile 2.2.0, ArkhamAsylum 2.1.1, HelltideRevamped 2.3.0, HordeDev 2.2.3, Reaper 1.10.2, WonderCity 2.2.1, SilentRaven 0.2.2, Rosie 1.0.13.
+
+### Fixed
+
+#### Rosie
+
+- Pickup pauses taken by other plugins (HordeDev's pylon pause) expire after 60 s; a Rosie reload restores only its own pause, and turning pickup / Rosie back on clears the others. A pause left by a toggled-off or reloaded plugin no longer stops pickup for the rest of the session.
+- A drop Rosie cannot take no longer holds everyone: each busy episode gets 20 s in which a drop must leave the ground, then the remaining drops rest 24 s (logged once). This bounds the live 12–39 s Helltide waits; why the item could not be taken is still open (the `[Rosie pickup] Gave up on <name>` line names it).
+- A failed town step (for example `sell_failed`) no longer ends the trip at once: the remaining steps and the return portal still run, then the trip ends as failed. A request made in another town (Kurast, Caldeum) is served in Temis without a return leg; a trip whose services all finished and only the return portal was missing ends completed (one `[Rosie] return portal missing` line, no fail streak).
+- On the return leg Rosie hands over once to SilentRaven when a Whisper reward is ready (auto-fire on, capped at 100 s, not counted in the 240 s service time).
+- Town selection tables are rebuilt at most once a second (48 widget reads per call instead of 2,286).
+
+#### HelltideRevamped
+
+- A Rosie refusal or a failed / cancelled trip no longer freezes standalone Helltide farming in an Alfred retry loop: town service is latched off (`Town service unavailable (...) — farming on`) until Rosie reports it is no longer stuck; a stuck Rosie is never a hard need and the bag-count fallback is off while stuck.
+- The trap-recovery "skip this zone" lasts one scan cycle; with no other Helltide active it returns to the known one (`no other Helltide found — returning to <zone>`) instead of never going back.
+- A waypoint that is refused or silently ignored 3 times is skipped for the hour (`waypoint <zone> unreachable — skipping this hour`) instead of 99 teleport attempts.
+- The Looter hold inside a Helltide is bounded: after 15 s of busy without the bag count rising, farming goes on (`Looter busy 15s without progress — farming on`); a productive multi-item pickup is never cut off.
+- HelltideRevamped: **the Helltide hour follows UTC**. The plugin read the local minute, so in half-hour time zones (UTC+5:30, +9:30, -3:30) it idled in town for 5 minutes in the middle of every Helltide, searched during the real minute 55-59 break and stopped events at the wrong minute (`core/hr_clock.lua`).
+- HelltideRevamped: a pyre / flame pillar event now walks to the event it chose, not merely the closest pyre or pillar of either kind (a spent one nearby could park the bot next to it for the rest of the Helltide). The walk is given up after 45 s and the whole event after 240 s; an event given up on is skipped for 180 s.
+- HelltideRevamped: a remembered chest paid for by the bot's own interaction counts as opened even when the next tick sees the balance below its price (it used to read as "Cinders dropped below ..., aborting").
+- HelltideRevamped: a teleport channel that was interrupted (the teleport buff was seen, the player is still in the zone it was fired from) no longer counts toward the 3 tries after which the search skips a waypoint for the rest of the hour (at most 5 interruptions per destination, logged `teleport to <town> interrupted`): a hit while channelling can no longer make the search skip the only active Helltide.
+- HelltideRevamped smart farm (night review): the cinder plan counts the expected income only until the last minutes and, with 250 in hand and a reachable Mystery, lets no regular chest take the balance below 250 (a whole hour could pass without a Mystery); a buff flicker no longer cancels and blacklists a chest trip (the exit counts after 3 s without the buff) and a chest whose trip really left the Helltide twice is skipped for the rest of that Helltide; bad chest cells decay by the hour in any zone and across restarts; a Mystery opened before a chest reset and seen closed again after it is routed to again; a new Helltide's chest that spends the balance to exactly 0 is "spent", not "lost"; the first-session cinder rate starts from a plain average (one early pile no longer reads as 100+/min); Farm events run with the default menu (*Skip legacy Helltide events*, formerly *Prefer tears over legacy Helltide events*, now off by default); a diablo4.life answer without Helltide data falls back to helltides.com for the hour.
+
+#### HordeDev
+
+- A compass run left outside the Horde (failed Rosie return, relog, *Use alfred* off) is reset instead of idling at the Caldeum gate forever.
+- With *Use alfred* off, HordeDev still yields to live town work and does not teleport to the Library during it.
+- The pylon pause of Rosie pickup is released on toggle off, disable and reload, and bounded whichever task runs.
+- Console: one horde prints about 217 lines instead of 2,877 (peak 11 lines a second instead of 60).
+- A Rosie town trip during the reset, sigil activation or portal entry holds the transaction instead of faulting; *Pick Pylon delay* now applies to every regular pylon.
+- A stuck Rosie is no hard need: chests keep being opened (`Rosie stuck: <reason>; farming on without town trips`).
+
+#### Reaper
+
+- A stuck or refusing Rosie no longer traps Reaper in an Alfred loop (`Alfred stuck (<reason>)` in the status; a refusal is retried after 30 s).
+- Altar clicks that never summon are bounded (5 clicks / 30 s, then resync once or skip the boss); at most one "retrying open" cycle per chest; Belial is skipped while *Belial Chest* automation is off.
+- A death after the summon walks back to the arena once and continues the fight (no restart from the entrance, no skip); no phantom summon from an old click; Kill Monsters gives up after 75 s without boss, enemy or chest.
+- The tether anchor is never the world origin; Andariel and Harbinger anchors match the recorded arena endpoints. Less console spam (`Clearing path and target.` only when something was set).
+
+#### ArkhamAsylum
+
+- A plain in-Pit town trip teleports to town again (it was blocked by its own accepted request).
+- Pit exploration yields to Rosie pickup for at most 15 s (not next to a live boss, never over the forced exit).
+- With Rosie loaded, town trips go to Temis (the town Rosie serves) even with *Home town* = Cerrigar; Cerrigar still drives Pit entry and exit.
+
+#### WonderCity
+
+- A boss sighting no longer idles the explorers for the rest of the floor; after a revive the bot walks back to the boss.
+- Walks to enticements, portals, warp pads and bosses are bounded (Batmobile rejects the target or 12 s without progress); an unreachable enticement does not use up *max enticement*.
+- Exploration yields to Rosie pickup for at most 12 s per episode; the vendor-closed ACCEPT loop in town restarts at the brazier; the reward phase survives a script reload in the same Undercity.
+
+#### SilentRaven
+
+- Readiness no longer depends on English quest text (objective counters n/m, meta-quest inference; a wrong guess costs at most one probe per Temis visit).
+- Activity plugins (Pit, Reaper, Undercity, Helltide) wait for a running SilentRaven claim in Temis instead of teleporting away and cancelling it.
+- The *Debug logging* checkbox now logs state changes and hold reasons.
+
+#### Batmobile
+
+- False traversal ping-pong traps and the terminal *giving up* are fixed: escapes keep retrying every 15 s; the escape's own crossing is not counted as a reversal.
+- A progressing long partial route is no longer hijacked by the stall escape; traversal routing uses the same height / direction filters as normal target selection; the post-traversal escape is bounded (3 s / 2 failed pathfinds).
+- Evade in *unstuck* follows *Use evade*; movement rules skip skills that cannot be cast; hot-path console lines follow the logging level (Info: on change or once per 5 s).
+- The free-roam debug explorer yields to Rosie pickup (bounded).
+
+#### WarPigs / WarPug
+
+- WarPigs' Helltide off-window (minutes 55–59) follows the UTC minute like HelltideRevamped; half-hour time zones were 30 minutes off.
+- WarPigs no longer adopts a manual Reaper left enabled from an earlier session; the plan boss is started with `run_once` instead.
+- *plugin not loaded*, preemption and same-activity opt-out lines are logged once per episode; a missing plugin shows in the status line.
+- WarPug with WarPigs off: a running activity plugin pauses a WarPug session instead of halting it (`<name> running`).
+
+#### Standalone farming (all activity plugins)
+
+- **One activity at a time without WarPigs**: ArkhamAsylum, HelltideRevamped, HordeDev, Reaper and WonderCity share a lease (`_G.QQT_Warpigz_activity_lease`). The first enabled one runs; another enabled activity holds with a message on its overlay instead of both teleporting back and forth. HordeDev's *Run pit* hand-off still works; with WarPigs enabled the lease is not used.
+
+### Added
+
+- HelltideRevamped **Smart farm (Farm mode)**, every part behind an option, standalone (no WarPigs needed); WarPigs / Warplan keep the plain behaviour:
+  - *Smart chest order*: Mystery chests first, seen chests before learned spots, nearest by patrol road, no ping-pong (hysteresis, at most 3 target changes a minute), an allowed chest right next to you taken on the way; after each chest reset (UTC :00/:15/:20/:30/:40/:45) fresh Mystery chests first again.
+  - *Cinder plan*: 250 kept for a Mystery chest you can still reach, counting the expected income until the last minutes; regular chests when the reserve stays, when income refills it, above *Max carry* or in the last minutes.
+  - *Road routing*: far chests (over 100 m) along the patrol loop the shorter way round; stuck off the road: back to the road and up to 3 other ways, the working one remembered. A failed smart trip is not picked again for 60 s; a chest the bot got stuck on 3 times in a Helltide is left alone until the next Helltide has passed.
+  - *Learn while farming*: chest spots per zone (`learned/<zone>.txt`), predicted after two sightings; the Helltide boundary from the buff; chests trips got stuck on.
+  - *Stay inside the Helltide*, *Event radius* (40 m, Warplan 12 m), *Events until minute*, *Pin the target on the map*, *Forget learned data (this zone)*.
+- HelltideRevamped **Live data & stats**: an on-screen stats overlay (timers, cinders per minute / hour, earned / spent / lost, chests, deaths per Helltide, session and all time); an offline web dashboard (`HelltideRevamped/dashboard/index.html`, data rewritten every 10 s when on); an opt-in live Helltide zone (helltides.com or diablo4.life: the search teleports straight to this hour's region; off by default, one request at a time, a few per hour, back-off, nothing personal sent); *Reset all-time stats*. `HelltideRevampedPlugin.status().stats` (additive).
+- Batmobile: the Movement Rules skill picker offers the Warlock's **Rampage**, found by its spell name among the equipped spells (revamp engine only; needs a live check).
+
+### Notes
+
+- **Not possible, and not faked:**
+  - *Live chest locations from the internet*: no public source serves Helltide chest positions in world coordinates (helltides.com's chest maps are image pixels and site content), and the game API does not expose unseen chests. Chest spots are learned in game (seen chests, then predicted spots after two sightings); the live data used is only this hour's Helltide zone.
+  - *A web dashboard served by the plugin*: QQT cannot run an HTTP server. The dashboard is a local page (`HelltideRevamped/dashboard/index.html`) that reads a data file the plugin rewrites.
+  - *Pathing that learns the map*: the bot learns chest spots, the Helltide boundary and spots where trips got stuck, and reuses a working approach; it does not build its own navigation mesh (Batmobile still does the pathing).
+- Needs a live check: whether unspent cinders vanish exactly when the Helltide ends (this decides the *lost* count); chest reset minutes and whether a Mystery chest respawns within the hour; Season 15 event skins; the Rampage spell name and cast; whether `os.rename` exists in QQT (without it saves write directly); whether helltides.com and diablo4.life are reachable from QQT's curl.
+- Reaper: an altar that stays non-interactable for 30 s now skips the boss (raise `NOT_READY_BOUND` in `tasks/interact_altar.lua` if the live altar re-arms more slowly).
+- Generated files (`HelltideRevamped/learned/*.txt`, `dashboard/hr_data.js`) are not part of the release package.
+- Saves are bounded and careful: `<file>.tmp` first, replaced only when complete (the `.tmp` copy stays and is read back if the file itself cannot be written); an existing file that cannot be read (locked, over 1 MB) is never overwritten that session (*Forget learned data* / *Reset all-time stats* still replace it); three failed writes switch saving that file off for the session.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py --luajit require`: 68 test files × (Lua 5.4 + LuaJIT), 136 runs, 0 failures; the largest function captures 48 upvalues (limit 60).
+- New regression files, each case checked to fail on the pre-fix code: `test_rosie_night_v3`, `test_horde_standalone_farm`, `test_reaper_bounds`, `test_wondercity_bounds`, `test_silentraven_standalone`, `test_batmobile_nav_recovery`, `test_activity_lease_joint`; new cases in `test_integration_arkham`, `test_integration_helltide`, `test_joint_rosie` (R9, R10), `test_integration_horde`, `test_integration_silentraven`, `test_integration_warpigs_dispatch` (R1b–R3b, WPD-8b UTC minute) and `test_integration_warpug`.
+- New offline tests: `test_helltide_clock`, `test_helltide_stats`, `test_helltide_cinder_plan`, `test_helltide_chest_order` (incl. the task-level event walk bound and skip, failed trips and bad chest cells, 3D distances), `test_helltide_roads`, `test_helltide_atlas_fence` (incl. unreadable zone files), `test_helltide_live`, `test_helltide_dashboard`, `test_helltide_standalone_smart` (joint host: HelltideRevamped + Rosie + Batmobile, a Farm Helltide), and a Rampage case in `test_batmobile.lua`. The scripted clocks of `joint_host.lua`, `test_integration_helltide.lua` and `test_helltide_modes.lua` answer the UTC minute (`os.date('!%M')`) too; the joint host reads back files written in the same run.
+- `python3 audit/check_release.py --base HEAD`: PASS.
+
 ## [3.0.0] — 2026-09-27
 
 ![QQT Warpigz Suite v3](https://raw.githubusercontent.com/forsagaxeno-afk/QQT_Warpigz_v2/claude/qqt-diablo4-plugins-orchestrator-4439v5/assets/branding/qqt-warpigz-suite-v3.png)

@@ -120,6 +120,9 @@ reward_phase.observe = function ()
             NO_CHEST_AFTER_KILL, tostring(tracker.last_boss_name)))
         tracker.boss_kill_time, tracker.reward_grace_until = nil, nil
         tracker.kill_dismissed_at = now
+        -- QQT_Warpigz_v3: the next live boss gets its own first sight and
+        -- boss_delay; the dead one no longer holds the explorers.
+        tracker.boss_trigger_time, tracker.boss_seen_at = nil, nil
     end
     if reward_seen and not tracker.reward_seen then
         tracker.reward_seen = true

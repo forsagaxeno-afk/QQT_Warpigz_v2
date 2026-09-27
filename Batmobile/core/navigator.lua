@@ -131,6 +131,14 @@ local navigator = {
     trap_probe_pos            = nil,
     trap_probe_time           = -1,
     trap_probe_moved          = false,
+    -- QQT_Warpigz_v3: trap/escape bookkeeping.
+    trap_bbox_since           = nil,   -- start of the current confined-bbox trap (giving_up base)
+    escape_trav_key           = nil,   -- name+pos of the gizmo attempt_escape routed to
+    pingpong_since            = -1,    -- crossings before this time are not ping-pong evidence
+    trav_escape_for           = nil,   -- trav_escape_pos the timers below belong to
+    trav_escape_started_at    = -1,
+    trav_escape_fails         = 0,
+    partial_progress_pos      = nil,   -- long-route consumption anchor (stall-escape)
 }
 
 -- Tunables (kept as locals so they're visible in code but not part of the
@@ -142,6 +150,9 @@ local TRAP_BBOX_THRESHOLD   = 25    -- trapped if both bbox dimensions < this
 local TRAP_MIN_SAMPLES      = 20    -- need this many samples before trap can fire
 local TRAP_ESCAPE_COOLDOWN  = 5     -- seconds between escape attempts
 local TRAP_GIVEUP_TIMEOUT   = 60    -- seconds in trapped state before giving_up=true
+local TRAP_GIVEUP_RETRY     = 15    -- QQT_Warpigz_v3: escape cadence after giving_up
+local TRAV_ESCAPE_TIMEOUT   = 3     -- QQT_Warpigz_v3: max seconds of the post-traversal escape
+local TRAV_ESCAPE_MAX_FAILS = 2     -- QQT_Warpigz_v3: failed escape pathfinds before dropping it
 local TRAV_HISTORY_MAX      = 5     -- recent traversals to consider for direction
 local TRAV_TRAP_BL_DURATION = 300   -- seconds to long-blacklist trap re-entry gizmos
 local TRAP_POST_ESCAPE_GRACE = 15   -- seconds to keep trap active after escape routes
@@ -152,6 +163,33 @@ local WORLD_JUMP_DIST       = 100   -- zone change + jump beyond this = teleport
 local SCAN_GRACE_SECS       = 3     -- no negative walkability cache after load/world change
 local WORLD_CACHE_SECS      = 300   -- explorer map of the world just left is kept this long
 local TRAP_PAUSED_MOVE_MIN  = 2     -- paused: displacement per sample interval that counts as driving
+
+-- QQT_Warpigz_v3: per-tick navigator diagnostics honour the 'logging'
+-- combo.  Disabled prints nothing, Debug prints every line, Info prints a
+-- line per key when its state changes (e.g. target nil -> set) and at most
+-- one repeat per NAV_LOG_INTERVAL s, with the suppressed count appended.
+-- A paused caller parked on its goal printed ~20 lines/s and an exhausted
+-- explorer ~60 lines/s here.
+local NAV_LOG_INTERVAL = 5
+local nav_log_state = {}
+local function nav_log(key, state, msg)
+    local level = settings.log_level or 1
+    if level < 1 then return end
+    if level >= 2 then console.print(msg); return end
+    local now = get_time_since_inject()
+    local e = nav_log_state[key]
+    if e == nil then
+        e = { t = -math.huge, state = nil, skipped = 0 }
+        nav_log_state[key] = e
+    end
+    if e.state == state and now - e.t < NAV_LOG_INTERVAL then
+        e.skipped = e.skipped + 1
+        return
+    end
+    if e.skipped > 0 then msg = msg .. string.format(' (+%d similar)', e.skipped) end
+    e.t, e.state, e.skipped = now, state, 0
+    console.print(msg)
+end
 
 -- Wire up failed-direction sharing once at module load.  The explorer reads this
 -- list during frontier scoring; navigator.record_failed_direction reassigns the
@@ -185,7 +223,10 @@ local function compute_escape_target(trav_pos, player_pos)
     local dy = player_pos:y() - trav_pos:y()
     local len = math.sqrt(dx*dx + dy*dy)
     if len < 0.1 then dx, dy = 1, 0 else dx, dy = dx/len, dy/len end
-    -- Walk from max to min distance, return first walkable point found
+    -- Walk from max to min distance, return first walkable point found.
+    -- QQT_Warpigz_v3: 1 u steps (the old 5 u step tested only the 5 u point)
+    -- and nil when nothing is walkable, so the caller skips the escape
+    -- instead of holding every set_target for an unwalkable waypoint.
     local dist = TRAV_ESCAPE_DIST
     while dist >= TRAV_ESCAPE_MIN do
         local pt = vec3:new(
@@ -197,15 +238,49 @@ local function compute_escape_target(trav_pos, player_pos)
         if utility.is_point_walkeable(pt) then
             return pt
         end
-        dist = dist - 5
+        dist = dist - 1
     end
-    -- Last resort: minimum nudge (may not be walkable but better than nothing)
-    local pt = vec3:new(
-        player_pos:x() + dx * TRAV_ESCAPE_MIN,
-        player_pos:y() + dy * TRAV_ESCAPE_MIN,
-        player_pos:z()
-    )
-    return utility.set_height_of_valid_position(pt)
+    return nil
+end
+
+-- QQT_Warpigz_v3: shared entry of the post-traversal escape (jump, buff and
+-- buff-missed crossings).  Stores the destination to restore afterwards and
+-- starts the escape clock; with no walkable escape point the destination is
+-- restored right away.  Returns the escape point or nil.
+local function begin_post_trav_escape(trav_pos, player_pos, label)
+    local escape_pt = compute_escape_target(trav_pos, player_pos)
+    local ptt = nil
+    if navigator.trav_final_target ~= nil then
+        console.print('[nav] ' .. label .. ' crossed, brief escape then restoring target ' .. utils.vec_to_string(navigator.trav_final_target))
+        ptt = { pos = navigator.trav_final_target, is_custom = true }
+        navigator.trav_final_target = nil
+    elseif navigator.paused and navigator.target ~= nil then
+        ptt = { pos = navigator.target, is_custom = navigator.is_custom_target }
+    end
+    navigator.pathfind_fail_count = 0
+    if escape_pt == nil then
+        console.print('[nav] ' .. label .. ' escape: no walkable escape point — resuming directly')
+        navigator.trav_escape_pos = nil
+        navigator.post_trav_target = nil
+        navigator.trav_escape_for = nil
+        if ptt ~= nil then
+            navigator.target = ptt.pos
+            navigator.is_custom_target = ptt.is_custom
+        elseif not navigator.paused then
+            navigator.target = nil
+            navigator.is_custom_target = false
+        end
+        return nil
+    end
+    navigator.trav_escape_pos = trav_pos
+    navigator.post_trav_target = ptt
+    navigator.trav_escape_for = trav_pos
+    navigator.trav_escape_started_at = get_time_since_inject()
+    navigator.trav_escape_fails = 0
+    navigator.target = escape_pt
+    navigator.is_custom_target = false
+    console.print('[nav] ' .. label .. ' escape target: ' .. utils.vec_to_string(escape_pt))
+    return escape_pt
 end
 
 -- Per-frame caching to avoid redundant expensive calls.
@@ -331,10 +406,23 @@ local function try_traversal_route(local_player, player_pos)
     local closest_trav = nil
     local closest_trav_dist = math.huge
     local now_for_bl = now
+    -- QQT_Warpigz_v3: same filters as select_target — the gizmo must be on
+    -- the player's floor (|dz| <= 3) and in the destination's half-plane
+    -- (dot > 0).  Without them a long route hijacked itself onto any side
+    -- ladder within 30 u, including ones behind the player.
+    local goal = navigator.target
     for _, trav in ipairs(nearby_travs) do
-        local d = utils.distance(player_pos, trav:get_position())
-        local trav_str = trav:get_skin_name() .. utils.vec_to_string(trav:get_position())
-        if d <= 30 and d < closest_trav_dist and not is_trav_blacklisted(trav_str, now_for_bl) then
+        local tpos = trav:get_position()
+        local d = utils.distance(player_pos, tpos)
+        local trav_str = trav:get_skin_name() .. utils.vec_to_string(tpos)
+        local usable = d <= 30 and d < closest_trav_dist
+            and math.abs(tpos:z() - player_pos:z()) <= 3
+        if usable and goal ~= nil then
+            local dot = (goal:x() - player_pos:x()) * (tpos:x() - player_pos:x())
+                + (goal:y() - player_pos:y()) * (tpos:y() - player_pos:y())
+            usable = dot > 0
+        end
+        if usable and not is_trav_blacklisted(trav_str, now_for_bl) then
             closest_trav = trav
             closest_trav_dist = d
         end
@@ -348,7 +436,12 @@ local function try_traversal_route(local_player, player_pos)
     if approach_node == nil then
         approach_node = get_closeby_node(trav_pos, 5)
     end
-    if approach_node == nil then return false, closest_trav end
+    if approach_node == nil then
+        -- QQT_Warpigz_v3: short (15 s) blacklist so the up-to-16 feasibility
+        -- A* calls are not repeated on every stall check (every 2 s).
+        navigator.blacklisted_trav[closest_trav:get_skin_name() .. utils.vec_to_string(trav_pos)] = now
+        return false, closest_trav
+    end
     console.print('[nav] routing via traversal ' .. closest_trav:get_skin_name() ..
         ' to reach ' .. (navigator.target and utils.vec_to_string(navigator.target) or 'exploration') ..
         ' (paused=' .. tostring(navigator.paused) .. ')')
@@ -562,9 +655,9 @@ select_target = function (prev_target)
     local target = explorer.select_node(local_player, prev_target)
     if target ~= nil then
         local dist = utils.distance(local_player:get_position(), target)
-        console.print('[select_target] picked ' .. utils.vec_to_string(target) .. ' dist=' .. string.format('%.1f', dist) .. ' frontiers=' .. explorer.frontier_count .. ' bt=#' .. #explorer.backtrack .. ' bting=' .. tostring(explorer.backtracking))
+        nav_log('select_target', 'picked', '[select_target] picked ' .. utils.vec_to_string(target) .. ' dist=' .. string.format('%.1f', dist) .. ' frontiers=' .. explorer.frontier_count .. ' bt=#' .. #explorer.backtrack .. ' bting=' .. tostring(explorer.backtracking))
     else
-        console.print('[select_target] nil, frontiers=' .. explorer.frontier_count .. ' bt=#' .. #explorer.backtrack)
+        nav_log('select_target', 'nil', '[select_target] nil, frontiers=' .. explorer.frontier_count .. ' bt=#' .. #explorer.backtrack)
     end
     return target
 end
@@ -669,7 +762,9 @@ local unstuck = function (local_player)
             local dist = utils.distance(navigator.last_pos, unstuck_node)
             raycast_success = utility.is_ray_cast_walkeable(navigator.last_pos, unstuck_node, 0.5, dist)
         end
-        if navigator.disable_spell ~= true and utility.can_cast_spell(337031) and
+        -- QQT_Warpigz_v3: honour the 'use evade for movement' checkbox
+        -- (a standalone combat script may keep Evade charges for itself).
+        if settings.use_evade and navigator.disable_spell ~= true and utility.can_cast_spell(337031) and
             navigator.unstuck_nodes[unstuck_node_str] == nil
         then
             utils.log(1, 'unstuck by evading')
@@ -789,6 +884,8 @@ navigator.reset_movement = function ()
     navigator.move_spell_fail_count = 0
     navigator.trav_interact_key = nil
     navigator.trav_interact_count = 0
+    navigator.trav_escape_for = nil        -- QQT_Warpigz_v3
+    navigator.partial_progress_pos = nil   -- QQT_Warpigz_v3
     _trav_cache, _buff_cache = nil, nil
     _trav_cache_time, _buff_cache_time = -1, -1
 end
@@ -1050,6 +1147,12 @@ navigator.clear_target = function ()
     navigator.path = {}
     navigator.disable_spell = nil
     navigator.pathfind_replan_cooldown = -1
+    -- QQT_Warpigz_v3: a cleared goal ends the post-traversal escape too;
+    -- otherwise the next set_target was deferred behind an escape waypoint
+    -- that no longer existed (paused callers froze with target=nil).
+    navigator.trav_escape_pos = nil
+    navigator.post_trav_target = nil
+    navigator.trav_escape_for = nil
 end
 -- Non-Jump traversal interacts are bounded.  A gizmo that never yields the
 -- Player_Traversal buff (not interactable, blocked, interact rejected in
@@ -1114,6 +1217,11 @@ navigator.move = function ()
             navigator.partial_target_last_progress_time = navigator.partial_target_last_progress_time + move_gap
         end
         if navigator.trapped_since ~= nil then navigator.trapped_since = navigator.trapped_since + move_gap end
+        -- QQT_Warpigz_v3: the give-up base and the escape phase clock too.
+        if navigator.trap_bbox_since ~= nil then navigator.trap_bbox_since = navigator.trap_bbox_since + move_gap end
+        if navigator.trav_escape_for ~= nil then
+            navigator.trav_escape_started_at = navigator.trav_escape_started_at + move_gap
+        end
     end
     local local_player = get_local_player()
     if not local_player then return end
@@ -1206,24 +1314,10 @@ navigator.move = function ()
                 navigator.failed_target_radius = 15
                 -- Short escape to avoid re-triggering the landing-side gizmo,
                 -- then re-plan toward the original destination from the new position.
-                local escape_pt = compute_escape_target(trav_pos, player_pos)
-                navigator.trav_escape_pos = trav_pos
                 -- Preserve the original destination: store it for restoration after
                 -- the brief escape, whether it was a custom target or explorer target.
-                if navigator.trav_final_target ~= nil then
-                    console.print('[nav] jump crossed, brief escape then restoring target ' .. utils.vec_to_string(navigator.trav_final_target))
-                    navigator.post_trav_target = { pos = navigator.trav_final_target, is_custom = true }
-                    navigator.trav_final_target = nil
-                elseif navigator.paused and navigator.target ~= nil then
-                    navigator.post_trav_target = { pos = navigator.target, is_custom = navigator.is_custom_target }
-                else
-                    navigator.post_trav_target = nil
-                end
-                navigator.target = escape_pt
-                navigator.is_custom_target = false
-                navigator.pathfind_fail_count = 0
+                begin_post_trav_escape(trav_pos, player_pos, 'jump')   -- QQT_Warpigz_v3
                 navigator.is_partial_path = false
-                console.print('[nav] post-jump escape target: ' .. utils.vec_to_string(escape_pt))
             end
             ::trav_interact_done::
         end
@@ -1257,10 +1351,20 @@ navigator.move = function ()
             end
             -- Always append, even if pre_trav_z was nil — direction-from-name
             -- is the load-bearing field for ping-pong detection.
+            -- QQT_Warpigz_v3: the crossing attempt_escape routed is tagged and
+            -- restarts ping-pong evidence (see update_trap_state).
+            local is_escape = navigator.last_trav ~= nil and navigator.escape_trav_key ~= nil
+                and navigator.escape_trav_key == navigator.last_trav:get_skin_name()
+                    .. utils.vec_to_string(navigator.last_trav:get_position())
+            if is_escape then
+                navigator.escape_trav_key = nil
+                navigator.pingpong_since = get_time_since_inject()
+            end
             navigator.trav_history[#navigator.trav_history + 1] = {
                 t        = get_time_since_inject(),
                 delta_z  = crossing_dz,    -- informational only; may be ~0
                 direction = crossing_dir,  -- +1 up, -1 down, 0 unknown/jump
+                escape   = is_escape or nil,
             }
             if #navigator.trav_history > TRAV_HISTORY_MAX then
                 table.remove(navigator.trav_history, 1)
@@ -1363,22 +1467,8 @@ navigator.move = function ()
             -- Brief escape to avoid re-triggering the landing-side gizmo,
             -- then re-plan toward the original destination from the new position.
             if (not chain_taken) and trav_pos_for_escape then
-                local escape_pt = compute_escape_target(trav_pos_for_escape, player_pos)
-                navigator.trav_escape_pos = trav_pos_for_escape
                 -- Preserve the original destination for restoration after brief escape
-                if navigator.trav_final_target ~= nil then
-                    console.print('[nav] traversal crossed, brief escape then restoring target ' .. utils.vec_to_string(navigator.trav_final_target))
-                    navigator.post_trav_target = { pos = navigator.trav_final_target, is_custom = true }
-                    navigator.trav_final_target = nil
-                elseif navigator.paused and navigator.target ~= nil then
-                    navigator.post_trav_target = { pos = navigator.target, is_custom = navigator.is_custom_target }
-                else
-                    navigator.post_trav_target = nil
-                end
-                navigator.target = escape_pt
-                navigator.is_custom_target = false
-                navigator.pathfind_fail_count = 0
-                console.print('[nav] post-traversal escape target: ' .. utils.vec_to_string(escape_pt))
+                begin_post_trav_escape(trav_pos_for_escape, player_pos, 'post-traversal')   -- QQT_Warpigz_v3
             elseif not chain_taken then
                 if navigator.trav_final_target ~= nil then
                     console.print('[nav] traversal crossed, restoring custom target ' .. utils.vec_to_string(navigator.trav_final_target))
@@ -1424,6 +1514,10 @@ navigator.move = function ()
         local crossed_str = missed_trav:get_skin_name() .. utils.vec_to_string(missed_pos)
         -- Only blacklist the exact crossed gizmo with a timestamp (15s cooldown)
         navigator.blacklisted_trav[crossed_str] = get_time_since_inject()
+        if navigator.escape_trav_key == crossed_str then   -- QQT_Warpigz_v3
+            navigator.escape_trav_key = nil
+            navigator.pingpong_since = get_time_since_inject()
+        end
         navigator.last_trav      = nil
         navigator.trav_interact_key = nil
         navigator.trav_interact_count = 0
@@ -1438,21 +1532,8 @@ navigator.move = function ()
         navigator.last_pos       = cur_node
         navigator.unstuck_nodes  = {}
         navigator.unstuck_count  = 0
-        local escape_pt = compute_escape_target(missed_pos, player_pos)
-        navigator.trav_escape_pos = missed_pos
         -- Preserve the original destination for restoration after brief escape
-        if navigator.trav_final_target ~= nil then
-            navigator.post_trav_target = { pos = navigator.trav_final_target, is_custom = true }
-            navigator.trav_final_target = nil
-        elseif navigator.paused and navigator.target ~= nil then
-            navigator.post_trav_target = { pos = navigator.target, is_custom = navigator.is_custom_target }
-        else
-            navigator.post_trav_target = nil
-        end
-        navigator.target             = escape_pt
-        navigator.is_custom_target   = false
-        navigator.pathfind_fail_count = 0
-        console.print('[nav] buff-missed escape target: ' .. utils.vec_to_string(escape_pt))
+        begin_post_trav_escape(missed_pos, player_pos, 'buff-missed')   -- QQT_Warpigz_v3
     end
 
     -- Post-traversal escape: complete when the player has either moved TRAV_ESCAPE_DIST
@@ -1462,8 +1543,26 @@ navigator.move = function ()
         local dist_from_trav = utils.distance(player_pos, navigator.trav_escape_pos)
         local reached_escape = navigator.target ~= nil
             and utils.distance(player_pos, navigator.target) <= 2
-        if dist_from_trav >= TRAV_ESCAPE_DIST or reached_escape then
+        -- QQT_Warpigz_v3: the escape phase is bounded.  It swallows every
+        -- set_target, so an escape that cannot finish (failed pathfinds that
+        -- only nudge, or a caller that cleared the target) froze the player.
+        local now_esc = get_time_since_inject()
+        if navigator.trav_escape_for ~= navigator.trav_escape_pos then
+            navigator.trav_escape_for = navigator.trav_escape_pos
+            navigator.trav_escape_started_at = now_esc
+            navigator.trav_escape_fails = 0
+        end
+        local escape_expired = now_esc - navigator.trav_escape_started_at > TRAV_ESCAPE_TIMEOUT
+            or navigator.trav_escape_fails >= TRAV_ESCAPE_MAX_FAILS
+            or (navigator.target == nil and navigator.paused)
+        if escape_expired and not (dist_from_trav >= TRAV_ESCAPE_DIST or reached_escape) then
+            console.print(string.format('[nav] post-trav escape dropped after %.1fs (%d failed pathfinds, target=%s)',
+                now_esc - navigator.trav_escape_started_at, navigator.trav_escape_fails,
+                navigator.target and utils.vec_to_string(navigator.target) or 'nil'))
+        end
+        if dist_from_trav >= TRAV_ESCAPE_DIST or reached_escape or escape_expired then
             local ptt = navigator.post_trav_target
+            navigator.trav_escape_for = nil
             if ptt ~= nil then
                 console.print('[nav] post-trav escape complete (dist=' .. string.format('%.1f', dist_from_trav) .. '), restoring target ' .. utils.vec_to_string(ptt.pos))
                 console.print(string.format('[nav] restored target feasibility: dist=%.1f custom=%s walkable=%s',
@@ -1629,7 +1728,7 @@ navigator.move = function ()
         navigator.last_trav == nil and
         (navigator.target == nil or utils.distance(cur_node, navigator.target) <= 1)
     then
-        console.print('[nav] no target or reached, selecting new (prev=' .. (navigator.target and utils.vec_to_string(navigator.target) or 'nil') .. ')')
+        nav_log('no_target', navigator.target ~= nil, '[nav] no target or reached, selecting new (prev=' .. (navigator.target and utils.vec_to_string(navigator.target) or 'nil') .. ')')
         navigator.blacklisted_spell_node = {}
         if navigator.paused then return end
         -- A long route owns the goal: arriving (or losing the target) ends
@@ -1642,7 +1741,7 @@ navigator.move = function ()
         navigator.is_custom_target = false
         navigator.path = {}
         navigator.disable_spell = nil
-        console.print('[nav] new target=' .. (navigator.target and utils.vec_to_string(navigator.target) or 'nil'))
+        nav_log('new_target', navigator.target ~= nil, '[nav] new target=' .. (navigator.target and utils.vec_to_string(navigator.target) or 'nil'))
     elseif navigator.target ~= nil and
         navigator.last_update ~= nil and
         navigator.last_update + update_timeout < get_time_since_inject() and
@@ -1732,6 +1831,31 @@ navigator.move = function ()
         navigator.last_trav = nil
     end
 
+    -- QQT_Warpigz_v3: a partial route injected by long_path.navigate_to is
+    -- walked without re-running A*, so the partial-path tracker below was
+    -- never refreshed and the stall-escape fired 1.5 s into a route that was
+    -- progressing.  While that route is being consumed, movement (>= 1 u from
+    -- the last anchor) or a better distance to the goal counts as progress;
+    -- the stall-escape arms only once the route is exhausted or the player
+    -- stops moving.
+    if navigator.is_partial_path and navigator.target ~= nil
+        and navigator.partial_target_ref == navigator.target
+        and #navigator.path > 0
+        and navigator.long_path_active and navigator.long_path_active()
+    then
+        local now_pp = get_time_since_inject()
+        local anchor = navigator.partial_progress_pos
+        if anchor == nil or utils.distance(player_pos, anchor) >= 1 then
+            if anchor ~= nil then navigator.partial_target_last_progress_time = now_pp end
+            navigator.partial_progress_pos = player_pos
+        end
+        local d_goal = utils.distance(player_pos, navigator.target)
+        if d_goal < navigator.partial_target_best_dist - 2 then
+            navigator.partial_target_best_dist = d_goal
+            navigator.partial_target_last_progress_time = now_pp
+        end
+    end
+
     -- Partial-path stall escape: if A* keeps returning partial paths (target
     -- across a cliff/climb/etc.) and the player can't make progress on the
     -- current floor for 3s+, attempt traversal routing now. Without this,
@@ -1776,7 +1900,7 @@ navigator.move = function ()
             return
         end
         local dist_to_target = utils.distance(navigator.last_pos, navigator.target)
-        console.print('[nav] pathfinding to=' .. utils.vec_to_string(navigator.target) .. ' dist=' .. string.format('%.1f', dist_to_target) .. ' custom=' .. tostring(navigator.is_custom_target))
+        nav_log('pathfinding', navigator.target, '[nav] pathfinding to=' .. utils.vec_to_string(navigator.target) .. ' dist=' .. string.format('%.1f', dist_to_target) .. ' custom=' .. tostring(navigator.is_custom_target))
         -- Always cap explorer targets to explore_path_budget_ms (was gated behind
         -- require_full_path_explore, making the GUI setting a no-op in normal use).
         -- Custom targets keep the default tiered caps so kill_monster / patrol
@@ -1930,7 +2054,7 @@ navigator.move = function ()
                 navigator.pathfind_fail_count = 0
                 return
             end
-            console.print('[nav] PARTIAL PATH #' .. #result .. ' toward ' .. utils.vec_to_string(navigator.target) .. ' (dist=' .. string.format('%.1f', dist_to_target) .. ')')
+            nav_log('partial_path', navigator.target, '[nav] PARTIAL PATH #' .. #result .. ' toward ' .. utils.vec_to_string(navigator.target) .. ' (dist=' .. string.format('%.1f', dist_to_target) .. ')')
             navigator.pathfind_fail_count = 0
             navigator.path = result
             navigator.is_partial_path = true
@@ -1953,12 +2077,13 @@ navigator.move = function ()
             navigator.pathfind_fail_count = navigator.pathfind_fail_count + 1
             tracker.bench_count("pathfind_fail")
             navigator.pathfind_area_cooldown = get_time_since_inject() + 0.4
-            console.print('[nav] PATHFIND FAILED #' .. navigator.pathfind_fail_count .. ' target=' .. utils.vec_to_string(navigator.target) .. ' dist=' .. string.format('%.1f', dist_to_target) .. ' paused=' .. tostring(navigator.paused) .. ' frontiers=' .. explorer.frontier_count)
+            nav_log('pathfind_failed', navigator.target, '[nav] PATHFIND FAILED #' .. navigator.pathfind_fail_count .. ' target=' .. utils.vec_to_string(navigator.target) .. ' dist=' .. string.format('%.1f', dist_to_target) .. ' paused=' .. tostring(navigator.paused) .. ' frontiers=' .. explorer.frontier_count)
             -- Post-traversal escape: A* may fail when the escape point is on the edge of
             -- a small platform (top of ladder, narrow ledge).  Use direct movement to
             -- physically push the player away from the traversal instead of calling
             -- select_target (which would pick the landing-side gizmo and bounce back).
             if navigator.trav_escape_pos ~= nil then
+                navigator.trav_escape_fails = navigator.trav_escape_fails + 1   -- QQT_Warpigz_v3
                 console.print('[nav] escape pathfind failed — nudging away from traversal directly')
                 pathfinder.request_move(navigator.target)
                 return
@@ -1985,7 +2110,7 @@ navigator.move = function ()
                     )
                     local valid = utility.set_height_of_valid_position(nudge)
                     if utility.is_point_walkeable(valid) then
-                        console.print(string.format(
+                        nav_log('nudge', navigator.target, string.format(
                             '[nav] limited A* failed (dist=%.1f); nudging %d units toward (%.1f,%.1f)',
                             len, step_dist, valid:x(), valid:y()
                         ))
@@ -2068,13 +2193,13 @@ navigator.move = function ()
             tracker.bench_start("select_target")
             navigator.target = select_target(navigator.target)
             tracker.bench_stop("select_target")
-            console.print('[nav] new target after fail=' .. (navigator.target and utils.vec_to_string(navigator.target) or 'nil') .. (navigator.target and (' dist=' .. string.format('%.1f', utils.distance(cur_node, navigator.target))) or ''))
+            nav_log('new_target', navigator.target ~= nil, '[nav] new target after fail=' .. (navigator.target and utils.vec_to_string(navigator.target) or 'nil') .. (navigator.target and (' dist=' .. string.format('%.1f', utils.distance(cur_node, navigator.target))) or ''))
             navigator.is_custom_target = false
             navigator.path = {}
             navigator.disable_spell = nil
             return
         else
-            console.print('[nav] pathfind OK, path=#' .. #result)
+            nav_log('pathfind_ok', navigator.target, '[nav] pathfind OK, path=#' .. #result)
             if navigator.is_custom_target and navigator.is_partial_path then
                 -- Custom target had partial paths (e.g. portal on a ledge) and A* just
                 -- found a full route — we're on the same surface now.  Suppress all
@@ -2143,7 +2268,7 @@ navigator.move = function ()
         end
     end
     if not moved and #navigator.path > 0 then
-        console.print('[nav] has path (#' .. #navigator.path .. ') but no move, remaining=#' .. #new_path .. ' target=' .. (navigator.target and utils.vec_to_string(navigator.target) or 'nil'))
+        nav_log('no_move', navigator.target, '[nav] has path (#' .. #navigator.path .. ') but no move, remaining=#' .. #new_path .. ' target=' .. (navigator.target and utils.vec_to_string(navigator.target) or 'nil'))
     end
     navigator.path = new_path
     tracker.bench_stop("nav_consume_path")
@@ -2263,12 +2388,21 @@ navigator.update_trap_state = function(local_player, no_sample)
     --
     -- Threshold: 1 reversal — a single down-then-up (or up-then-down) within
     -- 60s is almost always a wasted trip.
+    -- QQT_Warpigz_v3: BOTH crossings of a pair must be inside the window
+    -- (an Up minutes ago + a Down now is not a ping-pong), and pairs that
+    -- end in or precede the crossing attempt_escape itself routed are not
+    -- evidence either (pingpong_since = time of that escape crossing): the
+    -- escape's own reversal held `trapped` for another 60 s and flipped
+    -- giving_up wherever the bot went next.
     local reversals = 0
     local trav_window = TRAP_DETECT_WINDOW * 2
+    local pp_since = navigator.pingpong_since or -math.huge
     for i = 2, #navigator.trav_history do
         local prev = navigator.trav_history[i - 1]
         local cur  = navigator.trav_history[i]
-        if (now - cur.t) <= trav_window then
+        if (now - cur.t) <= trav_window and (now - prev.t) <= trav_window
+            and prev.t >= pp_since and not cur.escape
+        then
             local prev_dir = prev.direction or 0
             local cur_dir  = cur.direction  or 0
             if (prev_dir > 0 and cur_dir < 0)
@@ -2281,6 +2415,13 @@ navigator.update_trap_state = function(local_player, no_sample)
     local pingpong_trapped = reversals >= 1
 
     local is_trapped = bbox_trapped or pingpong_trapped
+    -- QQT_Warpigz_v3: giving_up is earned only by a confined bbox; a pure
+    -- ping-pong signal never escalates to it (attempt_escape reads this).
+    if bbox_trapped then
+        if navigator.trap_bbox_since == nil then navigator.trap_bbox_since = now end
+    else
+        navigator.trap_bbox_since = nil
+    end
 
     -- Post-escape grace: keep trap active even if bbox grew, so the next
     -- attempt_escape on the NEW floor (after a successful climb) can find
@@ -2327,20 +2468,33 @@ navigator.attempt_escape = function(local_player)
 
     -- Giveup check (always run, even before first cooldown elapses, so HR
     -- doesn't have to wait an extra TRAP_ESCAPE_COOLDOWN before noticing).
-    if now - navigator.trapped_since > TRAP_GIVEUP_TIMEOUT then
-        if not navigator.giving_up then
-            navigator.giving_up = true
-            console.print(string.format(
-                '[TRAP] GIVING UP after %ds trapped + %d escape attempts',
-                math.floor(now - navigator.trapped_since),
-                navigator.trapped_escape_count))
-        end
-        return
+    -- QQT_Warpigz_v3: only a bbox confined for TRAP_GIVEUP_TIMEOUT gives up
+    -- (a ping-pong signal or the post-escape grace never does), and giving
+    -- up is no longer terminal: the escape body keeps running every
+    -- TRAP_GIVEUP_RETRY s with the blacklist age requirement dropped, so a
+    -- caller that never calls clear_giving_up (Arkham, WonderCity, Reaper,
+    -- standalone farming) still leaves a pocket once its exit is usable.
+    local bbox_since = navigator.trap_bbox_since
+    if bbox_since == nil then
+        navigator.giving_up = false
+    elseif now - bbox_since > TRAP_GIVEUP_TIMEOUT and not navigator.giving_up then
+        navigator.giving_up = true
+        console.print(string.format(
+            '[TRAP] GIVING UP after %ds trapped + %d escape attempts (escape keeps retrying every %ds)',
+            math.floor(now - navigator.trapped_since),
+            navigator.trapped_escape_count, TRAP_GIVEUP_RETRY))
     end
 
-    if now - navigator.trapped_last_escape_time < TRAP_ESCAPE_COOLDOWN then return end
+    local escape_cooldown = navigator.giving_up and TRAP_GIVEUP_RETRY or TRAP_ESCAPE_COOLDOWN
+    if now - navigator.trapped_last_escape_time < escape_cooldown then return end
     navigator.trapped_last_escape_time = now
     navigator.trapped_escape_count = navigator.trapped_escape_count + 1
+    -- QQT_Warpigz_v3: drop expired long-term entries so they read as usable.
+    for k, expiry in pairs(navigator.trap_blacklisted_trav) do
+        if type(expiry) ~= 'number' or now >= expiry then
+            navigator.trap_blacklisted_trav[k] = nil
+        end
+    end
 
     -- Recompute trapped-zone bbox with a small margin (used for traversal search)
     local cutoff = now - TRAP_DETECT_WINDOW
@@ -2413,7 +2567,9 @@ navigator.attempt_escape = function(local_player)
     --   Attempt 2   : require >=5s
     --   Attempt 3+  : ignore blacklist entirely
     local bl_age_required
-    if navigator.trapped_escape_count == 1 then
+    if navigator.giving_up then
+        bl_age_required = 0  -- QQT_Warpigz_v3: slow retries after giving up
+    elseif navigator.trapped_escape_count == 1 then
         bl_age_required = 15
     elseif navigator.trapped_escape_count == 2 then
         bl_age_required = 5
@@ -2621,6 +2777,9 @@ navigator.attempt_escape = function(local_player)
             -- Wipe the recent blacklist for this traversal so we can re-cross
             local trav_str = best_trav:get_skin_name() .. utils.vec_to_string(best_trav:get_position())
             navigator.blacklisted_trav[trav_str] = nil
+            -- QQT_Warpigz_v3: the crossing of this gizmo is the escape itself,
+            -- recorded without counting as a ping-pong reversal.
+            navigator.escape_trav_key = trav_str
             -- Restore, do not overwrite, a caller's goal (long path, patrol
             -- waypoint): it comes back after the crossing like a
             -- try_traversal_route destination.
@@ -2680,6 +2839,10 @@ navigator.clear_trap_state = function()
     -- Crossing history feeds ping-pong detection; kept, a Down/Up pair from
     -- the zone just left re-armed `trapped` on the first move() elsewhere.
     navigator.trav_history = {}
+    -- QQT_Warpigz_v3: ping-pong / give-up bookkeeping of the fixes above.
+    navigator.trap_bbox_since = nil
+    navigator.escape_trav_key = nil
+    navigator.pingpong_since  = -1
 end
 
 return navigator

@@ -9,6 +9,7 @@ local explorerlite = require 'rosie.private.town.core.explorerlite'
 local base_task = require 'rosie.private.town.tasks.base'
 local lifecycle = require 'rosie.private.town.core.lifecycle'
 local town_movement = require 'rosie.private.town.core.town_movement'
+local pathfinder = require('rosie.movement').for_owner('town') -- QQT_Warpigz_v3
 
 local task = base_task.new_task()
 local status_enum = {
@@ -107,6 +108,66 @@ function extension.failed()
 end
 function extension.is_in_vendor_screen() return false end
 
+-- QQT_Warpigz_v3: while any trip runs, SilentRaven's auto-fire holds on
+-- 'alfred_busy', and a standalone activity may never stand in Temis
+-- otherwise. Once per trip, after every service and before the walk to the
+-- return portal, Rosie stops moving and queues the Whisper claim (only when
+-- SilentRaven is enabled, unmanaged, auto-fire on, a reward ready and not
+-- yet claimed this visit), then waits for its callback: at most RAVEN_WAIT
+-- seconds, which are not service time (lifecycle.tick, tracker.raven_wait).
+local RAVEN_WAIT = 100
+local raven = {request = nil, done = true, since = nil}
+local function raven_plugin()
+    local p = rawget(_G, 'SilentRavenPlugin')
+    if type(p) ~= 'table' or type(p.get_status) ~= 'function' or type(p.trigger_tasks) ~= 'function' then return nil end
+    local ok, s = pcall(p.get_status)
+    if not ok or type(s) ~= 'table' then return nil end
+    if s.enabled ~= true or s.auto_fire ~= true or s.managed_by ~= nil or s.ready ~= true
+        or s.running == true or s.pending == true or s.paused == true
+        or s.last_zone_handled == 'Skov_Temis' then return nil end
+    return p
+end
+local function raven_finish(message)
+    raven.done, tracker.raven_wait = true, nil
+    if message then console.print('[Rosie] ' .. message) end
+    return false
+end
+-- True while Rosie waits for SilentRaven (the teleport task does nothing else).
+local function raven_handoff()
+    local id = tracker.request_id
+    if raven.request ~= id then
+        raven.request, raven.done, raven.since = id, true, nil
+        local p = raven_plugin()
+        if not p then return false end
+        pathfinder.clear_stored_path()
+        local ok, accepted, why = pcall(p.trigger_tasks, settings.plugin_label, function(result)
+            if raven.request == id and not raven.done then
+                raven_finish('SilentRaven finished (' .. tostring(result) .. '); walking to the return portal')
+            end
+        end)
+        if not ok or accepted ~= true then
+            return raven_finish('SilentRaven hand-off refused: ' .. tostring(ok and why or accepted))
+        end
+        raven.done, raven.since, tracker.raven_wait = false, get_time_since_inject(), true
+        console.print('[Rosie] waiting for SilentRaven to claim the Whisper reward before the return portal')
+    end
+    if raven.done then
+        -- The walk to the portal starts from a clean approach state.
+        if raven.since then raven.since = nil; task.reset_session() end
+        return false
+    end
+    if get_time_since_inject() - raven.since >= RAVEN_WAIT then
+        local p = rawget(_G, 'SilentRavenPlugin')
+        if type(p) == 'table' and type(p.cancel) == 'function' then pcall(p.cancel, settings.plugin_label) end
+        raven_finish(string.format('SilentRaven did not finish within %ds; walking to the return portal', RAVEN_WAIT))
+        raven.since = nil; task.reset_session()
+        return false
+    end
+    task.set_status('Waiting for SilentRaven')
+    task.suspend()
+    return true
+end
+
 task.name = 'teleport'
 task.extension = extension
 task.status_enum = status_enum
@@ -114,7 +175,10 @@ task.max_retries = 5
 task.teleport_time = nil
 
 task.shouldExecute = function ()
-    if not tracker.return_required or tracker.teleport_done or tracker.teleport_failed then return false end
+    if tracker.teleport_done or tracker.teleport_failed then return false end
+    -- QQT_Warpigz_v3: a request from another town has no return leg, only
+    -- the outbound hop to Temis (until the first town visit).
+    if not tracker.return_required and not (tracker.teleport and not tracker.visited_town) then return false end
     if tracker.trigger_tasks == false then
         task.retry = 0
     end
@@ -144,6 +208,7 @@ task.Execute = function ()
     local player=get_local_player()
     if not player or player:is_dead() or tracker.external_pause then return end
     if tracker.visited_town and not utils.is_in_town() then
+        if not tracker.return_required then return end -- QQT_Warpigz_v3: no return leg
         if lifecycle.returned() then extension.done()
         elseif not utils.player_in_zone('[sno none]') then extension.failed() end
         return
@@ -156,6 +221,7 @@ task.Execute = function ()
         teleport_with_debounce()
     else
         if outbound then reset_session(); outbound=false end
+        if tracker.return_required and raven_handoff() then return end -- QQT_Warpigz_v3
         task.baseExecute()
     end
 end

@@ -70,7 +70,50 @@ function M.hunt_ruptures()
     return true, nil
 end
 
--- Farm mode with ruptures on replaces the legacy pyre / flame pillar events.
+-- QQT_Warpigz_v3: legacy Helltide events (pyre / flame pillar). Warplan keeps
+-- the old reach (12 m) and cut-off (minute 45); Farm uses 'Event radius'
+-- (12-80 m, fenced to the learned Helltide area) and 'Events until minute'.
+M.EVENT_LEGACY_RADIUS, M.EVENT_LEGACY_UNTIL = 12, 45
+-- Bounds of one event (tasks/helltide.lua): the walk to it, and the whole
+-- event from choosing it; an event given up on is skipped for EVENT_SKIP_S.
+M.EVENT_WALK_MAX, M.EVENT_STAY_MAX, M.EVENT_SKIP_S = 45, 240, 180
+
+local function clamp_setting(value, default, lo, hi)
+    value = tonumber(value) or default
+    if value ~= value then value = default end
+    if value < lo then return lo end
+    if value > hi then return hi end
+    return value
+end
+
+function M.event_radius()
+    if not M.is_farm() then return M.EVENT_LEGACY_RADIUS end
+    return clamp_setting(settings.event_radius, 40, 12, 80)
+end
+
+function M.event_until()
+    if not M.is_farm() then return M.EVENT_LEGACY_UNTIL end
+    return clamp_setting(settings.event_until_min, 45, 30, 55)
+end
+
+-- `dist` is the player's distance to the event actor.
+function M.event_in_reach(actor, dist)
+    local radius = M.event_radius()
+    if type(dist) ~= 'number' or dist >= radius then return false end
+    if radius <= M.EVENT_LEGACY_RADIUS then return true end
+    local fence = tracker.hr_fence
+    if fence and actor then
+        local ok, pos = pcall(function() return actor:get_position() end)
+        if ok and pos then
+            local ok2, allowed = pcall(fence.allowed, pos)
+            if ok2 and allowed == false then return false end
+        end
+    end
+    return true
+end
+
+-- Farm mode with ruptures on and "Skip legacy Helltide events" ticked (off by
+-- default, QQT_Warpigz_v3) replaces the legacy pyre / flame pillar events.
 function M.skip_local_events()
     return M.is_farm() and settings.hunt_rift == true
         and settings.rupture_replace_local_events == true

@@ -6,6 +6,15 @@ local explorer = require "core.explorer"
 local town_salvage_task = require "tasks.town_salvage"
 local loot_guard = require "core.loot_guard"
 
+-- QQT_Warpigz_v3: per-pulse (~10 Hz) status lines are printed only when they
+-- change; `say` drops a line equal to the previous one.
+local last_said = nil
+local function say(message)
+    if message == last_said then return end
+    last_said = message
+    console.print(message)
+end
+
 -- Reference the position from horde.lua
 local horde_boss_room_position = vec3:new(-36.17675, -36.3222, 2.200)
 
@@ -156,7 +165,11 @@ open_chests_task = {
 
         explorer.is_task_running = true -- state handlers own movement, including loot waits
         local current_time = get_time_since_inject()
-        console.print("Current state: " .. self.current_state)
+        -- QQT_Warpigz_v3: logged on a state change only (was every ~0.1 s pulse).
+        if self.logged_state ~= self.current_state then
+            self.logged_state, self.logged_find, last_said = self.current_state, nil, nil
+            console.print("Current state: " .. self.current_state)
+        end
     
         if self.current_state == chest_state.INIT then
             self:init_chest_opening()
@@ -191,7 +204,7 @@ open_chests_task = {
 
     return_from_salvage = function(self)
         if not tracker.check_time("salvage_return_time", 6) then
-            console.print("Waiting before resuming chest opening")
+            say("Waiting before resuming chest opening")
             return
         end
         town_salvage_task:reset()
@@ -203,7 +216,7 @@ open_chests_task = {
     end,
 
     waiting_for_salvage = function(self)
-        console.print("Need salvage. Setting tracker.needs_salvage to start salvage task")
+        say("Need salvage. Setting tracker.needs_salvage to start salvage task")
         tracker.needs_salvage = true
         -- C1/C6: an Alfred that became unavailable (disabled, or unreadable
         -- past its bounded grace) and a bag the built-in salvage would not
@@ -215,8 +228,11 @@ open_chests_task = {
         local status = delegated and utils.read_alfred_status()
         if delegated and status == nil then return end
         if delegated and status.enabled == true then
-            if not alfred_pause_expired(status) then return end
-            why = "Alfred paused past its 60 s bound"
+            -- QQT_Warpigz_v3: a stuck Alfred/Rosie refuses the trip; resume.
+            if status.stuck == true then
+                why = "Rosie stuck: " .. tostring(status.stuck_reason or 'town service refused')
+            elseif not alfred_pause_expired(status) then return
+            else why = "Alfred paused past its 60 s bound" end
         elseif tracker.entry_mode == 'warplan' then
             -- F-H1: no built-in Cerrigar salvage in War Plan mode.
             why = "no built-in town salvage in War Plan mode"
@@ -230,12 +246,17 @@ open_chests_task = {
     end,
 
     init_chest_opening = function(self)
-        console.print("Initializing chest opening")
-        console.print("settings.always_open_talisman_chest: " .. tostring(settings.always_open_talisman_chest))
-        console.print("settings.always_open_ga_chest: " .. tostring(settings.always_open_ga_chest))
-        console.print("tracker.ga_chest_opened: " .. tostring(tracker.ga_chest_opened))
-        console.print("tracker.talisman_chest_opened: " .. tostring(tracker.talisman_chest_opened))
-        console.print("settings.selected_chest_type: " .. tostring(settings.selected_chest_type))
+        -- QQT_Warpigz_v3: the settings dump once per boss-loot wait, not on
+        -- every pulse of it.
+        local first = not tracker.aether_drop_wait
+        if first then
+            console.print("Initializing chest opening")
+            console.print("settings.always_open_talisman_chest: " .. tostring(settings.always_open_talisman_chest))
+            console.print("settings.always_open_ga_chest: " .. tostring(settings.always_open_ga_chest))
+            console.print("tracker.ga_chest_opened: " .. tostring(tracker.ga_chest_opened))
+            console.print("tracker.talisman_chest_opened: " .. tostring(tracker.talisman_chest_opened))
+            console.print("settings.selected_chest_type: " .. tostring(settings.selected_chest_type))
+        end
 
         -- Always set self.selected_chest_type
         local chest_type_map = {"MATERIALS", "GOLD"}
@@ -252,12 +273,14 @@ open_chests_task = {
             self.current_chest_type = picked
         end
 
-        console.print("self.selected_chest_type: " .. tostring(self.selected_chest_type))
-        console.print("self.current_chest_type: " .. tostring(self.current_chest_type))
+        if first then
+            console.print("self.selected_chest_type: " .. tostring(self.selected_chest_type))
+            console.print("self.current_chest_type: " .. tostring(self.current_chest_type))
+        end
 
         -- Wait for boss loots to drop before moving
         if not tracker.check_time("aether_drop_wait", settings.boss_kill_delay) then
-            console.print("waiting for boss loot")
+            if first then console.print("waiting for boss loot") end
             return
         end
         
@@ -294,7 +317,7 @@ open_chests_task = {
 
     move_to_center = function(self)
         if utils.distance_to(horde_boss_room_position) > 2 then
-            console.print("Moving to center position.")
+            say("Moving to center position.")
             move_to(horde_boss_room_position)
         else
             self.current_state = chest_state.SELECTING_CHEST
@@ -333,14 +356,17 @@ open_chests_task = {
             return
         end
     
-        console.print("Attempting to find " .. self.current_chest_type .. " chest")
+        if self.logged_find ~= self.current_chest_type then
+            self.logged_find = self.current_chest_type
+            console.print("Attempting to find " .. self.current_chest_type .. " chest")
+        end
         local chest = utils.get_chest(enums.chest_types[self.current_chest_type])
         
         if chest then
             self.chest_not_found_attempts = 0 -- Reset the counter when chest is found
             if utils.distance_to(chest) > 2 then
                 if tracker.check_time("request_move_to_chest", 0.15) then
-                    console.print(string.format("Moving to %s chest", self.current_chest_type))
+                    say(string.format("Moving to %s chest", self.current_chest_type))
                     move_to(chest:get_position())
                     tracker.clear_key("request_move_to_chest")
 
@@ -555,6 +581,7 @@ open_chests_task = {
         self.move_attempts, self.chest_not_found_attempts = 0, 0
         self.pre_interact_aether, self.pre_interact_chest = nil, nil
         self.last_opened_type, self.chest_error, self.state_before_pause = nil, nil, nil
+        self.logged_state, self.logged_find, last_said = nil, nil, nil -- QQT_Warpigz_v3
         clear_chest_timers()
         tracker.clear_key("aether_drop_wait")
         tracker.clear_key("salvage_return_time")

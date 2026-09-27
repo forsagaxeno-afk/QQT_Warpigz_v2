@@ -18,6 +18,15 @@ local tracker = {
     chest_opened            = false,
     belial_chest_interacted = false,  -- set when the physical Belial chest is interacted with
     just_revived            = false,  -- set by revive task, cleared by navigate_to_boss
+    -- QQT_Warpigz_v3: the summon of this run is committed (the altar took an
+    -- interactable click). Survives a death inside the same lair (revive does
+    -- not clear it), so a respawn goes back to the fight instead of skipping
+    -- the boss; cleared by reset_run, void once the zone changes.
+    summoned_this_run       = false,
+    summon_zone             = nil,
+    -- QQT_Warpigz_v3: last position the altar was seen or clicked this run
+    -- (Kill Monsters tether anchor, post-death walk target).
+    altar_pos               = nil,
 
     -- session stats
     total_kills        = 0,
@@ -39,6 +48,15 @@ function tracker.reset_run()
     tracker.start_time              = 0
     tracker.finished_time           = 0
     tracker.chest_opened_time       = nil
+    tracker.summoned_this_run       = false -- QQT_Warpigz_v3
+    tracker.summon_zone             = nil
+    tracker.altar_pos               = nil
+end
+
+-- QQT_Warpigz_v3: true while this run's summon is committed in `zone` (the
+-- lair the summon happened in).
+function tracker.summon_committed(zone)
+    return tracker.summoned_this_run == true and zone ~= nil and zone == tracker.summon_zone
 end
 
 function tracker.check_time(key, delay)

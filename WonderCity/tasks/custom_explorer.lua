@@ -351,7 +351,7 @@ local task = {
 task.shouldExecute = function ()
     if not settings.use_custom_explorer then return false end
     if not utils.player_in_undercity() then return false end
-    if tracker.boss_trigger_time ~= nil then return false end
+    if tracker.boss_gate_active() then return false end -- QQT_Warpigz_v3: non-sticky boss gate
     -- Reset before reading sticky boss-room state from the previous floor.
     if floor.run_time ~= tracker.floor_generation then
         reset_floor()

@@ -12,6 +12,7 @@ local enter_task = nil
 -- C5: when the alfred task became the active task (Arkham yielding control
 -- to Alfred). That time is not progress time for any walk/stuck window.
 local yield_started = nil
+local pickup_hold_since = nil -- QQT_Warpigz_v3: in-pit Looter yield start (see pickup_yield)
 local current_task = { name = 'Idle', status = 'Idle' } -- Default state when no task is active
 local function alfred_owns_control()
     return alfred_task and alfred_task.is_busy and alfred_task.is_busy()
@@ -40,6 +41,7 @@ task_manager.release_control = function ()
         if enter_task then enter_task.committed_at = nil end
         active_task = nil
         yield_started = nil
+        pickup_hold_since = nil -- QQT_Warpigz_v3
         running = false
     end
 end
@@ -82,6 +84,56 @@ local function execute(task)
     task:Execute()
 end
 
+-- QQT_Warpigz_v3: bounded in-pit yield to the Looter (Rosie pickup). Explore,
+-- kill and boss tasks drive Batmobile every pulse, which overrode Rosie's
+-- approach move and walked the drop out of pickup range. While Looter is busy
+-- (at most PICKUP_HOLD_MAX s per busy episode, shared with the glyph/Alfred
+-- holds so they never stack) Arkham stands still and runs no task; a live
+-- boss in melee range is never ignored for loot. The held time is handed to
+-- every task's on_yield so it never counts toward walk/stuck windows (C5).
+local PICKUP_HOLD_MAX, PICKUP_BOSS_RANGE = 15, 8
+local function boss_close()
+    local ok, close = pcall(function()
+        local pos = get_player_position()
+        if not pos or not target_selector or type(target_selector.get_near_target_list) ~= 'function' then
+            return false
+        end
+        for _, e in pairs(target_selector.get_near_target_list(pos, PICKUP_BOSS_RANGE) or {}) do
+            if e:is_boss() and e:get_current_health() > 0 then return true end
+        end
+        return false
+    end)
+    return ok and close == true
+end
+local function end_pickup_yield()
+    if pickup_hold_since == nil then return end
+    local held = get_time_since_inject() - pickup_hold_since
+    pickup_hold_since = nil
+    if held > 0 then
+        for _, t in ipairs(tasks) do
+            if t.on_yield then t.on_yield(held) end
+        end
+    end
+end
+local function pickup_yield()
+    if not utils.player_in_pit() or boss_close()
+        or not utils.looter_hold(PICKUP_HOLD_MAX, 'pit task (pickup yield)')
+    then
+        end_pickup_yield()
+        return false
+    end
+    if pickup_hold_since == nil then
+        pickup_hold_since = get_time_since_inject()
+        utils.stop_movement()
+    elseif BatmobilePlugin and type(BatmobilePlugin.is_long_path_navigating) == 'function'
+        and BatmobilePlugin.is_long_path_navigating()
+    then
+        utils.stop_movement()
+    end
+    current_task = { name = 'Idle', status = 'yield to Looter' }
+    return true
+end
+
 local last_call_time = -math.huge
 task_manager.execute_tasks = function ()
     local current_core_time = get_time_since_inject()
@@ -106,6 +158,7 @@ task_manager.execute_tasks = function ()
         end
         active_task = nil
         yield_started = nil
+        pickup_hold_since = nil -- QQT_Warpigz_v3
     end
     if pending_navigation_reset and not alfred_owns_control() then
         BatmobilePlugin.reset('arkham_asylum')
@@ -118,13 +171,16 @@ task_manager.execute_tasks = function ()
     -- Town relocation and reward tasks must not preempt an accepted Alfred
     -- trip (including a foreign caller's trip to a different service town).
     if alfred_task.is_busy and alfred_task.is_busy(forced) then
+        end_pickup_yield() -- QQT_Warpigz_v3
         execute(alfred_task)
         return
     end
     if forced then
+        end_pickup_yield() -- QQT_Warpigz_v3
         execute(exit_task)
         return
     end
+    if pickup_yield() then return end -- QQT_Warpigz_v3
     current_task = { name = 'Idle', status = 'Idle' }
     for _, task in ipairs(tasks) do
         if task.shouldExecute() then

@@ -60,7 +60,7 @@ local function reset()
     owned_path, session_started, session_world = nil, nil, nil
     reroll_count, reroll_pending, pending_click, halt_reason = 0, false, nil, nil
     session.alfred, session.paused_at, session.paused_from = nil, nil, nil
-    hold.reason, hold.since, hold.cleared_at = nil, nil, nil
+    hold.reason, hold.since, hold.cleared_at, hold.activity_logged = nil, nil, nil, nil -- QQT_Warpigz_v3
     alfred_gate.advisory_since = nil
     set_state('IDLE')
 end
@@ -183,6 +183,23 @@ local function alfred_hold(alfred, dispatcher)
     return nil
 end
 
+-- QQT_Warpigz_v3: an enabled activity plugin owns movement and teleports
+-- (standalone farming with WarPigs off, a persisted toggle). WarPug must not
+-- start or continue a session against it; the session pauses instead.
+local ACTIVITY_EXPORTS = {
+    {'ArkhamAsylumPlugin', 'ArkhamAsylum'}, {'WonderCityPlugin', 'WonderCity'},
+    {'HelltideRevampedPlugin', 'HelltideRevamped'}, {'InfernalHordesPlugin', 'HordeDev'},
+    {'ReaperPlugin', 'Reaper'},
+}
+local function activity_running()
+    for _, export in ipairs(ACTIVITY_EXPORTS) do
+        local p = rawget and rawget(_G, export[1]) or _G[export[1]]
+        local status = p and (read_status(p, 'status') or read_status(p, 'get_status'))
+        if status and status.enabled == true then return export[2] .. ' running' end
+    end
+    return nil
+end
+
 -- Returns the companion that currently owns town, or nil.
 local function integrations_busy()
     local dispatcher, dispatcher_reason
@@ -204,7 +221,7 @@ local function integrations_busy()
         if status.running or status.pending or status.external_trigger then return 'SilentRaven busy' end
     end
     if looter_busy() then return 'Looter busy' end
-    return nil
+    return activity_running()   -- QQT_Warpigz_v3
 end
 
 -- Third result true: only a companion owns town, so a session may pause.
@@ -215,7 +232,13 @@ local function context()
     end)
     if not ok or not alive then return nil, 'player unavailable or dead' end
     local key = world_key()
-    if not key then return nil, 'outside Temis or world unavailable' end
+    if not key then
+        -- QQT_Warpigz_v3: an activity that took the player out of Temis pauses
+        -- the session (companion) instead of halting it.
+        local activity = activity_running()
+        if activity then return nil, activity, true end
+        return nil, 'outside Temis or world unavailable'
+    end
     local quests = has_warplan_quests()
     if quests ~= false then return nil, quests and 'war plan quest active' or 'quest snapshot unavailable' end
     local busy = integrations_busy()
@@ -228,14 +251,21 @@ local function note_hold(reason)
     local t = now()
     if not reason then
         if hold.since then hold.since, hold.cleared_at = nil, t end
-        hold.reason = nil
+        hold.reason, hold.activity_logged = nil, nil
         return
     end
     if not hold.since then hold.since, hold.logged_at, hold.cleared_at = t, t, nil end
     hold.reason = reason
     if t - hold.logged_at >= HOLD_LOG_INTERVAL then
         hold.logged_at = t
-        log(string.format('still waiting for town work after %.0fs: %s', t - hold.since, reason))
+        -- QQT_Warpigz_v3: standalone farming can run for hours; an activity
+        -- hold is logged once per episode, not every minute.
+        if reason:sub(-8) ~= ' running' then
+            log(string.format('still waiting for town work after %.0fs: %s', t - hold.since, reason))
+        elseif hold.activity_logged ~= reason then
+            hold.activity_logged = reason
+            log('waiting: ' .. reason .. ' (WarPug plans once it is off)')
+        end
     end
 end
 

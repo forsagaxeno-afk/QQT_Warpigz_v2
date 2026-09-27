@@ -9,6 +9,7 @@ function task:reset()
     self.started,self.quiet_until,self.next_interact=nil,nil,nil
     self.inside_since,self.inside_world=nil,nil
     self.interactions,self.move_issued=0,false
+    self.companion_seen=false
     tracker.horde_entry_pending=false
 end
 
@@ -31,7 +32,9 @@ function task:Execute()
     if tracker.entry_mode == 'warplan' then return end -- F-H1 (forced paths too)
     local now=get_time_since_inject()
     if self.token~=start_task.entry_started or not self.started then
+        local seen=self.companion_seen -- QQT_Warpigz_v3: noted before the first pulse
         self:reset()
+        self.companion_seen=seen
         self.token=start_task.entry_started
         self.started=start_task.entry_started or now
         self.quiet_until,self.next_interact=now,now
@@ -43,6 +46,13 @@ function task:Execute()
     if now<self.quiet_until then return end
     local s=start_task.read_world()
     if not s then self.inside_since,self.inside_world=nil,nil;return end
+    -- QQT_Warpigz_v3: see start_dungeon.left_for_companion (horde_opened is
+    -- already set here, so the abandoned-run recovery takes over).
+    if start_task.left_for_companion(self,s) then
+        console.print("[enter_horde] A town trip took the player away before the portal entry; ending it for a new run")
+        self:reset()
+        return
+    end
     if s.inside then
         if self.inside_world~=s.id then self.inside_since,self.inside_world=now,s.id end
         self.entry_phase="WAIT_HORDE_STABLE"

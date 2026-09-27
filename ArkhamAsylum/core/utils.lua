@@ -129,24 +129,42 @@ end
 -- continuously busy for less than max_hold seconds; afterwards the caller
 -- proceeds (one log line per busy episode) so a Looter stuck in approach
 -- retries cannot hold the Pit (C6). A gap in sampling starts a new episode.
-local looter = {since = nil, seen = -math.huge, logged = false}
+-- QQT_Warpigz_v3: the busy episode (since) stays shared, so the in-pit
+-- pickup yield, the glyph upgrade and the Alfred trip never stack their
+-- bounds; each caller logs its own "proceeds" line once per episode.
+local looter = {since = nil, seen = -math.huge, logged = {}}
 utils.looter_hold = function (max_hold, what)
     local now = get_time_since_inject()
     if not utils.is_looting() then
-        looter.since, looter.logged = nil, false
+        looter.since = nil
+        if next(looter.logged) ~= nil then looter.logged = {} end
         return false
     end
     if looter.since == nil or now - looter.seen > 2 then
-        looter.since, looter.logged = now, false
+        looter.since, looter.logged = now, {}
     end
     looter.seen = now
     if now - looter.since < max_hold then return true end
-    if not looter.logged then
-        looter.logged = true
+    local key = tostring(what or 'task')
+    if not looter.logged[key] then
+        looter.logged[key] = true
         console.print(string.format('[arkham] Looter busy for %.0fs — %s proceeds (bounded Looter yield)',
             now - looter.since, tostring(what or 'task')))
     end
     return false
+end
+
+-- QQT_Warpigz_v3: a SilentRaven Whisper claim (its own auto-fire or keybind,
+-- or a queued request) owns Temis movement and clicks until it finishes,
+-- bounded by SilentRaven (100 s run, 120 s pause). Town steps (walks,
+-- interactions, the teleport out of Temis) wait; a paused queued request
+-- does not hold them.
+utils.raven_claim_active = function ()
+    local raven = SilentRavenPlugin or PLUGIN_silent_raven
+    if type(raven) ~= 'table' or type(raven.get_status) ~= 'function' then return false end
+    local ok, s = pcall(raven.get_status)
+    return ok and type(s) == 'table' and s.enabled == true
+        and (s.running == true or (s.pending == true and s.paused ~= true))
 end
 
 return utils

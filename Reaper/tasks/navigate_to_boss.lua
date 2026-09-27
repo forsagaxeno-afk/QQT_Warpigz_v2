@@ -118,6 +118,11 @@ local TRAVERSAL_NAV_TIMEOUT   = 20.0  -- seconds before giving up on crossing a 
 local MAX_TRAVERSAL_ATTEMPTS  = 3     -- give up entirely after this many failed traversal attempts
 
 local T_SETTLE       = 2.5
+-- QQT_Warpigz_v3: arrivals at the altar position without an altar (and no
+-- committed summon, no chest) before the boss is skipped. The Batmobile
+-- branch used to yield and restart from the entrance forever.
+local MAX_NO_ALTAR_ARRIVALS = 3
+local no_altar_arrivals = 0
 local T_ENTER        = 15.0
 
 local nav = {
@@ -204,13 +209,49 @@ local function get_altar_approach_target(boss)
     return nil, nil
 end
 
+-- QQT_Warpigz_v3: after a death inside the lair whose summon is still
+-- committed (tracker.summon_committed), arriving at the arena without an
+-- altar hands over to Kill Monsters: never re-walk from the entrance, never
+-- skip the boss (the key is already spent).
+local function summon_committed()
+    return tracker.summon_committed(utils.get_zone())
+end
+
+local function hand_over_to_fight(why)
+    console.print("[Reaper] " .. why .. " — summon still active, handing over to the fight.")
+    if BatmobilePlugin then BatmobilePlugin.stop_long_path(plugin_label) end
+    tracker.altar_activated     = true
+    tracker.altar_activate_time = now()
+    reset_nav()
+end
+
 -- -------------------------------------------------------
 -- shouldExecute
 -- -------------------------------------------------------
 local task = { name = "Navigate to Boss" }
 
+-- QQT_Warpigz_v3: the boss teleport out of town waits while SilentRaven
+-- claims a Whisper reward (utils.raven_claim_active, bounded by SilentRaven).
+local raven_wait_logged = false
+local function raven_hold(boss)
+    if in_target_zone(boss) or not (utils.raven_claim_active and utils.raven_claim_active()) then raven_wait_logged = false; return false end
+    if not raven_wait_logged then
+        raven_wait_logged = true
+        console.print("[Reaper] SilentRaven is claiming a Whisper reward - boss teleport waits.")
+    end
+    return true
+end
+
+-- QQT_Warpigz_v3: best-known point at the altar (recorded path endpoint or a
+-- non-zero boss-room seed; nil when unknown). Kill Monsters' tether anchor.
+function task.approach_target(boss)
+    if not boss then return nil end
+    return (get_altar_approach_target(boss))
+end
+
 function task.reset()
     reset_nav()
+    no_altar_arrivals = 0 -- QQT_Warpigz_v3
 end
 
 function task.shouldExecute()
@@ -252,6 +293,7 @@ function task.shouldExecute()
     -- interact_altar handles both movement to the altar and interaction; no need to navigate.
     local _altar = in_target_zone(boss) and utils.get_altar()
     if _altar then
+        no_altar_arrivals = 0 -- QQT_Warpigz_v3
         if nav.state ~= STATE.IDLE then reset_nav() end
         return false
     end
@@ -300,6 +342,7 @@ function task.Execute()
 
     -- ---- IDLE ----
     if nav.state == STATE.IDLE then
+        if raven_hold(boss) then return end -- QQT_Warpigz_v3
         nav.target_boss    = boss
         nav.attempts       = 0
         nav.path_exhausted = false
@@ -325,6 +368,8 @@ function task.Execute()
 
     -- ---- MAP_NAV: drive teleport state machine ----
     if nav.state == STATE.MAP_NAV then
+        -- QQT_Warpigz_v3: no teleport retry while SilentRaven claims in town.
+        if raven_hold(boss) then return end
         map_nav.update()
 
         if map_nav.is_done() or in_target_zone(boss) then
@@ -432,6 +477,10 @@ function task.Execute()
             if altar then
                 target       = altar:get_position()
                 target_label = "altar"
+            elseif tracker.altar_pos and summon_committed() then
+                -- QQT_Warpigz_v3: post-death walk back to where the altar was.
+                target       = tracker.altar_pos
+                target_label = "last altar position"
             else
                 target, target_label = get_altar_approach_target(boss)
             end
@@ -448,6 +497,21 @@ function task.Execute()
             -- the altar was activated and is now gone (e.g. Alfred reset tracker state
             -- mid-run). Stop navigating — open_chest will take over.
             if utils.distance_to(target) <= 8.0 and not altar then
+                if summon_committed() then -- QQT_Warpigz_v3
+                    hand_over_to_fight("At the altar position after respawn")
+                    return
+                end
+                no_altar_arrivals = no_altar_arrivals + 1
+                if no_altar_arrivals >= MAX_NO_ALTAR_ARRIVALS then -- QQT_Warpigz_v3
+                    console.print(string.format(
+                        "[Reaper] Reached the altar position %d times without an altar — giving up on %s.",
+                        no_altar_arrivals, boss.label))
+                    no_altar_arrivals = 0
+                    rotation.advance("Altar not found at the recorded position")
+                    tracker.reset_run()
+                    reset_nav()
+                    return
+                end
                 console.print("[Reaper] Already at altar position, no altar visible — yielding.")
                 reset_nav()
                 return
@@ -581,6 +645,12 @@ function task.Execute()
             end
         end
         if pathwalker.is_path_completed() then
+            -- QQT_Warpigz_v3: post-death, the recorded path's end is the arena.
+            if not utils.get_altar() and summon_committed() then
+                pathwalker.stop_walking()
+                hand_over_to_fight("Recorded path ended at the arena after respawn")
+                return
+            end
             -- Path finished but altar still isn't in range — fall back to
             -- Batmobile so navigation isn't dead-ended on a stale path file.
             if not utils.get_altar() and BatmobilePlugin then

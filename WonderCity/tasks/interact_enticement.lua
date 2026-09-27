@@ -23,6 +23,21 @@ local task = {
     last_interact_call = nil,
 }
 local INTERACT_REFIRE_COOLDOWN = 1.0
+-- QQT_Warpigz_v3 (C6, loot_obols rule): the walk to an enticement is bounded.
+-- Batmobile rejecting it (set_target()==false) or no PROGRESS_STEP m of
+-- progress in NO_PROGRESS_SECONDS marks it unreachable for this floor.
+local NO_PROGRESS_SECONDS, PROGRESS_STEP = 12, 1
+local approach = {best = nil, time = nil, last = nil}
+local PROGRESS_GAP = 2 -- a longer gap (another task ran) starts a fresh window
+local function give_up(key, name, why)
+    tracker.enticement[key] = 'unreachable' -- skipped; not counted as interacted
+    approach.best, approach.time = nil, nil
+    task.interact_time, task.last_interact_call, task.active_key = nil, nil, nil
+    console.print(string.format('[WonderCity:enticement] %s unreachable (%s) - skipping it on this floor',
+        tostring(name), why))
+    utils.stop_movement()
+    task.status = 'enticement unreachable - continuing'
+end
 
 task.shouldExecute = function ()
     return utils.get_closest_enticement() ~= nil and
@@ -42,6 +57,7 @@ task.Execute = function ()
             task.active_key = key
             task.interact_time = nil
             task.last_interact_call = nil
+            approach.best, approach.time = nil, nil
         end
         local timeout = settings.enticement_timeout
         local is_switch = name:match('SpiritHearth_Switch')
@@ -58,10 +74,23 @@ task.Execute = function ()
             task.last_interact_call = nil
             task.status = status_enum['IDLE']
         elseif utils.distance(local_player, enticement) > 3 then
-            BatmobilePlugin.set_target(plugin_label, enticement)
+            local dist, now = utils.distance(local_player, enticement), get_time_since_inject()
+            if approach.last and now - approach.last > PROGRESS_GAP then approach.best = nil end
+            approach.last = now
+            if approach.best == nil or dist < approach.best - PROGRESS_STEP then
+                approach.best, approach.time = dist, now
+            elseif now - approach.time >= NO_PROGRESS_SECONDS then
+                give_up(key, name, string.format('no progress for %ds at %.0fm', NO_PROGRESS_SECONDS, dist))
+                return
+            end
+            if BatmobilePlugin.set_target(plugin_label, enticement) == false then
+                give_up(key, name, 'Batmobile rejected the target')
+                return
+            end
             BatmobilePlugin.move(plugin_label)
             task.status = status_enum['WALKING']
         else
+            approach.best, approach.time = nil, nil
             utils.stop_movement()
             -- Start the timeout clock as soon as we're in interact range,
             -- not only when is_interactable() returns false. The Grand
@@ -97,9 +126,11 @@ end
 -- C5: time spent yielding (e.g. to Alfred) does not expire the objective.
 task.on_yield = function (seconds)
     if task.interact_time then task.interact_time = task.interact_time + seconds end
+    if approach.time then approach.time = approach.time + seconds end
 end
 
 task.reset = function ()
+    approach.best, approach.time = nil, nil
     task.active_key = nil
     task.interact_time = nil
     task.last_interact_call = nil

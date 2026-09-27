@@ -99,6 +99,20 @@ local reset_state = function ()
     task.step      = 0
     task.step_time = -1
     task.bargain_idx = 0
+    task.accept_started_at = nil -- QQT_Warpigz_v3: first ACCEPT of this attempt
+end
+
+-- QQT_Warpigz_v3 (C6): an entry attempt whose portal never appeared starts
+-- over at the brazier (re-interact, fresh commit window), logged once.
+local PORTAL_SPAWN_TIMEOUT = 30.0
+local restart_flow = function (reason)
+    if not task.restart_logged then
+        task.restart_logged = true
+        console.print('[WonderCity:enter] ' .. reason .. ' - restarting flow')
+    end
+    reset_state()
+    task.interacted    = false
+    task.committed_at  = nil -- a new entry attempt starts its own window
 end
 
 local slot_screen_pos = function (slot_index)
@@ -409,6 +423,7 @@ local run_steps = function ()
         utility.send_mouse_click(settings.accept_button_x, settings.accept_button_y)
         record_click('ACCEPT', settings.accept_button_x, settings.accept_button_y, 'left')
         task.committed_at = task.committed_at or now
+        task.accept_started_at = task.accept_started_at or now -- QQT_Warpigz_v3
         task.step = STEP.ACCEPT_WAIT
         task.actor_guard_until = now + POST_ACCEPT_GUARD
         task.step_time = now
@@ -426,8 +441,13 @@ local run_steps = function ()
                 task.step = STEP.BARGAIN_OPEN
                 task.step_time = -1
                 task.status = 'bargain failed - walking away'
-            else
+            elseif loot_manager:is_in_vendor_screen() then
                 task.step = STEP.ACCEPT
+            else
+                -- QQT_Warpigz_v3: the confirmation closed and no portal came;
+                -- clicking a blind ACCEPT point again cannot help.
+                restart_flow(string.format('portal never spawned %.0fs after accept (vendor closed)',
+                    now - (task.accept_started_at or task.step_time)))
             end
         else
             task.status = status_enum['WAITING'] .. 'for portal'
@@ -466,6 +486,7 @@ local open_portal = function (delay)
         end
     elseif not task.interacted then
         task.interacted = true
+        task.restart_logged = false -- QQT_Warpigz_v3: one restart line per attempt
         task.interact_started_at = -1
         task.interact_threshold = INTERACT_THRESHOLD_DEFAULT
         if task.retry_bargain then
@@ -491,18 +512,13 @@ local open_portal = function (delay)
         task.status = status_enum['WAITING'] .. 'for portal to spawn'
         -- Recovery: if no portal appeared in a generous window, retry from
         -- scratch (re-interact brazier on the next tick).
-        local PORTAL_SPAWN_TIMEOUT = 30.0
-        if task.step_time > 0 and
-            now - task.step_time > PORTAL_SPAWN_TIMEOUT
+        -- QQT_Warpigz_v3: measured from the FIRST accept of this attempt
+        -- (each ACCEPT re-click refreshed step_time, so this never fired).
+        local accepted_at = task.accept_started_at or task.step_time
+        if task.step == STEP.ACCEPT_WAIT and accepted_at > 0 and
+            now - accepted_at > PORTAL_SPAWN_TIMEOUT
         then
-            console.print(string.format(
-                '[WonderCity:enter] portal never spawned in %.0fs after accept — restarting flow',
-                PORTAL_SPAWN_TIMEOUT))
-            task.step          = 0
-            task.step_time     = -1
-            task.bargain_idx   = 0
-            task.interacted    = false
-            task.committed_at  = nil -- a new entry attempt starts its own window
+            restart_flow(string.format('portal never spawned in %.0fs after accept', PORTAL_SPAWN_TIMEOUT))
         end
     elseif delay and task.debounce_time + settings.confirm_delay > get_time_since_inject() then
         task.status = status_enum['WAITING'] .. 'for confirmation'
@@ -541,6 +557,16 @@ task.Execute = function ()
     local local_player = get_local_player()
     if not local_player then return end
     BatmobilePlugin.pause(plugin_label)
+    -- QQT_Warpigz_v3: no walk or brazier step while SilentRaven claims (Temis
+    -- as the working town); a started tribute/portal flow or a committed
+    -- entry goes on.
+    if task.step == 0 and not task.committed() and not task.bargain_walk_away and (utils.raven_claim_active and utils.raven_claim_active()) then
+        if task.status ~= status_enum['WAITING'] .. 'for SilentRaven' then
+            BatmobilePlugin.clear_target(plugin_label)
+            task.status = status_enum['WAITING'] .. 'for SilentRaven'
+        end
+        return
+    end
 
     -- Guard against all actor queries during the post-click transition windows.
     -- The game can free/invalidate actor objects during portal submission and
@@ -668,6 +694,7 @@ task.reset = function ()
     task.interact_started_at = -1
     task.interact_threshold = INTERACT_THRESHOLD_DEFAULT
     task.brazier_missing_logged = false
+    task.restart_logged = false
 end
 task.on_cancel = task.reset
 

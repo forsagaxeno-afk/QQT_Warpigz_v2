@@ -1,5 +1,5 @@
 local plugin_label = 'wonder_city'
-local plugin_version = '2.2.0'
+local plugin_version = '2.2.1'
 console.print("Lua Plugin - WonderCity - Leoric - v" .. plugin_version)
 
 local gui = {}
@@ -202,7 +202,7 @@ gui.render = function ()
         gui.elements.keybind_toggle:render('Toggle Keybind', 'Toggle the bot for quick enable')
     end
     if gui.elements.undercity_settings_tree:push('Undercity Settings') then
-        gui.elements.town:render('Town', gui.town, 'Working town: where the bot teleports/returns to and where Alfred runs salvage. Should match your AlfredTheButler town setting.')
+        gui.elements.town:render('Town', gui.town, 'Working town: where the bot teleports/returns to and enters the Undercity. Town service (Rosie) always runs in Temis; WonderCity travels back here itself.') -- QQT_Warpigz_v3
         gui.elements.batmobile_priority:render('Batmobile priority', gui.batmobile_priority, 'Select whether to priortize direction or distance while exploring')
         if gui.elements.batmobile_priority:get() == 1 then
             render_menu_header('[EXPERIMENTAL] Priortizing distance will use more processing power. ' ..

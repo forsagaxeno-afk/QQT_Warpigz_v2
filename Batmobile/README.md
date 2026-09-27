@@ -16,6 +16,7 @@ Batmobile also handles any traversals in game if move command is given.
 
 ### Movement spells
 - checkboxes for movement spells available to your class. requires "Use movement spells" to be toggled on.
+- Movement Rules (revamp engine): the skill picker also offers **Rampage** (Warlock), found by its spell name (`get_name_for_spell`) among the equipped spells instead of a fixed id; it stays "(unequipped)" until a spell whose name contains "rampage" is on the bar (checked at most every 10 s). Range 15, no line-of-sight check. The legacy per-class chain is unchanged. The spell name, id and cast behaviour still need a live check.
 
 ### Debug
 - Toggle Explorer -- toggle to freeroam with explorer

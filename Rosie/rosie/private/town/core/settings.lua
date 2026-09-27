@@ -119,7 +119,90 @@ function settings.get_export_keybind_state()
     return false
 end
 
-function settings:update_settings()
+-- QQT_Warpigz_v3 (night audit R3): the named-item selection tables
+-- (affixes, uniques, mythics, mythic forms, talisman lists: about 2,300
+-- widget reads and fresh tables) were rebuilt on every town pulse (20 Hz)
+-- and every menu frame. update_settings() now reads the scalar settings every
+-- call and rebuilds the selections at most every SELECTION_REFRESH s, or at
+-- once with force (the preview and an explicit town run; settings:
+-- update_settings(true)).
+local SELECTION_REFRESH = 1
+local selections_at = nil
+function settings:update_selections()
+    settings.ancestral_affix = {}
+    for _, affix_type in pairs(affix_types) do
+        local item_type = affix_type.name
+        if not item_type:match('talisman') then
+            settings.ancestral_affix[item_type] = {}
+            for _, affix in pairs(affix_type.data) do
+                local cb = item_type .. '_affix_' .. tostring(affix.sno_id)
+                if gui.elements[cb] and gui.elements[cb]:get() then
+                    settings.ancestral_affix[item_type][affix.sno_id] = true
+                end
+            end
+        end
+    end
+    settings.ancestral_unique = {}
+    for _,items in ipairs(unique_selection_lists) do
+        for _,item in pairs(items) do
+            local checkbox_name = 'unique_' .. tostring(item.sno_id)
+            if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
+                settings.ancestral_unique[item.sno_id] = true
+            end
+        end
+    end
+    settings.ancestral_mythic = {}
+    for _,item in pairs(mythic_items) do
+        local checkbox_name = 'mythic_' .. tostring(item.sno_id)
+        if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
+            settings.ancestral_mythic[item.sno_id] = true
+        end
+    end
+    settings.mythic_form_keep = {}
+    for _,item in pairs(unique_items) do
+        local checkbox_name = 'mythic_form_' .. tostring(item.sno_id)
+        if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
+            settings.mythic_form_keep[item.sno_id] = true
+        end
+    end
+    settings.talisman_seal_affix         = {}
+    settings.talisman_charm_affix        = {}
+    for _, affix_type in pairs(affix_types) do
+        local item_type = affix_type.name
+        if item_type:match('talisman') then
+            local tbl = {}
+            for _, affix in pairs(affix_type.data) do
+                local cb = item_type .. '_affix_' .. tostring(affix.sno_id)
+                if gui.elements[cb] and gui.elements[cb]:get() then tbl[affix.sno_id] = true end
+            end
+            if item_type == 'talisman_seal'  then settings.talisman_seal_affix  = tbl end
+            if item_type == 'talisman_charm' then settings.talisman_charm_affix = tbl end
+        end
+    end
+    settings.talisman_charm_unique = {}
+    for _, item in pairs(unique_charm_items) do
+        local cb = 'charm_unique_' .. tostring(item.sno_id)
+        if gui.elements[cb] and gui.elements[cb]:get() then
+            settings.talisman_charm_unique[item.sno_id] = true
+        end
+    end
+    settings.talisman_charm_set = {}
+    for _, item in pairs(set_charm_items) do
+        local cb = 'charm_set_' .. tostring(item.sno_id)
+        if gui.elements[cb] and gui.elements[cb]:get() then
+            settings.talisman_charm_set[item.sno_id] = true
+        end
+    end
+    settings.talisman_seal_mythic = {}
+    for _, item in pairs(mythic_seal_items) do
+        local cb = 'seal_mythic_' .. tostring(item.sno_id)
+        if gui.elements[cb] and gui.elements[cb]:get() then
+            settings.talisman_seal_mythic[item.sno_id] = true
+        end
+    end
+end
+
+function settings:update_settings(force)
     settings.enabled = gui.elements.main_toggle:get()
     settings.town_choice = town.option_to_id[gui.elements.town_choice:get()] or town.default
     settings.use_keybind = gui.elements.use_keybind:get()
@@ -137,45 +220,9 @@ function settings:update_settings()
     settings.ancestral_unique_filter = gui.elements.ancestral_unique_filter_toggle:get()
     settings.ancestral_filter        = gui.elements.ancestral_filter_toggle:get()
     settings.ancestral_affix_count   = gui.elements.ancestral_affix_count_slider:get()
-    settings.ancestral_affix = {}
-    for _, affix_type in pairs(affix_types) do
-        local item_type = affix_type.name
-        if not item_type:match('talisman') then
-            settings.ancestral_affix[item_type] = {}
-            for _, affix in pairs(affix_type.data) do
-                local cb = item_type .. '_affix_' .. tostring(affix.sno_id)
-                if gui.elements[cb] and gui.elements[cb]:get() then
-                    settings.ancestral_affix[item_type][affix.sno_id] = true
-                end
-            end
-        end
-    end
     settings.path_angle = gui.elements.explorer_path_angle_slider:get()
-    settings.ancestral_unique = {}
-    for _,items in ipairs(unique_selection_lists) do
-        for _,item in pairs(items) do
-            local checkbox_name = 'unique_' .. tostring(item.sno_id)
-            if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
-                settings.ancestral_unique[item.sno_id] = true
-            end
-        end
-    end
-    settings.ancestral_mythic = {}
-    for _,item in pairs(mythic_items) do
-        local checkbox_name = 'mythic_' .. tostring(item.sno_id)
-        if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
-            settings.ancestral_mythic[item.sno_id] = true
-        end
-    end
     settings.mythic_form_filter = gui.elements.mythic_form_filter_toggle:get()
     settings.mythic_form_other = gui.elements.mythic_form_other:get()
-    settings.mythic_form_keep = {}
-    for _,item in pairs(unique_items) do
-        local checkbox_name = 'mythic_form_' .. tostring(item.sno_id)
-        if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
-            settings.mythic_form_keep[item.sno_id] = true
-        end
-    end
     settings.stash_socketables = gui.elements.stash_socketables:get()
     settings.stash_consumables = gui.elements.stash_consumables:get()
     settings.stash_keys = gui.elements.stash_keys:get()
@@ -197,47 +244,12 @@ function settings:update_settings()
     settings.talisman_seal_action        = gui.elements.talisman_seal_action:get()
     settings.talisman_seal_affix_filter  = gui.elements.talisman_seal_affix_filter_toggle:get()
     settings.talisman_seal_affix_count   = gui.elements.talisman_seal_affix_count_slider:get()
-    settings.talisman_seal_affix         = {}
     settings.talisman_charm_action       = gui.elements.talisman_charm_action:get()
     settings.talisman_charm_affix_filter = gui.elements.talisman_charm_affix_filter_toggle:get()
     settings.talisman_charm_affix_count  = gui.elements.talisman_charm_affix_count_slider:get()
-    settings.talisman_charm_affix        = {}
-    for _, affix_type in pairs(affix_types) do
-        local item_type = affix_type.name
-        if item_type:match('talisman') then
-            local tbl = {}
-            for _, affix in pairs(affix_type.data) do
-                local cb = item_type .. '_affix_' .. tostring(affix.sno_id)
-                if gui.elements[cb] and gui.elements[cb]:get() then tbl[affix.sno_id] = true end
-            end
-            if item_type == 'talisman_seal'  then settings.talisman_seal_affix  = tbl end
-            if item_type == 'talisman_charm' then settings.talisman_charm_affix = tbl end
-        end
-    end
     settings.talisman_charm_unique_filter = gui.elements.talisman_charm_unique_filter_toggle:get()
-    settings.talisman_charm_unique = {}
-    for _, item in pairs(unique_charm_items) do
-        local cb = 'charm_unique_' .. tostring(item.sno_id)
-        if gui.elements[cb] and gui.elements[cb]:get() then
-            settings.talisman_charm_unique[item.sno_id] = true
-        end
-    end
     settings.talisman_charm_set_filter = gui.elements.talisman_charm_set_filter_toggle:get()
-    settings.talisman_charm_set = {}
-    for _, item in pairs(set_charm_items) do
-        local cb = 'charm_set_' .. tostring(item.sno_id)
-        if gui.elements[cb] and gui.elements[cb]:get() then
-            settings.talisman_charm_set[item.sno_id] = true
-        end
-    end
     settings.talisman_seal_mythic_filter = gui.elements.talisman_seal_mythic_filter_toggle:get()
-    settings.talisman_seal_mythic = {}
-    for _, item in pairs(mythic_seal_items) do
-        local cb = 'seal_mythic_' .. tostring(item.sno_id)
-        if gui.elements[cb] and gui.elements[cb]:get() then
-            settings.talisman_seal_mythic[item.sno_id] = true
-        end
-    end
     settings.talisman_tab_x             = gui.elements.talisman_tab_x:get()
     settings.talisman_tab_y             = gui.elements.talisman_tab_y:get()
 
@@ -253,6 +265,11 @@ function settings:update_settings()
         settings.gamble_category = type(selected)=='string' and selected:lower() or 'unknown'
     else
        settings.gamble_category = gui.elements.gamble_non_english:get():lower()
+    end
+    local now = get_time_since_inject()
+    if force == true or not selections_at or now - selections_at >= SELECTION_REFRESH or now < selections_at then
+        selections_at = now
+        settings:update_selections()
     end
 end
 

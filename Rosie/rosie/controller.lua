@@ -96,7 +96,7 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.12';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.13';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
         for _,key in ipairs({'trigger_tasks','trigger_tasks_with_teleport'}) do
@@ -157,7 +157,7 @@ function M.new(cached,conflict)
         -- This only reads widgets/items and updates the census; it never admits
         -- a request or dispatches a worker callback.
         local ok,why=pcall(function()
-            settings:update_settings()
+            settings:update_settings(true) -- QQT_Warpigz_v3: fresh selections
             local player,world=get_local_player(),get_current_world()
             if not player or player:is_dead()~=false then error('waiting for a living player') end
             local zone=world and world:get_current_zone_name()
@@ -206,7 +206,7 @@ function M.new(cached,conflict)
         if not installation_valid() then return false,app.conflict end
         if not enabled() then app.notice='Enable Rosie before starting service.';return false end
         if Movement.status().cleanup_pending or not Movement.release('pickup') then app.notice='Waiting for pickup movement to release.';return false end
-        settings:update_settings()
+        settings:update_settings(true) -- QQT_Warpigz_v3: fresh selections
         local ok,why=life.request('Rosie',nil,true,true)
         app.notice=not ok and 'Cannot start: '..tostring(why) or nil
         return ok,why
@@ -298,7 +298,7 @@ function M.new(cached,conflict)
         if app.actions.stop and app.elements.stop:get() then app.elements.enabled:set(false);app.last_enabled=false;cancel('Cancelled by user');app.notice=nil;return end
         if not displayed then return end
         local current_enabled=enabled()
-        if current_enabled and not app.last_enabled then app.error=nil;app.notice=nil;life.clear_cancel() end
+        if current_enabled and not app.last_enabled then app.error=nil;app.notice=nil;life.clear_cancel();app.pickup_settings.clear_foreign_pauses('Rosie enabled') end -- QQT_Warpigz_v3
         app.last_enabled=current_enabled
         settings:update_settings();require('rosie.private.pickup.src.settings').update()
         if not settings.enabled and life.busy() then life.cancel('Town service disabled') end
@@ -334,7 +334,10 @@ function M.new(cached,conflict)
                 and rawget(_G,'PLUGIN_alfred_the_butler')==town
         end,
         _pending_pulls=function() return town and town.get_pending_pulls() or {} end,
-        enable=function() if not app.active or conflict then return false end;if not installation_valid() then return false end;app.error=nil;app.notice=nil;app.elements.enabled:set(true);if life then life.clear_cancel() end;return true end,
+        enable=function() if not app.active or conflict then return false end;if not installation_valid() then return false end
+            -- QQT_Warpigz_v3: the Rosie enable edge clears other plugins' pickup pauses.
+            if not enabled() and app.pickup_settings then app.pickup_settings.clear_foreign_pauses('Rosie enabled') end
+            app.error=nil;app.notice=nil;app.elements.enabled:set(true);if life then life.clear_cancel() end;return true end,
         disable=function() if not app.active then return false end;installation_valid();app.elements.enabled:set(false);app.last_enabled=false;cancel('Rosie disabled during service');return true end,
         service=app.service,
         stop=function() if not app.active then return false end;installation_valid();app.elements.enabled:set(false);app.last_enabled=false;cancel('Cancelled by user');return true end,

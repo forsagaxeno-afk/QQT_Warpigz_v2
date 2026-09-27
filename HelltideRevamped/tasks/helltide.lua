@@ -840,6 +840,11 @@ local function get_cached_actors()
     return cached_actors
 end
 
+-- QQT_Warpigz_v3: the learned chest atlas (core/hr_atlas.lua) scans this
+-- cached snapshot; the web dashboard reads the remembered chests and target.
+tracker.hr_get_actors = get_cached_actors
+tracker.hr_get_remembered = function() return remembered_chests, remembered_chest_target end
+
 -- ── [maiden helpers — bodies] ──────────────────────────────────────────────
 -- Forward-declared above (alongside the maiden tunables/state). Bodies live
 -- here so they can see the local `get_cached_actors` defined just above.
@@ -1002,10 +1007,13 @@ end
 -- to grid-coverage exploration instead of bouncing INIT ↔ EXPLORE_HELLTIDE).
 local function check_and_load_waypoints()
     tracker.waypoints = {}
+    tracker.waypoints_zone = nil -- QQT_Warpigz_v3
     for _, tp in ipairs(enums.helltide_tps) do
         if utils.player_in_region(tp.region) then
             load_waypoints(tp.file)
             tracker.confirmed_helltide_tp = tp
+            -- QQT_Warpigz_v3: the loop's zone (core/hr_roads.lua, core/hr_fence.lua).
+            tracker.waypoints_zone = tp.name
             return true
         end
     end
@@ -1041,13 +1049,16 @@ local function remember_chest(name, cost, actor)
     local pos = actor:get_position()
     local key = chest_key(name, pos)
     if remembered_chests[key] then
+        -- QQT_Warpigz_v3: seen again (a chest reset drops chests not seen since).
+        remembered_chests[key].seen_at = get_time_since_inject()
         return -- already known
     end
     remembered_chests[key] = {
         name = name,
         cost = cost,
         position = pos,
-        discovered_at = get_time_since_inject()
+        discovered_at = get_time_since_inject(),
+        seen_at = get_time_since_inject(), -- QQT_Warpigz_v3
     }
     console.print(string.format("[CHEST REMEMBER] %s (cost: %d cinders) at (%.1f, %.1f, %.1f) — saving location for a later approach",
         name, cost, pos:x(), pos:y(), pos:z()))
@@ -1258,6 +1269,15 @@ local function log_chest_diagnostics()
     local known, interactable, affordable, in_range, blocked = 0, 0, 0, 0, 0
     for _, actor in pairs(get_cached_actors()) do
         local entry = chest_targets.read(actor)
+        -- QQT_Warpigz_v3: the Season 15 Helltide event skins are unknown; each
+        -- *Helltide*Event* / *_Event_* skin is logged once per session.
+        local lskin = entry and entry.skin:lower()
+        if lskin and (lskin:find("_event_", 1, true) or (lskin:find("helltide", 1, true) and lskin:find("event", 1, true)))
+            and not unknown_chest_skins[entry.skin] then
+            unknown_chest_skins[entry.skin] = true
+            console.print(string.format("[EVENT SKIN] skin=%s interactable=%s dist=%.1f",
+                entry.skin, tostring(entry.interactable), utils.distance_to(entry.position)))
+        end
         if entry then
             local name, cost = chest_targets.classify(entry.skin, enums.chest_types)
             if name then
@@ -1337,44 +1357,53 @@ local function check_events(self)
     -- Priority 1: Cinder chests when player can afford one
     if settings.helltide_chest then
         local current_cinders = get_helltide_coin_cinders()
-        local now_bl = get_time_since_inject()
-        local selected = chest_targets.select(get_cached_actors(), enums.chest_types,
-            get_player_position(), current_cinders, WAYPOINT_MAX_DIST, function(entry)
-                local key = chest_key(entry.name, entry.position)
-                local expiry = chest_temp_blacklist[key]
-                if expiry and expiry > now_bl then return true end
-                chest_temp_blacklist[key] = nil
-                chest_blacklist_data[key] = nil
-                return false
-            end)
-        if selected then
-            found_chest = selected.name
-            found_chest_position = selected.position
-            pre_interact_cinders = nil
-            last_chest_interact_time = -math.huge
-            tracker.clear_key("chest_drop_time")
-            chest_stuck_reset()
-            remembered_chests[chest_key(found_chest, found_chest_position)] = nil
-            console.print(string.format("[HELLTIDE CHEST] Detected %s at dist=%.1f cinders=%d/%d",
-                found_chest, utils.distance_to(found_chest_position), current_cinders, selected.cost))
-            self.current_state = helltide_state.MOVING_TO_HELLTIDE_CHEST
-            return
-        end
+        -- QQT_Warpigz_v3: Farm-mode smart chest order (core/hr_chest_order.lua).
+        -- true: a chest was chosen; false: none is allowed now (the plain
+        -- selection below would ignore the cinder plan); nil: off or failed,
+        -- the plain selection runs (Warplan / WarPigs always).
+        local smart = self:hr_smart_chests()
+        if smart == true then return end
+        if smart == nil then
+            local now_bl = get_time_since_inject()
+            local selected = chest_targets.select(get_cached_actors(), enums.chest_types,
+                get_player_position(), current_cinders, WAYPOINT_MAX_DIST, function(entry)
+                    local key = chest_key(entry.name, entry.position)
+                    local expiry = chest_temp_blacklist[key]
+                    if expiry and expiry > now_bl then return true end
+                    chest_temp_blacklist[key] = nil
+                    chest_blacklist_data[key] = nil
+                    return false
+                end)
+            if selected then
+                found_chest = selected.name
+                found_chest_position = selected.position
+                pre_interact_cinders = nil
+                last_chest_interact_time = -math.huge
+                tracker.clear_key("chest_drop_time")
+                chest_stuck_reset()
+                remembered_chests[chest_key(found_chest, found_chest_position)] = nil
+                console.print(string.format("[HELLTIDE CHEST] Detected %s at dist=%.1f cinders=%d/%d",
+                    found_chest, utils.distance_to(found_chest_position), current_cinders, selected.cost))
+                self.current_state = helltide_state.MOVING_TO_HELLTIDE_CHEST
+                return
+            end
 
-        -- Scan for unaffordable chests in range and remember them
-        scan_and_remember_chests()
+            -- Scan for unaffordable chests in range and remember them
+            scan_and_remember_chests()
 
-        -- Check if we can now afford a previously remembered chest and navigate back
-        local rkey, rentry = find_affordable_remembered_chest()
-        if rkey and rentry then
-            console.print(string.format("[CHEST RECALL] Now have enough cinders (%d/%d) for %s — navigating back to (%.1f, %.1f)",
-                current_cinders, rentry.cost, rentry.name, rentry.position:x(), rentry.position:y()))
-            remembered_chest_target = rkey
-            remembered_chest_long_path_started = false
-            remembered_chest_long_path_ok = false
-            chest_stuck_reset()
-            self.current_state = helltide_state.MOVING_TO_REMEMBERED_CHEST
-            return
+            -- Check if we can now afford a previously remembered chest and navigate back
+            local rkey, rentry = find_affordable_remembered_chest()
+            if rkey and rentry then
+                console.print(string.format("[CHEST RECALL] Now have enough cinders (%d/%d) for %s — navigating back to (%.1f, %.1f)",
+                    current_cinders, rentry.cost, rentry.name, rentry.position:x(), rentry.position:y()))
+                rentry.interacted, rentry.pre_cinders = nil, nil -- QQT_Warpigz_v3: this trip's own interaction
+                remembered_chest_target = rkey
+                remembered_chest_long_path_started = false
+                remembered_chest_long_path_ok = false
+                chest_stuck_reset()
+                self.current_state = helltide_state.MOVING_TO_REMEMBERED_CHEST
+                return
+            end
         end
 
         -- Check if a nearby remembered chest needs fewer cinders than the threshold — if so, stay and farm monsters
@@ -1460,14 +1489,18 @@ local function check_events(self)
     end
 
     -- Priority 4: Nearby events / interactables while patrolling
+    -- QQT_Warpigz_v3: reach from core/hr_mode.lua (Warplan 12 m; Farm 'Event
+    -- radius', fenced to the learned Helltide area).
     if settings.event and utils.do_events() and not tracker.hr_mode.skip_local_events() then
         target = find_closest_target("S04_Helltide_Prop_SoulSyphon_01_Dyn")
-        if target and target:is_interactable() and utils.distance_to(target) < 12 then
+        if target and target:is_interactable() and tracker.hr_mode.event_in_reach(target, utils.distance_to(target))
+            and self:hr_event_engage(target, "S04_Helltide_Prop_SoulSyphon_01_Dyn") then
             self.current_state = helltide_state.MOVING_TO_PYRE
             return
         end
         target = find_closest_target("S04_Helltide_FlamePillar_Switch_Dyn")
-        if target and target:is_interactable() and utils.distance_to(target) < 12 then
+        if target and target:is_interactable() and tracker.hr_mode.event_in_reach(target, utils.distance_to(target))
+            and self:hr_event_engage(target, "S04_Helltide_FlamePillar_Switch_Dyn") then
             self.current_state = helltide_state.MOVING_TO_PYRE
             return
         end
@@ -1619,7 +1652,8 @@ local helltide_task = {
             settings.orb_set_clear(true)
         end
 
-        if loot_guard.busy() then
+        -- QQT_Warpigz_v3 (C6): bounded, see loot_hold below.
+        if self:loot_hold(lp) then
             clear_movement()
             self:note_hold("waiting for Looter to finish")
             return
@@ -1775,6 +1809,10 @@ local helltide_task = {
             -- Tell search_helltide to skip the cached helltide zone (the one
             -- we just gave up on) and cycle through the others.
             tracker.skip_cached_zone = true
+            -- QQT_Warpigz_v3: search restarts its scan from SEARCHING (its
+            -- WAITING_FOR_TELEPORT from our arrival here is stale and would
+            -- teleport straight back into the abandoned zone).
+            tracker.search_restart = true
             -- HLT-3: this recovery owns the trip out; no Alfred with-teleport
             -- round trip may start from inside the trap (see back_to_town).
             tracker.abandoning_zone = true
@@ -1794,6 +1832,7 @@ local helltide_task = {
             and not tracker.tear_event.holds_zone(self.current_state) then
             console.print(string.format("[HELLTIDE] Left helltide zone at (%.1f,%.1f) — navigating back via backtrack",
                 lp and lp:get_position():x() or 0, lp and lp:get_position():y() or 0))
+            self:hr_left_zone(lp and lp:get_position()) -- QQT_Warpigz_v3: learned fence, chest trip cancelled
             if settings.experimental_explorer then
                 helltide_explorer.mark_active_unreachable()
             end
@@ -1809,7 +1848,10 @@ local helltide_task = {
         -- inside a helltide (tasks/alfred.lua, R12). Unreadable status holds at most ~10 s (C1)
         -- and a foreign Alfred pause at most PAUSED_HOLD_MAX (alfred_paused_skip).
         local needs_salvage = false
-        if settings.salvage and not tracker.has_salvaged and not tracker.alfred_paused_skip then
+        -- QQT_Warpigz_v3: nor while Alfred/Rosie refuses or failed the trip
+        -- (stuck, utils.alfred_town_blocked): farm on with full bags.
+        if settings.salvage and not tracker.has_salvaged and not tracker.alfred_paused_skip
+            and not utils.alfred_town_blocked() then
             local available = utils.alfred_available()
             if available == nil then clear_movement(); self:note_hold("Alfred status unreadable"); return end
             if available then
@@ -1906,6 +1948,7 @@ local helltide_task = {
         -- Back in zone: blacklist the exit direction so experimental explorer avoids it,
         -- clear nav state, resume normal exploration.
         if utils.is_in_helltide() then
+            self:hr_left_confirm(true) -- QQT_Warpigz_v3
             console.print("[HELLTIDE] Back in helltide zone — blacklisting exit node, resuming exploration")
             if settings.experimental_explorer then
                 helltide_explorer.mark_active_unreachable()
@@ -1918,6 +1961,7 @@ local helltide_task = {
 
         -- Still outside — navigate toward last known in-zone position using the
         -- existing backtrack path; Batmobile keeps all exploration state intact.
+        self:hr_left_confirm(false) -- QQT_Warpigz_v3: a confirmed exit is learned now
         if last_in_zone_pos then
             navigate_to(last_in_zone_pos)
         elseif BatmobilePlugin then
@@ -2327,8 +2371,16 @@ local helltide_task = {
         end
     end,
 
+    -- QQT_Warpigz_v3: the event actor check_events engaged (self._event_skin
+    -- at self._event_pos), not merely the closest pyre or pillar of either
+    -- skin: with the Farm reach (up to 80 m) a spent pyre nearby would pull
+    -- the bot away. The walk and the whole event are bounded
+    -- (hr_mode.EVENT_WALK_MAX / EVENT_STAY_MAX); given up, it is skipped.
     move_to_pyre = function(self)
-        local pyre = find_closest_target("S04_Helltide_Prop_SoulSyphon_01_Dyn") or find_closest_target("S04_Helltide_FlamePillar_Switch_Dyn")
+        local pyre = self:hr_event_target()
+        if pyre and self:hr_event_timeout(tracker.hr_mode.EVENT_WALK_MAX, "[HELLTIDE] Event not reached in %ds — skipping it") then
+            pyre = nil
+        end
         if pyre then
             local dist = utils.distance_to(pyre)
             if dist > 2 then
@@ -2339,12 +2391,17 @@ local helltide_task = {
             end
         else
             clear_movement()
+            self:hr_event_done()
             self.current_state = helltide_state.EXPLORE_HELLTIDE
         end
     end,
 
     interact_pyre = function(self)
-        local pyre = find_closest_target("S04_Helltide_Prop_SoulSyphon_01_Dyn") or find_closest_target("S04_Helltide_FlamePillar_Switch_Dyn")
+        local pyre = self:hr_event_target()
+        -- QQT_Warpigz_v3: an interaction that never takes is bounded too.
+        if pyre and self:hr_event_timeout(tracker.hr_mode.EVENT_STAY_MAX, "[HELLTIDE] Event still running after %ds — moving on") then
+            pyre = nil
+        end
         if pyre then
             if pyre:is_interactable() then
                 interact_object(pyre)
@@ -2353,12 +2410,16 @@ local helltide_task = {
             end
         else
             clear_movement()
+            self:hr_event_done()
             self.current_state = helltide_state.EXPLORE_HELLTIDE
         end
     end,
 
     stay_near_pyre = function(self)
-        local pyre = find_closest_target("S04_Helltide_Prop_SoulSyphon_01_Dyn") or find_closest_target("S04_Helltide_FlamePillar_Switch_Dyn")
+        local pyre = self:hr_event_target()
+        if pyre and self:hr_event_timeout(tracker.hr_mode.EVENT_STAY_MAX, "[HELLTIDE] Event still running after %ds — moving on") then
+            pyre = nil
+        end
         if pyre then
             if pyre:is_interactable() then
                 self.current_state = helltide_state.INTERACT_PYRE
@@ -2368,7 +2429,47 @@ local helltide_task = {
             end
         else
             clear_movement()
+            self:hr_event_done()
             self.current_state = helltide_state.EXPLORE_HELLTIDE
+        end
+    end,
+
+    hr_event_target = function(self)
+        if not self._event_skin or not self._event_pos then
+            return find_closest_target("S04_Helltide_Prop_SoulSyphon_01_Dyn") or find_closest_target("S04_Helltide_FlamePillar_Switch_Dyn")
+        end
+        return chest_targets.at_position(get_cached_actors(), self._event_skin, self._event_pos)
+    end,
+
+    hr_event_done = function(self)
+        self._event_skin, self._event_pos, self._event_at = nil, nil, nil
+    end,
+
+    -- check_events: engage an event unless it was given up on recently.
+    hr_event_engage = function(self, target, skin)
+        local pos = target:get_position()
+        local now = get_time_since_inject()
+        local key = skin .. math.floor(pos:x()) .. ',' .. math.floor(pos:y())
+        local skip = self._event_skip and self._event_skip[key]
+        if skip and skip > now then return false end
+        self._event_skin, self._event_pos, self._event_at = skin, pos, now
+        return true
+    end,
+
+    -- The engaged event's time is up (limit seconds since it was chosen):
+    -- logged, skipped for hr_mode.EVENT_SKIP_S, true.
+    hr_event_timeout = function(self, limit, fmt)
+        if not self._event_at or get_time_since_inject() - self._event_at <= limit then return false end
+        console.print(string.format(fmt, limit))
+        self:hr_event_skip()
+        return true
+    end,
+
+    hr_event_skip = function(self)
+        if self._event_skin and self._event_pos then
+            self._event_skip = self._event_skip or {}
+            local key = self._event_skin .. math.floor(self._event_pos:x()) .. ',' .. math.floor(self._event_pos:y())
+            self._event_skip[key] = get_time_since_inject() + tracker.hr_mode.EVENT_SKIP_S
         end
     end,
 
@@ -2587,6 +2688,7 @@ local helltide_task = {
             if chest_dist <= 2 then
                 interact_object(chest)
                 mark_chest_opened()
+                self:hr_on_opened('silent', found_silent_chest_position) -- QQT_Warpigz_v3: stats
                 found_silent_chest_position = nil
                 clear_movement()
                 return
@@ -2771,6 +2873,7 @@ local helltide_task = {
                 get_helltide_coin_cinders(), CHEST_POST_OPEN_PAUSE))
             pre_interact_cinders = nil
             mark_chest_opened()
+            self:hr_on_opened(found_chest, found_chest_position, nil, hkey) -- QQT_Warpigz_v3
             found_chest = nil
             found_chest_position = nil
             last_chest_interact_time = -math.huge
@@ -2790,6 +2893,9 @@ local helltide_task = {
                 console.print(string.format("[HELLTIDE CHEST] %s opened (no longer interactable) — holding %.1fs for loot", found_chest, CHEST_POST_OPEN_PAUSE))
                 pre_interact_cinders = nil
                 mark_chest_opened()
+                -- QQT_Warpigz_v3: counted only when we interacted with it.
+                self:hr_on_opened(found_chest, found_chest_position,
+                    {interacted = last_chest_interact_time > -math.huge}, hkey)
                 found_chest = nil
                 found_chest_position = nil
                 last_chest_interact_time = -math.huge
@@ -2873,6 +2979,11 @@ local helltide_task = {
         -- Check we can still afford it
         local current_cinders = get_helltide_coin_cinders()
         if current_cinders < entry.cost then
+            -- QQT_Warpigz_v3: our own interaction paid for it: it opened.
+            if entry.interacted and entry.pre_cinders and current_cinders <= entry.pre_cinders - entry.cost then
+                console.print(string.format("[CHEST RECALL] %s opened (cinders %d->%d)", entry.name, entry.pre_cinders, current_cinders))
+                self:hr_on_opened(entry.name, entry.position, entry, remembered_chest_target)
+            end
             console.print(string.format("[CHEST RECALL] Cinders dropped below %d, aborting return to %s", entry.cost, entry.name))
             remembered_chests[remembered_chest_target] = nil
             remembered_chest_target = nil
@@ -2887,6 +2998,9 @@ local helltide_task = {
         end
 
         local dist = utils.distance_to(entry.position)
+        -- QQT_Warpigz_v3: a better chest (a Mystery seen, a chest reset) may
+        -- replace a smart-order target; never next to the chest (channel).
+        if entry.smart and dist > 25 and self:hr_reconsider() then return end
         local has_batmobile = BatmobilePlugin ~= nil
         local long_path_active = has_batmobile
             and BatmobilePlugin.is_long_path_navigating
@@ -2905,6 +3019,11 @@ local helltide_task = {
             _chest_micropartial_count   = 0
             _chest_micropartial_last_id = 0
             _chest_combat_block_t       = nil
+        elseif entry.route and entry.route.mode ~= 'offroad' then
+            -- QQT_Warpigz_v3: road and backtrack legs have their own watchdog
+            -- (core/hr_roads.lua); the chest may get farther meanwhile.
+            _chest_stuck_t    = now_t
+            _chest_stuck_dist = dist
         elseif dist <= CHEST_INTERACT_RANGE then
             -- At the chest — channeling, not stuck. Refresh the window so
             -- monster-interrupted opens don't blacklist a reachable chest.
@@ -2969,12 +3088,18 @@ local helltide_task = {
                 end
                 _chest_stuck_t    = now_t
                 _chest_stuck_dist = dist
+            elseif entry.route and self:hr_offroad_stuck(entry) then
+                -- QQT_Warpigz_v3: back to the road, then another way to the
+                -- chest (core/hr_roads.lua, at most 3); blacklisted after that.
+                _chest_stuck_t    = now_t
+                _chest_stuck_dist = dist
             else
                 console.print(string.format(
                     "[CHEST RECALL] Stuck near %s (dist=%.1f, no >%.1fm progress in %.1fs) — blacklisting %.0fs and resuming patrol",
                     entry.name, dist, CHEST_STUCK_PROGRESS, now_t - _chest_stuck_t, CHEST_BLACKLIST_DURATION))
                 chest_temp_blacklist[remembered_chest_target] = now_t + CHEST_BLACKLIST_DURATION
                 chest_blacklist_data[remembered_chest_target] = {pos = entry.position, expiry = now_t + CHEST_BLACKLIST_DURATION, name = entry.name}
+                self:hr_trip_failed(entry, remembered_chest_target, 'stuck') -- QQT_Warpigz_v3
                 if has_batmobile and BatmobilePlugin.stop_long_path then
                     BatmobilePlugin.stop_long_path(plugin_label)
                 end
@@ -3007,6 +3132,7 @@ local helltide_task = {
                             entry.name, _chest_micropartial_count, CHEST_MICROPARTIAL_PLEN_MAX, dist, CHEST_BLACKLIST_DURATION))
                         chest_temp_blacklist[remembered_chest_target] = now_t + CHEST_BLACKLIST_DURATION
                         chest_blacklist_data[remembered_chest_target] = {pos = entry.position, expiry = now_t + CHEST_BLACKLIST_DURATION, name = entry.name}
+                        self:hr_trip_failed(entry, remembered_chest_target, 'stuck') -- QQT_Warpigz_v3
                         if has_batmobile and BatmobilePlugin.stop_long_path then
                             BatmobilePlugin.stop_long_path(plugin_label)
                         end
@@ -3023,8 +3149,10 @@ local helltide_task = {
         end
 
         -- Give up if chest has drifted beyond the max range (player moved away during navigation)
-        if dist > REMEMBERED_CHEST_MAX_DIST then
+        -- QQT_Warpigz_v3: a road route (patrol loop) is bounded by the loop instead.
+        if dist > REMEMBERED_CHEST_MAX_DIST and not entry.route then
             console.print(string.format("[CHEST RECALL] %s is too far (%.0f), forgetting it", entry.name, dist))
+            self:hr_trip_failed(entry, remembered_chest_target, 'far') -- QQT_Warpigz_v3: not picked again at once
             remembered_chests[remembered_chest_target] = nil
             remembered_chest_target = nil
             if has_batmobile and BatmobilePlugin.stop_long_path then
@@ -3054,6 +3182,10 @@ local helltide_task = {
             end
         end
 
+        -- QQT_Warpigz_v3: road route: along the patrol loop until the hand-off
+        -- (core/hr_roads.lua); the last stretch uses the recall below.
+        if entry.route and self:hr_road_step(entry, dist) then return end
+
         -- Close range: stop long path and use precision nav
         if dist < 15 then
             if has_batmobile and BatmobilePlugin.stop_long_path then
@@ -3061,6 +3193,9 @@ local helltide_task = {
             end
 
             local chest = chest_targets.at_position(get_cached_actors(), entry.name, entry.position)
+            -- QQT_Warpigz_v3: a learned spot takes any chest of its kind (the
+            -- regular gear type rotates at the same place).
+            if not chest and entry.predicted then chest = self:hr_spot_chest(entry) end
             if chest then
                 -- Chest exists but is no longer interactable — open succeeded.
                 -- Only now is it safe to drop the remembered entry; previously
@@ -3069,6 +3204,7 @@ local helltide_task = {
                 if not chest:is_interactable() then
                     console.print(string.format("[CHEST RECALL] %s opened (no longer interactable) — holding %.1fs for loot", entry.name, CHEST_POST_OPEN_PAUSE))
                     mark_chest_opened()
+                    self:hr_on_opened(entry.name, chest:get_position(), entry, remembered_chest_target) -- QQT_Warpigz_v3
                     if settings.experimental_explorer then
                         helltide_explorer.mark_chest_opened(chest:get_position())
                     end
@@ -3097,6 +3233,9 @@ local helltide_task = {
                         end
                         last_chest_interact_time = now
                         console.print(string.format("[CHEST RECALL] Opening remembered %s", entry.name))
+                        -- QQT_Warpigz_v3: counted as opened (stats) once it is spent or paid.
+                        entry.interacted = true
+                        entry.pre_cinders = entry.pre_cinders or current_cinders
                         interact_object(chest)
                         mark_chest_opened()
                     end
@@ -3108,6 +3247,14 @@ local helltide_task = {
                     navigate_to(chest)
                     return
                 end
+            end
+
+            -- QQT_Warpigz_v3: a learned (predicted) spot without a chest this
+            -- time (2 s within 15 m: the actor list is cached for 1 s): one
+            -- miss for the atlas, then the next target.
+            if entry.predicted and tracker.check_time("remembered_chest_timeout", 2) then
+                self:hr_predicted_miss(entry)
+                return
             end
 
             -- Close but actor not found — chest may have despawned
@@ -3153,6 +3300,7 @@ local helltide_task = {
                     entry.name, RECALL.NO_PROGRESS_SECS, _recall_best_dist, dist, CHEST_BLACKLIST_DURATION))
                 chest_temp_blacklist[remembered_chest_target] = now_t + CHEST_BLACKLIST_DURATION
                 chest_blacklist_data[remembered_chest_target] = {pos = entry.position, expiry = now_t + CHEST_BLACKLIST_DURATION, name = entry.name}
+                self:hr_trip_failed(entry, remembered_chest_target, 'stuck') -- QQT_Warpigz_v3
                 if BatmobilePlugin.stop_long_path then
                     BatmobilePlugin.stop_long_path(plugin_label)
                 end
@@ -3199,6 +3347,7 @@ local helltide_task = {
                             RECALL.FAIL_THRESHOLD, entry.name, CHEST_BLACKLIST_DURATION))
                         chest_temp_blacklist[remembered_chest_target] = now_t + CHEST_BLACKLIST_DURATION
                         chest_blacklist_data[remembered_chest_target] = {pos = entry.position, expiry = now_t + CHEST_BLACKLIST_DURATION, name = entry.name}
+                        self:hr_trip_failed(entry, remembered_chest_target, 'stuck') -- QQT_Warpigz_v3
                         if BatmobilePlugin.stop_long_path then
                             BatmobilePlugin.stop_long_path(plugin_label)
                         end
@@ -3608,6 +3757,7 @@ local helltide_task = {
     credit_yield = function(self, now)
         local last = self._handlers_ran_at
         self._handlers_ran_at = now
+        local why = self.hold_reason -- QQT_Warpigz_v3: named in the resume log
         self.hold_reason, self._hold_since = nil, nil
         local gap = last and (now - last) or 0
         if gap < 0.5 then return end
@@ -3631,14 +3781,53 @@ local helltide_task = {
         elseif self.current_state == helltide_state.MOVING_TO_REMEMBERED_CHEST then
             local entry = remembered_chest_target and remembered_chests[remembered_chest_target]
             pos = entry and entry.position
+            -- QQT_Warpigz_v3: the road route's no-progress window too.
+            if entry and entry.route and tracker.hr_roads then tracker.hr_roads.credit(entry.route, gap) end
         end
         if pos and _chest_stuck_key then
             local d = utils.distance_to(pos)
             if d > _chest_stuck_dist then _chest_stuck_dist = d end
         end
         if gap >= 5 then
-            console.print(string.format("[HELLTIDE] Resumed after %.1fs yield — stuck/no-progress windows paused meanwhile", gap))
+            -- QQT_Warpigz_v3: name the hold ("Looter", or its hold reason).
+            why = why and (why:find("Looter", 1, true) and " (Looter)" or (" (" .. why .. ")")) or ""
+            console.print(string.format("[HELLTIDE] Resumed after %.1fs yield%s — stuck/no-progress windows paused meanwhile",
+                gap, why))
         end
+    end,
+
+    -- QQT_Warpigz_v3 (C6, live 12-39 s waits): the in-Helltide Looter hold
+    -- has its own bound, like search_helltide's loot_hold. Rosie keeps busy
+    -- set across drops, so drops it wants but cannot take (~18 s each) added
+    -- up to one long freeze. The window restarts whenever the bag item count
+    -- rises (a Mystery chest drop picked up item by item is never cut off);
+    -- after 15 s of continuous busy without a new item HR farms on until
+    -- busy drops (logged once). The yield is still credited (C5).
+    -- QQT_Warpigz_v3 (night audit R5): busy drops for a frame between two
+    -- drops, which re-armed the window (and ended a cap) on every drop: 49 s
+    -- continuous waits with 4 untakeable drops. The window and the cap now
+    -- end only after 2 s without busy (Rosie's own per-episode pickup budget
+    -- then rests such drops, so its busy really drops).
+    loot_hold = function(self, lp)
+        local now = get_time_since_inject()
+        if not loot_guard.busy() then
+            self._loot_quiet = self._loot_quiet or now
+            if now - self._loot_quiet >= 2 then
+                self._loot_since, self._loot_items, self._loot_capped = nil, nil, nil
+            end
+            return false
+        end
+        self._loot_quiet = nil
+        local items = lp and lp:get_item_count() or 0
+        if not self._loot_since or items > (self._loot_items or items) then
+            self._loot_since, self._loot_capped = now, nil
+        end
+        self._loot_items = items
+        if self._loot_capped then return false end
+        if now - self._loot_since < 15 then return true end
+        self._loot_capped = true
+        console.print(string.format("[HELLTIDE] Looter busy %.0fs without progress — farming on", now - self._loot_since))
+        return false
     end,
 
     -- C6: a companion hold is published as hold_reason (see main.lua
@@ -3747,12 +3936,14 @@ local helltide_task = {
         self._override_cache_time = nil
         self._override_walk_logged = false
         tracker.waypoints = {}
+        tracker.waypoints_zone = nil -- QQT_Warpigz_v3
         tracker.clear_key("remembered_chest_timeout")
         tracker.clear_key("salvage_return_time")
         maiden_pos = nil
         maiden_reset_cycle()
         helltide_explorer.reset()
         tracker.tear_event.on_reset()
+        if tracker.hr_chest_order then tracker.hr_chest_order.on_reset() end -- QQT_Warpigz_v3
         clear_movement()
     end,
 
@@ -3767,11 +3958,279 @@ local helltide_task = {
         self._bm_session_reset = not preserve_external
         self._handlers_ran_at = nil
         self.hold_reason, self._hold_since, self._hold_logged = nil, nil, nil
+        self._loot_since, self._loot_items, self._loot_capped, self._loot_quiet = nil, nil, nil, nil -- QQT_Warpigz_v3
         self._town_tp_at = nil
         self._abandon_reached_town = nil
         self._trav_cleared_for = nil
+        self._hr_reconsider_at = nil -- QQT_Warpigz_v3
+        self._hr_exit = nil -- QQT_Warpigz_v3
+        self._event_skin, self._event_pos, self._event_at, self._event_skip = nil, nil, nil, nil -- QQT_Warpigz_v3
         tracker.abandoning_zone = nil
-    end
+    end,
+
+    -- ── QQT_Warpigz_v3: smart farm (Farm mode) ───────────────────────────
+    -- Separate functions keep the upvalues of check_events and
+    -- move_to_remembered_chest (both near the LuaJIT margin) unchanged. The
+    -- logic lives in core/hr_chest_order.lua, hr_roads.lua, hr_atlas.lua,
+    -- hr_fence.lua and hr_stats.lua (reached through tracker).
+
+    -- Inputs of core/hr_chest_order.lua pick().
+    hr_smart_ctx = function(self, now)
+        return {
+            actors = get_cached_actors(),
+            remembered = remembered_chests,
+            blacklisted = function(key)
+                local expiry = chest_temp_blacklist[key]
+                return expiry ~= nil and expiry > now
+            end,
+            key_of = chest_key,
+            player = get_player_position(),
+            cinders = get_helltide_coin_cinders(),
+            current = remembered_chest_target,
+            now = now,
+        }
+    end,
+
+    -- check_events Priority 1. true: a chest was chosen (state set); false:
+    -- none is allowed now; nil: the smart order is off or failed.
+    hr_smart_chests = function(self)
+        local order = tracker.hr_chest_order
+        if not order or not order.enabled() then return nil end
+        scan_and_remember_chests()
+        local now = get_time_since_inject()
+        local ok, pick = pcall(order.pick, self:hr_smart_ctx(now))
+        if not ok then
+            order.note_error(pick)
+            return nil
+        end
+        if not pick then return false end
+        self:hr_commit_pick(pick, now)
+        return true
+    end,
+
+    hr_commit_pick = function(self, pick, now)
+        if settings.map_pin and pick.position and utility and utility.set_map_pin
+            and self._hr_pinned ~= pick.key then
+            self._hr_pinned = pick.key
+            pcall(utility.set_map_pin, pick.position)
+        end
+        if pick.kind == 'visible' and (pick.distance or math.huge) <= WAYPOINT_MAX_DIST then
+            found_chest = pick.name
+            found_chest_position = pick.position
+            pre_interact_cinders = nil
+            last_chest_interact_time = -math.huge
+            tracker.clear_key("chest_drop_time")
+            chest_stuck_reset()
+            remembered_chests[pick.key] = nil
+            console.print(string.format("[HELLTIDE CHEST] %s %s at dist=%.1f cinders=%d/%d (smart order, class %d)",
+                pick.opportunistic and "On the way:" or "Detected", pick.name, pick.distance or 0,
+                get_helltide_coin_cinders(), pick.cost, pick.class or -1))
+            self.current_state = helltide_state.MOVING_TO_HELLTIDE_CHEST
+            return
+        end
+        local entry = remembered_chests[pick.key]
+        if not entry then
+            entry = {name = pick.name, cost = pick.cost, position = pick.position, discovered_at = now, seen_at = now}
+            remembered_chests[pick.key] = entry
+        end
+        entry.predicted = pick.predicted or nil
+        entry.spot = pick.spot
+        entry.route = pick.route
+        entry.smart = true
+        entry.interacted, entry.pre_cinders = nil, nil -- this trip's own interaction
+        remembered_chest_target = pick.key
+        remembered_chest_long_path_started = false
+        remembered_chest_long_path_ok = false
+        chest_stuck_reset()
+        console.print(string.format("[CHEST ORDER] Going to %s%s at %.0fm (class %d, %s)", pick.name,
+            pick.predicted and " (learned spot)" or "", pick.distance or 0, pick.class or -1,
+            pick.route and string.format("road %.0fm + %.0fm off-road", pick.route.road or 0, pick.route.offroad or 0)
+                or "direct"))
+        self.current_state = helltide_state.MOVING_TO_REMEMBERED_CHEST
+    end,
+
+    -- While walking to a smart-order target (every 2 s): switch when the
+    -- order says so (better class, reset); hysteresis in hr_chest_order.
+    hr_reconsider = function(self)
+        local order = tracker.hr_chest_order
+        if not order or not order.enabled() then return false end
+        local now = get_time_since_inject()
+        if self._hr_reconsider_at and now - self._hr_reconsider_at < 2 and now >= self._hr_reconsider_at then
+            return false
+        end
+        self._hr_reconsider_at = now
+        local ok, pick = pcall(order.pick, self:hr_smart_ctx(now))
+        if not ok then
+            order.note_error(pick)
+            return false
+        end
+        if not pick or pick.key == remembered_chest_target then return false end
+        console.print(string.format("[CHEST ORDER] Switching to %s (class %d)", pick.name, pick.class or -1))
+        if BatmobilePlugin and BatmobilePlugin.stop_long_path then BatmobilePlugin.stop_long_path(plugin_label) end
+        clear_movement()
+        recall_state_reset()
+        remembered_chest_target = nil
+        self:hr_commit_pick(pick, now)
+        return true
+    end,
+
+    -- A chest trip ended with an open (entry.interacted, or nil entry: the
+    -- cinders were paid). Stats, the atlas spot, the learned road exit.
+    hr_on_opened = function(self, name, pos, entry, key)
+        local order = tracker.hr_chest_order
+        if order and key then pcall(order.release, key) end
+        if entry and not entry.interacted then return end -- spent before we got there
+        local stats, atlas, roads = tracker.hr_stats, tracker.hr_atlas, tracker.hr_roads
+        if stats then pcall(stats.on_chest_opened, name, enums.chest_types[name] or 0) end
+        if atlas and pos and name ~= 'silent' then pcall(atlas.mark_opened, pos, name) end
+        if roads and entry and entry.route then pcall(roads.on_success, entry.route, pos, name) end
+    end,
+
+    -- A smart-order chest trip failed: not picked again at once (60 s
+    -- blacklist, released); a trip that got stuck also marks the chest's
+    -- 4 m cell bad (3 in a Helltide: skipped until it decays, core/hr_roads.lua).
+    hr_trip_failed = function(self, entry, key, kind)
+        if not entry or not entry.smart or not key then return end
+        local expiry = get_time_since_inject() + CHEST_BLACKLIST_DURATION
+        chest_temp_blacklist[key] = expiry
+        chest_blacklist_data[key] = {pos = entry.position, expiry = expiry, name = entry.name}
+        local order, roads = tracker.hr_chest_order, tracker.hr_roads
+        if order then pcall(order.release, key) end
+        if roads and kind == 'stuck' then pcall(roads.record_bad, entry.position) end
+    end,
+
+    -- The chest at a learned spot: any Helltide chest of the spot's kind
+    -- (Mystery / regular) within 4 m; the entry takes its name and cost.
+    hr_spot_chest = function(self, entry)
+        local want_mystery = entry.name == 'usz_rewardGizmo_Uber'
+        local px, py = entry.position:x(), entry.position:y()
+        for _, actor in pairs(get_cached_actors()) do
+            local e = chest_targets.read(actor)
+            if e then
+                local name, cost = chest_targets.classify(e.skin, enums.chest_types)
+                if name and (name == 'usz_rewardGizmo_Uber') == want_mystery then
+                    local dx, dy = e.position:x() - px, e.position:y() - py
+                    if dx * dx + dy * dy <= 16 then
+                        entry.name, entry.cost = name, cost
+                        return actor
+                    end
+                end
+            end
+        end
+        return nil
+    end,
+
+    hr_predicted_miss = function(self, entry)
+        local atlas, order = tracker.hr_atlas, tracker.hr_chest_order
+        if atlas then pcall(atlas.mark_miss, entry.spot or entry.position) end
+        if order then pcall(order.release, remembered_chest_target) end
+        console.print(string.format("[CHEST ORDER] No %s at the learned spot this time — next target", entry.name))
+        remembered_chests[remembered_chest_target] = nil
+        remembered_chest_target = nil
+        tracker.clear_key("remembered_chest_timeout")
+        if BatmobilePlugin and BatmobilePlugin.stop_long_path then BatmobilePlugin.stop_long_path(plugin_label) end
+        clear_movement()
+        recall_state_reset()
+        if BatmobilePlugin then BatmobilePlugin.resume(plugin_label) end
+        self.current_state = helltide_state.EXPLORE_HELLTIDE
+    end,
+
+    -- Road leg of a route (core/hr_roads.lua). true: this tick walked the road.
+    hr_road_step = function(self, entry, dist)
+        local roads, route = tracker.hr_roads, entry.route
+        if not roads or type(route) ~= 'table' or route.mode == 'offroad' then return false end
+        if route.mode == 'road' and dist < 20 then
+            route.mode = 'offroad' -- the road passes the chest: finish directly
+            return false
+        end
+        local ok, goal = pcall(roads.next_goal, route, get_player_position(), get_time_since_inject())
+        if not ok or route.failed or (goal == nil and route.mode ~= 'offroad') then
+            console.print(string.format("[ROADS] Road route to %s dropped (%s) — direct navigation",
+                entry.name, tostring(ok and (route.failed or 'no road goal') or goal)))
+            entry.route = nil
+            chest_stuck_reset()
+            return false
+        end
+        if goal == nil then
+            console.print(string.format("[ROADS] Leaving the road for %s (%.0fm off-road)", entry.name, route.offroad or 0))
+            chest_stuck_reset()
+            return false
+        end
+        if BatmobilePlugin and BatmobilePlugin.stop_long_path and BatmobilePlugin.is_long_path_navigating
+            and BatmobilePlugin.is_long_path_navigating() then
+            BatmobilePlugin.stop_long_path(plugin_label)
+        end
+        navigate_to(goal)
+        return true
+    end,
+
+    -- Stuck off the road: back to the road and another exit (true), or
+    -- false (the caller blacklists as before).
+    hr_offroad_stuck = function(self, entry)
+        local roads = tracker.hr_roads
+        if not roads or type(entry.route) ~= 'table' then return false end
+        local ok, backtrack = pcall(roads.stuck_offroad, entry.route, get_player_position())
+        if not ok or not backtrack then return false end
+        console.print(string.format("[ROADS] Stuck near %s — back to the road, trying another way (%d/%d)",
+            entry.name, #(entry.route.tried or {}), roads.MAX_EXITS))
+        if BatmobilePlugin and BatmobilePlugin.stop_long_path then BatmobilePlugin.stop_long_path(plugin_label) end
+        recall_state_reset()
+        return true
+    end,
+
+    -- The Helltide buff dropped while the hour runs ("Left helltide zone").
+    -- QQT_Warpigz_v3 (night review): one buff read can miss (a buff-list
+    -- refresh), so nothing is learned yet: the drop is only recorded, and
+    -- hr_left_confirm acts once the buff stayed away for 3 s. A flicker just
+    -- interrupts the trip, as before.
+    hr_left_zone = function(self, pos)
+        local ex = {pos = pos, at = get_time_since_inject()}
+        local order = tracker.hr_chest_order
+        if order and order.enabled() then
+            if self.current_state == helltide_state.MOVING_TO_REMEMBERED_CHEST and remembered_chest_target then
+                ex.key = remembered_chest_target
+                local e = remembered_chests[ex.key]
+                ex.name, ex.cpos = e and e.name, e and e.position
+            elseif self.current_state == helltide_state.MOVING_TO_HELLTIDE_CHEST and found_chest and found_chest_position then
+                ex.key, ex.name, ex.cpos = chest_key(found_chest, found_chest_position), found_chest, found_chest_position
+            end
+        end
+        self._hr_exit = ex
+    end,
+
+    -- RETURN_TO_HELLTIDE tick (back: the buff is back). A confirmed exit: the
+    -- fence learns the spot; a smart-order chest trip that led out is not
+    -- tried again for 3 minutes, and after 2 such trips in a Helltide not at
+    -- all in that Helltide (core/hr_chest_order.lua on_left).
+    hr_left_confirm = function(self, back)
+        local ex = self._hr_exit
+        if not ex then return end
+        local now = get_time_since_inject()
+        if back then
+            self._hr_exit = nil
+            if not ex.done then
+                console.print(string.format("[HELLTIDE] Helltide buff back after %.1fs — a buff flicker, not counted as leaving the zone",
+                    math.max(0, now - ex.at)))
+            end
+            return
+        end
+        if ex.done or (now - ex.at < 3 and now >= ex.at) then return end
+        ex.done = true
+        local fence, order = tracker.hr_fence, tracker.hr_chest_order
+        if fence and ex.pos then pcall(fence.on_left, ex.pos) end
+        if not ex.key or not order then return end
+        local expiry = now + 180
+        chest_temp_blacklist[ex.key] = expiry
+        chest_blacklist_data[ex.key] = {pos = ex.cpos, expiry = expiry, name = ex.name}
+        pcall(order.release, ex.key)
+        local okn, n, dropped = pcall(order.on_left, ex.key)
+        if okn and dropped then
+            console.print(string.format("[CHEST ORDER] The trip to %s left the Helltide %d times — skipping it for the rest of this Helltide",
+                tostring(ex.name), n))
+        else
+            console.print(string.format("[CHEST ORDER] The trip to %s left the Helltide — skipping it for 180s", tostring(ex.name)))
+        end
+    end,
 }
 
 on_render(function()

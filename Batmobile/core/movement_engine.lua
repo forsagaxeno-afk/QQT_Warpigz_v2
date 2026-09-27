@@ -75,6 +75,10 @@ engine.pick = function (rule_state_list, ctx)
             utils.debug_log('[mvr] slot=%d skip: disabled', slot)
         elseif not rule.skill_id or rule.skill_id == 0 then
             utils.debug_log('[mvr] slot=%d skip: no skill selected', slot)
+        elseif not helpers.can_cast(rule.skill_id) then
+            -- QQT_Warpigz_v3: a rule whose skill is on cooldown or unequipped
+            -- never wins; the next rule (e.g. Evade) gets its turn.
+            utils.debug_log('[mvr] slot=%d skip: not castable', slot)
         else
             local last = engine.last_fire[slot] or -1
             local throttle = (rule.throttle_ms or 0) / 1000.0

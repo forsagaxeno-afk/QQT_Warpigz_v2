@@ -75,7 +75,7 @@ local function session(opts)
         get_position = function() return s.pos end,
         get_current_speed = function() return 0 end,
         is_dead = function() return false end,
-        get_item_count = function() return 0 end,
+        get_item_count = function() return s.items or 0 end, -- QQT_Warpigz_v3
         get_consumable_items = function() return {} end,
         get_attribute = function() return 0 end,
         get_buffs = function() return s.in_helltide and {{name_hash = HELLTIDE_BUFF}} or {} end,
@@ -107,7 +107,9 @@ local function session(opts)
     env.orbwalker = {set_clear_toggle = function(on) s.orb.clear = on end,
         set_block_movement = function(on) s.orb.block = on end}
     env.os = setmetatable({date = function(fmt, ...)
-        if fmt == '%M' then return string.format('%02d', s.minute) end
+        -- QQT_Warpigz_v3: the Helltide hour is read in UTC (core/hr_clock.lua).
+        if fmt == '%M' or fmt == '!%M' then return string.format('%02d', s.minute) end
+        if fmt == '!%S' then return '00' end
         return os.date(fmt, ...)
     end}, {__index = os})
     env.BatmobilePlugin = {
@@ -421,7 +423,9 @@ case('Looter hold during RIFT_WAIT_OPEN does not use up the open window (C5/L11)
     eq(s.helltide.current_state, 'RIFT_WAIT_OPEN')
     local looting = true
     s.env.LooteerPlugin.is_actively_looting = function() return looting end
-    s.tick(30) -- Looter holds HR for 30 s (> SPAWN_WAIT_S + 15)
+    -- Looter holds HR for 30 s (> SPAWN_WAIT_S + 15). QQT_Warpigz_v3: a
+    -- productive pickup (one bag item every 5 s); an idle one is bounded.
+    for _ = 1, 6 do s.tick(5); s.items = (s.items or 0) + 1 end
     looting = false
     s.tick(1)
     eq(s.logged('Timed out waiting for the rupture to open'), 0, 'held time not counted')

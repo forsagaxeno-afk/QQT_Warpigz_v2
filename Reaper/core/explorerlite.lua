@@ -99,7 +99,11 @@ local exploration_mode = "unexplored"
 -- Clears the current path and target position
 -- -------------------------------------------------------
 function explorerlite:clear_path_and_target()
-    console.print("Clearing path and target.")
+    -- QQT_Warpigz_v3: log only when something was set (every Alfred yield
+    -- tick used to print this; console spam crashed the host).
+    if target_position ~= nil or #current_path > 0 then
+        console.print("Clearing path and target.")
+    end
     target_position = nil
     current_path    = {}
     path_index      = 1

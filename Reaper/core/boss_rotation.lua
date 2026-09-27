@@ -163,6 +163,10 @@ function rotation.build(settings)
 
     local function add_entry(bd)
         local tier = bd.key_tier or "lair"
+        -- QQT_Warpigz_v3 (RPR-8 for manual rotations): with Reaper > Belial
+        -- Chest off nothing confirms the Ritual of Lies dialog, the reward
+        -- chest never opens and the run cannot complete. Skip Belial.
+        local skipped = bd.id == "belial" and settings.belial_chest_enabled ~= true
         table.insert(rotation.boss_list, {
             id             = bd.id,
             zone_prefix    = bd.zone_prefix,
@@ -170,8 +174,13 @@ function rotation.build(settings)
             key_tier       = tier,
             run_type       = tier,   -- aliased so logs / external API stay readable
             runs_remaining = 0,
+            skipped        = skipped or nil,
         })
-        console.print(string.format("  [%s] %s", tier, bd.label))
+        if skipped then
+            console.print("[Reaper] Belial skipped: Belial Chest automation is off (Reaper > Belial Chest).")
+        else
+            console.print(string.format("  [%s] %s", tier, bd.label))
+        end
     end
 
     if rotation.mode == "manual" then

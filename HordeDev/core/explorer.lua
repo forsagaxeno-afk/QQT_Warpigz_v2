@@ -568,7 +568,7 @@ end
 explorer.check_if_stuck = check_if_stuck
 
 function explorer:set_custom_target(target)
-    console.print("Setting custom target.")
+    -- console.print("Setting custom target.") -- QQT_Warpigz_v3: every movement pulse
     target_position = target
 end
 
@@ -715,7 +715,7 @@ end
 
 
 function explorer:move_to_target()
-    console.print("Moving to target")
+    -- console.print("Moving to target") -- QQT_Warpigz_v3: every movement pulse
     
     -- if handle_stuck_player() then
     --     -- If we've just set a temporary target, we want to move to it immediately
@@ -735,7 +735,7 @@ function explorer:move_to_target()
 end
 
 function explorer:move_to_target_safely()
-    console.print("Moving to target safely")
+    -- console.print("Moving to target safely") -- QQT_Warpigz_v3: every movement pulse
     move_to_target(true)
 end
 

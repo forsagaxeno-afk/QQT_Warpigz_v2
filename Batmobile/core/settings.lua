@@ -56,6 +56,9 @@ local function _read_rule(slot)
     local skill_idx = rw.skill:get() or 0
     if skill_idx > 0 then
         local cat = mrul.skill_catalog[skill_idx]
+        -- QQT_Warpigz_v3: a name-matched skill (Rampage) gets its equipped
+        -- spell id here (cached 10 s); unresolved it stays 0 (not cast).
+        if cat and cat.match and mrul.resolve_named then mrul.resolve_named() end
         if cat then rule.skill_id = cat.id end
     end
     local cp_idx = rw.cast_position:get() or 0

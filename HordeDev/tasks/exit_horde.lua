@@ -27,7 +27,7 @@ local function snapshot()
         local bsk = lower:find("bsk", 1, true) ~= nil
         -- F-H1: a War Plan run is out once it is in any loaded non-Horde
         -- world (Leave Dungeon may not land at the Caldeum gate).
-        return {player=player, zone=zone, id=id, horde=zone==HORDE_ZONE,
+        return {player=player, zone=zone, id=id, horde=zone==HORDE_ZONE, bsk=bsk, name=name,
             outside=zone==EXIT_ZONE and not bsk
                 or (tracker.entry_mode == 'warplan' and zone ~= HORDE_ZONE and not bsk)}
     end)
@@ -118,6 +118,7 @@ local exit_horde_task = {
         self.reset_started, self.leave_attempts, self.next_leave = nil, nil, nil
         self.outside_since, self.outside_id, self.reset_sent_at = nil, nil, nil
         self.reset_settle_since, self.reset_settle_id = nil, nil
+        self.companion_seen = false
         tracker.reset_exit_pending = false
         exit_started, teleport_fired_time = false, nil
     end,
@@ -149,8 +150,16 @@ local exit_horde_task = {
             self.reset_settle_since, self.reset_settle_id = nil, nil
             return
         end
+        -- QQT_Warpigz_v3: a companion town trip (Rosie's automatic service)
+        -- during the RESET took the player on to a town. main.lua holds this
+        -- transaction while the trip is live and extends its deadline; after
+        -- it, any loaded overworld (Sanctuary) world outside BSK counts as
+        -- outside: reset_all_dungeons does not need the Caldeum gate. Without
+        -- a companion trip only the gate counts, as before.
+        local outside = s.outside or (self.companion_seen == true and not s.horde and not s.bsk
+            and s.zone ~= '[sno none]' and s.name:find("Sanctuary", 1, true) == 1)
         if self.reset_sent_at then
-            if not s.outside then
+            if not outside then
                 self:fail_reset("Area changed during reset settling. Check the current activity.")
                 return
             end
@@ -174,7 +183,7 @@ local exit_horde_task = {
             if tracker.entry_mode == 'warplan' then warplan.complete() end
             return
         end
-        if s.outside then
+        if outside then
             if self.outside_id ~= s.id then
                 self.outside_since, self.outside_id = current_time, s.id
             end
