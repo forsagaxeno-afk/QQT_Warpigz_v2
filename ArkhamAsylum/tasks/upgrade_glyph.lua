@@ -4,6 +4,7 @@ local settings = require 'core.settings'
 local tracker = require 'core.tracker'
 local gui = require 'gui'
 local soul_task = require 'tasks.consume_chorons_soul'
+local events = require 'core.qqt_events' -- QQT_Warpigz_v3
 
 local task = {
     name = 'upgrade_glyph',
@@ -50,13 +51,16 @@ local function resolve_attempt(glyphs)
     if not pending then return end
     for _, glyph in pairs(glyphs) do
         if glyph.glyph_name_hash == pending.hash then
-            if glyph:get_level() <= pending.level then
+            local now_level = glyph:get_level()
+            if now_level <= pending.level then
+                events.emit('arkham', 'glyph_upgrade_failed', {hash = pending.hash, level = pending.level}) -- QQT_Warpigz_v3
                 task.failed_count = task.failed_count + 1
                 if pending.level == 45 or task.failed_count >= 5 then
                     task.blacklist[pending.hash] = true
                     task.failed_count = 0
                 end
             else
+                events.emit('arkham', 'glyph_upgraded', {hash = pending.hash, from = pending.level, to = now_level}) -- QQT_Warpigz_v3
                 task.failed_count = 0
             end
             task.pending_attempt = nil

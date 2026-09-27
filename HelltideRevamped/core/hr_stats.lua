@@ -23,6 +23,7 @@
 -- Helltide's close and when the plugin is switched off.
 local clock = require "core.hr_clock"
 local store = require "core.hr_store"
+local events = require "core.qqt_events" -- QQT_Warpigz_v3
 
 local M = {
     FILE = 'learned/stats.txt',
@@ -187,6 +188,9 @@ function M.close_helltide(now)
     st.last_closed, st.last_closed_at = h, now
     st.dirty = true
     M.save(now)
+    events.emit('helltide', 'helltide_done', {hour = h.hour_id, zone = h.zone, earned = h.earned, spent = h.spent,
+        lost = h.lost, chests = h.chests, mystery = h.mystery, deaths = h.deaths, tears = h.tears,
+        secs = h.secs}) -- QQT_Warpigz_v3
     return h
 end
 
@@ -282,6 +286,7 @@ end
 -- ── events ───────────────────────────────────────────────────────────────
 -- QQT_Warpigz_v3: `pos` (optional) records the chest in M.opened.
 function M.on_chest_opened(name, cost, pos)
+    events.emit('helltide', 'chest_opened', {name = name, cost = cost}) -- QQT_Warpigz_v3
     if name == 'silent' then add('silent', 1) return end
     if type(cost) == 'number' and cost > 0 then add('chests', 1) end
     if name == M.MYSTERY then add('mystery', 1) end
@@ -297,8 +302,8 @@ function M.on_chest_opened(name, cost, pos)
     while #list > M.OPENED_MAX do table.remove(list, 1) end
 end
 
-function M.on_death() add('deaths', 1) end
-function M.on_tear_done() add('tears', 1) end
+function M.on_death() add('deaths', 1); events.emit('helltide', 'death', {}) end -- QQT_Warpigz_v3
+function M.on_tear_done() add('tears', 1); events.emit('helltide', 'tear_done', {}) end -- QQT_Warpigz_v3
 
 function M.reset_alltime()
     M.alltime = counters()

@@ -7,6 +7,7 @@ local settings = require 'rosie.private.town.core.settings'
 local tracker = require 'rosie.private.town.core.tracker'
 local explorerlite = require 'rosie.private.town.core.explorerlite'
 local vendor = require 'rosie.private.town.core.vendor'
+local events = require 'rosie.private.qqt_events' -- QQT_Warpigz_v3
 local task = require('rosie.private.town.tasks.base').new_task()
 local plugin_label = 'alfred_the_butler'
 local state
@@ -261,6 +262,7 @@ end
 local ITEM_WAIT,MAX_SKIPS=8,3
 local function received(p,how)
     log('Deposited '..p.name..' (sno='..p.sno..'); '..how)
+    events.emit('rosie','stashed',{name=p.name,sno=p.sno,bag=p.bag}) -- QQT_Warpigz_v3
     state.pending=nil; state.progress=state.time; state.interactions=0; state.deposited=true
     state.proven=true; state.skips=0; state.skip_names=nil
 end

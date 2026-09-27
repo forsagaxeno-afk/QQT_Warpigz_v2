@@ -1,5 +1,6 @@
 local tracker = require 'core.tracker'
 local utils = require 'core.utils'
+local events = require 'core.qqt_events' -- QQT_Warpigz_v3
 local reward_phase = {}
 local LOOT_QUIET_SECONDS = 3
 local REWARD_GRACE_SECONDS = 45
@@ -111,6 +112,7 @@ reward_phase.observe = function ()
     if dead_boss and not tracker.boss_kill_time and not dismissed then
         tracker.boss_kill_time = get_time_since_inject()
         tracker.kill_dismissed_at = nil
+        events.emit('wondercity', 'boss_killed', {name = boss_name}) -- QQT_Warpigz_v3
         console.print(string.format('[WonderCity:finish] boss death observed (%s, zone %s); waiting for reward chest',
             tostring(boss_name), tostring(select(2, pcall(function() return get_current_world():get_current_zone_name() end)))))
     end
@@ -149,6 +151,7 @@ reward_phase.active = function ()
 end
 
 reward_phase.mark_opened = function (reason)
+    if not tracker.done then events.emit('wondercity', 'undercity_reward', {reason = reason}) end -- QQT_Warpigz_v3
     tracker.done = true -- reward opened; not permission for an immediate exit
     tracker.reward_opened_time = get_time_since_inject()
     tracker.loot_quiet_since = nil

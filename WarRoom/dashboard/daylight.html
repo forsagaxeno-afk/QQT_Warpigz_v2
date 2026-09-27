@@ -1,0 +1,84 @@
+<!doctype html>
+<!-- QQT_Warpigz_v3: WarRoom suite dashboard, "Daylight" theme (light HUD).
+     Open index.html from disk (double-click); it opens the last chosen theme.
+     Layout and logic are shared with forge.html and console.html (base.css,
+     app.js); this page only sets the theme. Reads suite_data.js from this folder
+     every write_every s (min 5 s). No server, no internet, no external files. -->
+<html lang="en" data-wr-theme="daylight">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WarRoom — Live</title>
+<link rel="stylesheet" href="base.css">
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f3f1ed; --panel: #ffffff; --panel2: #f7f5f2; --line: #e4e0d9; --line2: #d3cdc3;
+  --ink: #1d2025; --ink2: #3a3f47; --muted: #62666d; --dim: #7d8086; --red: #b3121b; --char: #2a2d33; --gold: #b7791f;
+  --head: #1d2025; --headink: #f3f1ed;
+  --sys: system-ui, "Segoe UI", Roboto, sans-serif;
+  --body-font: 14px/1.45 var(--sys); --ctl-font: 13px/1.3 var(--sys); --pill-font: var(--sys);
+  --num-font: "Bahnschrift", "DIN Alternate", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+  --cap-font: 700 10.5px/1.3 var(--sys); --cap-track: .14em; --h1-font: 700 17px/1.2 var(--sys); --h1-track: .02em;
+  --tab-font: 650 12px/1 var(--sys); --tab-track: .08em; --title-font: 700 22px/1.2 var(--sys); --big-font: 600 32px/1.05 var(--num-font);
+  --kpi-size: 26px; --name-font: 650 14.5px/1.3 var(--sys); --cnt-font: 600 22px/1 var(--num-font); --th-font: 700 10px/1.2 var(--sys);
+  --radius: 6px; --radius-sm: 4px; --shadow: 0 1px 2px rgba(29,32,37,.06), 0 2px 8px rgba(29,32,37,.04); --sw-shape: none;
+  --link: var(--red); --focus: var(--red); --ctl-bg: var(--panel); --ctl-hover: #4a4f58;
+  --accent: var(--red); --accent-fill: var(--char); --on-accent: #ffffff; --accent-soft: rgba(179,18,27,.08); --accent-ink: var(--red);
+  --hero: var(--ink); --good: #16803c; --good-line: rgba(22,128,60,.4); --warn: #9a620f; --warn-line: rgba(183,121,31,.5);
+  --bad: #b3121b; --bad-line: rgba(179,18,27,.45); --bad-soft: rgba(179,18,27,.08);
+  --sw-bg: var(--bg); --tab-bg: var(--panel); --chip-bg: #ebe7e0; --banner-bg: var(--panel); --banner-bad: rgba(179,18,27,.06);
+  --now-bg: linear-gradient(rgba(179,18,27,.06), var(--panel) 70%);
+  --track: #ebe7e0; --bar-fill: var(--red); --hover: var(--panel2); --grid: #ebe7e0; --tip-bg: #ffffff;
+  --a-pit: #2456c9; --a-helltide: #c2410c; --a-undercity: #0f8a5f; --a-hordes: #b7791f; --a-bosses: #c0356f; --a-whispers: #6d4fc4; --a-neutral: #cfc9bf;
+  --r-mythic: #7a3fb8; --r-unique: #9a7b2f; --r-legendary: #c2570c; --r-rare: #a88a00; --r-magic: #2456c9; --r-common: #8a8c91;
+  --c-gold: #b7791f; --c-xp: #4a4f58;
+}
+body { -webkit-font-smoothing: antialiased; }
+.hrsw { border-bottom-color: var(--line); }
+.hrsw .hrsw-lbl { color: var(--muted); }
+.hrsw .hrsw-seg { background: var(--track); border: 1px solid var(--line2); border-radius: 6px; padding: 2px; gap: 2px; }
+.hrsw a { color: var(--ink2); border-radius: 4px; font-weight: 500; background: transparent; }
+.hrsw a + a { border-left: 0; }
+.hrsw a:hover { background: var(--panel); }
+.hrsw a.cur { background: var(--char); color: var(--panel); }
+header.top { background: var(--head); color: var(--headink); border-bottom: 3px solid var(--red); }
+header.top .in { padding-top: 10px; padding-bottom: 10px; }
+.sigil { width: 30px; height: 30px; }
+.brand h1 em { color: #f05b63; }
+.brand .sub { color: #a8a39b; font-size: 12.5px; }
+header.top .pill { background: rgba(255,255,255,.07); color: #d6d2cb; border-color: transparent; border-radius: 3px; text-transform: none; letter-spacing: .02em; font-weight: 500; padding: 6px 10px; }
+header.top .pill.ok { color: #d6d2cb; } header.top .pill.warn { color: #f0c46a; } header.top .pill.bad { color: #ff9a9f; background: rgba(240,91,99,.14); }
+#dot { border-radius: 50%; width: 7px; height: 7px; background: #6c7178; }
+#dot.live { background: #3fbf73; box-shadow: 0 0 0 3px rgba(63,191,115,.2); animation: blink 2s infinite; }
+@keyframes blink { 50% { box-shadow: 0 0 0 5px rgba(63,191,115,.05); } }
+header.top .scope { border-color: rgba(255,255,255,.22); border-radius: 4px; }
+header.top .scope button { background: transparent; color: #e7e3dc; text-transform: none; letter-spacing: .02em; font-weight: 500; padding: 6px 10px; }
+header.top .scope button + button { border-left-color: rgba(255,255,255,.18); }
+header.top .scope button[aria-pressed="true"] { background: #f3f1ed; color: #1d2025; font-weight: 650; }
+.tabbar { margin-top: 14px; box-shadow: var(--shadow); }
+.tabbar a[aria-current="page"] { background: var(--panel); border-bottom-color: var(--red); color: var(--ink); }
+.tabbar .sw { border-radius: 2px; }
+.banner { border-radius: 4px; border: 1px solid var(--line); border-left-width: 3px; font-size: 13px; box-shadow: var(--shadow); }
+.banner::before { content: ""; width: 8px; height: 8px; top: 15px; transform: rotate(45deg); background: var(--dim); }
+.banner.warn::before { background: var(--gold); } .banner.bad::before { background: var(--red); }
+.panel.framed { border-top: 3px solid var(--red); }
+.sw, .feed .k, .legend i { border-radius: 2px; }
+.counter.hero .n { color: var(--ink); }
+.counters { overflow: hidden; }
+.counter.hero:first-child { box-shadow: inset 0 3px 0 var(--red); }
+.acts th, table.t th { background: var(--panel2); padding-top: 7px; }
+.acts .cnt, .kpis .n, .counter .n, .fate .n, .rar .v { font-family: var(--num-font); }
+.plug { background: var(--panel); box-shadow: var(--shadow); }
+.tip { box-shadow: 0 4px 14px rgba(0,0,0,.14); border-left-color: var(--red); }
+.golink a.btn { border-color: var(--char); background: var(--char); color: #fff; }
+.golink a.btn:hover { background: var(--red); border-color: var(--red); color: #fff; }
+.strip i span { color: #fff; }
+</style>
+</head>
+<body>
+<nav class="hrsw" aria-label="Dashboard theme"><div class="hrsw-in"><span class="hrsw-lbl">Theme</span><div class="hrsw-seg"><a href="forge.html" data-theme-file="forge">Forge</a><a href="daylight.html" data-theme-file="daylight" class="cur" aria-current="page">Daylight</a><a href="console.html" data-theme-file="console">Console</a></div></div></nav>
+<div id="app"></div>
+<script src="app.js"></script>
+</body>
+</html>

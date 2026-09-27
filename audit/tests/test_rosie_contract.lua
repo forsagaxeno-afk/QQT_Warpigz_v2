@@ -467,13 +467,17 @@ case('S15 Mythic form of a Unique (rarity 6, same SNO, mythic upgrade affix) is 
     ok(tgui.elements.mythic_form_451091 ~= nil, 'Condemnation is in the Mythic Unique picker')
     tgui.elements.mythic_form_filter_toggle:set(true)
     h.run(1)
+    -- 3.2.4: Always keep mythics (default on) wins over the unchecked action.
+    eq(acts(h.gear(dagger(marked, 0))), false, 'filter on, Always keep mythics on: unchecked Mythic Unique kept')
+    tgui.elements.mythic_always_keep:set(false)
+    h.run(1)
     local function salvages(item) return h.as('Rosie', function() return utils.is_salvage_or_sell(item, SALVAGE) end) end
     eq(salvages(h.gear(dagger(marked, 0))), true, 'filter on: unchecked Mythic Unique is salvaged')
     eq(acts(h.gear({rarity = 8, ancestral = true})), false, 'filter on: iconic mythic still kept')
     tgui.elements.mythic_form_451091:set(true)
     h.run(1)
     eq(acts(h.gear(dagger(marked, 0))), false, 'filter on: checked Mythic Unique is kept')
-    eq(acts(h.gear(dagger(base, 0))), true, 'the checked list never keeps the plain Unique')
+    eq(acts(h.gear(dagger(base, 0))), false, '3.2.4: the checked list keeps the plain Unique too')
     tgui.elements.mythic_form_451091:set(false); tgui.elements.mythic_form_other:set(0)
     h.run(1)
     eq(acts(h.gear(dagger(marked, 0))), false, 'unchecked action Keep: kept')
@@ -482,6 +486,8 @@ case('S15 Mythic form of a Unique (rarity 6, same SNO, mythic upgrade affix) is 
     h.run(1)
     eq(acts(locked), false, 'a locked (favorite) Mythic Unique is never touched')
     tgui.elements.mythic_form_filter_toggle:set(false)
+    h.run(1)
+    tgui.elements.mythic_always_keep:set(true)
     h.run(1)
     eq(acts(h.gear(dagger(marked, 0))), false, 'filter off: back to Always keep mythics')
     -- The real drop is picked up.

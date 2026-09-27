@@ -293,6 +293,8 @@ do
             return assert(loadfile(root .. '/WarPigs/wp_silent_raven.lua', 't', c.env))()
         end
         if name == 'core.tasks.turn_in_rewards' then return {tick = function() end, get_state = function() return 'IDLE' end} end
+        -- QQT_Warpigz_v3 (3.3.0): the suite event bus (a no-op without a collector).
+        if name == 'core.qqt_events' then return assert(loadfile(root .. '/WarPigs/core/qqt_events.lua', 't', c.env))() end
         return previous_require(name)
     end
     c.env.actors_manager.get_all_actors = function() return {} end

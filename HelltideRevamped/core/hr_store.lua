@@ -144,6 +144,14 @@ function M.write(rel, chunks)
     if M.failed[rel] then return false, 'disabled' end
     local path = M.path(rel)
     if not path then return false, 'no root' end
+    return M.write_path(rel, path, chunks)
+end
+
+-- QQT_Warpigz_v3 (3.3.0): the same bounded .tmp write to an absolute path
+-- (WarRoom's dashboard folder); `rel` keys the failure counters and logs.
+function M.write_path(rel, path, chunks)
+    if M.failed[rel] then return false, 'disabled' end
+    if type(path) ~= 'string' or path == '' then return false, 'no path' end
     local ok, text = pcall(table.concat, chunks or {})
     if not ok or type(text) ~= 'string' then return failed(rel, 'bad data') end
     if #text > M.MAX_BYTES then

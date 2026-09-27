@@ -1,9 +1,11 @@
 -- QQT_Warpigz_v3: data file for the offline web dashboard.
 --
--- The host cannot serve HTTP (no sockets), so the dashboard is a static page
--- (dashboard/index.html, opened from disk; it opens the last chosen theme
--- page: forge.html, daylight.html or console.html) that re-loads the script
--- dashboard/hr_data.js every 5 s. This module rewrites that file every
+-- The host cannot serve HTTP (no sockets), so the dashboard is static pages
+-- that re-load the script hr_data.js every 5 s. 3.3.0: the Helltide pages
+-- ship with the WarRoom plugin (WarRoom/dashboard/helltide/); with WarRoom
+-- loaded (_G.QQT_WarRoom.dashboard_dir) the file is written into WarRoom's
+-- dashboard folder, else into HelltideRevamped/dashboard/ as before. This
+-- module rewrites that file every
 -- 'Dashboard update (s)' seconds (5-60, default 10) while 'Web dashboard' is
 -- on and the plugin is enabled:  window.HR_DATA = {...};
 -- The payload is bounded to 256 KB (the map layers are cut first).
@@ -26,6 +28,7 @@ local enums = require "data.enums"   -- QQT_Warpigz_v3
 
 local M = {
     FILE = 'dashboard/hr_data.js',
+    WARROOM_FILE = 'hr_data.js', -- QQT_Warpigz_v3 (3.3.0): inside _G.QQT_WarRoom.dashboard_dir
     MAX_BYTES = 256 * 1024,
     TRAIL_MAX = 300,
     TRAIL_EVERY = 5,
@@ -300,8 +303,35 @@ function M.build(now, player_pos, layers)
     return 'window.HR_DATA=' .. text .. ';\n'
 end
 
+-- QQT_Warpigz_v3 (3.3.0): the WarRoom plugin publishes
+-- _G.QQT_WarRoom = {dashboard_dir = <its dashboard folder>}; the Helltide
+-- pages live there, so hr_data.js is written next to them. nil: no WarRoom
+-- (the file goes to HelltideRevamped/dashboard/ as before).
+function M.warroom_path()
+    local ok, path = pcall(function()
+        local room = rawget(_G, 'QQT_WarRoom')
+        local dir = type(room) == 'table' and room.dashboard_dir or nil
+        if type(dir) ~= 'string' or dir == '' then return nil end
+        local last = dir:sub(-1)
+        if last ~= '/' and last ~= '\\' then dir = dir .. (dir:find('\\', 1, true) and '\\' or '/') end
+        return dir .. M.WARROOM_FILE
+    end)
+    if ok then return path end
+    return nil
+end
+
+-- QQT_Warpigz_v3 (3.3.0): with WarRoom loaded and enabled, the Helltide tab is fed
+-- even when the 'Web dashboard' option is off. `enabled` is WarRoom's own
+-- Enable toggle (WarRoom/main.lua publishes it at load and on every pulse):
+-- only an explicit true builds the file, so WarRoom switched off costs nothing.
+local function warroom_on()
+    local ok, w = pcall(function() return rawget(_G, 'QQT_WarRoom') end)
+    return ok and type(w) == 'table' and w.enabled == true and type(w.dashboard_dir) == 'string'
+end
+M.warroom_on = warroom_on
+
 function M.tick(now, player_pos, in_helltide)
-    if settings.dashboard ~= true then return false end
+    if settings.dashboard ~= true and not warroom_on() then return false end
     if in_helltide and player_pos and (not st.trail_at or now - st.trail_at >= M.TRAIL_EVERY or now < st.trail_at) then
         st.trail_at = now
         local x, y = atlas.xyz(player_pos)
@@ -324,7 +354,10 @@ function M.tick(now, player_pos, in_helltide)
         text = nil
     end
     if not text then return false end
-    local ok = store.write(M.FILE, {text})
+    local ok
+    local target = M.warroom_path() -- QQT_Warpigz_v3 (3.3.0)
+    if target then ok = store.write_path('WarRoom/dashboard/' .. M.WARROOM_FILE, target, {text})
+    else ok = store.write(M.FILE, {text}) end
     if ok then st.writes = st.writes + 1 end
     return ok
 end

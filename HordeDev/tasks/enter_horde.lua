@@ -17,6 +17,7 @@ function task:fail(message)
     self.entry_phase,self.entry_error="FAULT",message
     tracker.horde_entry_pending=true
     console.print("[enter_horde] "..message)
+    tracker.emit('horde_fail', {msg = message}) -- QQT_Warpigz_v3
 end
 
 task.shouldExecute = function()
@@ -62,6 +63,7 @@ function task:Execute()
         self.entry_phase="IN_HORDE"
         start_task:release_movement()
         console.print("[enter_horde] Horde arrival confirmed; entry finished.")
+        tracker.emit_start() -- QQT_Warpigz_v3
         return
     end
     self.inside_since,self.inside_world=nil,nil

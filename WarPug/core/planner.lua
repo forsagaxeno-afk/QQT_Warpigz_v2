@@ -1,4 +1,5 @@
 local settings = require 'core.settings'
+local events = require 'core.qqt_events' -- QQT_Warpigz_v3
 -- Captured at load (never lazily): the route around the Whisper-tree wall.
 -- Without it (older install) walks go straight to the target as before.
 local route_ok, temis_route = pcall(require, 'warpug_temis_route')
@@ -54,6 +55,7 @@ local function halt(reason)
     halt_reason, pending_click, reroll_pending = reason, nil, false
     session.paused_at, session.paused_from = nil, nil
     log(reason .. ' — disable and re-enable WarPug to retry')
+    events.emit('warpug', 'plan_halt', {reason = reason}) -- QQT_Warpigz_v3
     set_state('HALTED')
 end
 local function reset()
@@ -535,6 +537,7 @@ function planner.tick()
         owned_path, pending_click = nil, nil
         if not sent then halt('Confirmation outcome unknown: ' .. tostring(err)); return end
         log('War plan submitted; waiting for quests')
+        events.emit('warpug', 'plan_created', {path = table.concat(valid, ' -> '), rerolls = reroll_count}) -- QQT_Warpigz_v3
         reroll_pending = false
         set_state('DONE_WAIT')
         return
@@ -554,6 +557,7 @@ function planner.tick()
             halt('Reroll click failed'); return
         end
         reroll_count = reroll_count + 1
+        events.emit('warpug', 'plan_reroll', {n = reroll_count}) -- QQT_Warpigz_v3
         pending_click = { t = now(), x = settings.reroll_confirm_x, y = settings.reroll_confirm_y,
             width = get_screen_width(), height = get_screen_height() }
         set_state('REROLL_WAIT1')

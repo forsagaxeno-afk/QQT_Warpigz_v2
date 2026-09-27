@@ -138,7 +138,12 @@ local function add_creator(f)
     e.warplan.deselect_last=function() return table.remove(f.selected)~=nil end
     e.warplan.is_complete=function() return #f.selected==1 end
     e.warplan.confirm=function() f.confirms=f.confirms+1 end
-    local creator_environment=setmetatable({require=function(name)
+    local creator_environment
+    creator_environment=setmetatable({require=function(name)
+        -- QQT_Warpigz_v3 (3.3.0): the suite event bus (a no-op without a collector).
+        if name=='core.qqt_events' then
+            return assert(loadfile(SUITE_ROOT .. '/WarPug/core/qqt_events.lua','t',creator_environment))()
+        end
         assert(name=='core.settings'); return f.psettings
     end},{__index=e})
     f.planner=assert(loadfile(SUITE_ROOT .. '/WarPug/core/planner.lua','t',creator_environment))()

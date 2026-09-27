@@ -1,6 +1,6 @@
 local gui = {}
 local tracker = require "core.tracker" -- QQT_Warpigz_v3: tracker.hr_external (WarPigs drives: Warplan)
-local version = "v2.5.2"
+local version = "v2.6.0"
 local plugin_label = "helltide_revamped"
 
 local function create_checkbox(value, key)
@@ -304,8 +304,9 @@ local function render_live_stats()
         render_overlay_appearance() -- QQT_Warpigz_v3
     end
     e.dashboard:render("Web dashboard",
-        "Writes HelltideRevamped\\dashboard\\hr_data.js. Open HelltideRevamped\\dashboard\\index.html in a browser (from disk, no internet) for live stats, map, history and performance.")
-    if e.dashboard:get() then
+        "Writes hr_data.js for the Helltide map. With WarRoom enabled this is automatic (WarRoom/dashboard): the option only matters without WarRoom") -- QQT_Warpigz_v3 (3.3.0)
+    local room = rawget(_G, 'QQT_WarRoom')
+    if e.dashboard:get() or (type(room) == 'table' and room.enabled == true) then
         e.dashboard_sec:render("  Update every (s)", "How often the dashboard data file is rewritten", 1)
     end
     e.reset_alltime:render("Reset all-time stats", "Clear the all-time totals and the Helltide history", 0)

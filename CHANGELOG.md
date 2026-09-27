@@ -2,6 +2,39 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.0] — 2026-09-27
+
+![QQT Warpigz Suite v3](https://raw.githubusercontent.com/forsagaxeno-afk/QQT_Warpigz_v2/claude/qqt-diablo4-plugins-orchestrator-4439v5/assets/branding/qqt-warpigz-suite-v3.png)
+
+**QQT_Warpigz_v3 3.3.0** adds **WarRoom**, an 11th plugin: one live dashboard for the whole suite, viewable on this PC or from your phone / another PC on your home network or VPN. It works under WarPigs and when you run a single farm plugin by hand. The Helltide map moves into it as a tab.
+
+### Upgrade from 3.2.x
+
+- Copy **all 11 folders** now (new: `WarRoom`). Menu settings are kept. Keep `WarRoom/data/` when you update to keep all-time totals.
+- HelltideRevamped no longer has its own `dashboard` pages; the Helltide map is WarRoom's **Helltide** tab. With WarRoom loaded, HelltideRevamped feeds it automatically.
+
+### Added
+
+- **WarRoom 1.0.0** (menu *Z | War Room | Dashboard*: Enable on, Write every 15 s, reset Session / Today / All time):
+  - **Overview**: what the bot is doing now (activity, step, progress), alerts, activities done / started, gold and XP (per hour), items looted by rarity (Mythics detected properly), deaths, busy time; an activities table with success rate, average and best time; items by rarity, greater affixes and what happened to them (stashed / salvaged / sold / kept); a "what ran when" strip; gold/hr and XP/hr charts; latest events and notable drops.
+  - Tabs: **Helltide** (figures + the map), **Pit**, **Undercity**, **Hordes**, **Bosses**, **Whispers**, **Items** (filters), **Timeline** (filters), **Bot** (health card per plugin, alerts).
+  - **Session / Today / All time** scopes; live / stale / offline banners; three themes (**Forge**, **Daylight**, **Console**) switched at the top.
+  - Open `WarRoom/dashboard/index.html`, or run `WarRoom/server/serve.bat` and open `http://127.0.0.1:8765`. **From your phone or over VPN**: `serve-lan.bat` (read-only, only the dashboard folder, private networks only, access token link; allow the firewall prompt for *Private networks*). Nothing is downloaded from the internet and no account or character names are written.
+- **Event bus** in every plugin (`qqt_events.lua`): plugins report runs, kills, chests, pickups, town trips and Whisper claims. Without WarRoom it does nothing.
+
+### Changed
+
+- WarPigs 1.1.6, WarPug 1.0.15, Batmobile 2.2.1, ArkhamAsylum 2.1.2, HelltideRevamped 2.6.0, HordeDev 2.2.4, Reaper 1.10.3, WonderCity 2.2.3, SilentRaven 0.2.5, Rosie 1.0.16: report their events to WarRoom (no behaviour change).
+
+### Needs a live check
+
+- Gold and XP readers (`get_gold`, experience / paragon) are documented but new to this suite: the page shows "n/a" if the host cannot read them.
+- `serve.ps1` on Windows PowerShell 5.1 and the Windows Firewall prompt in LAN mode.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py --luajit require`: 91 test files × (Lua 5.4 + LuaJIT), 182 runs, 0 failures. New: `test_qqt_events_bus`, `test_qqt_events_joint`, `test_warroom_collector`, `test_warroom_joint` (full War Plan day with every plugin + WarRoom; counters checked against the event log; WarRoom absent / disabled / broken never changes bot behaviour), `test_warroom_dashboard`, `test_warroom_server`, `test_release_layout`. All dashboard pages rendered in headless Chromium (3 themes × 10 tabs × 2 widths) with no errors.
+
 ## [3.2.3] — 2026-09-27
 
 **QQT_Warpigz_v3 3.2.3**: HelltideRevamped 2.5.2 makes the in-game stats overlay readable and configurable. Replace the `HelltideRevamped` folder; settings are kept (the overlay position resets to the new default once).

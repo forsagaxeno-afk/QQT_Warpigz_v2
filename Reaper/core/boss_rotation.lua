@@ -22,6 +22,7 @@
 local enums     = require "data.enums"
 local tracker   = require "core.tracker"
 local materials = require "core.materials"
+local events    = require "core.qqt_events" -- QQT_Warpigz_v3
 
 local rotation = {}
 
@@ -297,6 +298,10 @@ function rotation.consume_run()
 
     tracker.total_kills        = tracker.total_kills + 1
     tracker.current_boss_kills = tracker.current_boss_kills + 1
+    -- QQT_Warpigz_v3: the one point that knows the killed boss (before the rotation advances).
+    local since = tonumber(tracker.altar_activate_time) or 0
+    events.emit('reaper', 'boss_killed', {boss = boss.id, label = boss.label, tier = tier,
+        secs = since > 0 and get_time_since_inject() - since or nil})
 
     refresh_runs_remaining()
 
@@ -333,6 +338,7 @@ function rotation.advance(reason)
         console.print(string.format("[Reaper] Skipping %s.", boss.label))
     end
     if boss then boss.skipped = true end
+    if boss then events.emit('reaper', 'boss_skipped', {label = boss.label, reason = reason}) end -- QQT_Warpigz_v3
     if rotation.external then
         rotation.failed = true
         rotation.failure_reason = reason or "Run could not be completed"

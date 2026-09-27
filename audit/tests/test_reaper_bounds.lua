@@ -378,6 +378,45 @@ case('N8 the tether anchor is the last altar position, never a stale seed or the
     end
 end)
 
+-- 3.3.0 review A7: the reward chest's chest_opened suite event is sent once
+-- per run, AFTER the run state (chest_opened_time, altar_activated) is set,
+-- with the name the Belial check reads anyway: a chest actor that fails on
+-- that read no longer aborts Execute before the summon is confirmed.
+case('A7 chest_opened after the run state, once, no extra host call', function()
+    local e, c = harness()
+    local log = {}
+    e.QQT_Warpigz_events = {seq = 0, ring = {}, max = 512, on_emit = function(ev) log[#log + 1] = ev end}
+    e.require('core.boss_rotation').set_external('duriel')
+    local tracker = e.require('core.tracker')
+    local task = e.require('tasks.open_chest')
+    local chest = c.actor('EGB_Chest_Duriel', e.vec3:new(0, 0, 0))
+    c.actors({chest})
+    local reads = 0
+    function chest:get_skin_name() reads = reads + 1; return 'EGB_Chest_Duriel' end
+    task.Execute()
+    eq(c.interactions, 1, 'chest opened')
+    local n = 0
+    for _, ev in ipairs(log) do if ev.kind == 'chest_opened' then n = n + 1; eq(ev.name, 'EGB_Chest_Duriel', 'name') end end
+    eq(n, 1, 'one chest_opened')
+    eq(reads, 2, 'two name reads per open (finder + Belial check), none for the event')
+    -- A chest whose name read fails after the finder (a stale actor).
+    local e2, c2 = harness()
+    e2.require('core.boss_rotation').set_external('duriel')
+    local tracker2 = e2.require('core.tracker')
+    local task2 = e2.require('tasks.open_chest')
+    local bad = c2.actor('EGB_Chest_Duriel', e2.vec3:new(0, 0, 0))
+    local calls = 0
+    function bad:get_skin_name()
+        calls = calls + 1
+        if calls > 1 then error('stale actor') end
+        return 'EGB_Chest_Duriel'
+    end
+    c2.actors({bad})
+    pcall(task2.Execute)
+    ok(tracker2.chest_opened_time ~= nil, 'the open is recorded before any later name read')
+    eq(tracker2.altar_activated, true, 'the summon is confirmed before any later name read')
+end)
+
 print(string.format('Reaper bounds: %d cases, %d checks, %d failures', cases, checks, #failures))
 if #failures > 0 then error('Reaper bounds failures:\n' .. table.concat(failures, '\n')) end
 print('PASS: test_reaper_bounds (' .. cases .. ' cases)')

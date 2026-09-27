@@ -1,6 +1,6 @@
 <!doctype html>
-<!-- QQT_Warpigz_v3: HelltideRevamped offline dashboard, "Daylight" theme. Open index.html
-     from disk (double-click); it opens the last chosen theme. It reloads hr_data.js from this folder every 5 s;
+<!-- QQT_Warpigz_v3: HelltideRevamped map page inside WarRoom (WarRoom/dashboard/helltide/), "Daylight" theme. Open index.html
+     from disk (double-click); it opens the last chosen theme. It reloads ../hr_data.js (the WarRoom dashboard folder) every 5 s;
      HelltideRevamped rewrites that file while "Web dashboard" is on.
      No server, no internet, no external files. The map is drawn from the
      plugin's own data (patrol road, learned Helltide border, learned chest
@@ -10,6 +10,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HelltideRevamped — Live</title>
+<script>/* QQT_Warpigz_v3: ?embed=1 = shown inside WarRoom's Helltide tab */ if (/[?&]embed=1/.test(location.search)) document.documentElement.className += ' embed';</script>
 <style>
 :root {
   color-scheme: light;
@@ -240,10 +241,14 @@ tbody tr:hover td { background: var(--panel2); }
 .hrsw a:focus-visible { outline: 2px solid var(--red); }
 .hrsw a.cur { background: var(--char); color: var(--panel); font-weight: 600; }
 @media (max-width: 560px) { .hrsw .hrsw-in { padding-left: 12px; padding-right: 12px; justify-content: space-between; } .hrsw a { padding: 4px 9px; } }
+/* QQT_Warpigz_v3: back link to the WarRoom suite dashboard; embedded view hides the bar */
+.hrsw .hrsw-back { margin-right: auto; text-decoration: none; border: 0; background: transparent; padding: 4px 0; }
+.hrsw .hrsw-back:hover { background: transparent; text-decoration: underline; }
+html.embed .hrsw { display: none; }
 </style>
 </head>
 <body>
-<nav class="hrsw" aria-label="Dashboard theme"><div class="hrsw-in"><span class="hrsw-lbl">Theme</span><div class="hrsw-seg"><a href="forge.html" data-theme-file="forge">Forge</a><a href="daylight.html" data-theme-file="daylight" class="cur" aria-current="page">Daylight</a><a href="console.html" data-theme-file="console">Console</a></div></div></nav>
+<nav class="hrsw" aria-label="Dashboard theme"><div class="hrsw-in"><a class="hrsw-back" href="../daylight.html#helltide" target="_top">&lsaquo; Back to WarRoom</a><span class="hrsw-lbl">Theme</span><div class="hrsw-seg"><a href="forge.html" data-theme-file="forge">Forge</a><a href="daylight.html" data-theme-file="daylight" class="cur" aria-current="page">Daylight</a><a href="console.html" data-theme-file="console">Console</a></div></div></nav>
 <header class="mast">
   <div class="in">
     <svg class="mark" viewBox="0 0 30 30" aria-hidden="true"><rect x="4" y="4" width="22" height="22" transform="rotate(45 15 15)" fill="#b3121b"/><path d="M15 7 L20 15 L15 23 L10 15 Z" fill="none" stroke="#f3f1ed" stroke-width="1.8"/><circle cx="15" cy="15" r="2.2" fill="#f3f1ed"/></svg>
@@ -382,7 +387,7 @@ tbody tr:hover td { background: var(--panel2); }
     <section class="panel"><div class="ph"><div class="cap">History</div></div><div class="scroll"><table id="hist"></table></div></section>
     <section class="panel"><div class="ph"><div class="cap">Slowest sections</div><span class="sub">max ms since load</span></div><div class="scroll"><table id="perftab"></table></div></section>
   </div>
-  <div class="foot2">Reads hr_data.js from this folder every 5 s · times in UTC unless marked local</div>
+  <div class="foot2">Reads hr_data.js from the WarRoom dashboard folder every 5 s · times in UTC unless marked local</div>
 </div>
 
 <script>
@@ -1141,7 +1146,7 @@ tbody tr:hover td { background: var(--panel2); }
     if (old) old.parentNode.removeChild(old);
     var s = document.createElement('script');
     s.id = 'hr-data';
-    s.src = 'hr_data.js?ts=' + Date.now();
+    s.src = '../hr_data.js?ts=' + Date.now();
     s.onload = function () {
       // A half-written file throws while loading and leaves HR_DATA as it was.
       var d = window.HR_DATA;
@@ -1170,7 +1175,7 @@ tbody tr:hover td { background: var(--panel2); }
   var links = document.querySelectorAll('.hrsw a');
   for (var i = 0; i < links.length; i++) {
     links[i].addEventListener('click', function () {
-      try { localStorage.setItem('hr_dash_theme', this.getAttribute('data-theme-file')); } catch (e) { /* blocked */ }
+      try { localStorage.setItem('wr_theme', this.getAttribute('data-theme-file')); } catch (e) { /* blocked */ }
     });
   }
 })();

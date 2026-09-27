@@ -1,4 +1,6 @@
 local plugin_label = 'arkham_asylum'
+local events = require 'core.qqt_events' -- QQT_Warpigz_v3
+local settings = require 'core.settings' -- QQT_Warpigz_v3 (pit_end level)
 -- kept plugin label instead of waiting for update_tracker to set it
 
 local tracker = {
@@ -43,6 +45,17 @@ tracker.reset_pit_state = function ()
     tracker.reset_floor_state()
 end
 
+-- QQT_Warpigz_v3: suite event for a finished pit run (left for good, not
+-- for an Alfred trip that resumes it). Read before the floor state resets.
+tracker.emit_pit_end = function ()
+    local now = get_time_since_inject()
+    local level, limit = settings.pit_level, settings.reset_timeout
+    local boss = tracker.boss_dead == true or tracker.boss_kill_time ~= nil
+    events.emit('arkham', 'pit_end', {secs = now - (tracker.pit_start_time or now), boss = boss,
+        glyph = tracker.glyph_done == true, level = level,
+        timeout = not boss and type(limit) == 'number' and now - (tracker.pit_start_time or now) >= limit})
+end
+
 -- Observe transitions before priority selection. Lower-priority task predicates
 -- never run while town/reward tasks win, so they cannot own lifecycle cleanup.
 -- alfred_trip: an Alfred trip is in flight (own request, or Alfred busy).
@@ -73,6 +86,7 @@ tracker.observe_world = function (alfred_trip)
             console.print('[tracker] left ' .. left_pit .. ' for an Alfred trip — the run resumes on return')
         end
         -- Floor state belongs to the pit we may still come back to.
+        if left_pit and tracker.resume_key == nil then tracker.emit_pit_end() end -- QQT_Warpigz_v3
         if tracker.resume_key == nil then tracker.reset_floor_state() end
         tracker.glyph_trigger_time = nil
         return kind
@@ -85,7 +99,10 @@ tracker.observe_world = function (alfred_trip)
         tracker.glyph_trigger_time = nil
         console.print('[tracker] back in ' .. key .. ' — resuming the run')
     elseif kind == 'run' then tracker.reset_pit_state()
-    else tracker.reset_floor_state() end
+    else
+        tracker.reset_floor_state()
+        events.emit('arkham', 'pit_floor', {gen = tracker.generation}) -- QQT_Warpigz_v3
+    end
     return kind
 end
 

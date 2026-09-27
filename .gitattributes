@@ -1,0 +1,5 @@
+# QQT_Warpigz_v3: the WarRoom server scripts are Windows batch/PowerShell files
+# and must keep their CRLF line endings byte for byte (checked by
+# audit/check_release.py and audit/tests/test_warroom_server.lua).
+WarRoom/server/*.bat -text
+WarRoom/server/*.ps1 -text

@@ -34,6 +34,19 @@ local external = {
             busy    = orchestrator.is_busy(),
         }
     end,
+    -- QQT_Warpigz_v3 (3.3.0): a side-effect-free status for observers (the
+    -- WarRoom dashboard). status() runs alfred_idle(), which starts / clears
+    -- WarPigs' own bounded-hold clocks and logs, and is_busy() asks
+    -- SilentRaven / WarPug (and can log once); peek() only reads WarPigs'
+    -- own state: busy = an activity WarPigs enabled is on.
+    peek    = function()
+        return {
+            name    = settings.plugin_label,
+            version = settings.plugin_version,
+            enabled = gui.elements.main_toggle:get() and settings.get_keybind_state(),
+            busy    = orchestrator.activity_on(),
+        }
+    end,
 }
 
 return external

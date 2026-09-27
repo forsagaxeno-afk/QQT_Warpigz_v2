@@ -11,6 +11,7 @@
 -- the ground.
 local pathfinder=require('rosie.movement').for_owner('pickup')
 local Utils=require('rosie.private.pickup.utils.utils')
+local events=require('rosie.private.qqt_events') -- QQT_Warpigz_v3
 local M={}
 local entries={}
 local movement_owned=false
@@ -99,6 +100,11 @@ function M.release_movement(clear)
     movement_owned=false
     movement_key=nil
 end
+-- QQT_Warpigz_v3: suite 'pickup' event. A drop's description is read once,
+-- when Rosie starts on it; the event goes out when a drop Rosie interacted
+-- with in reach leaves the ground list in the same world, or a bag receipt
+-- (or a no-bag take) settles it. M.is_mythic is set by item_manager.
+local announce
 function M.observe(items)
     if type(items)~='table' then M.release_movement(); return false end
     local seen,complete={},true
@@ -119,6 +125,8 @@ function M.observe(items)
     if complete then
         for id in pairs(entries) do
             if not seen[id] then
+                local gone=entries[id] -- QQT_Warpigz_v3: suite event
+                if gone and gone.touched and gone.world==world then announce(gone) end
                 entries[id]=nil;G.retried[id]=nil -- QQT_Warpigz_v3 (Q1)
                 if episode.since then episode.since=get_time_since_inject() end -- QQT_Warpigz_v3: progress
             end
@@ -167,6 +175,25 @@ local function item_name(item)
     local info=Utils.call(item,'get_item_info')
     return tostring(Utils.call(info,'get_display_name') or Utils.call(info,'get_skin_name') or 'item'):gsub('[\r\n]',' '):sub(1,80)
 end
+-- QQT_Warpigz_v3: suite event (see M.observe).
+local function describe(item)
+    local info=Utils.call(item,'get_item_info')
+    local rarity=Utils.call(info,'get_rarity')
+    if type(rarity)~='number' or rarity~=rarity then rarity=nil end
+    local sno=Utils.call(info,'get_sno_id')
+    local mythic=false
+    if rarity and type(M.is_mythic)=='function' then
+        local ok,m=pcall(M.is_mythic,rarity,sno,info); mythic=ok and m==true
+    end
+    local ok,ga=pcall(Utils.get_ga_count,info)
+    return {name=item_name(item),sno=type(sno)=='number' and sno or nil,rarity=rarity,mythic=mythic,
+        ancestral=Utils.call(info,'is_ancestral')==true,ga=ok and type(ga)=='number' and ga or nil}
+end
+announce=function(e)
+    if not e.desc or e.announced then return end
+    e.announced=true
+    events.emit('rosie','pickup',e.desc)
+end
 local function fail_round(e,now,why,item,d)
     e.rounds=e.rounds+1;e.why=why;e.rest_until=now+REST
     -- QQT_Warpigz_v2 (live rc.13): name the drop Rosie could not take.
@@ -186,6 +213,7 @@ local function settle(id,item,why,line,retry,d)
     -- receipt = a bag receipt proved the take (the only verdict that never carries over).
     G.settled[id]={sno=sno_of(item),x=p.x,y=p.y,seen=now,why=why,retry=retry==true,away=d>REACH,
         receipt=why=='taken' and retry~=true}
+    if why=='taken' and entries[id] then announce(entries[id]) end -- QQT_Warpigz_v3: suite event
     entries[id]=nil
     if episode.since and why=='taken' then episode.since=now end -- only a pickup is progress (20 s budget)
     if before==why then return end
@@ -266,6 +294,11 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
         -- QQT_Warpigz_v3 (Q1): gear keeps the rounds; 'nonbag' has no receipt.
         e={rounds=0,rest_until=0,interacts=0,next=0,bag=bag,sno=sno_of(item),reach=0,
             class=(kind==nil or bag=='equipment' or bag=='talisman') and 'gear' or bag and 'small' or 'nonbag'}
+        if events.bus() then -- QQT_Warpigz_v3: suite event (no bus: no describe cost)
+            local ok_desc,desc=pcall(describe,item)
+            e.desc=ok_desc and desc or nil
+        end
+        e.world=G.world
         entries[id]=e
     end
     -- QQT_Warpigz_v3 (Q1): another drop went first meanwhile (it may share
@@ -347,6 +380,7 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
         if e.bag and e.receipt==nil then e.receipt=Utils.sno_count(e.bag,e.sno) end
         if not fight then e.reach=e.reach+1 end -- QQT_Warpigz_v3 (Q1 review): only CLEAR interactions count
         e.interacts=e.interacts+1
+        e.touched=true -- QQT_Warpigz_v3: suite event
         pcall(interact_object,item)
     end
     e.working=true

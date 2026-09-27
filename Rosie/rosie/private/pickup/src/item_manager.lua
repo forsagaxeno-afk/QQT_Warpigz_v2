@@ -42,6 +42,14 @@ local function is_mythic(rarity,sno,info)
         or rarity==6 and MythicForm.is_mythic_sno(sno)
         or MythicForm.is_mythic_form(info,rarity)
 end
+M.is_mythic=is_mythic -- QQT_Warpigz_v3: exported; also handed to pickup's suite event (no require cycle)
+Pickup.is_mythic=is_mythic
+-- QQT_Warpigz_v3 (keep menu): the town keep list a SNO is selected in, or
+-- nil (through the sorter's bound town utils; no require cycle).
+local function town_named_keep(sno)
+    local ok,why=pcall(UniqueSorter.named_keep,sno)
+    return ok and type(why)=='string' and why or nil
+end
 local function equipment_threshold(s,rarity,sno,slot,info)
     local mythic=is_mythic(rarity,sno,info)
     local required,source=0,'common_general'
@@ -115,13 +123,22 @@ function M.check_want_item(item, ignore_distance)
         local skin=Utils.call(info,'get_skin_name')
         return false,'unrecognized item type',type(skin)~='string' and 'deferred' or nil
     end
+    -- QQT_Warpigz_v3 (keep menu, user report: a checked Leoric's Crown): a
+    -- drop selected in a town keep list is taken whatever the GA sliders, the
+    -- minimum rarity or the in-game loot filter say, and the list of Uniques
+    -- Rosie dropped never refuses it (on the ground a Mythic form looks like
+    -- its plain Unique; the bag copy decides).
+    local keep_list=town_named_keep(Utils.call(info,'get_sno_id'))
     -- QQT_Warpigz_v2 local patch (Rosie 1.0.8): a plain Unique Rosie dropped
     -- on purpose is never taken again (fingerprint, else SNO near the drop spot).
-    local listed,dropped,dropped_reason=pcall(Blacklist.match,item,info)
-    if listed and dropped then return false,dropped_reason end
+    if not keep_list then
+        local listed,dropped,dropped_reason=pcall(Blacklist.match,item,info)
+        if listed and dropped then return false,dropped_reason end
+    end
     local inventory,full=Utils.bag_state('equipment')
     if not inventory then return false,'equipment bag unavailable','deferred' end
     if full then return false,'equipment bag full or unreadable' end
+    if keep_list then return true,'accepted: selected in '..keep_list end
     -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): a mythic never takes the
     -- in-game loot-filter refusal (the town rules exempt it the same way).
     local early=Utils.call(info,'get_rarity')

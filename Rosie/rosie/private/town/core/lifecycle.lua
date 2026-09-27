@@ -8,6 +8,7 @@ local tracker=require 'rosie.private.town.core.tracker'
 local settings=require 'rosie.private.town.core.settings'
 local utils=require 'rosie.private.town.core.utils'
 local vendor=require 'rosie.private.town.core.vendor' -- QQT_Warpigz_v3 (Q6)
+local events=require 'rosie.private.qqt_events' -- QQT_Warpigz_v3
 local M={}
 local retired=false
 local held_looter,legacy_resume,held_bat=nil,false,nil
@@ -183,6 +184,13 @@ function M.request(caller,callback,teleport,manual)
         return false,reason
     end
     tracker.external_trigger_callback=callback
+    -- QQT_Warpigz_v3: suite event; the start census is what the trip will sell / salvage.
+    local sell=tonumber(tracker.sell_count) or 0
+    local salvage=(tonumber(tracker.salvage_count) or 0)+(tonumber(tracker.salvage_talisman_count) or 0)
+    tracker.qqt_trip={t=get_time_since_inject(),sell=sell,salvage=salvage}
+    events.emit('rosie','trip_start',{caller=caller,teleport=tracker.teleport==true,sell=sell,salvage=salvage,
+        stash=(tonumber(tracker.stash_count) or 0)+(tonumber(tracker.stash_talisman_count) or 0),
+        inv=tonumber(tracker.inventory_count)})
     return true
 end
 -- kind: nil (a failure), 'cancelled' (user stop, disable, reload: never
@@ -190,6 +198,8 @@ end
 function M.finish(success,reason,kind)
     if finished then return false end
     finished=true
+    local trip_caller,trip=tracker.external_caller,tracker.qqt_trip -- QQT_Warpigz_v3 (read before they clear)
+    tracker.qqt_trip=nil
     local callback=tracker.external_trigger_callback
     tracker.external_trigger_callback=nil
     tracker.external_trigger,tracker.manual_trigger,tracker.trigger_tasks=false,false,false
@@ -217,6 +227,10 @@ function M.finish(success,reason,kind)
     -- disable) closes a panel it left open; controller.lua ticks the close.
     vendor.request_close('trip '..tracker.outcome)
     console.print('[Rosie] '..tracker.outcome..(tracker.failure_reason and ': '..tracker.failure_reason or ''))
+    local done=tracker.outcome=='completed' -- QQT_Warpigz_v3: suite event
+    events.emit('rosie','trip_end',{caller=trip_caller,outcome=tracker.outcome,reason=tracker.failure_reason,
+        secs=trip and get_time_since_inject()-trip.t or nil,sold=done and trip and trip.sell or nil,
+        salvaged=done and trip and trip.salvage or nil})
     if callback then
         local ok,why=pcall(callback,{success=success==true,reason=tracker.failure_reason,request_id=tracker.request_id,
             outcome=tracker.outcome})

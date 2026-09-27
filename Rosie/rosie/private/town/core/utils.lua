@@ -44,6 +44,7 @@ local item_set_charm = {}
 local legacy_unique_items = {}
 local item_mythic = {}
 local item_special_seal = {}
+local iconic_alias, iconic_alias_rows = {}, {} -- QQT_Warpigz_v3 (keep menu): older iconic SNO -> list row SNO
 -- npc_enum / npc_loc_enum / npc_via_loc_enum / walls are sourced from the
 -- active town config (see core/town.lua). __index delegates per-key reads to
 -- whichever town is selected so existing call sites like
@@ -219,7 +220,21 @@ end
 
 -- QQT_Warpigz_v2 (M2): a host error reading one item keeps that item; it
 -- never escapes into the census, a task or the service pulse.
-local kept_logged, kept_logged_n = {}, 0
+-- QQT_Warpigz_v3 3.2.4 (live: the same '[Rosie] Charm kept: ...' line every
+-- 15-50 s): "once" lines are remembered per QQT session in a global table, so
+-- a reload of this module does not reset them.
+function utils.log_once(key, line)
+    local store = rawget(_G, 'QQT_ROSIE_LOGGED_ONCE')
+    if type(store) ~= 'table' or type(store.seen) ~= 'table' then
+        store = {seen = {}, n = 0}
+        rawset(_G, 'QQT_ROSIE_LOGGED_ONCE', store)
+    end
+    if store.seen[key] then return false end
+    if store.n >= 2048 then store.seen, store.n = {}, 0 end
+    store.seen[key], store.n = true, store.n + 1
+    pcall(console.print, line)
+    return true
+end
 function utils.talisman_decision(item)
     local ok, action, why, item_type = pcall(talisman_decide, item)
     if not ok then action, why, item_type = TALISMAN_KEEP, 'host error: ' .. tostring(action):sub(1, 120), nil end
@@ -232,12 +247,11 @@ function utils.talisman_decision(item)
         local category = okt and (kind == 'talisman_seal' and s.talisman_seal_action or kind == 'talisman_charm' and s.talisman_charm_action)
         if category == utils.item_enum.SALVAGE or category == utils.item_enum.SELL then
             local oks, sno = pcall(function() return item:get_sno_id() end)
-            local key = tostring(kind) .. '|' .. tostring(oks and sno) .. '|' .. why
-            if not kept_logged[key] then
-                if kept_logged_n >= 256 then kept_logged, kept_logged_n = {}, 0 end
-                kept_logged[key], kept_logged_n = true, kept_logged_n + 1
+            local key = 'talisman|' .. tostring(kind) .. '|' .. tostring(oks and sno) .. '|' .. why
+            local store = rawget(_G, 'QQT_ROSIE_LOGGED_ONCE')
+            if not (type(store) == 'table' and type(store.seen) == 'table' and store.seen[key]) then
                 local okn, name = pcall(function() return item:get_name() end)
-                console.print(string.format('[Rosie] %s kept: %s (sno=%s): %s', kind == 'talisman_seal' and 'Seal' or 'Charm',
+                utils.log_once(key, string.format('[Rosie] %s kept: %s (sno=%s): %s', kind == 'talisman_seal' and 'Seal' or 'Charm',
                     tostring(okn and name or '?'), tostring(oks and sno or '?'), why))
             end
         end
@@ -414,7 +428,9 @@ local function build_picker_catalog()
         kind=meta.kind or kind
         quality=meta.quality or quality
         if kind=='equipment' and not (catalog_slots[meta.slot] or equipment_types[row.item_type] or utils.mythics[id]) then return end
-        if kind=='equipment' and utils.mythics[id] then quality='mythic' end
+        -- QQT_Warpigz_v3 (keep menu): the S14 re-issued iconic Mythics (catalog
+        -- quality "unique") are Iconic Mythics, never plain Uniques or forms.
+        if kind=='equipment' and (utils.mythics[id] or mythic_form.is_mythic_sno(id)) then quality='mythic' end
         local group=kind=='equipment' and (quality=='unique' or quality=='mythic') and quality
             or kind=='charm' and (quality=='unique' or quality=='mythic') and 'charm'
             or kind=='charm' and quality=='set' and 'set'
@@ -453,6 +469,22 @@ local function build_picker_catalog()
         return result
     end
     item_unique,item_mythic=list('unique'),list('mythic')
+    -- QQT_Warpigz_v3 (keep menu): one Iconic Mythic row per name. The older
+    -- SNO keeps its saved row; the S14 re-issue of the same name (Harlequin
+    -- Crest 2646291 -> 609820) is matched to that row (3.2.4: by name).
+    local by_name,merged={},{}
+    for _,row in ipairs(item_mythic) do
+        local prev=by_name[row.name]
+        if not prev then by_name[row.name]=row
+        elseif mythic_form.is_mythic_sno(prev.sno_id) and not mythic_form.is_mythic_sno(row.sno_id) then
+            iconic_alias[prev.sno_id]=row.sno_id; by_name[row.name]=row
+        else iconic_alias[row.sno_id]=prev.sno_id end
+    end
+    for _,row in ipairs(item_mythic) do if not iconic_alias[row.sno_id] then merged[#merged+1]=row end end
+    iconic_alias_rows={}
+    for old in pairs(iconic_alias) do iconic_alias_rows[#iconic_alias_rows+1]={sno_id=old} end
+    table.sort(iconic_alias_rows,function(a,b) return a.sno_id<b.sno_id end)
+    item_mythic=merged
     item_unique_charm,item_set_charm,item_special_seal=list('charm'),list('set'),list('seal')
 end
 function utils.get_item_affixes()
@@ -479,6 +511,18 @@ function utils.get_mythic_seal_items()
 end
 function utils.get_mythic_items()
     return item_mythic
+end
+-- QQT_Warpigz_v3 (keep menu): S14 re-issue SNOs of an Iconic Mythic whose
+-- list row is the older SNO (not rendered).
+function utils.get_iconic_alias_items()
+    return iconic_alias_rows
+end
+function utils.iconic_row_id(sno)
+    for _=1,4 do
+        if iconic_alias[sno]==nil then break end
+        sno=iconic_alias[sno]
+    end
+    return sno
 end
 function utils.log(msg)
     -- console.print(utils.settings.plugin_label .. ': ' .. tostring(msg))
@@ -663,13 +707,51 @@ function utils.is_max_aspect(affix)
     end
     return false
 end
+-- QQT_Warpigz_v3 (keep menu; 3.2.4 semantics): the named lists of
+-- "1. Always keep". A checked row keeps the plain Unique AND its Mythic form,
+-- Ancestral or not; a checked name also matches another SNO of that name
+-- (the S14 re-issue of an Iconic Mythic).
+--  * 'Unique items I always keep' (unique_<sno>): always used (an empty list
+--    keeps nothing extra; the old "Use unique/mythic filter" switch is gone).
+--  * 'Iconic Mythic items to keep' (mythic_<sno>, one row per name) and
+--    'Mythic Uniques to keep' (mythic_form_<sno>, while "Separate list for
+--    Mythic Uniques" is on): used while "Always keep Mythics" is off.
+local function sno_name(sno)
+    local meta = current_items[sno]
+    return utils.mythics[sno] or mythic_form.MYTHIC_SNOS[sno] or (meta and meta.name) or nil
+end
+local function listed(list, sno)
+    if type(list) ~= 'table' or sno == nil then return false end
+    if list[sno] then return true end
+    local row = utils.iconic_row_id(sno)
+    if row ~= sno and list[row] then return true end
+    local name = sno_name(sno)
+    if not name then return false end
+    for id, on in pairs(list) do
+        if on and sno_name(id) == name then return true end
+    end
+    return false
+end
+function utils.in_unique_keep_list(sno) return listed(utils.settings.ancestral_unique, sno) end
+function utils.in_mythic_form_list(sno) return utils.settings.mythic_form_filter == true and listed(utils.settings.mythic_form_keep, sno) end
+function utils.in_iconic_list(sno) return listed(utils.settings.ancestral_mythic, sno) end
 function utils.is_correct_unique(item)
-    local item_id = item:get_sno_id()
-    return utils.settings.ancestral_unique[item_id] ~= nil or utils.settings.ancestral_mythic[item_id] ~= nil
+    return utils.in_unique_keep_list(item:get_sno_id())
 end
 function utils.is_correct_mythic(item)
     local item_id = item:get_sno_id()
-    return utils.settings.ancestral_mythic[item_id] ~= nil or utils.settings.ancestral_unique[item_id] ~= nil
+    return utils.in_iconic_list(item_id) or utils.in_unique_keep_list(item_id)
+end
+-- The named list a ground drop of this SNO is selected in, or nil. Pickup
+-- takes such a drop whatever its GA sliders or the in-game loot filter say
+-- (on the ground a Mythic form looks like its plain Unique).
+function utils.named_keep(sno)
+    local s=utils.settings
+    if type(sno)~='number' or type(s)~='table' then return nil end
+    if utils.in_unique_keep_list(sno) then return "'Unique items I always keep'" end
+    if s.mythic_always_keep==false and utils.in_mythic_form_list(sno) then return "'Mythic Uniques to keep'" end
+    if s.mythic_always_keep==false and utils.in_iconic_list(sno) then return "'Iconic Mythic items to keep'" end
+    return nil
 end
 function utils.is_correct_unique_charm(item)
     local item_id = item:get_sno_id()
@@ -770,130 +852,174 @@ function utils.pull_protected(item)
     if not ok then return 'unreadable' end
     return why
 end
-classify_equipment = function(item,action)
-    if not utils.can_modify_item(item) then return false,0,false end
-
+-- QQT_Warpigz_v3 3.2.4 (Rosie 1.0.16): item power of a plain Unique, or nil
+-- when the host does not tell it (then no effect).
+local function sane_ip(v) return type(v) == 'number' and v == v and v > 0 and v < 2000 and math.floor(v) or nil end
+function utils.get_item_power(item)
+    local ok, v = pcall(function()
+        local f = item.get_item_power
+        if type(f) == 'function' then return f(item) end
+        return nil
+    end)
+    local ip = ok and sane_ip(v) or nil
+    if ip then return ip end
+    ok, v = pcall(function() return item:get_attribute('Item_Power_Total') end)
+    return ok and sane_ip(v) or nil
+end
+-- QQT_Warpigz_v3 (keep menu; 3.2.4, live: a Mythic Leoric's Crown checked in
+-- the Unique list was salvaged because "Use Mythic Unique filter" with
+-- "unchecked Mythic Uniques = Salvage" decided before "Always keep mythics"
+-- and the Unique list): one decision per item, in the order the menu reads.
+--  1. Always keep: locked items; "Always keep Mythics" (Iconic Mythics incl.
+--     the S14 re-issues, Mythic Uniques, mythic charms/seals); the checked
+--     lists (both forms); plain Uniques with Item Power >= N. With "Always
+--     keep Mythics" off, an unchecked Mythic keeps the Mythic GA rule, then
+--     takes its action (Mythic Uniques: their own action while "Separate list
+--     for Mythic Uniques" is on). Mythics never reach the rules below.
+--  2. In-game loot filter (optional).  3. Junk.  4. Uniques (GA, action).
+--  5. Legendary and lower.
+-- Returns the action (item_enum), the reason, the item class, affix count.
+local KEEP,SALVAGE,SELL=0,1,2
+local function decide(item)
+    if not utils.can_modify_item(item) then
+        local okl,locked=pcall(function() return item:is_locked() end)
+        return KEEP,okl and locked==true and 'locked (favourite)' or nil
+    end
     local item_id = item:get_sno_id()
-
     local item_type = utils.get_item_type(item)
-    if item_type == 'cache' then return false, 0, false end
-    if item_type == 'unknown' then return false, 0, false end
-    if item_type == 'tempering' then return false, 0, false end
+    if item_type == 'cache' or item_type == 'unknown' or item_type == 'tempering' then return KEEP end
     -- QQT_Warpigz_v3 (Q10): a seal or charm is judged by the talisman rules
     -- wherever the host lists it, never by the Legendary equipment action.
     if item_type == 'talisman_seal' or item_type == 'talisman_charm' then
-        return utils.talisman_decision(item) == action, 0, false
+        return utils.talisman_decision(item), nil, 'talisman'
     end
-
     local rarity = item:get_rarity()
-    if not valid_rarity(rarity) then return false,0,false end
-    local is_unique  = rarity == 6
-    -- QQT_Warpigz_v2: an S15 Mythic form keeps the Unique's SNO and rarity 6.
-    -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): S14 re-issued iconic Mythics
-    -- (Mythic modifier forced by definition) are iconic, not forms: the Mythic
-    -- Unique filter never applies to them.
-    local iconic_s14 = mythic_form.is_mythic_sno(item_id)
-    local is_form = rarity==6 and utils.mythics[item_id]==nil and not iconic_s14 and mythic_form.is_mythic_form(item,rarity)
-    local is_mythic  = rarity>=8 or utils.mythics[item_id] ~= nil or iconic_s14 or is_form
+    if not valid_rarity(rarity) then return KEEP,'rarity unreadable' end
+    local s = utils.settings
+    local meta = current_items[item_id]
+    -- Iconic Mythic: rarity 8+, the legacy list, the S14 re-issues (rarity 6,
+    -- Mythic modifier forced by definition) and catalog Mythic equipment.
+    local iconic = rarity>=8 or utils.mythics[item_id]~=nil or mythic_form.is_mythic_sno(item_id)
+        or rarity==6 and meta~=nil and meta.kind=='equipment' and meta.quality=='mythic'
+    -- Mythic Unique: an S14+ Mythic form keeps the Unique's SNO and rarity 6.
+    local is_form = rarity==6 and not iconic and mythic_form.is_mythic_form(item,rarity)
+    local is_unique = rarity==6 and not iconic and not is_form
+    local is_mythic = iconic or is_form
+    local class = iconic and 'Iconic Mythic' or is_form and 'Mythic Unique' or is_unique and 'Unique' or nil
     -- A bag Unique whose affixes cannot be read (or list nothing) may be a
     -- Mythic form: never sold or salvaged.
-    if rarity==6 and not is_mythic and mythic_form.undecided(item,nil) then return false,0,false end
+    if is_unique and mythic_form.undecided(item,nil) then
+        return KEEP,'affixes not readable yet, may be a Mythic Unique',class
+    end
+    -- 1. Always keep
+    if is_mythic and s.mythic_always_keep ~= false then return KEEP,'Mythic (Always keep mythics)',class end
+    if rarity>=6 then
+        if utils.in_unique_keep_list(item_id) then return KEEP,'checked in "Unique items I always keep"',class end
+        if utils.in_iconic_list(item_id) then return KEEP,'checked in "Iconic Mythic items to keep"',class end
+        if utils.in_mythic_form_list(item_id) then return KEEP,'checked in "Mythic uniques to keep"',class end
+    end
+    local need_ip = tonumber(s.unique_ip_keep) or 0
+    if is_unique and need_ip > 0 then
+        local ip = utils.get_item_power(item)
+        if ip and ip >= need_ip then return KEEP,'item power '..ip..' >= '..need_ip,class end
+    end
     local ga_count,ga_readable = utils.get_item_ga_count(item)
-
-    -- QQT_Warpigz_v2: Mythic Unique filter. Checked forms are always kept;
-    -- unchecked ones keep the Mythic GA override, else take their own action.
-    if is_form and utils.settings.mythic_form_filter then
-        if type(utils.settings.mythic_form_keep)=='table' and utils.settings.mythic_form_keep[item_id] then return false,0,false end
-        if not ga_readable then return false,0,false end
-        local need=tonumber(utils.settings.ancestral_mythic_ga_count) or 0
-        if need>0 and ga_count>=need then return false,0,false end
-        return utils.settings.mythic_form_other == action, 0, false
+    if is_mythic then
+        if not ga_readable then return KEEP,'Greater Affixes unreadable',class end
+        local need = tonumber(s.ancestral_mythic_ga_count) or 0
+        if need > 0 and ga_count >= need then
+            return KEEP,string.format("'Also keep Mythics with Greater Affixes' (%d >= %d)",ga_count,need),class
+        end
+        if rarity_conflicts_with_catalog(meta,rarity,true) then return KEEP,'rarity conflicts with the item catalog',class end
+        if is_form and s.mythic_form_filter then
+            return s.mythic_form_other,"'Mythic Uniques not checked' action",class
+        end
+        return s.ancestral_item_mythic,"'Iconic Mythics not checked' action",class
     end
-
-    -- QQT_Warpigz_v2 local patch (H3): "Always keep mythics" (default on; the
-    -- old WarPigz Alfred's mythic_always_keep key) overrides every rule, the
-    -- loot filter included. Switched off, mythics still never take the
-    -- loot-filter or junk action: only the GA, name-list and mythic rules.
-    if is_mythic and utils.settings.mythic_always_keep ~= false then return false, 0, false end
-
-    -- loot filter mode: in-game filter is the sole rule
-    if utils.settings.loot_filter_mode and not is_mythic then
+    -- 2. In-game loot filter: decides the rest of the equipment.
+    if s.loot_filter_mode or s.loot_filter_equipment then
         local ok, filtered = pcall(function() return item:is_filtered_by_loot_filter() end)
-        if ok and filtered==true then return action == utils.item_enum['SALVAGE'], 0, false end
-        return false, 0, false
+        if ok and filtered==true then return SALVAGE,'hidden by the in-game loot filter',class end
+        return KEEP,'the in-game loot filter shows it',class
     end
-
-    -- loot filter equipment mode: in-game filter decides equipment, Rosie handles the rest
-    if utils.settings.loot_filter_equipment and not is_mythic then
-        local ok, filtered = pcall(function() return item:is_filtered_by_loot_filter() end)
-        if ok and filtered==true then return action==utils.item_enum['SALVAGE'],0,false end
-        return false,0,false
+    if not ga_readable then return KEEP,'Greater Affixes unreadable',class end
+    if rarity_conflicts_with_catalog(meta,rarity,false) then
+        return KEEP,'rarity conflicts with the item catalog',class -- metadata never substitutes a destructive rarity decision
     end
-
-    if not ga_readable then return false,0,false end
-
-    local meta=current_items[item_id]
-    if rarity_conflicts_with_catalog(meta,rarity,is_mythic) then
-        return false,0,false -- metadata never substitutes a destructive rarity decision
-    end
-
     local ancestry_ok,is_ancestral=pcall(function() return item:is_ancestral() end)
     local junk_ok,is_junk=pcall(function() return item:is_junk() end)
-    if not ancestry_ok or type(is_ancestral)~='boolean' or not junk_ok or type(is_junk)~='boolean' then return false,0,false end
-
-    -- non-ancestral path
-    if not is_ancestral and not is_mythic then
-        if is_junk then
-            return utils.settings.item_junk == action, 0, false
-        elseif is_unique then
-            return utils.settings.item_unique == action, 0, false
-        else
-            return utils.settings.item_legendary_or_lower == action, 0, false
-        end
+    if not ancestry_ok or type(is_ancestral)~='boolean' or not junk_ok or type(is_junk)~='boolean' then
+        return KEEP,'ancestral or junk flag unreadable',class
     end
-
-    -- ancestral path
-    if is_junk and not is_mythic then
-        return utils.settings.ancestral_item_junk == action, 0, false
+    local kind = is_ancestral and 'Ancestral' or 'Non-Ancestral'
+    -- 3. Junk
+    if is_junk then
+        return is_ancestral and s.ancestral_item_junk or s.item_junk,'marked as junk ('..kind..' junk action)',class
     end
-
-    -- mythic
-    if is_mythic then
-        if utils.settings.ancestral_mythic_ga_count > 0 and ga_count >= utils.settings.ancestral_mythic_ga_count then
-            return false, 0, false  -- GA override: keep
-        end
-        if utils.settings.ancestral_unique_filter and utils.is_correct_mythic(item) then
-            return false, 0, false  -- name filter: keep
-        end
-        return utils.settings.ancestral_item_mythic == action, 0, false
-    end
-
-    -- unique
+    -- 4. Uniques
     if is_unique then
-        if utils.settings.ancestral_unique_ga_count > 0 and ga_count >= utils.settings.ancestral_unique_ga_count then
-            return false, 0, false  -- GA override: keep
+        local need = tonumber(s.ancestral_unique_ga_count) or 0
+        if need > 0 and ga_count >= need then
+            return KEEP,string.format("'Uniques: keep with Greater Affixes' (%d >= %d)",ga_count,need),class
         end
-        if utils.settings.ancestral_unique_filter and utils.is_correct_unique(item) then
-            return false, 0, false  -- name filter: keep
-        end
-        return utils.settings.ancestral_item_unique == action, 0, false
+        return is_ancestral and s.ancestral_item_unique or s.item_unique,
+            string.format('Uniques: %s action (not in a keep list, Greater Affixes %d)',kind,ga_count),class
     end
-
-    -- non-unique, non-mythic (rare/magic/legendary)
-    if utils.settings.ancestral_ga_count > 0 and ga_count >= utils.settings.ancestral_ga_count then
-        if utils.settings.ancestral_filter and utils.settings.ancestral_affix then
+    -- 5. Legendary, Rare, Magic, Common
+    if not is_ancestral then return s.item_legendary_or_lower,'Non-Ancestral action' end
+    if s.ancestral_ga_count > 0 and ga_count >= s.ancestral_ga_count then
+        if s.ancestral_filter and s.ancestral_affix then
             local matched = 0
             for _, affix in pairs(item:get_affixes()) do
                 if utils.is_correct_affix(item_type, affix) then matched = matched + 1 end
             end
-            if matched >= utils.settings.ancestral_affix_count then
-                return false, matched, false
+            if matched >= s.ancestral_affix_count then
+                return KEEP,string.format('Greater Affixes %d and %d checked affixes',ga_count,matched),nil,matched
             end
         else
-            return false, 0, false
+            return KEEP,string.format('Greater Affixes %d >= %d',ga_count,s.ancestral_ga_count)
         end
     end
-    return utils.settings.ancestral_item_legendary == action, 0, false
+    return s.ancestral_item_legendary,'Ancestral action'
+end
+local ACTION_WORD={[KEEP]='Kept',[SALVAGE]='Will salvage',[SELL]='Will sell'}
+local function display_name(item,sno)
+    local ok,n=pcall(function() return item:get_display_name() end)
+    n=ok and type(n)=='string' and (n:gsub('{[^}]*}',''):gsub('^%s+',''):gsub('%s+$','')) or ''
+    if n=='' then
+        local meta=current_items[sno]
+        n=meta and named_item(meta.name) and meta.name or ('sno '..tostring(sno))
+    end
+    return (n:gsub('[\r\n]',' '):sub(1,80))
+end
+-- One console line per distinct decision (SNO, class, action, reason) of a
+-- Unique or Mythic, and of any other item a Greater Affix rule keeps, once per
+-- QQT session (utils.log_once): "[Rosie] Kept Leoric's Crown: checked in
+-- "Unique items I always keep" (Mythic Unique, sno=2647147)".
+local function log_decision(item,action,why,class)
+    if not why then return end
+    -- Other gear: only a Greater Affix keep (not every default action).
+    if class==nil and (action~=KEEP or not why:find('Greater Affixes',1,true)) then return end
+    local ok,sno=pcall(function() return item:get_sno_id() end)
+    local key='decision|'..tostring(ok and sno)..'|'..tostring(class)..'|'..tostring(action)..'|'..why
+    local store=rawget(_G,'QQT_ROSIE_LOGGED_ONCE')
+    if type(store)=='table' and type(store.seen)=='table' and store.seen[key] then return end
+    utils.log_once(key,string.format('[Rosie] %s %s: %s (%s, sno=%s)',ACTION_WORD[action] or 'Kept',display_name(item,ok and sno),
+        why,class or 'item',tostring(ok and sno or '?')))
+end
+-- The town decision for an equipment item: action (Keep / Salvage / Sell),
+-- reason, class, matched affix count. A host error keeps the item.
+function utils.equipment_decision(item)
+    local ok,action,why,class,matched=pcall(decide,item)
+    if not ok then return KEEP,'host error: '..tostring(action):sub(1,120),nil,0 end
+    if action~=SALVAGE and action~=SELL then action=KEEP end
+    if class~='talisman' then pcall(log_decision,item,action,why,class) end
+    return action,why,class,matched or 0
+end
+classify_equipment = function(item,action)
+    local verdict,_,_,matched = utils.equipment_decision(item)
+    if verdict==KEEP then return false,matched,false end
+    return verdict==action,0,false
 end
 function utils.is_mounted()
     local local_player = get_local_player()
@@ -963,8 +1089,34 @@ end
 -- (QQT_Warpigz_v3 review): the sell tally feeds tracker.sell_count, which the
 -- sell step's is_done() reads, so a request census (force 'now') and a change
 -- in the number of talismans recount at once.
-local TALISMAN_INTERVAL = 1
-local talisman_tally = {at = nil, n = nil, salvage = 0, stash = 0, sell = 0}
+local TALISMAN_INTERVAL = 30
+local talisman_tally = {at = nil, n = nil, sig = nil, salvage = 0, stash = 0, sell = 0}
+local function flat(v, out)
+    if type(v) ~= 'table' then out[#out + 1] = tostring(v); return end
+    local keys = {}
+    for k in pairs(v) do keys[#keys + 1] = tostring(k) end
+    table.sort(keys)
+    for _, k in ipairs(keys) do
+        out[#out + 1] = k .. '='
+        local x = v[k]; if x == nil then x = v[tonumber(k)] end
+        flat(x, out)
+    end
+end
+local function talisman_signature(items)
+    local s, out = utils.settings, {}
+    local keys = {}
+    for k in pairs(s) do
+        if type(k) == 'string' and (k:find('^talisman_') or k:find('^loot_filter')) then keys[#keys + 1] = k end
+    end
+    table.sort(keys)
+    for _, k in ipairs(keys) do out[#out + 1] = k .. ':'; flat(s[k], out) end
+    out[#out + 1] = tostring(s.mythic_always_keep) .. tostring(s.skip_favorite)
+    for _, item in pairs(items) do
+        local ok, sno = pcall(function() return item:get_sno_id() end)
+        out[#out + 1] = tostring(ok and sno)
+    end
+    return table.concat(out, ',')
+end
 local census_errors = {}
 local function census_error(why)
     local message = tostring(why)
@@ -1013,9 +1165,11 @@ function utils.update_tracker_count(local_player,force)
     local sell_equipment_counter = sell_counter
     local talisman_items = local_player:get_talisman_items()
     local tally = talisman_tally -- QQT_Warpigz_v3 (Q10)
+    local okg, sig = pcall(talisman_signature, talisman_items)
+    if not okg then sig = nil end
     if force == 'now' or tally.at == nil or now - tally.at >= TALISMAN_INTERVAL or now < tally.at
-        or tally.n ~= #talisman_items then
-        tally.at, tally.n, tally.salvage, tally.stash, tally.sell = now, #talisman_items, 0, 0, 0
+        or tally.n ~= #talisman_items or sig == nil or sig ~= tally.sig then
+        tally.at, tally.n, tally.sig, tally.salvage, tally.stash, tally.sell = now, #talisman_items, sig, 0, 0, 0
         for _, item in pairs(talisman_items) do
             local ok, kind = pcall(talisman_census, item)
             if not ok then

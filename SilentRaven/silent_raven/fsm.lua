@@ -7,6 +7,7 @@ local stats = require 'silent_raven.stats'
 local coordination = require 'silent_raven.coordination'
 -- QQT_Warpigz_v3: the settings module (holds .debug) for the debug log.
 local sr_settings = require 'silent_raven.settings'
+local events = require 'silent_raven.qqt_events' -- QQT_Warpigz_v3
 local M = {}
 local MAX_ATTEMPTS, WALK_TIMEOUT, PANEL_TIMEOUT, RUN_TIMEOUT = 3, 20, 10, 100
 local TELEPORT_RETRY_SECONDS, TELEPORT_SPELL_ID = 6, 186139
@@ -63,6 +64,9 @@ local function finish(result, preserve_path, keep_visit)
     if result == 'success' then said = ' — claimed ' .. tostring(tracker.last_pick_entry and tracker.last_pick_entry.name)
     elseif result:sub(1, 8) == 'skipped_' then said = ' — skipped' end
     log.info('run finished: ' .. result .. ' (' .. tostring(tracker.last_reason) .. ')' .. said)
+    local pick = result == 'success' and tracker.last_pick_entry or nil -- QQT_Warpigz_v3: suite event
+    events.emit('silentraven', 'whisper_claim', {result = result, reason = tracker.last_reason,
+        name = pick and pick.name, slot = pick and pick.slot, legendary = pick and pick.legendary == true})
     tracker.finish(result)
 end
 -- Pause bookkeeping shared by own-run companion yields and an owner's

@@ -1,3 +1,4 @@
+local events = require "core.qqt_events" -- QQT_Warpigz_v3
 local tracker = {
     finished_time = 0,
     pit_start_time = 0,
@@ -121,7 +122,29 @@ function tracker.fresh_run_reset()
     tracker.chests_skipped            = nil
     tracker.horde_idle_since          = nil
     tracker.council_seen              = false
+    -- QQT_Warpigz_v3: a run left without emit_done (WarPigs switched HordeDev
+    -- off mid-run, a death / relog path) must not keep the next War Plan
+    -- horde from sending horde_start.
+    tracker.qqt_run_started           = false
+    tracker.qqt_pylon_announced       = false
     tracker.clear_runtime_timers()
+end
+
+-- QQT_Warpigz_v3: suite events. horde_start once per run (sigil arrival,
+-- portal entry, or the first pylon of a War Plan horde); horde_done when the
+-- run is left (teleport or reset); tracker.emit is the shared emitter.
+tracker.qqt_run_started = false
+function tracker.emit(kind, fields)
+    return events.emit('hordedev', kind, fields)
+end
+function tracker.emit_start()
+    if tracker.qqt_run_started then return end
+    tracker.qqt_run_started = true
+    events.emit('hordedev', 'horde_start', {mode = tracker.entry_mode})
+end
+function tracker.emit_done(exit)
+    tracker.qqt_run_started = false
+    events.emit('hordedev', 'horde_done', {mode = tracker.entry_mode, exit = exit})
 end
 
 return tracker

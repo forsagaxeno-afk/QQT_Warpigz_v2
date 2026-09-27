@@ -63,6 +63,7 @@ end
 
 function task:fail(message)
     self.activation_phase, self.activation_error = "FAULT", message
+    tracker.emit('horde_fail', {msg = message}) -- QQT_Warpigz_v3
     console.print("[start_dungeon] "..message)
     -- Keep ownership until explicitly restarted; do not use another compass.
 end
@@ -74,6 +75,7 @@ function task:begin_activation(now, s, item)
     self.activation_phase = "WAIT_SIGIL_DIALOG"
     tracker.sigil_activation_pending = true
     tracker.horde_opened, tracker.has_entered = false, false
+    tracker.qqt_run_started = false -- QQT_Warpigz_v3: a new run
     self.explorer_before_start=explorer.is_task_running
     explorer.is_task_running=true
     local stopped, why=pcall(self.stop_movement,s.player)
@@ -114,6 +116,7 @@ function task:activation_update(now)
         self.activation_phase="IN_HORDE"
         self:release_movement()
         console.print("[start_dungeon] Horde arrival confirmed.")
+        tracker.emit_start() -- QQT_Warpigz_v3
         return
     end
     if not s.outside or s.id~=self.source_world then

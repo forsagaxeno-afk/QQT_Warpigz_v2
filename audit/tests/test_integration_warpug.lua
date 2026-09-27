@@ -34,7 +34,10 @@ local function count_log(f, needle)
 end
 
 local function load_planner(settings)
-    local env = setmetatable({ require = function(name)
+    local env
+    env = setmetatable({ require = function(name)
+        -- QQT_Warpigz_v3 (3.3.0): the suite event bus (a no-op without a collector).
+        if name == 'core.qqt_events' then return assert(loadfile(root .. 'core/qqt_events.lua', 't', env))() end
         assert(name == 'core.settings', 'unexpected planner dependency: ' .. tostring(name))
         return settings
     end }, { __index = _G })

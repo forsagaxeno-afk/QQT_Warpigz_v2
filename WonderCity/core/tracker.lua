@@ -1,4 +1,6 @@
 local plugin_label = 'wonder_city'
+local events = require 'core.qqt_events' -- QQT_Warpigz_v3
+local settings = require 'core.settings' -- QQT_Warpigz_v3 (undercity_end timeout)
 -- kept plugin label instead of waiting for update_tracker to set it
 
 local tracker = {
@@ -128,6 +130,21 @@ tracker.forget_resume = function ()
     tracker.resume_key, tracker.resume_until = nil, nil
 end
 
+-- QQT_Warpigz_v3: suite event for an Undercity run that is over (left for
+-- good, not for an Alfred trip that resumes it).
+tracker.emit_end = function (now)
+    local secs = now - (tracker.undercity_start_time or now)
+    local reason = tracker.done and (tracker.completion_reason or 'reward') or nil
+    if not reason then
+        local limit = settings.reset_timeout
+        reason = (type(limit) == 'number' and secs >= limit) and 'timeout' or 'left'
+    end
+    local base = tracker.run_floor_base
+    events.emit('wondercity', 'undercity_end', {success = tracker.done == true, reason = reason, secs = secs,
+        floors = type(base) == 'number' and tracker.floor_generation - base or nil})
+    tracker.run_floor_base = nil
+end
+
 -- alfred_trip: an Alfred trip is in flight (own request or Alfred busy).
 tracker.observe_world = function (alfred_trip)
     local world = get_current_world()
@@ -164,6 +181,7 @@ tracker.observe_world = function (alfred_trip)
         -- Floor state belongs to the Undercity we may still come back to.
         if tracker.resume_key ~= nil then return kind end
         rawset(_G, RUN_STATE_GLOBAL, nil) -- QQT_Warpigz_v3: the run is over
+        if left then tracker.emit_end(now) end -- QQT_Warpigz_v3
     end
     if inside then tracker.forget_resume() end
     if kind == 'resume' then
@@ -181,6 +199,8 @@ tracker.observe_world = function (alfred_trip)
         tracker.undercity_start_time = now
         tracker.enticement = {}
         tracker.beacon_aside = {} -- QQT_Warpigz_v3
+        tracker.run_floor_base = tracker.floor_generation - 1 -- QQT_Warpigz_v3
+        events.emit('wondercity', 'undercity_start', {}) -- QQT_Warpigz_v3
     end
     return kind
 end

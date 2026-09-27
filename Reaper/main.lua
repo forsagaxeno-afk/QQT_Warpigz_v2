@@ -1,5 +1,5 @@
 -- ============================================================
---  Reaper  v1.10.2
+--  Reaper  v1.10.3
 --  by Magoogle
 --
 --  Flow per run:
@@ -26,6 +26,7 @@ local alfred_task  = require "tasks.alfred"
 local dungeon_reset = require "tasks.dungeon_reset"
 local interact_altar = require "tasks.interact_altar" -- QQT_Warpigz_v3 (status text)
 local activity_lease = require "core.activity_lease" -- QQT_Warpigz_v3
+local events       = require "core.qqt_events" -- QQT_Warpigz_v3
 
 -- Home town now resolved per pulse from settings.town_zone / settings.town_waypoint
 -- (driven by the gui.town combo_box). Defaults to Temis to match Arkham/Alfred.
@@ -59,6 +60,8 @@ local function end_run(result, reason)
     if not run.active then return nil end
     run.active = false
     run.last_result, run.last_error = result, reason
+    -- QQT_Warpigz_v3: suite event; the run kind is 'mode' ('kind' is the event's own name).
+    events.emit('reaper', 'run_end', {result = result, reason = reason, mode = run.kind})
     local cb = run_once_callback
     run_once_callback = nil
     if result ~= "success" then
@@ -312,7 +315,7 @@ on_render(function()
     end
 
     local x, y = 20, 60
-    graphics.text_2d("=== REAPER  v1.10.2  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
+    graphics.text_2d("=== REAPER  v1.10.3  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
     y = y + 20
     if activity_lease.reason then -- QQT_Warpigz_v3
         graphics.text_2d(activity_lease.reason, vec2:new(x, y), 13, color_yellow(255))
@@ -492,6 +495,6 @@ ReaperPlugin = {
 }
 
 console.print("=============================================")
-console.print("  Reaper  v1.10.2  by Magoogle  - Loaded")
+console.print("  Reaper  v1.10.3  by Magoogle  - Loaded")
 console.print("  Enable in menu to start reaping")
 console.print("=============================================")

@@ -3,6 +3,7 @@ local plugin_label = 'arkham_asylum'
 local utils = require "core.utils"
 local settings = require 'core.settings'
 local tracker = require 'core.tracker'
+local events = require 'core.qqt_events' -- QQT_Warpigz_v3
 
 -- Pit guardian (boss) handler. Higher priority than portal / explore_pit /
 -- kill_monster so once the boss spawns nothing else can pull the bot away.
@@ -103,6 +104,7 @@ local function update_boss_state()
         tracker.glyph_anchor_pos = copy_vec3(glyph:get_position())
         if tracker.boss_kill_time == nil then
             tracker.boss_kill_time = get_time_since_inject()
+            events.emit('arkham', 'pit_boss_killed', {}) -- QQT_Warpigz_v3
         end
         console.print('[kill_boss] glyphstone present — marking boss dead, anchor at gizmo')
         return
@@ -119,6 +121,7 @@ local function update_boss_state()
     -- phase. Only an observed dead boss or the glyphstone proves completion.
     if dead_boss then
         tracker.boss_dead = true
+        if tracker.boss_kill_time == nil then events.emit('arkham', 'pit_boss_killed', {}) end -- QQT_Warpigz_v3
         tracker.boss_kill_time = get_time_since_inject()
         tracker.glyph_anchor_pos = copy_vec3(dead_boss:get_position())
         console.print('[kill_boss] dead boss observed — holding for glyphstone')

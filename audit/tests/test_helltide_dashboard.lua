@@ -187,12 +187,18 @@ end)
 
 -- QQT_Warpigz_v3: three theme pages share hr_data.js; index.html redirects to
 -- the last chosen one (localStorage 'hr_dash_theme', Forge by default).
+-- QQT_Warpigz_v3 (3.3.0): the pages moved to WarRoom/dashboard/helltide/
+-- (checked there by the WarRoom tests); the page checks below run only when
+-- a copy still ships in HelltideRevamped/dashboard/.
 local THEMES = {'forge.html', 'daylight.html', 'console.html'}
 local function read_page(name)
-    local f = assert(io.open(SUITE_ROOT .. '/HelltideRevamped/dashboard/' .. name, 'r'), name)
+    local f = io.open(SUITE_ROOT .. '/HelltideRevamped/dashboard/' .. name, 'r')
+    if not f then return nil end
     local page = f:read('*a'); f:close()
     return page
 end
+local PAGES_MOVED = read_page('index.html') == nil
+if PAGES_MOVED then print('NOTE: HelltideRevamped/dashboard pages moved to WarRoom — HR page checks skipped') end
 
 local function no_external(page, name)
     for _, bad in ipairs({'src="http', "src='http", 'href="http', "href='http", '<link', '@import', 'url(', '<img',
@@ -208,7 +214,7 @@ R.case('option off: zero writes; the theme pages ship and read the data file', f
     local s = session()
     for _ = 1, 600 do s.advance(0.1); s.dash.tick(s.now, s.pos, true) end
     eq(#s.writes, 0, 'dashboard off')
-    for _, name in ipairs(THEMES) do
+    for _, name in ipairs(PAGES_MOVED and {} or THEMES) do
         local page = read_page(name)
         ok(page:find("'hr_data.js?ts='", 1, true) ~= nil, name .. ': reloads hr_data.js with a cache buster')
         ok(page:find('setInterval(load, 5000)', 1, true) ~= nil, name .. ': every 5 s')
@@ -241,6 +247,7 @@ R.case('option off: zero writes; the theme pages ship and read the data file', f
 end)
 
 R.case('index.html opens the last chosen theme (Forge by default, localStorage guarded)', function()
+    if PAGES_MOVED then return end -- QQT_Warpigz_v3 (3.3.0)
     local page = read_page('index.html')
     ok(page:find('<title>HelltideRevamped — Live</title>', 1, true) ~= nil, 'title')
     ok(page:find("localStorage.getItem('hr_dash_theme')", 1, true) ~= nil, 'reads the saved theme')
@@ -430,7 +437,7 @@ R.case('every theme page only reads fields the data file has (static check), and
     local keys = decode_keys(body)
     ok(body:find('"goal":{"cost":3000,"label":"Cinder run","ready":false}', 1, true) ~= nil, 'saving: the run threshold is the goal')
     ok(body:find('"plan":"Saving cinders for the run at 3000"', 1, true) ~= nil, 'plan text')
-    for _, name in ipairs(THEMES) do
+    for _, name in ipairs(PAGES_MOVED and {} or THEMES) do
         local page = read_page(name)
         local used = {}
         for field in page:gmatch('[^%w_%.]d%.([%a_][%w_]*)') do used[field] = true end
@@ -447,6 +454,54 @@ R.case('every theme page only reads fields the data file has (static check), and
             ok(used[field], name .. ' uses d.' .. field)
         end
     end
+end)
+
+-- QQT_Warpigz_v3 (3.3.0): with WarRoom loaded (_G.QQT_WarRoom.dashboard_dir)
+-- hr_data.js is written into WarRoom's dashboard folder, not HR's own.
+R.case('WarRoom present: hr_data.js goes to its dashboard_dir; absent: HR folder as before', function()
+    local s = session({cinders = 180})
+    s.set('dashboard', true)
+    s.at_minute(12)
+    s.pos = v(5, 5)
+    eq(s.dash.warroom_path(), nil, 'no WarRoom: no WarRoom path')
+    eq(s.dash.tick(s.now, s.pos, true), true, 'written without WarRoom')
+    ok(s.file('dashboard/hr_data.js') ~= nil, 'HR folder without WarRoom')
+    s.env.QQT_WarRoom = {dashboard_dir = '/mem/WarRoom/dashboard'}
+    eq(s.dash.warroom_path(), '/mem/WarRoom/dashboard/hr_data.js', 'separator added')
+    s.env.QQT_WarRoom = {dashboard_dir = 'C:\\QQT\\scripts\\WarRoom\\dashboard\\'}
+    eq(s.dash.warroom_path(), 'C:\\QQT\\scripts\\WarRoom\\dashboard\\hr_data.js', 'Windows folder kept')
+    s.env.QQT_WarRoom = {dashboard_dir = '/mem/WarRoom/dashboard/'}
+    s.files['/mem/HelltideRevamped/dashboard/hr_data.js'] = nil
+    s.advance(30)
+    eq(s.dash.tick(s.now, s.pos, true), true, 'written with WarRoom')
+    local text = s.files['/mem/WarRoom/dashboard/hr_data.js']
+    ok(text ~= nil, 'hr_data.js in WarRoom/dashboard')
+    json_check(payload(text or 'window.HR_DATA={};\n'))
+    eq(s.file('dashboard/hr_data.js'), nil, 'HR folder not written while WarRoom is present')
+    s.env.QQT_WarRoom = {dashboard_dir = 42}
+    eq(s.dash.warroom_path(), nil, 'a bad dashboard_dir is ignored')
+end)
+
+-- QQT_Warpigz_v3 (3.3.0, review A5): with the 'Web dashboard' option OFF the
+-- file is built only while WarRoom reports its Enable toggle as true (not
+-- before WarRoom read it, not while it is switched off).
+R.case('option off: hr_data.js only while WarRoom is enabled', function()
+    local s = session({cinders = 180})
+    s.set('dashboard', false)
+    s.at_minute(12)
+    s.pos = v(5, 5)
+    eq(s.dash.tick(s.now, s.pos, true), false, 'option off, no WarRoom: nothing written')
+    s.env.QQT_WarRoom = {dashboard_dir = '/mem/WarRoom/dashboard/'}
+    s.advance(30)
+    eq(s.dash.tick(s.now, s.pos, true), false, 'WarRoom toggle not read yet (enabled nil): nothing built')
+    s.env.QQT_WarRoom.enabled = false
+    s.advance(30)
+    eq(s.dash.tick(s.now, s.pos, true), false, 'WarRoom switched off: nothing built')
+    eq(s.files['/mem/WarRoom/dashboard/hr_data.js'], nil, 'no file while WarRoom is off')
+    s.env.QQT_WarRoom.enabled = true
+    s.advance(30)
+    eq(s.dash.tick(s.now, s.pos, true), true, 'WarRoom enabled: written automatically')
+    ok(s.files['/mem/WarRoom/dashboard/hr_data.js'] ~= nil, 'hr_data.js in WarRoom/dashboard')
 end)
 
 R.finish()

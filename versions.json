@@ -1,17 +1,18 @@
 {
   "project": "QQT_Warpigz_v3",
-  "version": "3.2.3",
+  "version": "3.3.0",
   "first_release": "2.0.0",
   "components": {
-    "WarPigs": "1.1.5",
-    "WarPug": "1.0.14",
-    "Batmobile": "2.2.0",
-    "ArkhamAsylum": "2.1.1",
-    "HelltideRevamped": "2.5.2",
-    "HordeDev": "2.2.3",
-    "Reaper": "1.10.2",
-    "WonderCity": "2.2.2",
-    "SilentRaven": "0.2.4",
-    "Rosie": "1.0.15"
+    "WarPigs": "1.1.6",
+    "WarPug": "1.0.15",
+    "Batmobile": "2.2.1",
+    "ArkhamAsylum": "2.1.2",
+    "HelltideRevamped": "2.6.0",
+    "HordeDev": "2.2.4",
+    "Reaper": "1.10.3",
+    "WonderCity": "2.2.3",
+    "SilentRaven": "0.2.5",
+    "Rosie": "1.0.16",
+    "WarRoom": "1.0.0"
   }
 }

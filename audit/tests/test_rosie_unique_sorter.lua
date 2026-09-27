@@ -111,12 +111,14 @@ case('menu: the new controls render right after the enable toggle; defaults and 
     local labels = t.h.menu_labels
     eq(labels[1], 'Enable Rosie', 'first widget\n' .. table.concat(labels, ' | '))
     eq(labels[2], 'Pick up every Unique (sort in the bag)', 'second widget')
-    eq(labels[3], 'Plain Uniques', 'third widget (the mode, shown while the option is on)')
+    -- QQT_Warpigz_v3 (keep menu): the mode moved to Keep, storage & town > 4. Uniques.
+    local function has(list, label) for _, l in ipairs(list) do if l == label then return true end end return false end
+    ok(has(labels, t.sorter.MODE_LABEL), 'the mode renders (in 4. Uniques) while the option is on')
     t.e.all_uniques:set(false)
     t.h.menu_labels = {}
     t.h.frame()
     eq(t.h.menu_labels[2], 'Pick up every Unique (sort in the bag)', 'off: still right after the toggle')
-    ok(t.h.menu_labels[3] ~= 'Plain Uniques', 'off: the mode combo is hidden')
+    ok(not has(t.h.menu_labels, t.sorter.MODE_LABEL), 'off: the mode combo is hidden')
     t.h.menu_labels = nil
     -- QQT restores both widgets by their own hashes.
     local p = setup({persisted = {Rosie_pickup_all_uniques = false, Rosie_plain_unique_mode = 1}})

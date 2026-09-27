@@ -53,12 +53,30 @@ function M.bind(pick_all_widget, mode)
 end
 -- Town helpers bound once at load (utils, tracker, lifecycle).
 function M.configure(d) deps = d end
+-- QQT_Warpigz_v3 (keep menu): the town keep list a SNO is selected in, or
+-- nil (pickup takes such a drop; see town utils.named_keep).
+function M.named_keep(sno)
+    local utils = deps and deps.utils
+    if type(utils) ~= 'table' or type(utils.named_keep) ~= 'function' then return nil end
+    return utils.named_keep(sno)
+end
 function M.pick_all() return widget_get(toggle) == true end
 function M.mode()
     local v = widget_get(mode_widget)
     return v == M.MODE_DROP and M.MODE_DROP or M.MODE_TOWN
 end
 function M.drop_mode() return M.pick_all() and M.mode() == M.MODE_DROP end
+-- QQT_Warpigz_v3 (keep menu): the mode is shown in Keep, storage & town >
+-- 4. Uniques (only while "Pick up every Unique" is on).
+M.MODE_LABEL = 'Uniques to salvage or sell'
+function M.render_mode()
+    if mode_widget == nil or not M.pick_all() then return false end
+    mode_widget:render(M.MODE_LABEL, {'Carry to town', 'Drop on the spot'},
+        'Carry to town: they stay in the bag until the next town trip salvages or sells them. '
+        ..'Drop on the spot: outside town, a plain Unique the rules above would salvage or sell is dropped right away and '
+        ..'never picked up again (Rosie remembers that exact item). Mythics, locked items and Uniques a keep rule protects are never dropped.')
+    return true
+end
 
 local function call(obj, name, ...)
     if obj == nil then return nil end

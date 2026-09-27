@@ -70,7 +70,7 @@ local function prepared_rows(name,data,show_item_type)
             classes[lower]=true
             if lower=='all' then any=true end
         end
-        rows[#rows+1]={widget=tostring(name)..'_'..tostring(item.sno_id),label=item_name,any=any,classes=classes,
+        rows[#rows+1]={widget=tostring(name)..'_'..tostring(item.sno_id),sno=item.sno_id,label=item_name,any=any,classes=classes,
             search=string.lower(table.concat({item_name,item.item_type or '',item.description or '',
                 table.concat(item.class,' '),item.set or '',tostring(item.sno_id)},' ')),
             tip=(item.description or item_name)..' | '..table.concat(item.class,', ')..' | Item ID: '..tostring(item.sno_id)}
@@ -78,7 +78,12 @@ local function prepared_rows(name,data,show_item_type)
     prepared_lists[key]=rows
     return rows
 end
-local function render_checkbox(name,data, show_item_type)
+-- annotate(row, checked): an optional label for the row (the keep lists say
+-- which forms of an item are kept); nil keeps the plain label.
+-- QQT_Warpigz_v3 (keep menu): `cached` (SNO -> true, the saved selection,
+-- at most a second old) marks a long list: with an empty search only its
+-- checked rows are shown, and only shown rows read their checkbox.
+local function render_checkbox(name,data, show_item_type, annotate, cached)
     local search_string=string.lower(gui.elements[tostring(name)..'_search']:get())
     local character_class=utils.get_character_class()
     local scope=gui.elements[tostring(name)..'_scope']
@@ -88,16 +93,24 @@ local function render_checkbox(name,data, show_item_type)
     for _,row in ipairs(prepared_rows(name,data,show_item_type)) do
         total=total+1
         local widget=gui.elements[row.widget]
-        local checked=widget:get()
+        local checked
+        if cached then
+            checked=cached[row.sno]~=nil
+            if checked or (search_string~='' and row.search:find(search_string,1,true)) then checked=widget:get() end
+        else
+            checked=widget:get()
+        end
         if checked then selected=selected+1 end
         local visible=checked or mode==1 or mode~=2 and (row.any or row.classes[character_class]==true)
+        if cached and search_string=='' then visible=checked end
         if visible and (checked or search_string=='' or row.search:find(search_string,1,true)) then
-            widget:render(row.label,row.tip)
+            widget:render(annotate and annotate(row,checked) or row.label,row.tip)
             shown=shown+1
         end
     end
     render_menu_header(string.format('%d shown / %d total; %d selected. Selected choices stay visible.',shown,total,selected))
-    if shown==0 then render_menu_header('No matching items. Clear the search or choose All classes.') end
+    if cached and search_string=='' then render_menu_header('Type part of a name (or an Item ID) in Search to find more items.')
+    elseif shown==0 then render_menu_header('No matching items. Clear the search or choose All classes.') end
 end
 
 gui.plugin_label = plugin_label
@@ -153,65 +166,70 @@ gui.gamble_categories_chinese = {
     ['default'] = {"CLASS NOT LOADED"}
 }
 
-gui.elements = cached and cached.elements or {
-    main_tree = tree_node:new(0),
-    main_toggle = create_checkbox(true, 'main_toggle'),
-    run_service = button:new(get_hash(plugin_label .. '_run_service')),
+-- QQT_Warpigz_v3 (keep menu; 3.2.5 generic): every settings widget has a
+-- maker, so a reload onto a newer Rosie creates each widget missing from the
+-- cached (older) element table instead of indexing nil.
+local element_makers = {
+    main_tree = function() return tree_node:new(0) end,
+    main_toggle = function() return create_checkbox(true, 'main_toggle') end,
+    run_service = function() return button:new(get_hash(plugin_label .. '_run_service')) end,
 
-    use_keybind = create_checkbox(false, 'use_keybind'),
-    keybind_toggle = keybind:new(0x0A, true, get_hash(plugin_label .. '_keybind_toggle' )),
-    export_keybind_toggle = keybind:new(0x0A, true, get_hash(plugin_label .. '_export_keybind_toggle' )),
-    dump_keybind = keybind:new(0x0A, true, get_hash(plugin_label .. '_dump_keybind')),
-    manual_keybind = keybind:new(0x0A, true, get_hash(plugin_label .. '_manual_keybind')),
+    use_keybind = function() return create_checkbox(false, 'use_keybind') end,
+    keybind_toggle = function() return keybind:new(0x0A, true, get_hash(plugin_label .. '_keybind_toggle' )) end,
+    export_keybind_toggle = function() return keybind:new(0x0A, true, get_hash(plugin_label .. '_export_keybind_toggle' )) end,
+    dump_keybind = function() return keybind:new(0x0A, true, get_hash(plugin_label .. '_dump_keybind')) end,
+    manual_keybind = function() return keybind:new(0x0A, true, get_hash(plugin_label .. '_manual_keybind')) end,
 
-    item_tree = tree_node:new(1),
-    item_legendary_or_lower = combo_box:new(1, get_hash(plugin_label .. '_item_legendary_or_lower')),
-    item_unique = combo_box:new(2, get_hash(plugin_label .. '_item_unique')),
-    item_junk = combo_box:new(1, get_hash(plugin_label .. '_item_junk')),
+    item_tree = function() return tree_node:new(1) end,
+    item_legendary_or_lower = function() return combo_box:new(1, get_hash(plugin_label .. '_item_legendary_or_lower')) end,
+    item_unique = function() return combo_box:new(2, get_hash(plugin_label .. '_item_unique')) end,
+    item_junk = function() return combo_box:new(1, get_hash(plugin_label .. '_item_junk')) end,
 
-    ancestral_item_tree = tree_node:new(1),
-    ancestral_item_legendary = combo_box:new(1, get_hash(plugin_label .. '_ancestral_item_legendary')),
-    ancestral_item_unique = combo_box:new(1, get_hash(plugin_label .. '_ancestral_item_unique')),
-    ancestral_item_junk = combo_box:new(1, get_hash(plugin_label .. '_ancestral_item_junk')),
-    ancestral_item_mythic = combo_box:new(0, get_hash(plugin_label .. '_ancestral_item_mythic')),
+    ancestral_item_tree = function() return tree_node:new(1) end,
+    ancestral_item_legendary = function() return combo_box:new(1, get_hash(plugin_label .. '_ancestral_item_legendary')) end,
+    ancestral_item_unique = function() return combo_box:new(1, get_hash(plugin_label .. '_ancestral_item_unique')) end,
+    ancestral_item_junk = function() return combo_box:new(1, get_hash(plugin_label .. '_ancestral_item_junk')) end,
+    ancestral_item_mythic = function() return combo_box:new(0, get_hash(plugin_label .. '_ancestral_item_mythic')) end,
     -- QQT_Warpigz_v2 local patch: the old WarPigz Alfred's key and default (on).
-    mythic_always_keep = create_checkbox(true, 'mythic_always_keep'),
+    mythic_always_keep = function() return create_checkbox(true, 'mythic_always_keep') end,
     -- QQT_Warpigz_v2: keep-list for Season 15 Mythic forms of ordinary Uniques.
-    mythic_form_filter_toggle = create_checkbox(false, 'mythic_form_filter'),
-    mythic_form_other = combo_box:new(1, get_hash(plugin_label .. '_mythic_form_other')),
-    ancestral_keep_max_aspect_toggle = create_checkbox(true, 'max_aspect'),
-    ancestral_aspect_filter_toggle = create_checkbox(false, 'aspect_filter'),
-    ancestral_ga_count_slider = slider_int:new(0, 4, 1, get_hash(plugin_label .. '_ga_slider')),
-    ancestral_unique_ga_count_slider = slider_int:new(0, 4, 1, get_hash(plugin_label .. '_unique_ga_slider')),
-    ancestral_mythic_ga_count_slider = slider_int:new(0, 4, 1, get_hash(plugin_label .. '_mythic_ga_slider')),
-    ancestral_filter_toggle = create_checkbox(false, 'use_filter'),
-    ancestral_unique_filter_toggle = create_checkbox(false, 'use_unique_filter'),
+    mythic_form_filter_toggle = function() return create_checkbox(false, 'mythic_form_filter') end,
+    mythic_form_other = function() return combo_box:new(1, get_hash(plugin_label .. '_mythic_form_other')) end,
+    ancestral_keep_max_aspect_toggle = function() return create_checkbox(true, 'max_aspect') end,
+    ancestral_aspect_filter_toggle = function() return create_checkbox(false, 'aspect_filter') end,
+    ancestral_ga_count_slider = function() return slider_int:new(0, 4, 1, get_hash(plugin_label .. '_ga_slider')) end,
+    ancestral_unique_ga_count_slider = function() return slider_int:new(0, 4, 1, get_hash(plugin_label .. '_unique_ga_slider')) end,
+    ancestral_mythic_ga_count_slider = function() return slider_int:new(0, 4, 1, get_hash(plugin_label .. '_mythic_ga_slider')) end,
+    -- QQT_Warpigz_v3 3.2.4 (Rosie 1.0.16): keep plain Uniques by item power (0 = off).
+    unique_ip_keep_slider = function() return slider_int:new(0, 925, 0, get_hash(plugin_label .. '_unique_ip_keep')) end,
+    ancestral_filter_toggle = function() return create_checkbox(false, 'use_filter') end,
+    ancestral_unique_filter_toggle = function() return create_checkbox(false, 'use_unique_filter') end,
 
-    ancestral_affix_count_slider = slider_int:new(1, 4, 2, get_hash(plugin_label .. '_affix_slider')),
+    ancestral_affix_count_slider = function() return slider_int:new(1, 4, 2, get_hash(plugin_label .. '_affix_slider')) end,
 
-    affix_export_button = button:new(get_hash(plugin_label .. '_affix_export_button')),
-    affix_import_button = button:new(get_hash(plugin_label .. '_affix_import_button')),
-    affix_import_name = input_text:new(get_hash(plugin_label .. '_affix_import_name')),
+    affix_export_button = function() return button:new(get_hash(plugin_label .. '_affix_export_button')) end,
+    affix_import_button = function() return button:new(get_hash(plugin_label .. '_affix_import_button')) end,
+    affix_import_name = function() return input_text:new(get_hash(plugin_label .. '_affix_import_name')) end,
 
-    socketable_tree = tree_node:new(1),
+    socketable_tree = function() return tree_node:new(1) end,
     -- QQT_Warpigz_v3 (Q5): shipped default "When full" (was Never): a full
     -- socketables bag (gems, runes) goes to the stash when the stash has room.
-    stash_socketables = combo_box:new(1, get_hash(plugin_label .. '_stash_socketables')),
+    stash_socketables = function() return combo_box:new(1, get_hash(plugin_label .. '_stash_socketables')) end,
 
-    consumeable_tree = tree_node:new(1),
-    stash_consumables = combo_box:new(0, get_hash(plugin_label .. '_stash_consumables')),
+    consumeable_tree = function() return tree_node:new(1) end,
+    stash_consumables = function() return combo_box:new(0, get_hash(plugin_label .. '_stash_consumables')) end,
 
-    key_tree = tree_node:new(1),
-    stash_keys = combo_box:new(0, get_hash(plugin_label .. '_stash_keys')),
-    stash_sigils = create_checkbox(false, 'stash_sigils'),
-    salvage_sigils = create_checkbox(false, 'salvage_sigils'),
+    key_tree = function() return tree_node:new(1) end,
+    stash_keys = function() return combo_box:new(0, get_hash(plugin_label .. '_stash_keys')) end,
+    stash_sigils = function() return create_checkbox(false, 'stash_sigils') end,
+    salvage_sigils = function() return create_checkbox(false, 'salvage_sigils') end,
 
-    gamble_tree = tree_node:new(1),
-    gamble_toggle = create_checkbox(false, 'gamble_toggle'),
-    gamble_language = combo_box:new(0, get_hash(plugin_label .. '_gamble_language')),
-    gamble_non_english = input_text:new(get_hash(plugin_label .. '_gamble_custom_text')),
-    gamble_threshold = slider_int:new(10, 2580, 1000, get_hash(plugin_label .. '_gamble_threshold')),
-    gamble_category = {
+    gamble_tree = function() return tree_node:new(1) end,
+    gamble_toggle = function() return create_checkbox(false, 'gamble_toggle') end,
+    gamble_language = function() return combo_box:new(0, get_hash(plugin_label .. '_gamble_language')) end,
+    gamble_non_english = function() return input_text:new(get_hash(plugin_label .. '_gamble_custom_text')) end,
+    gamble_threshold = function() return slider_int:new(10, 2580, 1000, get_hash(plugin_label .. '_gamble_threshold')) end,
+    gamble_category = function() return {
         ['sorcerer'] = combo_box:new(0, get_hash(plugin_label .. '_gamble_sorcerer_category')),
         ['barbarian'] = combo_box:new(0, get_hash(plugin_label .. '_gamble_barbarian_category')),
         ['rogue'] = combo_box:new(0, get_hash(plugin_label .. '_gamble_rogue_category')),
@@ -220,55 +238,63 @@ gui.elements = cached and cached.elements or {
         ['spiritborn'] = combo_box:new(0, get_hash(plugin_label .. '_gamble_spiritborn_category')),
         ['paladin'] = combo_box:new(0, get_hash(plugin_label .. '_gamble_paladin_category')),
         ['default'] = combo_box:new(0, get_hash(plugin_label .. '_gamble_default_category')),
-    },
+    } end,
 
-    loot_filter_tree      = tree_node:new(1),
-    loot_filter_toggle    = create_checkbox(false, 'loot_filter_mode'),
-    loot_filter_equipment = create_checkbox(false, 'loot_filter_equipment'),
-    loot_filter_seal  = create_checkbox(false, 'loot_filter_seal'),
-    loot_filter_charm = create_checkbox(false, 'loot_filter_charm'),
+    loot_filter_tree      = function() return tree_node:new(1) end,
+    loot_filter_toggle    = function() return create_checkbox(false, 'loot_filter_mode') end,
+    loot_filter_equipment = function() return create_checkbox(false, 'loot_filter_equipment') end,
+    loot_filter_seal  = function() return create_checkbox(false, 'loot_filter_seal') end,
+    loot_filter_charm = function() return create_checkbox(false, 'loot_filter_charm') end,
 
-    general_tree = tree_node:new(1),
-    town_choice = combo_box:new(0, get_hash(plugin_label .. '_town_choice_v2')),
-    explorer_path_angle_slider = slider_int:new(0, 360, 10, get_hash(plugin_label .. '_explorer_path_angle_slider')),
-    max_inventory = slider_int:new(20,33, 25, get_hash(plugin_label .. '_max_inventory')),
-    max_stash_items = slider_int:new(1, 350, 350, get_hash(plugin_label .. '_max_stash_items')),
-    failed_action = combo_box:new(0, get_hash(plugin_label .. '_failed_action')),
-    skip_cache = create_checkbox(false, 'skip_cache'),
-    skip_favorite = create_checkbox(false, 'skip_favorite'),
+    general_tree = function() return tree_node:new(1) end,
+    town_choice = function() return combo_box:new(0, get_hash(plugin_label .. '_town_choice_v2')) end,
+    explorer_path_angle_slider = function() return slider_int:new(0, 360, 10, get_hash(plugin_label .. '_explorer_path_angle_slider')) end,
+    max_inventory = function() return slider_int:new(20,33, 25, get_hash(plugin_label .. '_max_inventory')) end,
+    max_stash_items = function() return slider_int:new(1, 350, 350, get_hash(plugin_label .. '_max_stash_items')) end,
+    failed_action = function() return combo_box:new(0, get_hash(plugin_label .. '_failed_action')) end,
+    skip_cache = function() return create_checkbox(false, 'skip_cache') end,
+    skip_favorite = function() return create_checkbox(false, 'skip_favorite') end,
 
-    drawing_tree = tree_node:new(1),
-    draw_status = create_checkbox(true, 'draw_status'),
-    draw_status_offset_x = slider_int:new(0, 1200, 0, get_hash(plugin_label .. "draw_status_offset_x")),
-    draw_status_offset_y = slider_int:new(0, 600, 0, get_hash(plugin_label .. "draw_status_offset_y")),
-    draw_stash = create_checkbox(false, 'draw_stash'),
-    draw_sell = create_checkbox(false, 'draw_sell'),
-    draw_salvage = create_checkbox(false, 'draw_salvage'),
-    draw_box_space = slider_float:new(0, 1.0, 1.0, get_hash(plugin_label .. "draw_box_space")),
-    draw_inventory_origin_x = slider_int:new(0, 4000, 1270, get_hash(plugin_label .. "draw_inventory_origin_x")),
-    draw_inventory_origin_y = slider_int:new(0, 2500, 720,  get_hash(plugin_label .. "draw_inventory_origin_y")),
-    draw_offset_x = slider_int:new(0, 150, 54, get_hash(plugin_label .. "draw_offset_x")),
-    draw_offset_y = slider_int:new(0, 150, 75, get_hash(plugin_label .. "draw_offset_y")),
-    draw_box_height = slider_int:new(0, 100, 79, get_hash(plugin_label .. "draw_box_height")),
-    draw_box_width = slider_int:new(0, 100, 52, get_hash(plugin_label .. "draw_box_width")),
+    drawing_tree = function() return tree_node:new(1) end,
+    draw_status = function() return create_checkbox(true, 'draw_status') end,
+    draw_status_offset_x = function() return slider_int:new(0, 1200, 0, get_hash(plugin_label .. "draw_status_offset_x")) end,
+    draw_status_offset_y = function() return slider_int:new(0, 600, 0, get_hash(plugin_label .. "draw_status_offset_y")) end,
+    draw_stash = function() return create_checkbox(false, 'draw_stash') end,
+    draw_sell = function() return create_checkbox(false, 'draw_sell') end,
+    draw_salvage = function() return create_checkbox(false, 'draw_salvage') end,
+    draw_box_space = function() return slider_float:new(0, 1.0, 1.0, get_hash(plugin_label .. "draw_box_space")) end,
+    draw_inventory_origin_x = function() return slider_int:new(0, 4000, 1270, get_hash(plugin_label .. "draw_inventory_origin_x")) end,
+    draw_inventory_origin_y = function() return slider_int:new(0, 2500, 720,  get_hash(plugin_label .. "draw_inventory_origin_y")) end,
+    draw_offset_x = function() return slider_int:new(0, 150, 54, get_hash(plugin_label .. "draw_offset_x")) end,
+    draw_offset_y = function() return slider_int:new(0, 150, 75, get_hash(plugin_label .. "draw_offset_y")) end,
+    draw_box_height = function() return slider_int:new(0, 100, 79, get_hash(plugin_label .. "draw_box_height")) end,
+    draw_box_width = function() return slider_int:new(0, 100, 52, get_hash(plugin_label .. "draw_box_width")) end,
 
-    seperator = combo_box:new(0, get_hash(plugin_label .. '_seperator')),
+    seperator = function() return combo_box:new(0, get_hash(plugin_label .. '_seperator')) end,
 
-    talisman_seal_tree  = tree_node:new(1),
-    talisman_charm_tree = tree_node:new(1),
+    talisman_seal_tree  = function() return tree_node:new(1) end,
+    talisman_charm_tree = function() return tree_node:new(1) end,
 
-    talisman_seal_action              = combo_box:new(1, get_hash(plugin_label .. '_talisman_seal_action')),
-    talisman_seal_affix_filter_toggle = create_checkbox(false, 'talisman_seal_affix_filter'),
-    talisman_seal_affix_count_slider  = slider_int:new(1, 4, 1, get_hash(plugin_label .. '_talisman_seal_affix_count')),
-    talisman_charm_action              = combo_box:new(1, get_hash(plugin_label .. '_talisman_charm_action')),
-    talisman_charm_affix_filter_toggle = create_checkbox(false, 'talisman_charm_affix_filter'),
-    talisman_charm_affix_count_slider  = slider_int:new(1, 4, 1, get_hash(plugin_label .. '_talisman_charm_affix_count')),
-    talisman_charm_unique_filter_toggle = create_checkbox(false, 'talisman_charm_unique_filter'),
-    talisman_charm_set_filter_toggle    = create_checkbox(false, 'talisman_charm_set_filter'),
-    talisman_seal_mythic_filter_toggle  = create_checkbox(false, 'talisman_seal_mythic_filter'),
-    talisman_tab_x             = slider_int:new(0, 3840, 1466, get_hash(plugin_label .. '_talisman_tab_x')),
-    talisman_tab_y             = slider_int:new(0, 2160, 650,  get_hash(plugin_label .. '_talisman_tab_y')),
+    talisman_seal_action              = function() return combo_box:new(1, get_hash(plugin_label .. '_talisman_seal_action')) end,
+    talisman_seal_affix_filter_toggle = function() return create_checkbox(false, 'talisman_seal_affix_filter') end,
+    talisman_seal_affix_count_slider  = function() return slider_int:new(1, 4, 1, get_hash(plugin_label .. '_talisman_seal_affix_count')) end,
+    talisman_charm_action              = function() return combo_box:new(1, get_hash(plugin_label .. '_talisman_charm_action')) end,
+    talisman_charm_affix_filter_toggle = function() return create_checkbox(false, 'talisman_charm_affix_filter') end,
+    talisman_charm_affix_count_slider  = function() return slider_int:new(1, 4, 1, get_hash(plugin_label .. '_talisman_charm_affix_count')) end,
+    talisman_charm_unique_filter_toggle = function() return create_checkbox(false, 'talisman_charm_unique_filter') end,
+    talisman_charm_set_filter_toggle    = function() return create_checkbox(false, 'talisman_charm_set_filter') end,
+    talisman_seal_mythic_filter_toggle  = function() return create_checkbox(false, 'talisman_seal_mythic_filter') end,
+    talisman_tab_x             = function() return slider_int:new(0, 3840, 1466, get_hash(plugin_label .. '_talisman_tab_x')) end,
+    talisman_tab_y             = function() return slider_int:new(0, 2160, 650,  get_hash(plugin_label .. '_talisman_tab_y')) end,
 }
+local function make_elements(into)
+    local out = into or {}
+    for key, make in pairs(element_makers) do
+        if out[key] == nil then out[key] = make() end
+    end
+    return out
+end
+gui.elements = cached and cached.elements or make_elements()
 
 if cached then
     -- Preserve settings widgets, but renew native presentation containers after
@@ -278,11 +304,23 @@ if cached then
     gui.elements=elements
     local depths={main_tree=0,item_tree=1,ancestral_item_tree=1,socketable_tree=1,
         consumeable_tree=1,key_tree=1,gamble_tree=1,loot_filter_tree=1,general_tree=1,
-        drawing_tree=1,talisman_seal_tree=1,talisman_charm_tree=1}
+        drawing_tree=1,talisman_seal_tree=1,talisman_charm_tree=1,always_keep_tree=1,junk_tree=1,
+        unique_rules_tree=1,legendary_tree=1,storage_tree=1}
     for key,depth in pairs(depths) do gui.elements[key]=tree_node:new(depth) end
+    -- QQT_Warpigz_v3 3.2.5 (generic): a widget added in a newer Rosie is
+    -- missing from the cached (pre-update) element table after a Lua reload.
+    make_elements(gui.elements)
 end
 
 gui.elements.stop_service=gui.elements.stop_service or button:new(get_hash(plugin_label..'_stop_service'))
+-- QQT_Warpigz_v3 (keep menu): the section trees; `or`: a reload from an
+-- older Rosie keeps its cached widgets and gains the new ones.
+do
+    local e=gui.elements
+    for _,key in ipairs({'always_keep_tree','junk_tree','unique_rules_tree','legendary_tree','storage_tree'}) do
+        e[key]=tree_node:new(1)
+    end
+end
 
 for _,affix_type in pairs(affix_types) do
     local name = affix_type.name .. '_affix'
@@ -330,158 +368,128 @@ local function pop_tree(node)
     node:pop()
     menu_stack[#menu_stack] = nil
 end
+-- QQT_Warpigz_v3 (keep menu, user report 3.2.x: a checked Leoric's Crown was
+-- salvaged; "far too much clutter"): the keep / sell / salvage rules read top
+-- to bottom in the order Rosie applies them (town/core/utils.lua decide()).
+-- The first section that decides an item wins. Ancestral and Non-Ancestral
+-- keep separate actions inside each item section (the saved values differ).
+local ACTION_TIP=' Keep: stays in the bag and is stashed. Salvage / Sell: at the blacksmith / vendor on the next town trip.'
+local function sorter()
+    local ok,mod=pcall(require,'rosie.private.unique_sorter')
+    return ok and type(mod)=='table' and mod or nil
+end
+-- Which forms of an item a keep list keeps (shown on checked rows).
+local function annotate_unique(row,checked)
+    if checked then return row.label..'  [keeps plain + Mythic form]' end
+end
+local function annotate_form(row,checked)
+    local plain=gui.elements['unique_'..tostring(row.sno)]
+    if plain and plain:get() then return row.label.."  [kept by 'Unique items I always keep']" end
+    if checked then return row.label..'  [keeps Mythic form + plain]' end
+end
+local LIST_CACHE={unique='ancestral_unique',mythic_form='mythic_form_keep'}
+local function render_list(key,label,data,header,annotate)
+    if push_tree(gui.elements[key..'_tree'],label) then
+        if header then render_menu_header(header) end
+        gui.elements[key..'_search']:render('Search','Search name, class, item type or item ID',false,'','')
+        local s=utils.settings
+        local cached=LIST_CACHE[key] and type(s)=='table' and type(s[LIST_CACHE[key]])=='table' and s[LIST_CACHE[key]] or nil
+        render_checkbox(key,data,true,annotate,cached)
+        pop_tree(gui.elements[key..'_tree'])
+    end
+end
 local function render_settings()
     if not push_tree(gui.elements.main_tree, 'Keep, storage & town') then return false end
-    gui.elements.main_toggle:render('Enable town service','Allow automatic and requested service when Rosie is enabled.')
-    if push_tree(gui.elements.general_tree, 'General settings') then
-        gui.elements.town_choice:render('Home town', gui.town_options, 'Which town Rosie runs his errands in')
-        gui.elements.use_keybind:render('Use automatic-service keybind', 'Gate automatic town trips with a keybind. Pickup and Run town service remain available; use Enable Rosie to stop the whole product.')
-        if gui.elements.use_keybind:get() then
-            gui.elements.keybind_toggle:render('Automatic town service', 'Allow or pause new automatic town trips. An accepted trip finishes; the Rosie master switch cancels all work.')
-            gui.elements.dump_keybind:render('Dump tracker info', 'Dump all tracker info to log')
-            gui.elements.manual_keybind:render('Run town service keybind', 'Start an explicit town trip, including the pending stash-pull queue, while Rosie and town service are enabled.')
-            render_menu_header('Assign distinct keys. Manual service and diagnostics ignore unassigned or conflicting keys, and pause while typing in chat.')
+    local e=gui.elements
+    e.main_toggle:render('Enable town service','Allow automatic and requested service when Rosie is enabled.')
+    render_menu_header('Rules run from top to bottom: the first section that decides an item wins.')
+    if push_tree(e.always_keep_tree, '1. Always keep') then
+        render_menu_header('Never sold, salvaged or dropped; nothing below can override this section. Locked (favourite) items are never sold, salvaged or dropped either.')
+        e.mythic_always_keep:render('Always keep Mythics',
+            'Default on. Every Mythic is kept: the Iconic Mythics (Harlequin Crest, Doombringer ... including their Season 14 re-issues), '
+            .."the Mythic Uniques of Season 14+ (the Mythic form of an ordinary Unique, e.g. a Mythic Leoric's Crown: on the ground it looks "
+            ..'like the plain Unique, in the bag Rosie sees its Mythic upgrade affix), and mythic charms and seals. '
+            ..'Off: only the Mythics checked below (or with enough Greater Affixes) are kept; the others take the action you choose here.')
+        if not e.mythic_always_keep:get() then
+            render_menu_header('Always keep Mythics is off: choose which Mythics to keep and what happens to the others.')
+            e.ancestral_mythic_ga_count_slider:render('Also keep Mythics with Greater Affixes at least',
+                'A Mythic not checked below is still kept with at least this many Greater Affixes. 0 = off.')
+            e.ancestral_item_mythic:render('Iconic Mythics not checked', gui.item_options,
+                'What to do with an Iconic Mythic not checked in "Iconic Mythic items to keep" (and with Mythic Uniques while the separate list below is off).')
+            e.mythic_form_filter_toggle:render('Separate list for Mythic Uniques',
+                'On: Mythic Uniques (Season 14+ Mythic forms) checked in "Mythic Uniques to keep" are kept (their plain Unique too); the others take the action below. '
+                ..'Off: Mythic Uniques follow the Iconic Mythic action above.')
+            if e.mythic_form_filter_toggle:get() then
+                e.mythic_form_other:render('Mythic Uniques not checked', gui.item_options,
+                    'What to do with a Mythic Unique not checked in "Mythic Uniques to keep" nor in "Unique items I always keep".')
+            end
+            render_list('mythic','Iconic Mythic items to keep',mythic_items,
+                'Checked Iconic Mythics are kept (a checked name also keeps its Season 14 re-issue).')
+            if e.mythic_form_filter_toggle:get() then
+                render_list('mythic_form','Mythic Uniques to keep',unique_items,
+                    'Checked: the Mythic form is kept, and the plain Unique too.',annotate_form)
+            end
         end
-        render_menu_header('Leave bag space for the next drops. A threshold of 25 reserves 8 equipment slots in a 33-slot bag.')
-        gui.elements.max_inventory:render("Max inventory items", "No. of items in inventory to trigger Rosie tasks")
-        gui.elements.max_stash_items:render("Max stash items", "Rosie stops stashing when the observed stash reaches this configured limit")
-        render_menu_header('Town actions retry briefly. If a trip fails, correct the reported cause and use Run town service.')
-        gui.elements.skip_cache:render('Skip stashing cache', 'Keep caches in inventory')
-        if gui.elements.skip_cache:get() then
-            render_menu_header('If retained caches leave the bag full, Rosie reports the unresolved need and waits for Run town service.')
-        end
-        gui.elements.skip_favorite:render('Skip favorited items', 'When enabled, favorited (locked) items are ignored by all Rosie operations — not sold, salvaged, or stashed')
-        pop_tree(gui.elements.general_tree)
+        e.unique_ip_keep_slider:render('Keep Uniques with Item Power at least',
+            'Plain Uniques (not Mythics) with at least this item power are always kept (never sold, salvaged or dropped), '
+            ..'whatever the Greater Affix rules and actions below say. 0 = off. Max item power is 900 (925 with the upgrade).')
+        render_list('unique','Unique items I always keep',unique_items,
+            'Checked Uniques are kept as the plain Unique AND as its Mythic form, Ancestral or not. Rosie also picks them up whatever the pickup Greater Affix sliders or the in-game loot filter say. An empty list keeps nothing extra.',
+            annotate_unique)
+        pop_tree(e.always_keep_tree)
     end
-    if push_tree(gui.elements.loot_filter_tree, '[In-game Loot Filter]') then
-        gui.elements.loot_filter_toggle:render('Enable (Universal)', 'Use the in-game filter for equipment, seals and charms. Protected or unreadable items are retained.')
-        if gui.elements.loot_filter_toggle:get() then
+    if push_tree(e.loot_filter_tree, '2. In-game loot filter (optional)') then
+        render_menu_header('Off by default. When on, the in-game filter decides the equipment not kept by 1. Always keep: shown items are kept, hidden items are salvaged. Sections 3 to 5 then no longer apply to that equipment.')
+        e.loot_filter_toggle:render('Use for equipment, seals and charms', 'Use the in-game filter for equipment, seals and charms. Protected or unreadable items are kept.')
+        if e.loot_filter_toggle:get() then
             -- QQT_Warpigz_v3 (Q10, review): a seal affix filter that is on decides seals; charms keep the old order.
-            render_menu_header('Rejected equipment is salvaged. Rejected seals and charms follow their category action. Accepted or unreadable items are kept; locks remain protected. A seal affix filter that is on (with an affix checked) decides seals instead.')
+            render_menu_header('Rejected seals and charms follow their own action. A seal affix filter that is on (with an affix checked) decides seals instead.')
+        else
+            e.loot_filter_equipment:render('Use for equipment only', 'Use the in-game loot filter for armor, weapons and jewelry.')
+            e.loot_filter_seal:render('Use for seals only', 'Use the in-game loot filter for seals. The seal affix filter, when on with an affix checked, decides seals instead.') -- QQT_Warpigz_v3 (review)
+            e.loot_filter_charm:render('Use for charms only', 'Use the in-game loot filter for charms.')
         end
-        gui.elements.loot_filter_equipment:render('Enable (Equipment Only)', 'Use in-game loot filter for armor/weapons/jewelry. Ignored if Universal is on.')
-        gui.elements.loot_filter_seal:render('Enable (Seals Only)', 'Use in-game loot filter for seals. Ignored if Universal is on. The seal affix filter, when on with an affix checked, decides seals instead.') -- QQT_Warpigz_v3 (review)
-        gui.elements.loot_filter_charm:render('Enable (Charms Only)', 'Use in-game loot filter for charms. Ignored if Universal is on.')
-        if (gui.elements.loot_filter_equipment:get() or gui.elements.loot_filter_seal:get() or gui.elements.loot_filter_charm:get()) and not gui.elements.loot_filter_toggle:get() then
-            render_menu_header('Selective mode: loot filter applies to checked categories. Everything else uses Rosie\'s normal rules.')
-        end
-        pop_tree(gui.elements.loot_filter_tree)
+        pop_tree(e.loot_filter_tree)
     end
-    if push_tree(gui.elements.drawing_tree, 'Display settings') then
-        gui.elements.draw_stash:render('Draw Keep items', 'Draw blue box around items that Rosie will keep/stash')
-        if gui.elements.draw_stash:get() then
-            render_menu_header('Items to keep/stash are drawn with blue box')
-        end
-        gui.elements.draw_salvage:render('Draw Salvage items', 'Draw orange box around items that Rosie will salvage')
-        if gui.elements.draw_salvage:get() then
-            render_menu_header('Items to salvage are drawn with orange box')
-        end
-        gui.elements.draw_sell:render('Draw Sell items', 'Draw pink box around items that Rosie will sell')
-        if gui.elements.draw_sell:get() then
-            render_menu_header('Items to sell are drawn with pink box')
-        end
-        gui.elements.draw_inventory_origin_x:render("Inventory Origin X", "X pixel of the top-left inventory slot — open inventory and align until box overlaps slot 0,0")
-        gui.elements.draw_inventory_origin_y:render("Inventory Origin Y", "Y pixel of the top-left inventory slot")
-        gui.elements.draw_offset_x:render("Slot Width", "Pixel distance between inventory columns")
-        gui.elements.draw_offset_y:render("Slot Height", "Pixel distance between inventory rows")
-        gui.elements.draw_box_height:render("Box Height", "Height of the colored item box")
-        gui.elements.draw_box_width:render("Box Width", "Width of the colored item box")
-        pop_tree(gui.elements.drawing_tree)
+    if push_tree(e.junk_tree, '3. Items marked as junk') then
+        render_menu_header('Gear you marked as junk in game (and not kept by 1. or 2.).')
+        e.ancestral_item_junk:render('Ancestral junk', gui.item_options, 'What to do with Ancestral items marked as junk.'..ACTION_TIP)
+        e.item_junk:render('Non-Ancestral junk', gui.item_options, 'What to do with non-Ancestral items marked as junk.'..ACTION_TIP)
+        pop_tree(e.junk_tree)
     end
-    if push_tree(gui.elements.item_tree, 'Non-Ancestral') then
-        render_menu_header('Select the default action for the following item types for non-ancestral items')
-        gui.elements.item_unique:render('unique items', gui.item_options, 'Select what to do with non-ancestral unique items')
-        gui.elements.item_legendary_or_lower:render('Common / Magic / Rare / Legendary', gui.item_options, 'Default action for non-ancestral common, magic, rare and legendary equipment, including crafting bases. Keep preserves them.')
-        gui.elements.item_junk:render('junk items', gui.item_options, 'Select what to do with junk items')
-        pop_tree(gui.elements.item_tree)
+    if push_tree(e.unique_rules_tree, '4. Uniques') then
+        render_menu_header('Plain Uniques not kept by 1. Always keep (Mythics never get here).')
+        e.ancestral_unique_ga_count_slider:render('Keep with Greater Affixes at least', 'A Unique with at least this many Greater Affixes is kept. 0 = off.')
+        e.ancestral_item_unique:render('Otherwise: Ancestral Uniques', gui.item_options, 'What to do with the other Ancestral Uniques.'..ACTION_TIP)
+        e.item_unique:render('Otherwise: Non-Ancestral Uniques', gui.item_options, 'What to do with the other non-Ancestral Uniques.'..ACTION_TIP)
+        local sort=sorter()
+        if sort and type(sort.render_mode)=='function' then sort.render_mode() end
+        pop_tree(e.unique_rules_tree)
     end
-    if push_tree(gui.elements.ancestral_item_tree, 'Ancestral') then
-        render_menu_header('Select the default action for the following item types for ancestral items')
-        gui.elements.mythic_always_keep:render('Always keep mythics', 'Mythic items, charms and seals are never sold or salvaged. Overrides every other rule, loot filter and junk mark included. Off: mythics follow the mythic rules below (never the loot filter or junk action). Mythic Uniques follow the Mythic Unique filter when it is on.')
-        gui.elements.ancestral_item_mythic:render('mythic items', gui.item_options, 'Select what to do with mythic items')
-        gui.elements.ancestral_item_unique:render('unique items', gui.item_options, 'Select what to do with unique items')
-        gui.elements.ancestral_item_legendary:render('Common / Magic / Rare / Legendary', gui.item_options, 'Default action for ancestral common, magic, rare and legendary equipment, including crafting bases, when no keep override applies.')
-        gui.elements.ancestral_item_junk:render('junk items', gui.item_options, 'Select what to do with junk items')
-        render_menu_header('Select the number of greater affixes on items you want to keep (override the default actions above to keep)')
-        gui.elements.ancestral_mythic_ga_count_slider:render('Mythic Greater Affix', 'Minimum greater affixes to keep a mythic. 0 disables this override.')
-        gui.elements.ancestral_unique_ga_count_slider:render('Unique Greater Affix', 'Minimum greater affixes to keep an ancestral unique. 0 disables this override.')
-        gui.elements.ancestral_ga_count_slider:render('Non-Unique/Non-Mythic Min GA to Keep', 'Items with this many or more GAs are kept regardless of default action. 0 = disabled.')
-        gui.elements.ancestral_filter_toggle:render('Use affix filter', 'Sub-filter within GA gate: also require matching affixes to keep')
-        if gui.elements.ancestral_filter_toggle:get() then
-            render_menu_header('Item keeps only if GA gate passes AND it has >= N of your checked affixes')
-            gui.elements.ancestral_affix_count_slider:render('Min matching affixes', 'How many checked affixes must be present')
-            for _, affix_type in pairs(affix_types) do
-                if not affix_type.name:match('talisman') then
-                    local name = affix_type.name .. '_affix'
-                    if push_tree(gui.elements[name .. '_tree'], affix_type.name) then
-                        gui.elements[name .. '_search']:render('Search', 'Filter by name', false, '', '')
-                        render_checkbox(name, affix_type.data, false)
-                        pop_tree(gui.elements[name .. '_tree'])
+    if push_tree(e.legendary_tree, '5. Legendary, Rare, Magic, Common') then
+        render_menu_header('All other gear, including crafting bases.')
+        e.ancestral_ga_count_slider:render('Keep Ancestral with Greater Affixes at least', 'An Ancestral item with at least this many Greater Affixes is kept. 0 = off.')
+        if e.ancestral_ga_count_slider:get()>0 then
+            e.ancestral_filter_toggle:render('...and only with checked affixes', 'Also require at least N of your checked affixes before the Greater Affix rule keeps an item.')
+            if e.ancestral_filter_toggle:get() then
+                e.ancestral_affix_count_slider:render('Min matching affixes', 'How many checked affixes must be present')
+                for _, affix_type in pairs(affix_types) do
+                    if not affix_type.name:match('talisman') then
+                        local name = affix_type.name .. '_affix'
+                        if push_tree(e[name .. '_tree'], affix_type.name) then
+                            e[name .. '_search']:render('Search', 'Filter by name', false, '', '')
+                            render_checkbox(name, affix_type.data, false)
+                            pop_tree(e[name .. '_tree'])
+                        end
                     end
                 end
             end
         end
-        gui.elements.mythic_form_filter_toggle:render('Use Mythic Unique filter', 'Season 15 Mythic forms of ordinary Uniques (same item as the Unique, with the Mythic upgrade). On: checked ones are always kept, unchecked ones take the action below. Off: they count as mythics (Always keep mythics / mythic rules).')
-        if gui.elements.mythic_form_filter_toggle:get() then
-            gui.elements.mythic_form_other:render('unchecked Mythic Uniques', gui.item_options, 'Action for Mythic Uniques you did not check. The Mythic Greater Affix override above still keeps them. Locked (favorite) items are never touched.')
-            if push_tree(gui.elements['mythic_form_tree'], 'Mythic Uniques to keep') then
-                gui.elements['mythic_form_search']:render('Search', 'Search name, class, item type or item ID', false, '', '')
-                render_checkbox('mythic_form', unique_items, true)
-                pop_tree(gui.elements['mythic_form_tree'])
-            end
-        end
-        gui.elements.ancestral_unique_filter_toggle:render('Use unique/mythic filter', 'Checked ancestral uniques and mythics are kept. Unchecked items still use the GA override and default action above.')
-        if gui.elements.ancestral_unique_filter_toggle:get() then
-            render_menu_header('Check the uniques/mythics you want to keep. Unchecked items use the GA override and default action above.')
-            if push_tree(gui.elements['unique_tree'], 'Unique items') then
-                gui.elements['unique_search']:render('Search', 'Current class: search name, class, item type or item ID', false, '', '')
-                render_checkbox('unique', unique_items, true)
-                pop_tree(gui.elements['unique_tree'])
-            end
-            if push_tree(gui.elements['mythic_tree'], 'Mythic items') then
-                gui.elements['mythic_search']:render('Search', 'Search name, class, item type or item ID', false, '', '')
-                render_checkbox('mythic',mythic_items,true)
-                pop_tree(gui.elements['mythic_tree'])
-            end
-        end
-        pop_tree(gui.elements.ancestral_item_tree)
+        e.ancestral_item_legendary:render('Otherwise: Ancestral', gui.item_options, 'What to do with the other Ancestral common, magic, rare and legendary gear.'..ACTION_TIP)
+        e.item_legendary_or_lower:render('Otherwise: Non-Ancestral', gui.item_options, 'What to do with non-Ancestral common, magic, rare and legendary gear.'..ACTION_TIP)
+        pop_tree(e.legendary_tree)
     end
-    if push_tree(gui.elements.socketable_tree, 'Socketables') then
-        gui.elements.stash_socketables:render('Stash socketables', gui.stash_extra_options, 'Select when to stash socketables')
-        if gui.elements.stash_socketables:get() == utils.stash_extra_enum['NEVER'] then
-            render_menu_header('Never stash socketables')
-        elseif gui.elements.stash_socketables:get() == utils.stash_extra_enum['FULL'] then
-            render_menu_header('Stash all socketables when Rosie is stashing equipment if socketables inventory is full')
-        elseif gui.elements.stash_socketables:get() == utils.stash_extra_enum['ALWAYS'] then
-            render_menu_header('Stash all socketables when Rosie is stashing')
-        end
-        pop_tree(gui.elements.socketable_tree)
-    end
-    if push_tree(gui.elements.consumeable_tree, 'Consumables') then
-        gui.elements.stash_consumables:render('Stash consumables', gui.stash_extra_options, 'Select when to stash consumables')
-        if gui.elements.stash_consumables:get() == utils.stash_extra_enum['NEVER'] then
-            render_menu_header('Never stash consumables')
-        elseif gui.elements.stash_consumables:get() == utils.stash_extra_enum['FULL'] then
-            render_menu_header('Stash extra boss materials when Rosie is stashing equipment if consumables inventory is full')
-        elseif gui.elements.stash_consumables:get() == utils.stash_extra_enum['ALWAYS'] then
-            render_menu_header('Stash extra boss materials when Rosie is stashing')
-        end
-        pop_tree(gui.elements.consumeable_tree)
-    end
-    if push_tree(gui.elements.key_tree, 'Dungeon Keys') then
-        gui.elements.stash_keys:render('Stash dungeon keys', gui.stash_extra_options, 'Select when to stash dungeon keys')
-        gui.elements.stash_sigils:render('Stash Favourited sigils', 'stash favourited sigils')
-        gui.elements.salvage_sigils:render('Salvage Non-Favourited sigils', 'salvage non-favourited sigils')
-        if gui.elements.stash_keys:get() == utils.stash_extra_enum['NEVER'] then
-            render_menu_header('Never stash dungeon keys')
-        elseif gui.elements.stash_keys:get() == utils.stash_extra_enum['FULL'] then
-            render_menu_header('Stash extra compasses and tributes when Rosie is stashing equipment if dungeon keys inventory is full')
-        elseif gui.elements.stash_keys:get() == utils.stash_extra_enum['ALWAYS'] then
-            render_menu_header('Stash extra compasses and tributes when Rosie is stashing')
-        end
-        pop_tree(gui.elements.key_tree)
-    end
-    if push_tree(gui.elements.talisman_seal_tree, 'Talisman (Seal)') then
+    if push_tree(gui.elements.talisman_seal_tree, '6. Seals') then
         gui.elements.talisman_seal_action:render('Seal default action', {'Keep', 'Salvage', 'Sell'}, 'What to do with seals by default')
         gui.elements.talisman_seal_affix_filter_toggle:render('Use affix filter', 'Keep seals that have >= N of your checked affixes; every other seal takes the seal default action. While on with an affix checked, it decides seals instead of the in-game loot filter. Unique and mythic seals follow their own filter below. A seal whose affixes cannot be read is kept and the console says why.') -- QQT_Warpigz_v3 (Q10)
         if gui.elements.talisman_seal_affix_filter_toggle:get() then
@@ -512,7 +520,7 @@ local function render_settings()
         end
         pop_tree(gui.elements.talisman_seal_tree)
     end
-    if push_tree(gui.elements.talisman_charm_tree, 'Talisman (Charm)') then
+    if push_tree(gui.elements.talisman_charm_tree, '7. Charms') then
         gui.elements.talisman_charm_action:render('Charm default action', {'Keep', 'Salvage', 'Sell'}, 'What to do with charms by default')
         gui.elements.talisman_charm_affix_filter_toggle:render('Use affix filter', 'Keep charms that have >= N of your checked affixes; every other charm takes the charm default action. When the in-game loot filter (Universal or Charms only) is on, it decides non-unique charms before this filter (shown ones are kept, hidden ones take the charm action).') -- QQT_Warpigz_v3 (Q10, review: charms keep the in-game filter first)
         if gui.elements.talisman_charm_affix_filter_toggle:get() then
@@ -546,6 +554,59 @@ local function render_settings()
             end
         end
         pop_tree(gui.elements.talisman_charm_tree)
+    end
+    if push_tree(gui.elements.storage_tree, '8. Storage') then
+        local e=gui.elements
+        local function when(widget,what)
+            local v=widget:get()
+            if v==utils.stash_extra_enum['FULL'] then render_menu_header('Stashed when its bag is full.')
+            elseif v==utils.stash_extra_enum['ALWAYS'] then render_menu_header('Stashed on every town trip.') end
+        end
+        e.stash_socketables:render('Stash socketables', gui.stash_extra_options, 'Gems and runes. When full: stash them when the socketables bag is full. Always: on every trip.')
+        when(e.stash_socketables)
+        e.stash_consumables:render('Stash consumables', gui.stash_extra_options, 'Extra boss materials. When full: stash them when the consumables bag is full. Always: on every trip.')
+        when(e.stash_consumables)
+        e.stash_keys:render('Stash dungeon keys', gui.stash_extra_options, 'Extra compasses and tributes. When full: stash them when the dungeon keys bag is full. Always: on every trip.')
+        when(e.stash_keys)
+        e.stash_sigils:render('Stash favourited sigils', 'Stash favourited sigils')
+        e.salvage_sigils:render('Salvage non-favourited sigils', 'Salvage non-favourited sigils')
+        e.skip_cache:render('Leave caches in the bag', 'Caches are not stashed.')
+        if e.skip_cache:get() then
+            render_menu_header('If retained caches leave the bag full, Rosie reports the unresolved need and waits for Run town service.')
+        end
+        e.skip_favorite:render('Leave locked items in the bag', 'Locked (favourite) items are never sold or salvaged; with this on they are not stashed either.')
+        e.max_stash_items:render("Max stash items", "Rosie stops stashing when the observed stash reaches this configured limit")
+        pop_tree(e.storage_tree)
+    end
+    if push_tree(gui.elements.general_tree, '9. Town trips') then
+        local e=gui.elements
+        e.town_choice:render('Home town', gui.town_options, 'Which town Rosie runs his errands in')
+        render_menu_header('Leave bag space for the next drops. A threshold of 25 reserves 8 equipment slots in a 33-slot bag.')
+        e.max_inventory:render("Max inventory items", "No. of items in inventory to trigger Rosie tasks")
+        e.use_keybind:render('Use automatic-service keybind', 'Gate automatic town trips with a keybind. Pickup and Run town service remain available; use Enable Rosie to stop the whole product.')
+        if e.use_keybind:get() then
+            e.keybind_toggle:render('Automatic town service', 'Allow or pause new automatic town trips. An accepted trip finishes; the Rosie master switch cancels all work.')
+            e.dump_keybind:render('Dump tracker info', 'Dump all tracker info to log')
+            e.manual_keybind:render('Run town service keybind', 'Start an explicit town trip, including the pending stash-pull queue, while Rosie and town service are enabled.')
+            render_menu_header('Assign distinct keys. Manual service and diagnostics ignore unassigned or conflicting keys, and pause while typing in chat.')
+        end
+        render_menu_header('Town actions retry briefly. If a trip fails, correct the reported cause and use Run town service.')
+        pop_tree(e.general_tree)
+    end
+    if push_tree(gui.elements.drawing_tree, 'Display') then
+        local e=gui.elements
+        e.draw_stash:render('Draw Keep items', 'Draw a blue box around items that Rosie will keep/stash')
+        e.draw_salvage:render('Draw Salvage items', 'Draw an orange box around items that Rosie will salvage')
+        e.draw_sell:render('Draw Sell items', 'Draw a pink box around items that Rosie will sell')
+        if e.draw_stash:get() or e.draw_salvage:get() or e.draw_sell:get() then
+            e.draw_inventory_origin_x:render("Inventory Origin X", "X pixel of the top-left inventory slot — open inventory and align until box overlaps slot 0,0")
+            e.draw_inventory_origin_y:render("Inventory Origin Y", "Y pixel of the top-left inventory slot")
+            e.draw_offset_x:render("Slot Width", "Pixel distance between inventory columns")
+            e.draw_offset_y:render("Slot Height", "Pixel distance between inventory rows")
+            e.draw_box_height:render("Box Height", "Height of the colored item box")
+            e.draw_box_width:render("Box Width", "Width of the colored item box")
+        end
+        pop_tree(e.drawing_tree)
     end
     -- Gambling UI hidden pending API update
     -- if push_tree(gui.elements.gamble_tree, 'Gambling settings') then

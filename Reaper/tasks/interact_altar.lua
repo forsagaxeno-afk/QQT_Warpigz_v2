@@ -18,6 +18,7 @@ local tracker      = require "core.tracker"
 local rotation     = require "core.boss_rotation"
 local settings     = require "core.settings"
 local navigation_owner = require "core.navigation_owner"
+local events       = require "core.qqt_events" -- QQT_Warpigz_v3
 
 
 local plugin_label = 'reaper'
@@ -175,6 +176,8 @@ local function mark_summoned(t)
     tracker.summon_zone         = utils.get_zone()
     last_interact_time = 0
     clear_attempt()
+    local boss = rotation.current() -- QQT_Warpigz_v3: suite event
+    events.emit('reaper', 'boss_summoned', {boss = boss and boss.id, label = boss and boss.label})
 end
 
 -- QQT_Warpigz_v3: bounded give-up (see the constants above).

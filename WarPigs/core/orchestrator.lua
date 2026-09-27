@@ -1,5 +1,6 @@
 local settings = require 'core.settings'
 local RavenBridge = require 'wp_silent_raven'
+local events = require 'core.qqt_events' -- QQT_Warpigz_v3
 
 local orchestrator = {}
 local function log(msg) console.print('[WarPigs] ' .. msg) end
@@ -1314,6 +1315,11 @@ end
 local owned          = {}  -- plugin_name -> true (currently enabled by us)
 local last_wanted    = {}  -- plugin_name -> true (was-wanted on previous tick)
 local last_matches   = {}  -- pattern -> true (for verbose log only)
+-- QQT_Warpigz_v3: the matches the step_start/step_done events were last sent
+-- for. Separate from last_matches, which tick() does not update on its early
+-- returns (raven hold, teleport in flight): diffing against it re-sent every
+-- step on every tick of a hold.
+local emitted_matches = {}
 local pending_disable = {} -- plugin_name -> true (disable deferred by predicate)
 local pending_disable_since = {}  -- plugin_name -> time when deferral started (for MAX_DISABLE_DEFER_SECONDS)
 local last_disable_time     = {}  -- plugin_name -> time the disable actually fired (for TRANSITION_GAP_SECONDS gate)
@@ -1477,6 +1483,7 @@ local function plugin_enable(entry, reason)
         dispatch.unconfirmed[entry.plugin] = nil
         last_enabled_reason[entry.plugin] = reason
         log('enabled ' .. entry.plugin .. ' (' .. (reason or '?') .. ')')
+        events.emit('warpigs', 'plugin_enabled', {plugin = entry.plugin, reason = reason}) -- QQT_Warpigz_v3
         return
     end
     -- A refused Reaper run_once has its own cooldown and status entry (R4).
@@ -1517,6 +1524,7 @@ local function plugin_disable(entry)
             return false
         end
         log('disabled ' .. entry.plugin)
+        events.emit('warpigs', 'plugin_disabled', {plugin = entry.plugin}) -- QQT_Warpigz_v3
         dispatch.restore_orbwalker('after disabling ' .. entry.plugin)
     end
     if entry.plugin == 'ReaperPlugin' then dispatch.reaper_run_ended(get_time_since_inject(), true) end
@@ -2630,6 +2638,14 @@ function orchestrator.tick()
         end
     end
 
+    -- QQT_Warpigz_v3: suite events on every quest-step edge (always, not verbose-only).
+    for pattern in pairs(matches) do
+        if not emitted_matches[pattern] then events.emit('warpigs', 'step_start', {quest = pattern}) end
+    end
+    for pattern in pairs(emitted_matches) do
+        if not matches[pattern] then events.emit('warpigs', 'step_done', {quest = pattern}) end
+    end
+    emitted_matches = matches
     if settings.verbose_logs then
         for pattern in pairs(matches) do
             if not last_matches[pattern] then log('trigger matched: ' .. pattern) end
@@ -2646,6 +2662,7 @@ function orchestrator.tick()
     -- completed at least one WarPlans cycle first.
     local turn_in_matched_now = matches[TURN_IN_PATTERN] == true
     if turn_in_was_matched and not turn_in_matched_now then
+        events.emit('warpigs', 'turn_in_done', {}) -- QQT_Warpigz_v3
         if not had_turn_in_complete then
             had_turn_in_complete = true
             log('turn-in cycle completed — pit filler armed (run_pit_after_turnin)')
@@ -2780,6 +2797,7 @@ function orchestrator.tick()
             pending_disable_since[plugin_name] = nil
             if settings.use_teleport_transition then teleport_pending = true end
             log('detected self-disable of ' .. plugin_name .. ' — sequencing handoff')
+            events.emit('warpigs', 'plugin_finished', {plugin = plugin_name}) -- QQT_Warpigz_v3
             -- WPD-6: a Reaper run that ended by itself may have failed.
             if plugin_name == 'ReaperPlugin' then dispatch.reaper_run_ended(now, false) end
         end
@@ -3606,6 +3624,7 @@ function orchestrator.release_all()
     end
     last_wanted           = {}
     last_matches          = {}
+    emitted_matches       = {}
     pending_disable       = {}
     pending_disable_since = {}
     last_disable_time     = {}

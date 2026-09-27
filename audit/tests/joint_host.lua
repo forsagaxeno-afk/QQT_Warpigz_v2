@@ -448,6 +448,45 @@ function J.new(opts)
         'coroutine'}) do
         BASE[name] = rawget(_G, name)
     end
+    -- QQT_Warpigz_v3 (3.3.0): opts.ordered_pairs makes the plugins' pairs()
+    -- walk string / number / boolean keys in sorted order. Native pairs order
+    -- is not reproducible: LuaJIT 2.1 and Lua 5.4 seed the string hash per
+    -- process, and in Lua 5.4 whether a removed key's node is reused depends
+    -- on when the GC ran (so on every allocation anywhere in the process).
+    -- Batmobile's explorer takes the first of equally good frontiers in pairs
+    -- order, so the same script walks a different Pit from run to run with no
+    -- other change. Traversal semantics are kept: keys removed during the loop
+    -- are skipped, __pairs and tables with object keys use the native pairs.
+    if opts.ordered_pairs then
+        local native_pairs, rawget_, getmt = pairs, rawget, getmetatable
+        local RANK = {boolean = 1, number = 2, string = 3}
+        local function before(a, b)
+            local ta, tb = type(a), type(b)
+            if ta ~= tb then return RANK[ta] < RANK[tb] end
+            if ta == 'boolean' then return (not a) and b end
+            return a < b
+        end
+        BASE.pairs = function(t)
+            local mt = getmt(t)
+            if type(t) ~= 'table' or (mt and mt.__pairs) then return native_pairs(t) end
+            local keys = {}
+            for k in native_pairs(t) do
+                if not RANK[type(k)] then return native_pairs(t) end
+                keys[#keys + 1] = k
+            end
+            table.sort(keys, before)
+            local i = 0
+            return function()
+                while true do
+                    i = i + 1
+                    local k = keys[i]
+                    if k == nil then return nil end
+                    local v = rawget_(t, k)
+                    if v ~= nil then return k, v end
+                end
+            end, t, nil
+        end
+    end
     BASE.string, BASE.table, BASE.math = copy(string), copy(table), copy(math)
     h.stdlib = {string = BASE.string, table = BASE.table, math = BASE.math}
     h.stdlib_keys = {string = copy(BASE.string), table = copy(BASE.table), math = copy(BASE.math)}

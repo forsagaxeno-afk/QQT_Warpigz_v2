@@ -50,9 +50,23 @@ for folder, component_version in manifest["components"].items():
         require(f"s.version='{component_version}'" in source, f"Rosie displayed version mismatch")
     else:
         gui = "silent_raven/gui.lua" if folder.startswith("SilentRaven") else "gui.lua"
-        source = (ROOT / folder / gui).read_text()
+        path = ROOT / folder / gui
+        source = path.read_text() if path.is_file() else ""
+        require(path.is_file(), f"Missing {folder}/{gui}")
         match = re.search(r"local (?:plugin_version|version)\s*=\s*['\"](?:WarPigz )?v?([^'\"]+)", source)
         require(bool(match) and match[1] == component_version, f"GUI version mismatch: {folder}")
+    if folder == "WarRoom":
+        # QQT_Warpigz_v3: the dashboard page and the Windows server scripts ship
+        # with the plugin; the scripts must stay ASCII with CRLF line endings.
+        require((ROOT / folder / "dashboard" / "index.html").is_file(), "Missing WarRoom/dashboard/index.html")
+        for script in ("serve.ps1", "serve.bat", "serve-lan.bat"):
+            path = ROOT / folder / "server" / script
+            if not path.is_file():
+                errors.append(f"Missing WarRoom/server/{script}")
+                continue
+            data = path.read_bytes()
+            require(data.isascii(), f"WarRoom/server/{script} must be ASCII")
+            require(data.count(b"\n") == data.count(b"\r\n") > 0, f"WarRoom/server/{script} must use CRLF line endings")
     rows = [line for line in readme.splitlines() if line.startswith(f"| `{folder}` |")]
     require(len(rows) == 1 and f"| {component_version} |" in rows[0], f"README version mismatch: {folder}")
 

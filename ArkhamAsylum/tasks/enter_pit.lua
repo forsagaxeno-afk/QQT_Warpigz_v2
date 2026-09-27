@@ -4,6 +4,7 @@ local utils = require "core.utils"
 local settings = require 'core.settings'
 local tracker = require 'core.tracker'
 local pit_levels = require 'data.pitlevels'
+local events = require 'core.qqt_events' -- QQT_Warpigz_v3
 
 local status_enum = {
     IDLE = 'idle',
@@ -59,6 +60,7 @@ local open_portal = function (delay)
         local pit_address = pit_levels[settings.pit_level]
         if pit_address then
             utility.open_pit_portal(pit_address)
+            events.emit('arkham', 'pit_start', {level = settings.pit_level}) -- QQT_Warpigz_v3
             -- A newly opened pit is a new run, never the one left for Alfred.
             tracker.resume_key = nil
             task.committed_at = get_time_since_inject()

@@ -31,6 +31,7 @@ local settings = {
     ancestral_ga_count = 0,
     ancestral_unique_ga_count = 0,
     ancestral_mythic_ga_count = 0,
+    unique_ip_keep = 0,
     ancestral_unique_filter = false,
     ancestral_unique = {},
     ancestral_mythic = {},
@@ -217,7 +218,11 @@ function settings:update_settings(force)
     settings.ancestral_ga_count = gui.elements.ancestral_ga_count_slider:get()
     settings.ancestral_unique_ga_count = gui.elements.ancestral_unique_ga_count_slider:get()
     settings.ancestral_mythic_ga_count = gui.elements.ancestral_mythic_ga_count_slider:get()
-    settings.ancestral_unique_filter = gui.elements.ancestral_unique_filter_toggle:get()
+    local ip_el = gui.elements.unique_ip_keep_slider -- QQT_Warpigz_v3 3.2.5: nil-safe after a reload
+    settings.unique_ip_keep = ip_el and tonumber(ip_el:get()) or 0
+    -- QQT_Warpigz_v3 (keep menu): 'Unique items I always keep' has no switch; an
+    -- empty list is no per-item rule.
+    settings.ancestral_unique_filter = true
     settings.ancestral_filter        = gui.elements.ancestral_filter_toggle:get()
     settings.ancestral_affix_count   = gui.elements.ancestral_affix_count_slider:get()
     settings.path_angle = gui.elements.explorer_path_angle_slider:get()

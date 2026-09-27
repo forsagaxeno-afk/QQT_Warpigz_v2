@@ -14,6 +14,7 @@ local utils     = require "core.utils"
 local tracker   = require "core.tracker"
 local rotation  = require "core.boss_rotation"
 local settings  = require "core.settings"
+local events    = require "core.qqt_events" -- QQT_Warpigz_v3
 
 -- ---- Config ----
 local CHEST_INTERACT_COOLDOWN = 0.5  -- min seconds between EGB chest interact attempts
@@ -173,6 +174,9 @@ function task.Execute()
 
         interact_object(chest)
         last_interact_time = get_time_since_inject()
+        -- QQT_Warpigz_v3: chest_opened once per run, sent after the run state
+        -- below is set and with the name read there (no extra host call).
+        local first_open = tracker.chest_opened_time == nil
         tracker.chest_opened_time = os.time()
         -- Live 2.1.2 (Grigoire): a reward chest means the boss was summoned and
         -- killed. Until the run is counted (WAIT_COMPLETE) the altar must not
@@ -186,6 +190,7 @@ function task.Execute()
 
         -- Signal Belial chest UI task
         local n = chest:get_skin_name()
+        if first_open then events.emit('reaper', 'chest_opened', {name = n}) end
         if type(n) == "string" and n:find("^Boss_WT_Belial_") then
             tracker.belial_chest_interacted = true
             console.print("[Chest] Belial chest interacted – signalling UI task.")

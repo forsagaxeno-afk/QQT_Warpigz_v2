@@ -6,7 +6,7 @@
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v3.2.3.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
+**Current release: v3.3.0.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
 
 **New here? Read the [step-by-step user guide](docs/GUIDE_EN.md)** (install, setup, WarPigs automation or one activity by hand, troubleshooting).
 
@@ -20,23 +20,24 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 
 | Folder | Role | Component version |
 | --- | --- | --- |
-| `WarPigs` | Master orchestrator and town handoffs | 1.1.5 |
-| `WarPug` | War Plan selection and creation | 1.0.14 |
-| `Batmobile` | Shared navigation | 2.2.0 |
-| `ArkhamAsylum` | The Pit | 2.1.1 |
-| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.5.2 |
-| `HordeDev` | Infernal Hordes | 2.2.3 |
-| `Reaper` | Boss lairs | 1.10.2 |
-| `WonderCity` | Kurast Undercity | 2.2.2 |
-| `SilentRaven` | Whisper reward checks in Temis | 0.2.4 |
-| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.15 |
+| `WarPigs` | Master orchestrator and town handoffs | 1.1.6 |
+| `WarPug` | War Plan selection and creation | 1.0.15 |
+| `Batmobile` | Shared navigation | 2.2.1 |
+| `ArkhamAsylum` | The Pit | 2.1.2 |
+| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.0 |
+| `HordeDev` | Infernal Hordes | 2.2.4 |
+| `Reaper` | Boss lairs | 1.10.3 |
+| `WonderCity` | Kurast Undercity | 2.2.3 |
+| `SilentRaven` | Whisper reward checks in Temis | 0.2.5 |
+| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.16 |
+| `WarRoom` | Read-only web dashboard for the whole suite (gold, XP, runs, loot, Helltide); optional phone/LAN view | 1.0.0 |
 
 Nightmare Dungeons are not supported. WarPug excludes those nodes.
 
 ## Installation
 
 1. Stop the controllers and close QQT before replacing source files. Back up your plugin folders, settings, custom paths, and WarPug `positions.txt` outside the scripts directory.
-2. Copy **only the ten plugin folders above** into the QQT scripts directory. Do not copy `audit`, `docs` or `assets` there (QQT would try to load them as plugins and print `cannot open ...\main.lua`). Keep one loaded copy of each plugin. **From 3.0 the folders have no version in their name** and keep it across updates; when upgrading from 2.x, delete `WarPigs-1.0.0`, `WarPug-1.0.0`, `Batmobile-1.0.12`, `ArkhamAsylum-1.0.6`, `HelltideRevamped-0.4`, `HordeDev-1.3.9`, `Reaper-main`, `WonderCity-main` and `SilentRaven-0.1.3` first, or QQT loads two copies.
+2. Copy **only the 11 plugin folders above** into the QQT scripts directory. Do not copy `audit`, `docs` or `assets` there (QQT would try to load them as plugins and print `cannot open ...\main.lua`). Keep one loaded copy of each plugin. **From 3.0 the folders have no version in their name** and keep it across updates; when upgrading from 2.x, delete `WarPigs-1.0.0`, `WarPug-1.0.0`, `Batmobile-1.0.12`, `ArkhamAsylum-1.0.6`, `HelltideRevamped-0.4`, `HordeDev-1.3.9`, `Reaper-main`, `WonderCity-main` and `SilentRaven-0.1.3` first, or QQT loads two copies.
 3. Replace the SilentRaven folder completely: its modules now live under `silent_raven.*`. Restore your saved configuration as needed. Do not load old SilentRaven alongside this build.
 4. **Rosie replaces Alfred and Looter**: remove (or move out of the scripts directory) your old Alfred, SteroidAlfred, AlfredTheButler-WarPigz and LooteerV3 folders — Rosie publishes the same `AlfredTheButlerPlugin` / `LooteerPlugin` APIs and yields if another provider is loaded. Rosie switches the host Auto Loot off while its pickup runs. Keep your separately installed **combat/Orbwalker** plugin; it is not bundled or replaced. Configure town, loot rules, combat, and activity settings before enabling automation.
 5. Fully reload QQT. This matters for the captured module imports that fix Reaper's externally triggered `reset_run` crash.
@@ -45,6 +46,15 @@ Nightmare Dungeons are not supported. WarPug excludes those nodes.
 8. Enable WarPug for automatic plan creation, then WarPigs for orchestration. Set **Use teleport** for the existing via-Temis service cycle. While WarPigs runs, pause WarPigs rather than an activity plugin's hotkey (a hotkey pause is honoured and shown, but WarPigs then waits for that plugin). Avoid independently starting overlapping activity controllers.
 
 `audit`, `docs`, and `assets` are not plugins. The preserved [upstream documentation](docs/UPSTREAM_README.md) explains original menus and activity setup; its dated history describes earlier builds.
+
+## WarRoom dashboard
+
+`WarRoom` collects what the other plugins report (runs, loot, deaths, gold, XP, the current step and the War Plan queue) and writes it to `WarRoom\dashboard\suite_data.js`. It only watches: it never presses keys, moves the character or changes another plugin's settings. It is on by default (QQT menu **Z | War Room | Dashboard**: **Enable**, **Write every (s)** 15, reset buttons). To view it:
+
+- **On the gaming PC:** double-click `WarRoom\dashboard\index.html` (no internet, no install), or run `WarRoom\server\serve.bat` and open `http://127.0.0.1:8765`.
+- **On a phone or tablet at home:** run `WarRoom\server\serve-lan.bat` and open the private `http://192.168.x.y:8765/t/...` link it prints. Allow the Windows firewall prompt for **Private networks** only.
+
+HelltideRevamped's live map and stats now appear in WarRoom's **Helltide** tab (automatic while WarRoom is enabled; HelltideRevamped's **Web dashboard** option is not needed). The server is a small read-only script for the PowerShell built into Windows (nothing to download, no admin rights): localhost only by default, an access key for other devices, GET/HEAD only, and only the dashboard folder. The data files hold no character, account or file names. Details: [user guide, part 7](docs/GUIDE_EN.md#7-warroom-dashboard) and [WarRoom/README.md](WarRoom/README.md).
 
 ## Infernal Hordes from a War Plan (no compass)
 

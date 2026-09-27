@@ -1,13 +1,13 @@
 <!doctype html>
-<!-- QQT_Warpigz_v3: HelltideRevamped offline dashboard entry point. Open this
-     file from disk (double-click). It opens the theme you chose last (Forge,
-     Daylight or Console; switch at the top of the page), Forge by default.
-     Each theme page reloads hr_data.js from this folder every 5 s. -->
+<!-- QQT_Warpigz_v3: WarRoom suite dashboard entry point. Open this file from
+     disk (double-click) or through WarRoom/server. It opens the theme you chose
+     last (Forge, Daylight or Console; switch at the top of every page), Forge by
+     default. Each theme page reloads suite_data.js from this folder. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HelltideRevamped — Live</title>
+<title>WarRoom — Live</title>
 <style>
 :root { color-scheme: dark; }
 html, body { margin: 0; background: #0e0a07; color: #efe4cc; font: 14px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; }
@@ -19,15 +19,15 @@ a { color: #e3ab45; }
   var themes = { forge: 1, daylight: 1, console: 1 };
   var pick = 'forge';
   try {
-    var saved = localStorage.getItem('hr_dash_theme');
+    var saved = localStorage.getItem('wr_theme');
     if (saved && themes.hasOwnProperty(saved)) pick = saved;
   } catch (e) { /* file:// pages may block localStorage: use Forge */ }
-  location.replace(pick + '.html');
+  location.replace(pick + '.html' + location.hash);
 })();
 </script>
 </head>
 <body>
-<p>Opening the dashboard… If nothing happens, open
+<p>Opening WarRoom… If nothing happens, open
 <a href="forge.html">Forge</a>, <a href="daylight.html">Daylight</a> or <a href="console.html">Console</a>.</p>
 </body>
 </html>

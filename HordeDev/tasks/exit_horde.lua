@@ -135,6 +135,7 @@ local exit_horde_task = {
         self.reset_phase = "FAULT"
         self.reset_error = message
         console.print("[exit_horde] RESET stopped: " .. message)
+        tracker.emit('horde_fail', {msg = message}) -- QQT_Warpigz_v3
         -- Retain the pending task so walking/start/salvage cannot begin a new cycle.
     end,
 
@@ -180,6 +181,7 @@ local exit_horde_task = {
             self.reset_phase, self.reset_complete = "DONE", true
             exit_started = false
             console.print("[exit_horde] RESET sequence finished outside Horde; next cycle released.")
+            tracker.emit_done('reset') -- QQT_Warpigz_v3
             if tracker.entry_mode == 'warplan' then warplan.complete() end
             return
         end
@@ -296,6 +298,7 @@ local exit_horde_task = {
                 return
             end
             console.print("Teleporting out of Horde to Library.")
+            if not self.teleport_exit_started then tracker.emit_done('teleport') end -- QQT_Warpigz_v3
             loot_guard.commit_exit()
             teleport_to_waypoint(enums.waypoints.LIBRARY)
             self.teleport_exit_started = true

@@ -480,6 +480,12 @@ function bomber:main_pulse()
                         bomber.replicator.taken = pylon_name
                         bomber.replicator.taken_at = get_time_since_inject()
                     end
+                    -- QQT_Warpigz_v3: suite event on the first interact with this pylon.
+                    if not tracker.qqt_pylon_announced then
+                        tracker.qqt_pylon_announced = true
+                        tracker.emit_start() -- a War Plan horde has no sigil/portal entry
+                        tracker.emit('horde_pylon', {name = pylon_name})
+                    end
                     interact_object(pylon)
                     pylon_interact_time = get_current_time()
                 end
@@ -497,6 +503,7 @@ function bomber:main_pulse()
     end
 
     pylon_interact_time = nil
+    tracker.qqt_pylon_announced = nil -- QQT_Warpigz_v3
     loot_guard.pylon_done()
     if regular_pylon_wait then
         regular_pylon_wait = false
@@ -587,6 +594,7 @@ function bomber:main_pulse()
                 boss_pylon = utils.get_bartuc_pylon()
                 if boss_pylon then
                     tracker.interacting_pylon = true
+                    if not tracker.council_seen then tracker.emit('horde_council', {bartuc = true}) end -- QQT_Warpigz_v3
                     tracker.council_seen = true -- F-H1: the waves are over
                     if utils.distance_to(boss_pylon) > 2 then
                         bomber:bomb_to(boss_pylon:get_position())
@@ -628,6 +636,7 @@ function bomber:main_pulse()
             boss_pylon = utils.get_boss_pylon()
             if boss_pylon then
                 tracker.interacting_pylon = true
+                if not tracker.council_seen then tracker.emit('horde_council', {bartuc = false}) end -- QQT_Warpigz_v3
                 tracker.council_seen = true -- F-H1: the waves are over
                 if utils.distance_to(boss_pylon) > 2 then
                     bomber:bomb_to(boss_pylon:get_position())

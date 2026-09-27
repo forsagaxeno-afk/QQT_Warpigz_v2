@@ -1,6 +1,6 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.15
+One local addon for pickup, item rules, repairs and storage. Version 1.0.16
 (QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
@@ -41,15 +41,45 @@ is retried after 120 s while its need remains; after three failures (or a failur
 that a retry cannot fix) it waits for **Run town service**. Protected full bags do
 not cause endless town trips.
 
-**Mythics.** *Always keep mythics* (default on) keeps rarity-8 mythics, mythic
-charms and seals, the 14 iconic Mythics re-issued in Season 14 (Harlequin Crest,
-Doombringer and the others; rarity 6 on the host), and Season 15 Mythic forms of
-ordinary Uniques. A Mythic form is recognised by its Mythic upgrade affix
-(`S14_Mythic_UniquePotency`, hash 2628989) or any affix whose name contains
-`Mythic`; the log names the affix that matched. *Use Mythic Unique filter*
-(Ancestral, default off) replaces that rule for Mythic Uniques: checked ones are
-always kept, unchecked ones take the chosen action (default Salvage) unless the
-Mythic Greater Affix override keeps them.
+**Keep, storage & town** reads top to bottom in the order Rosie decides; the
+first section that decides an item wins:
+
+1. **Always keep**: nothing below can sell, salvage or drop these. Locked
+   (favourite) items are never touched either.
+   - *Always keep Mythics* (default on): every Mythic is kept: the Iconic
+     Mythics (Harlequin Crest, Doombringer and the others, including their
+     Season 14 re-issues, rarity 6 on the host), the Season 14+ **Mythic
+     Uniques** (the Mythic form of an ordinary Unique: same name, SNO and rarity
+     6; on the ground it looks like the plain Unique, in the bag Rosie sees its
+     Mythic upgrade affix `S14_Mythic_UniquePotency`, hash 2628989, or any affix
+     whose name contains `Mythic`), and mythic charms and seals. It wins over
+     every Mythic choice below.
+   - Only while it is off: *Also keep Mythics with Greater Affixes at least*,
+     *Iconic Mythics not checked* (action), *Separate list for Mythic Uniques*
+     with *Mythic Uniques not checked* (action), and the lists *Iconic Mythic
+     items to keep* (one row per name; a checked name also keeps its Season 14
+     re-issue) and *Mythic Uniques to keep* (a checked row keeps the plain
+     Unique too).
+   - *Keep Uniques with Item Power at least* (0 = off): plain Uniques only.
+   - *Unique items I always keep*: a checked Unique is kept as the plain Unique
+     AND as its Mythic form, Ancestral or not, even when marked junk or hidden by
+     the in-game filter, and pickup takes it whatever the GA sliders or the
+     in-game filter say. An empty list keeps nothing extra (the old *Use
+     unique/mythic filter* switch is gone; saved selections are used as they are).
+2. **In-game loot filter** (optional, off): decides the rest of the equipment.
+3. **Items marked as junk**: Ancestral / Non-Ancestral action.
+4. **Uniques**: keep with at least N Greater Affixes (0 = off), otherwise the
+   Ancestral / Non-Ancestral action; *Uniques to salvage or sell* (Carry to
+   town / Drop on the spot) is shown while *Pick up every Unique* is on.
+5. **Legendary, Rare, Magic, Common**: keep Ancestral items with at least N
+   Greater Affixes (optionally only with checked affixes), otherwise the
+   Ancestral / Non-Ancestral action.
+6. **Seals**, 7. **Charms**, 8. **Storage**, 9. **Town trips**, **Display**.
+
+Every decision on a Unique or Mythic (and every Greater Affix keep) is logged
+once per QQT session: `[Rosie] Kept Leoric's Crown: checked in "Unique items I
+always keep" (Mythic Unique, sno=2647147)`, `[Rosie] Will salvage <name>: <rule>
+(Unique, sno=...)`. All saved choices keep their widgets.
 
 A fresh ground drop shows no affixes until it has been picked up once, so a
 Mythic Unique and a plain Unique can read the same on the ground. **May be a
@@ -92,7 +122,7 @@ the older order: while the in-game loot filter (Universal or Charms only) is on,
 it decides non-unique charms before the charm affix filter. Unique seals
 (Annihilus, fixed affixes, never "+1 Charm Slot") and mythic seals are kept
 unless *Use unique/mythic seal filter* is on; then an unchecked one follows the
-seal action and affix filter, and *Always keep mythics* still keeps every mythic.
+seal action and affix filter, and *Always keep Mythics* still keeps every mythic.
 A seal whose affixes cannot be read (or lists none) is kept. Every seal or charm kept against a Salvage or Sell action is logged once
 with the reason (`[Rosie] Seal kept: <name> (sno=...): <reason>`).
 
@@ -103,7 +133,7 @@ Rosie's automatic bag/repair trips leave this queue pending. Run town service,
 its manual keybind, or an explicit request through the compatibility API consumes it;
 another addon can make that request. Clear the queue before delegating town trips
 if those copies should remain in storage. Copies the town rules keep as mythics
-(while *Always keep mythics* is on), Uniques whose affixes cannot rule out a
+(while *Always keep Mythics* is on), Uniques whose affixes cannot rule out a
 Mythic form and unreadable items are never taken: they stay in the stash and the
 log names them (`Kept in the stash: sno=...`).
 Favorites remain protected. Rosie verifies transfer into the proper
@@ -222,12 +252,13 @@ In the bag a Unique is a **Mythic** when it has rarity 8 or more, is one of the
 iconic Mythics (including the 14 re-issued in Season 14, such as Harlequin
 Crest), or carries the Mythic upgrade affix (`S14_Mythic_UniquePotency`, hash
 2628989, or any affix whose name contains `Mythic`). Everything else with
-rarity 6 is a **plain Unique**. **Plain Uniques** (shown while the option is on):
+rarity 6 is a **plain Unique**. **Uniques to salvage or sell** (Keep, storage &
+town > 4. Uniques, shown while the option is on):
 
-- *In town* (default): nothing is dropped.
+- *Carry to town* (default): nothing is dropped.
   Plain Uniques wait in the bag; the town trip sells, salvages or keeps them by
-  your rules, and Mythics follow *Always keep mythics* and the Mythic rules.
-- *Drop*: outside town (any town the game flags,
+  your rules, and Mythics follow *1. Always keep*.
+- *Drop on the spot*: outside town (any town the game flags,
   not only Rosie's home town), when no town trip runs, a plain Unique your town
   rules would sell or salvage is dropped on the spot, one item every 0.6 s.
   While the sorter can act, those items do not count toward the bag limit, so a
@@ -243,10 +274,10 @@ rarity 6 is a **plain Unique**. **Plain Uniques** (shown while the option is on)
   session. A drop that does not leave the bag within 2 s is retried twice (a
   town trip or pause in between keeps the count); then the item is left for the
   town trip and not tried again. Never dropped: Mythics (even with *Always keep
-  mythics* off; in town your Mythic rules decide), locked items, Uniques whose
-  affixes are not readable yet, and every Unique a keep rule protects (*Use
-  unique/mythic filter* selections, the Unique Greater Affix override, *Use
-  Mythic Unique filter*). Nothing is dropped while chat or a vendor screen is
+  Mythics* off; in town your Mythic rules decide), locked items, Uniques whose
+  affixes are not readable yet, and every Unique a keep rule protects (*Unique
+  items I always keep*, *Mythic Uniques to keep*, the Item Power and Unique
+  Greater Affix rules). Nothing is dropped while chat or a vendor screen is
   open, pickup is off or paused by another addon, or a town trip is requested
   or running.
 

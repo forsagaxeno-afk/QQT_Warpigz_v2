@@ -489,6 +489,7 @@ open_chests_task = {
         tracker.finished_chest_looting = true
         movement.stop()
         console.print("[open_chests] " .. message .. " Leaving the Horde without spending it.")
+        tracker.emit('horde_chest_fault', {msg = message}) -- QQT_Warpigz_v3
     end,
 
     try_next_chest = function(self, was_successful)
@@ -499,6 +500,7 @@ open_chests_task = {
             movement.stop()
             loot_guard.reset()
             self.last_opened_type = previous
+            tracker.emit('horde_chest', {type = previous}) -- QQT_Warpigz_v3
             if previous == "TALISMAN" then tracker.talisman_chest_opened = true
             elseif previous == "GREATER_AFFIX" then tracker.ga_chest_opened = true
             elseif previous == "GOLD" then tracker.gold_chest_opened = true end
