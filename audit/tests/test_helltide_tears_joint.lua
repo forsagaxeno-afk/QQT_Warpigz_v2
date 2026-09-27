@@ -109,6 +109,55 @@ case('Q3 standalone HR + Rosie: no pickup until the tear event is over, then eve
     eq(h.logged('Tear event loot:'), 1, 'one loot summary line')
 end)
 
+-- QQT_Warpigz_v3 (3.1.1): drops Rosie already settled (a Tuning Prism taken
+-- into Materials on the first interaction that the host still lists) are no
+-- target of the post-event loot window: LooteerPlugin.evaluate_item(item,
+-- true) refuses them ('pickup settled/exhausted'), so HR moves on and its
+-- summary counts them as taken. Pre-fix: each ghost was walked to again until
+-- its per-drop bound, '0 drop(s) walked to, 4 given up'.
+case('3.1.1 the loot window skips drops Rosie already settled and counts them as taken', function()
+    local h = J.new({place = 'helltide', rosie = true, persisted = {helltide_revamped_main_toggle = true}})
+    h.assert_clean('load')
+    el(h, WP).main_toggle:set(false)
+    el(h, HR).mode:set(1)
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(6)
+    eq(h.as('Rosie', function() return h.G.RosiePlugin.enable() end), true, 'Rosie enabled')
+    h.P.helltide.helltide = true
+    h.pos = h.v(-600, 300)
+    h.actor('helltide', 'S14_Rupture_SMP_SwitchGizmo', -585, 300)
+    h.actor('helltide', 'S14_PandemoniumCrack_gizmo_holdArea', -585, 300)
+    local tear = h.actor('helltide', 'S14_Rupture_SMP_Chargeable', -583, 301)
+    local task = h.mod(HR, 'tasks.helltide')
+    local tear_event = h.mod(HR, 'core.hr_tear_event')
+    ok(h.run_until(function()
+        return task.current_state == 'RIFT_CLOSE_TEARS' and h.pos:dist_to(tear.pos) <= 1.05
+    end, 30), 'HR walked onto the golden tear\n' .. h.tail(30))
+    local prisms, spots = {}, {{12, 1}, {-12, 4}, {3, -16}, {-6, 15}}
+    for i, spot in ipairs(spots) do
+        local p = h.drop('helltide', tear.pos:x() + spot[1], tear.pos:y() + spot[2],
+            {sno = 2533715, name = 'X2_HoradricCube_TuningStone_2', rarity = 0, display = "Protector's Tuning Prism"})
+        p.on_interact = function()
+            p.tries = (p.tries or 0) + 1
+            p.taken = true -- into Materials; the host keeps listing it (a ghost)
+        end
+        prisms[i] = p
+    end
+    h.run(20)
+    h.remove_actor(tear)
+    ok(h.run_until(function()
+        return h.logged('Tear event over') > 0 and not tear_event.is_rift_state(task.current_state)
+    end, 180), 'HR left the rupture after its loot window\n' .. h.tail(30))
+    h.assert_clean('3.1.1 settled')
+    for i, p in ipairs(prisms) do
+        ok(p.taken, 'prism ' .. i .. ' taken')
+        local want, why = h.as(HR, function() return h.G.LooteerPlugin.evaluate_item(p, true) end)
+        eq(want, false, 'prism ' .. i .. ': a settled drop is not wanted from afar')
+        eq(why, 'pickup settled/exhausted', 'prism ' .. i .. ' reason')
+    end
+    eq(h.logged('Tear event loot: 4 drop(s) walked to, 0 given up'), 1, 'summary counts the settled drops as taken\n' .. h.tail(30))
+    eq(h.logged('Event loot: leaving a drop'), 0, 'no drop given up')
+end)
+
 -- QQT_Warpigz_v3 (rc.2 review): the pause holds only at the event. A ring
 -- whose golden tear is open is engaged from 85 m out; the combat rotation
 -- kills a monster on the way (its drop lands 60 m from the ring, outside the

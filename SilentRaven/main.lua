@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- SilentRaven  --  magoogle  --  v0.2.3
+-- SilentRaven  --  magoogle  --  v0.2.4
 --
 -- Standalone Tree-of-Whispers turn-in plugin.  Two trigger paths:
 --
@@ -280,7 +280,7 @@ end
 -- side, so anything faster is wasted work.
 local function register_d4remote()
     if d4remote_registered or not (D4Remote and D4Remote.register) then return end
-    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.2.3') end) == true
+    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.2.4') end) == true
 end
 
 local function report_to_d4remote(now)
@@ -392,4 +392,4 @@ SilentRavenPlugin   = external
 -- report_to_d4remote retries while D4Remote loads later or register fails.
 register_d4remote()
 
-log.info('loaded magoogle | SilentRaven | v0.2.3')
+log.info('loaded magoogle | SilentRaven | v0.2.4')

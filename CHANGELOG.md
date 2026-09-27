@@ -2,6 +2,21 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.1.1] — 2026-09-27
+
+**QQT_Warpigz_v3 3.1.1** is a bug-fix release on top of 3.1.0: two minor issues found by the post-release integration audit. Upgrade by replacing the `SilentRaven` and `Rosie` folders (or all ten, as for 3.1.0); settings are kept.
+
+### Fixed
+
+- **SilentRaven 0.2.4: no claim trip while HelltideRevamped walks to a ritual ring.** The claim trip treated HR's `MOVING_TO_RIFT` state as idle (its busy list matched only states starting with `RIFT_`), so a due trip could pull the player to Temis on the way to a rupture. Any HR state naming a rift now counts as busy; the trip waits and runs after the rupture.
+- **Rosie 1.0.15: the tear event loot window no longer walks back to drops Rosie already settled.** `LooteerPlugin.evaluate_item(item, true)` (distance ignored, used by HelltideRevamped's post-event loot window) now refuses a drop pickup has settled or exhausted (not one merely resting between rounds) with the reason `pickup settled/exhausted`. Ghost drops the host still lists (for example a Tuning Prism already in Materials) are skipped and the summary counts them as taken (`4 drop(s) walked to, 0 given up` instead of `0 walked to, 4 given up`).
+
+### Validation
+
+- `python3 audit/tests/run_tests.py --luajit require`: 82 test files × (Lua 5.4 + LuaJIT), 164 runs, 0 failures.
+- New regression cases, each checked to fail on the 3.1.0 code: `test_silentraven_q8` (S1b, no claim trip in `MOVING_TO_RIFT`) and `test_helltide_tears_joint` (3.1.1, settled drops skipped by the loot window, correct counts).
+- `python3 audit/check_release.py --base 9a4e317`: PASS.
+
 ## [3.1.0] — 2026-09-27
 
 ![QQT Warpigz Suite v3](https://raw.githubusercontent.com/forsagaxeno-afk/QQT_Warpigz_v2/claude/qqt-diablo4-plugins-orchestrator-4439v5/assets/branding/qqt-warpigz-suite-v3.png)

@@ -114,6 +114,12 @@ published={
     end,
     evaluate_item=function(item,ignore_distance)
         local wanted,reason,decision=ItemManager.check_want_item(item,ignore_distance)
+        -- QQT_Warpigz_v3 (3.1.1): a caller that ignores the distance walks to the
+        -- drop (HR's tear loot window); a drop pickup already settled or
+        -- exhausted (not merely resting between rounds) is not worth the walk.
+        if wanted and ignore_distance and Pickup.blocked(item) and not Pickup.resting(item) then
+            return false,'pickup settled/exhausted',decision -- pickup logged it when it settled
+        end
         if not wanted then ItemManager.report_rejection(item,reason) end
         return wanted,reason,decision
     end,

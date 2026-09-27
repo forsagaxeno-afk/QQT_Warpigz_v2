@@ -177,6 +177,51 @@ case('S1 standalone HR + Rosie, no bag-full trip: a claim trip claims and HR far
     eq(h.logged('[Rosie] completed'), 1, 'the trip completes')
 end)
 
+-- QQT_Warpigz_v3 (3.1.1): HelltideRevamped walking to a ritual ring
+-- (MOVING_TO_RIFT) is busy: the due claim trip waits for the rupture instead
+-- of pulling the player to Temis on the way. Pre-fix HR_BUSY had '^RIFT_' and
+-- the trip was requested 64 m from the ring.
+case('S1b standalone HR + Rosie: no claim trip while HR walks to a ritual ring (MOVING_TO_RIFT)', function()
+    local h = J.new({place = 'helltide', rosie = true, speed = 7, persisted = {helltide_revamped_main_toggle = true}})
+    h.assert_clean('load')
+    h.instrument_exports()
+    h.mod(WP, 'gui').elements.main_toggle:set(false)
+    h.mod(HR, 'gui').elements.mode:set(1)
+    sr_gui(h).main_toggle:set(true)
+    sr_gui(h).claim_trip_slider:set(1)
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(8)
+    eq(h.as('Rosie', function() return h.G.RosiePlugin.enable() end), true, 'Rosie enabled')
+    h.P.helltide.helltide = true
+    h.pos = h.v(-600, 300)
+    local tear_pos, tear
+    h.at(55, function() -- a ring ~100 m away shortly before the trip is due
+        local x, y = h.pos:x() + 100, h.pos:y()
+        h.actor('helltide', 'S14_Rupture_SMP_SwitchGizmo', x, y)
+        h.actor('helltide', 'S14_PandemoniumCrack_gizmo_holdArea', x, y)
+        tear_pos = h.v(x + 2, y + 1)
+    end)
+    h.bounty_ready = true
+    local task = h.mod(HR, 'tasks.helltide')
+    local moving, trip_state = false, nil
+    h.run_until(function()
+        if tear_pos and not tear and h.pos:dist_to(tear_pos) <= 20 then
+            tear = h.actor('helltide', 'S14_Rupture_SMP_Chargeable', tear_pos:x(), tear_pos:y())
+        end
+        if task.current_state == 'MOVING_TO_RIFT' then moving = true end
+        if not trip_state and first(h.api_calls, function(c)
+            return c.name == 'trigger_tasks_with_teleport' and c.context == SR end) then
+            trip_state = tostring(task.current_state)
+        end
+        return h.reward_accepts == 1 and h.place == h.P.helltide
+    end, 200)
+    h.assert_clean('S1b')
+    ok(moving, 'HR walked to the ring (MOVING_TO_RIFT)\n' .. h.tail(30))
+    ok(trip_state ~= nil, 'the claim trip ran after the rupture\n' .. h.tail(30))
+    ok(not trip_state:find('RIFT', 1, true), 'no claim trip during the rupture (requested in ' .. trip_state .. ')')
+    eq(h.logged('claim trip waits because HelltideRevamped is busy (MOVING_TO_RIFT)'), 1, 'one busy line\n' .. h.tail(30))
+    eq(h.reward_accepts, 1, 'claimed after the rupture')
+end)
+
 case('S2 claim trips are bounded: an unclaimable reward costs at most two trips, one line; never from a Pit', function()
     local h = standalone_hr({claim_trip = 1})
     h.bounty_ready = true

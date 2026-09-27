@@ -29,7 +29,9 @@ local TOWNS = {Skov_Temis = true, Naha_Kurast = true, Kehj_Caldeum = true, Scos_
     Frac_Kyovashad = true, Hawe_Zarbinzet = true, Kehj_Gea_Kul = true, Step_Jirandai = true}
 -- HelltideRevamped states (its getState export) a town trip must not cut
 -- short: events, ruptures, chests, the maiden, its own town legs and teleports.
-local HR_BUSY = {'^RIFT_', '^CHAMBER_', 'MAIDEN', 'PYRE', 'CHAOS_RIFT', 'CHEST', 'TOWN', 'RETURN_', 'SHRINE', 'GOBLIN',
+-- QQT_Warpigz_v3 (3.1.1): any state naming a rift (MOVING_TO_RIFT, CHAOS_RIFT...)
+-- is busy; '^RIFT_' let a claim trip start on the walk to a ritual ring.
+local HR_BUSY = {'RIFT', '^CHAMBER_', 'MAIDEN', 'PYRE', 'CHAOS_RIFT', 'CHEST', 'TOWN', 'RETURN_', 'SHRINE', 'GOBLIN',
     'TELEPORT'}
 local s = {ready_since = nil, inferred = false, said = {}, quest_line = nil, quest_t = -math.huge,
     check_t = -math.huge, trip = nil, last_trip_t = -math.huge, unclaimed = 0}
