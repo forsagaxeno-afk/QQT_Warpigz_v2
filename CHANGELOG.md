@@ -2,6 +2,22 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.2.3] — 2026-09-27
+
+**QQT_Warpigz_v3 3.2.3**: HelltideRevamped 2.5.2 makes the in-game stats overlay readable and configurable. Replace the `HelltideRevamped` folder; settings are kept (the overlay position resets to the new default once).
+
+### Added
+
+- **Overlay appearance** (HelltideRevamped → *Live data & stats*): *Anchor* (top left / top right / bottom left / bottom right), *Offset X/Y (%)*, *Font size* (15), *Layout* (Two columns / One column), *Width (px, 0 = auto)*, *Colors* (Bright / Classic / Minimal), *Accent* (Cyan / Gold / Green / Red / Purple / White), *Background opacity (%)* (25), *Show bars*, *Compact layout*, and a toggle per section (Helltide timer, Wave, Cinders, Now, Target, Stats table, Opened this wave).
+
+### Fixed
+
+- **Overlay text was almost invisible.** The host draws text under filled rectangles, so the old dark 80 % panel dimmed every label to about 20 %. The default panel is now light (25 %) and text has a dark shadow / outline; titles are bold; bars and dividers sit on their own rows; values align in columns from the font size; the panel is only as tall as the sections you show. The new two-column default sits top left above the party frames at 1080p and up.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py --luajit require`: 84 test files × (Lua 5.4 + LuaJIT), 168 runs, 0 failures. `test_helltide_overlay` checks anchors, offsets, font sizes 10–28, section toggles, contrast of every preset and no overlap between rows.
+
 ## [3.2.2] — 2026-09-27
 
 **QQT_Warpigz_v3 3.2.2**: WonderCity 2.2.2 fixes Undercity runs stuck on the first floor. Replace the `WonderCity` folder; settings are kept.

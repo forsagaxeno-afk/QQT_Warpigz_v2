@@ -1,6 +1,6 @@
 local gui = {}
 local tracker = require "core.tracker" -- QQT_Warpigz_v3: tracker.hr_external (WarPigs drives: Warplan)
-local version = "v2.5.1"
+local version = "v2.5.2"
 local plugin_label = "helltide_revamped"
 
 local function create_checkbox(value, key)
@@ -28,7 +28,12 @@ gui.mode = { "Warplan", "Farm" }
 
 -- QQT_Warpigz_v3: live zone source and overlay row choices.
 gui.live_source = { "helltides.com", "diablo4.life" }
-gui.overlay_rows = { "All", "Helltide only", "Compact" }
+gui.overlay_rows = { "All", "Helltide only", "Timers + cinders" } -- QQT_Warpigz_v3: same indices
+-- QQT_Warpigz_v3: overlay appearance (core/hr_overlay.lua uses the indices).
+gui.overlay_anchor = { "Top left", "Top right", "Bottom left", "Bottom right" }
+gui.overlay_theme = { "Bright", "Classic", "Minimal" }
+gui.overlay_columns = { "One column", "Two columns" }
+gui.overlay_accent = { "Cyan", "Gold", "Green", "Red", "Purple", "White" }
 -- Menu buttons only raise a request here; main.lua handles it (no file work
 -- inside the menu callback).
 gui.request_forget, gui.request_reset_stats = false, false
@@ -112,9 +117,28 @@ gui.elements = {
     live_source = combo_box:new(0, get_hash(plugin_label .. "_live_source")),
     live_poll_min = slider_int:new(2, 15, 5, get_hash(plugin_label .. "_live_poll_min")),
     overlay = create_checkbox(true, plugin_label .. "overlay"),
-    overlay_x = slider_int:new(0, 100, 2, get_hash(plugin_label .. "_overlay_x")),
-    overlay_y = slider_int:new(0, 100, 30, get_hash(plugin_label .. "_overlay_y")),
     overlay_rows = combo_box:new(0, get_hash(plugin_label .. "_overlay_rows")),
+    -- QQT_Warpigz_v3: overlay appearance (new ids; the old Position X / Y ids
+    -- "_overlay_x" / "_overlay_y" are no longer read).
+    overlay_tree = tree_node:new(2),
+    overlay_anchor = combo_box:new(0, get_hash(plugin_label .. "_overlay_anchor")),
+    overlay_pos_x = slider_int:new(0, 60, 1, get_hash(plugin_label .. "_overlay_pos_x")),
+    overlay_pos_y = slider_int:new(0, 90, 3, get_hash(plugin_label .. "_overlay_pos_y")),
+    overlay_font = slider_int:new(10, 28, 15, get_hash(plugin_label .. "_overlay_font")),
+    overlay_columns = combo_box:new(1, get_hash(plugin_label .. "_overlay_columns")),
+    overlay_width = slider_int:new(0, 900, 0, get_hash(plugin_label .. "_overlay_width")),
+    overlay_bg = slider_int:new(0, 70, 25, get_hash(plugin_label .. "_overlay_bg")),
+    overlay_theme = combo_box:new(0, get_hash(plugin_label .. "_overlay_theme")),
+    overlay_accent = combo_box:new(0, get_hash(plugin_label .. "_overlay_accent")),
+    overlay_bars = create_checkbox(true, plugin_label .. "overlay_bars"),
+    overlay_compact = create_checkbox(false, plugin_label .. "overlay_compact"),
+    overlay_show_timer = create_checkbox(true, plugin_label .. "overlay_show_timer"),
+    overlay_show_wave = create_checkbox(true, plugin_label .. "overlay_show_wave"),
+    overlay_show_cinders = create_checkbox(true, plugin_label .. "overlay_show_cinders"),
+    overlay_show_now = create_checkbox(true, plugin_label .. "overlay_show_now"),
+    overlay_show_target = create_checkbox(true, plugin_label .. "overlay_show_target"),
+    overlay_show_stats = create_checkbox(true, plugin_label .. "overlay_show_stats"),
+    overlay_show_opened = create_checkbox(true, plugin_label .. "overlay_show_opened"),
     dashboard = create_checkbox(false, plugin_label .. "dashboard"),
     dashboard_sec = slider_int:new(5, 60, 10, get_hash(plugin_label .. "_dashboard_sec")),
     reset_alltime = button:new(get_hash(plugin_label .. "_reset_alltime")),
@@ -232,6 +256,34 @@ local function render_smart_farm()
     e.smart_tree:pop()
 end
 
+-- QQT_Warpigz_v3: Live data & stats > Stats overlay > Overlay appearance.
+local function render_overlay_appearance()
+    local e = gui.elements
+    if not e.overlay_tree:push("Overlay appearance") then return end
+    e.overlay_anchor:render("Anchor", gui.overlay_anchor, "Screen corner the panel is placed from. The offsets below are measured from this corner.")
+    e.overlay_pos_x:render("Offset X (%)", "Distance from the anchored left / right screen edge, percent of the screen width. The game's party frames sit at the left edge at about half the screen height: the default top-left two-column panel ends above them; a tall one-column panel is better moved right (about 13%) or to a right anchor.", 1)
+    e.overlay_pos_y:render("Offset Y (%)", "Distance from the anchored top / bottom screen edge, percent of the screen height", 1)
+    e.overlay_font:render("Font size", "Text size; line spacing, columns, bars and the panel size follow it", 1)
+    e.overlay_columns:render("Layout", gui.overlay_columns, "One column: every section under the other. Two columns: STATS and OPENED THIS WAVE to the right of the rest, about half as tall and twice as wide.")
+    e.overlay_width:render("Width (px, 0 = auto)", "Width of one column in pixels. 0: fits the text at the chosen font size. Longer texts are cut to the width.", 1)
+    e.overlay_theme:render("Colors", gui.overlay_theme, "Bright: white text with a dark shadow (readable on any scene). Classic: the first overlay's softer colours. Minimal: no panel, white text in a black outline.")
+    e.overlay_accent:render("Accent", gui.overlay_accent, "Colour of the section titles and the Helltide timer bar")
+    if e.overlay_theme:get() ~= 2 then
+        e.overlay_bg:render("Background opacity (%)", "Darkness of the panel behind the text. The game draws text beneath the panel, so a darker panel also dims the text: keep it at 40% or lower.", 1)
+    end
+    e.overlay_bars:render("Show bars", "Progress bars under the Helltide timer, the wave and the cinder goal")
+    e.overlay_compact:render("Compact layout", "Tighter lines; drops the section titles NOW / TARGET, the per hour rate, This HT earned / spent / lost, Position and the footers")
+    header("Sections") -- QQT_Warpigz_v3
+    e.overlay_show_timer:render("Helltide timer", "Time left in the Helltide (or until the next one)")
+    e.overlay_show_wave:render("Wave", "Chest reset wave and the next reset")
+    e.overlay_show_cinders:render("Cinders", "Balance, per minute / hour, the goal")
+    e.overlay_show_now:render("Now", "Activity, movement, in Helltide, plan")
+    e.overlay_show_target:render("Target", "The chest the bot goes to")
+    e.overlay_show_stats:render("Stats table", "This HT / Session / All time")
+    e.overlay_show_opened:render("Opened this wave", "Last chests opened and how many are still to open")
+    e.overlay_tree:pop()
+end
+
 local function render_live_stats()
     local e = gui.elements
     if not e.live_tree:push("Live data & stats") then return end
@@ -248,9 +300,8 @@ local function render_live_stats()
     e.overlay:render("Stats overlay",
         "On-screen panel: Helltide timer and next chest reset, cinders per minute / hour, earned / spent / lost, chests and deaths per Helltide, session and all time")
     if e.overlay:get() then
-        e.overlay_x:render("  Position X (%)", "Left edge of the panel, percent of the screen width", 1)
-        e.overlay_y:render("  Position Y (%)", "Top edge of the panel, percent of the screen height", 1)
-        e.overlay_rows:render("  Rows", gui.overlay_rows, "All: Helltide, session and all time. Helltide only. Compact: timer and cinders.")
+        e.overlay_rows:render("  Rows", gui.overlay_rows, "All: every section, the STATS table with This HT, Session and All time. Helltide only: the STATS table shows This HT only. Timers + cinders: only the header, timers and cinders.")
+        render_overlay_appearance() -- QQT_Warpigz_v3
     end
     e.dashboard:render("Web dashboard",
         "Writes HelltideRevamped\\dashboard\\hr_data.js. Open HelltideRevamped\\dashboard\\index.html in a browser (from disk, no internet) for live stats, map, history and performance.")
@@ -268,6 +319,10 @@ function gui.render()
     clamp_combo(gui.elements.kill_monsters_rarity, gui.kill_rarity)
     clamp_combo(gui.elements.live_source, gui.live_source) -- QQT_Warpigz_v3
     clamp_combo(gui.elements.overlay_rows, gui.overlay_rows) -- QQT_Warpigz_v3
+    clamp_combo(gui.elements.overlay_anchor, gui.overlay_anchor) -- QQT_Warpigz_v3
+    clamp_combo(gui.elements.overlay_theme, gui.overlay_theme) -- QQT_Warpigz_v3
+    clamp_combo(gui.elements.overlay_columns, gui.overlay_columns) -- QQT_Warpigz_v3
+    clamp_combo(gui.elements.overlay_accent, gui.overlay_accent) -- QQT_Warpigz_v3
     if not gui.elements.main_tree:push("Z | Helltide Revamped | Letrico | " .. version) then return end
 
     gui.elements.main_toggle:render("Enable", "Enable the bot")

@@ -268,10 +268,26 @@ After a tear event, the bot collects the drops Rosie wants in the event area, th
 
 | Option | Default | What it means |
 | --- | --- | --- |
-| **Stats overlay** | ON | A panel on screen: time left, cinders per minute and hour, chests, deaths. You can move it (**Position X / Y**) and pick **Rows**. |
+| **Stats overlay** | ON | A panel on screen: time left, cinders per minute and hour, chests, deaths. Pick **Rows**; change its look under **Overlay appearance** (below). |
 | **Web dashboard** | OFF | Turn it on. Then open `HelltideRevamped\dashboard\index.html` in your web browser straight from the disk (double-click it). No internet needed. It shows live stats, a map and history. Pick a theme at the top of the page: **Forge**, **Daylight** or **Console**; next time `index.html` opens the one you picked. |
 | **Live Helltide zone (internet)** | OFF | Asks helltides.com (or diablo4.life) where the Helltide is this hour, so the bot goes there directly. Only the zone is read; nothing about you is sent. |
 | **Reset all-time stats** | button | Clears the all-time totals. |
+
+**Overlay appearance** (open it under **Stats overlay**):
+
+| Option | Default | What it means |
+| --- | --- | --- |
+| **Anchor** | Top left | The screen corner the panel starts from. Pick **Top right** or **Bottom right** to move it away from the party frames. |
+| **Offset X / Y (%)** | 1 / 3 | How far from that corner, in percent of the screen. |
+| **Font size** | 15 | Bigger text makes the whole panel bigger. |
+| **Layout** | Two columns | **Two columns** is wide and short; **One column** is narrow and tall. |
+| **Width (px, 0 = auto)** | 0 | 0 fits the text. A smaller width cuts long texts. |
+| **Colors** | Bright | **Bright**: white text with a dark shadow. **Classic**: the old softer colours. **Minimal**: no panel, white text with a black outline. |
+| **Accent** | Cyan | Colour of the section titles and the timer bar. |
+| **Background opacity (%)** | 25 | How dark the panel is. The game draws the text under the panel, so a dark panel makes the text dim too: keep it at 40% or lower. |
+| **Show bars** | ON | The bars under the timer, the wave and the cinders. |
+| **Compact layout** | OFF | Tighter lines and fewer extra rows. |
+| **Sections** | all ON | Tick off what you do not need: Helltide timer, Wave, Cinders, Now, Target, Stats table, Opened this wave. The panel gets shorter. |
 
 **Tips:**
 

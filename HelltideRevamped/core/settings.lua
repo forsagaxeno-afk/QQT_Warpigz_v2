@@ -71,9 +71,23 @@ local settings = {
     live_source = 0,        -- 0 = helltides.com, 1 = diablo4.life
     live_poll_min = 5,
     overlay = true,
-    overlay_x = 2,
-    overlay_y = 30,
-    overlay_rows = 0,       -- 0 = All, 1 = Helltide only, 2 = Compact
+    overlay_rows = 0,       -- 0 = All, 1 = Helltide only, 2 = Timers + cinders
+    -- QQT_Warpigz_v3: overlay appearance (core/hr_overlay.lua). New ids: the
+    -- old Position X / Y (2%, 30%) put the panel over the party frames.
+    overlay_anchor = 0,     -- 0 = top left, 1 = top right, 2 = bottom left, 3 = bottom right
+    overlay_pos_x = 1,      -- % of the screen width from the anchored side
+    overlay_pos_y = 3,      -- % of the screen height from the anchored side
+    overlay_font = 15,
+    overlay_columns = 1,    -- 0 = one column, 1 = two columns (default: STATS / OPENED on the right)
+    overlay_width = 0,      -- px, 0 = auto
+    overlay_bg = 25,        -- background opacity %
+    overlay_theme = 0,      -- 0 = Bright, 1 = Classic, 2 = Minimal
+    overlay_accent = 0,     -- 0 = Cyan, 1 = Gold, 2 = Green, 3 = Red, 4 = Purple, 5 = White
+    overlay_bars = true,
+    overlay_compact = false,
+    overlay_show_timer = true, overlay_show_wave = true, overlay_show_cinders = true,
+    overlay_show_now = true, overlay_show_target = true, overlay_show_stats = true,
+    overlay_show_opened = true,
     dashboard = false,
     dashboard_sec = 10,
 }
@@ -109,7 +123,15 @@ local setting_controls = {
     cinder_run = "cinder_run", cinder_run_at = "cinder_run_at", -- QQT_Warpigz_v3 (Q4)
     farm_goal = "farm_goal", -- QQT_Warpigz_v3: Smart farm goal
     live_api = "live_api", live_source = "live_source", live_poll_min = "live_poll_min",
-    overlay = "overlay", overlay_x = "overlay_x", overlay_y = "overlay_y", overlay_rows = "overlay_rows",
+    overlay = "overlay", overlay_rows = "overlay_rows",
+    -- QQT_Warpigz_v3: overlay appearance
+    overlay_anchor = "overlay_anchor", overlay_pos_x = "overlay_pos_x", overlay_pos_y = "overlay_pos_y",
+    overlay_font = "overlay_font", overlay_columns = "overlay_columns", overlay_width = "overlay_width", overlay_bg = "overlay_bg",
+    overlay_theme = "overlay_theme", overlay_accent = "overlay_accent", overlay_bars = "overlay_bars",
+    overlay_compact = "overlay_compact", overlay_show_timer = "overlay_show_timer",
+    overlay_show_wave = "overlay_show_wave", overlay_show_cinders = "overlay_show_cinders",
+    overlay_show_now = "overlay_show_now", overlay_show_target = "overlay_show_target",
+    overlay_show_stats = "overlay_show_stats", overlay_show_opened = "overlay_show_opened",
     dashboard = "dashboard", dashboard_sec = "dashboard_sec",
 }
 -- Settings synced 1:1 from their control in update_settings (mode + ruptures).
@@ -126,7 +148,12 @@ local synced_controls = {
     "event_radius", "event_until_min", "map_pin",
     "cinder_run", "cinder_run_at", -- QQT_Warpigz_v3 (Q4)
     "farm_goal", -- QQT_Warpigz_v3
-    "live_api", "live_source", "live_poll_min", "overlay", "overlay_x", "overlay_y", "overlay_rows",
+    "live_api", "live_source", "live_poll_min", "overlay", "overlay_rows",
+    -- QQT_Warpigz_v3: overlay appearance
+    "overlay_anchor", "overlay_pos_x", "overlay_pos_y", "overlay_font", "overlay_columns", "overlay_width", "overlay_bg",
+    "overlay_theme", "overlay_accent", "overlay_bars", "overlay_compact", "overlay_show_timer",
+    "overlay_show_wave", "overlay_show_cinders", "overlay_show_now", "overlay_show_target",
+    "overlay_show_stats", "overlay_show_opened",
     "dashboard", "dashboard_sec",
 }
 

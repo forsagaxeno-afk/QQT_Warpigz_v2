@@ -343,9 +343,31 @@ free Pandemonium chests are still opened.
   Mystery, earned, spent, lost, deaths, time and cinders per minute for this
   Helltide, the session and all time); OPENED THIS WAVE (the last three with
   age and position, and how many known chests are still to open). Rebuilt at
-  most 4 times a second. Position and rows (All / Helltide only: the STATS
-  table shows this Helltide only / Compact: timers and cinders) are
-  adjustable.
+  most 4 times a second. **Rows**: All / Helltide only (the STATS table shows
+  this Helltide only) / Timers + cinders (header, timers and cinders only).
+  **Overlay appearance** (a subsection under the overlay option):
+
+  | Option | Default | What it does |
+  | --- | --- | --- |
+  | Anchor | Top left | Screen corner the panel is placed from (Top left / Top right / Bottom left / Bottom right) |
+  | Offset X (%) / Offset Y (%) | 1 / 3 | Distance from the anchored edges, percent of the screen; the panel is kept on screen |
+  | Font size | 15 | 10-28; line spacing, columns, bars and the panel size follow it |
+  | Layout | Two columns | One column, or STATS and OPENED THIS WAVE to the right of the rest (about half as tall) |
+  | Width (px, 0 = auto) | 0 | Width of one column; longer texts are cut to it |
+  | Colors | Bright | Bright (white text, dark shadow), Classic (the first overlay's softer colours), Minimal (no panel, white text in a black outline) |
+  | Accent | Cyan | Section titles and the timer bar: Cyan / Gold / Green / Red / Purple / White |
+  | Background opacity (%) | 25 | 0-70 (not with Minimal) |
+  | Show bars | on | Bars under the timer, the wave and the cinder goal |
+  | Compact layout | off | Tighter lines; no NOW / TARGET titles, per hour rate, This HT earned / spent / lost, Position or footers |
+  | Sections | all on | Helltide timer, Wave, Cinders, Now, Target, Stats table, Opened this wave (the header row always shows) |
+
+  The game draws overlay text *beneath* the panel's rectangles, so a darker
+  panel also dims the text (the 3.2.2 panel at 80% left labels at about a
+  fifth of their brightness): keep the background at 40% or lower; the text
+  shadow is what keeps it readable on bright scenes. The default two-column
+  panel in the top-left corner ends above the party frames at 1080p and up;
+  move a tall one-column panel right (Offset X about 13%) or to a right
+  anchor. The old Position X / Y values are not used any more (new ids).
 - **Web dashboard** (off): writes `dashboard\hr_data.js` every 10 s (5-60).
   Open `HelltideRevamped\dashboard\index.html` in a browser straight from the
   disk (no server, no internet). Pick a look with the theme switcher at the
