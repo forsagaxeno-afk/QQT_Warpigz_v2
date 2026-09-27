@@ -218,7 +218,8 @@ function settings:update_settings(force)
     settings.ancestral_ga_count = gui.elements.ancestral_ga_count_slider:get()
     settings.ancestral_unique_ga_count = gui.elements.ancestral_unique_ga_count_slider:get()
     settings.ancestral_mythic_ga_count = gui.elements.ancestral_mythic_ga_count_slider:get()
-    settings.unique_ip_keep = tonumber(gui.elements.unique_ip_keep_slider:get()) or 0
+    local ip_el = gui.elements.unique_ip_keep_slider -- QQT_Warpigz_v3 3.2.5: nil-safe after a reload
+    settings.unique_ip_keep = ip_el and tonumber(ip_el:get()) or 0
     settings.ancestral_unique_filter = gui.elements.ancestral_unique_filter_toggle:get()
     settings.ancestral_filter        = gui.elements.ancestral_filter_toggle:get()
     settings.ancestral_affix_count   = gui.elements.ancestral_affix_count_slider:get()

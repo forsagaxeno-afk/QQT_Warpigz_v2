@@ -282,6 +282,11 @@ if cached then
         consumeable_tree=1,key_tree=1,gamble_tree=1,loot_filter_tree=1,general_tree=1,
         drawing_tree=1,talisman_seal_tree=1,talisman_charm_tree=1}
     for key,depth in pairs(depths) do gui.elements[key]=tree_node:new(depth) end
+    -- QQT_Warpigz_v3 3.2.5: a widget added in a newer Rosie is missing from the
+    -- cached (pre-update) element table after a Lua reload; create it.
+    if gui.elements.unique_ip_keep_slider==nil then
+        gui.elements.unique_ip_keep_slider=slider_int:new(0, 925, 0, get_hash(plugin_label .. '_unique_ip_keep'))
+    end
 end
 
 gui.elements.stop_service=gui.elements.stop_service or button:new(get_hash(plugin_label..'_stop_service'))

@@ -2,6 +2,18 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.2.5] — 2026-09-27
+
+**QQT_Warpigz_v3 3.2.5**: Rosie 1.0.17 hotfix. Replace the `Rosie` folder; settings are kept.
+
+### Fixed
+
+- **Rosie stopped after updating to 3.2.4 without restarting QQT** ("Host error: settings.lua:221: attempt to index field 'unique_ip_keep_slider' (a nil value)"). After a Lua reload Rosie reuses its previous menu widgets, and the new *Keep Uniques with Item Power >=* slider was missing from them. The missing widget is now created on reload, and the setting is read nil-safe.
+
+### Validation
+
+- New case in `test_rosie_keep_checked_324.lua` (reload with a pre-3.2.4 cached menu) fails on 3.2.4 and passes now; Rosie test files pass on Lua 5.4 and LuaJIT.
+
 ## [3.2.4] — 2026-09-27
 
 **QQT_Warpigz_v3 3.2.4**: Rosie 1.0.16 can keep Uniques by item power, never salvages a checked Unique in its Mythic form, and does much less work on talismans. Replace the `Rosie` folder; settings are kept.

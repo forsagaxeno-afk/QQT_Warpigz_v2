@@ -229,5 +229,22 @@ case('sorter "Plain Uniques: Drop": a plain Unique at or above the item power is
     t.h.assert_clean('sorter ip')
 end)
 
+-- 3.2.5 live crash: after a Lua reload onto the new Rosie, the town GUI reuses the
+-- previous generation's cached element table, which has no unique_ip_keep_slider.
+case('3.2.5 reload with a pre-3.2.4 cached GUI does not crash settings', function()
+    local t = setup()
+    local prev = t.h.G.AlfredTheButlerPlugin
+    ok(type(prev) == 'table' and type(prev._gui) == 'table', 'cached town GUI published')
+    prev._gui.elements.unique_ip_keep_slider = nil
+    local dir
+    for d, rec in pairs(t.h.by_dir) do if rec.name == 'Rosie' then dir = d end end
+    ok(dir ~= nil, 'Rosie loaded')
+    t.h.reload(dir)
+    t.h.run(3)
+    t.h.assert_clean('reload with old cached GUI')
+    local tg = t.h.mod('Rosie', 'rosie.private.town.gui').elements
+    ok(tg.unique_ip_keep_slider ~= nil, 'missing widget recreated after reload')
+end)
+
 print('Rosie keep 3.2.4: ' .. checks .. ' checks')
 if #failures > 0 then error(#failures .. ' failure(s):\n' .. table.concat(failures, '\n')) end
