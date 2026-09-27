@@ -146,8 +146,12 @@ utils.get_closest_enticement = function (ignore_interacted)
             local actor_pos = actor:get_position()
             local enticement_str = utils.enticement_key(name, actor_pos)
             local dist = utils.distance(local_player, actor)
+            -- QQT_Warpigz_v3: a Grand Beacon set aside (tracker.beacon_aside)
+            -- waits out its pause; it is never dropped for the floor.
+            local aside = tracker.beacon_aside and tracker.beacon_aside[enticement_str]
             if dist <= settings.check_distance and
                 (tracker.enticement[enticement_str] == nil or ignore_interacted) and
+                (aside == nil or get_time_since_inject() >= aside.until_t) and
                 (closest_dist == nil or dist < closest_dist)
             then
                 closest_dist = dist

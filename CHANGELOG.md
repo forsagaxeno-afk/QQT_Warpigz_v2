@@ -2,6 +2,23 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.2.2] — 2026-09-27
+
+**QQT_Warpigz_v3 3.2.2**: WonderCity 2.2.2 fixes Undercity runs stuck on the first floor. Replace the `WonderCity` folder; settings are kept.
+
+### Fixed
+
+- **WonderCity no longer gets stuck on Undercity floor 1** (live: "failed to leave floor 1, whole lot of back tracking"). Since 3.1.0 one failed walk to the floor exit (`X1_Undercity_PortalSwitch` / `X1_Undercity_WarpPad`) or to the Grand Spirit Beacon skipped it for the rest of the floor — even when the failure was only Batmobile's 15 s cooldown after a failed pathfind, or a long fight. The bot then explored until the run timed out. Now a failed walk sets the exit or beacon aside for 20 s, then 40 s, then 60 s at most and tries it again (`... exploring for Ns before trying it again (attempt n)`); optional Spirit Hearths are still skipped for the floor.
+
+### Notes
+
+- Rosie: a plain Unique hidden by the in-game loot filter is skipped while *Respect Ingame Loot Filter* is on (default), also with *Pick up every Unique*; only Mythics are exempt. This is by design; turn that option off or let your in-game filter show Uniques.
+- WonderCity's Batmobile priority *direction* backtracks less than the default *distance*.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py --luajit require`: 84 test files × (Lua 5.4 + LuaJIT), 168 runs, 0 failures. New joint-host cases B7 in `test_wondercity_bounds` (real Batmobile, closed floor: one-time rejection, long fight, beacon before the switch) fail on 3.2.1 and pass now.
+
 ## [3.2.1] — 2026-09-27
 
 **QQT_Warpigz_v3 3.2.1**: HelltideRevamped 2.5.1 — the web dashboard has a new look, in **three themes** you pick from the bar at the top of the page (remembered in your browser). Replace the `HelltideRevamped` folder; settings are kept.

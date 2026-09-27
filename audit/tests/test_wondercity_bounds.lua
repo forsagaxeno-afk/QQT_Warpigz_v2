@@ -10,8 +10,12 @@
 --   B4 WonderCity holds its movement while the Looter picks up (bounded)
 --   B5 ACCEPT with the vendor closed and no portal restarts at the brazier
 --   B6 a script reload keeps the reward-phase state of the same Undercity
+--   B7 (QQT_Warpigz_v3, live "failed to leave floor 1") the floor exit
+--      (PortalSwitch / warp pad) and the Grand Beacon are only set aside
+--      after a failed walk (20 s, 40 s, 60 s cap) and the floor is left;
+--      joint host with the real Batmobile on a closed floor
 -- Unit cases use the QQT-shaped harness of test_wondercity.lua; B3 uses the
--- joint host with the real Rosie. Runs under Lua 5.4 and LuaJIT.
+-- joint host with the real Rosie, B7 the joint host with the real Batmobile. Runs under Lua 5.4 and LuaJIT.
 local SUITE = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local root = SUITE .. '/WonderCity/'
 local checks, failures = 0, {}
@@ -280,6 +284,17 @@ case('B2 a Batmobile-rejected enticement target is skipped at once; yield time i
     local task = s.load('tasks.interact_enticement')
     ok(task.shouldExecute()); task:Execute()
     ok(not task.shouldExecute(), 'set_target()==false gives it up')
+    -- QQT_Warpigz_v3: the Grand Beacon precedes the warp pad: it is only set
+    -- aside (20 s, then 40 s ...), never dropped for the floor.
+    s.now = s.now + 19; ok(not task.shouldExecute(), 'still set aside after 19 s')
+    s.now = s.now + 2; ok(task.shouldExecute(), 'the Grand Beacon is tried again after 20 s')
+    task:Execute(); s.now = s.now + 39; ok(not task.shouldExecute(), 'second pause is 40 s')
+    s.now = s.now + 2; ok(task.shouldExecute(), 'tried again after 40 s')
+    local s3 = session(); s3.nav_accept = false
+    s3.actors = {actor('X1_Undercity_SpiritHearth_Switch', 10)}
+    local t3 = s3.load('tasks.interact_enticement')
+    ok(t3.shouldExecute()); t3:Execute()
+    s3.now = s3.now + 300; ok(not t3.shouldExecute(), 'an optional Spirit Hearth stays skipped for the floor')
     local s2 = session()
     s2.actors = {actor('X1_Undercity_Enticements_SpiritBeaconSwitch', 10)}
     local t2 = s2.load('tasks.interact_enticement')
@@ -289,21 +304,36 @@ case('B2 a Batmobile-rejected enticement target is skipped at once; yield time i
     ok(t2.shouldExecute(), 'time the task did not execute is not no-progress time')
 end)
 
-case('B2 a PortalSwitch or warp pad Batmobile cannot reach is skipped for the floor', function()
+-- QQT_Warpigz_v3 (live "failed to leave floor 1"): the floor exit is set
+-- aside for a growing pause (20 s, 40 s, 60 s cap), never for the floor.
+case('B2 a PortalSwitch or warp pad Batmobile cannot reach is set aside, then tried again (never for the whole floor)', function()
     local s = session(); s.settings.check_distance = 20
     local portal = actor('X1_Undercity_PortalSwitch', 10)
     s.actors = {portal}
     local task = s.load('tasks.portal'); local tr = s.load('core.tracker')
     ok(task.shouldExecute()); task:Execute()
-    for t = 101, 113 do s.now = t; if task.shouldExecute() then task:Execute() end end
-    ok(not task.shouldExecute(), 'no progress for 12 s: the PortalSwitch is skipped')
+    local set_at = nil
+    for t = 101, 113 do
+        s.now = t
+        if task.shouldExecute() then task:Execute() elseif not set_at then set_at = t end
+    end
+    ok(not task.shouldExecute(), 'no progress for 12 s: the PortalSwitch is set aside')
+    s.now = set_at + 18; ok(not task.shouldExecute(), 'still set aside after 18 s')
+    s.now = set_at + 21; ok(task.shouldExecute(), 'tried again after the 20 s pause')
     tr.floor_generation = tr.floor_generation + 1
-    ok(task.shouldExecute(), 'a new floor forgets the skip')
+    ok(task.shouldExecute(), 'a new floor forgets the pause')
     local s2 = session(); s2.nav_accept = false; s2.settings.check_distance = 20
     s2.actors = {actor('X1_Undercity_WarpPad', 10)}
     local t2 = s2.load('tasks.portal')
     ok(t2.shouldExecute()); t2:Execute()
-    ok(not t2.shouldExecute(), 'a rejected warp pad is skipped at once')
+    ok(not t2.shouldExecute(), 'a rejected warp pad is set aside at once')
+    local pauses, last = {}, s2.now
+    for t = s2.now, s2.now + 400 do
+        s2.now = t
+        if t2.shouldExecute() then pauses[#pauses + 1] = t - last; t2:Execute(); last = t end
+    end
+    eq(pauses[1], 20, 'first pause'); eq(pauses[2], 40, 'second pause'); eq(pauses[3], 60, 'third pause (cap)')
+    eq(pauses[4], 60, 'the cap holds'); ok(#pauses >= 6, 'the warp pad keeps being retried on this floor')
 end)
 
 case('B2 kill_monster skips an unreachable goblin for a while, never a boss it is already fighting', function()
@@ -478,6 +508,63 @@ case('B3 a with-teleport trip whose return portal is missing after a complete se
     eq(st.fail_streak, 0, 'fail_streak')
     eq(#h.inventory, 0, 'bag serviced')
     ok(h.logged('return portal missing') == 1, 'logged once')
+end)
+
+-- ── B7 (joint host: real Batmobile + WonderCity on a closed floor) ─────────
+-- QQT_Warpigz_v3, live report "tried WonderCity many times and failed to
+-- leave floor 1". Floor 1 (X1_Undercity_Ziggurat_01) holds the warp pad and
+-- its PortalSwitch 16-17 m from the spawn; interacting with the switch
+-- leads to floor 2. Before the fix a single failed walk (Batmobile's 15 s
+-- failed-goal cooldown answering set_target()==false, or 12 s without 1 m
+-- of progress while a fight held the player) skipped the floor exit for the
+-- whole floor, and the Grand Beacon the same way.
+local function closed_floor(opts)
+    local h = J.new({dirs = {'Batmobile', 'WonderCity'}, place = 'undercity'})
+    h.assert_clean('load')
+    local uc = h.P.undercity
+    uc.zone, uc.slide, uc.box = 'X1_Undercity_Ziggurat_01', true, {-60, 60, -40, 40}
+    h.P.uc2 = {name = 'X1_Undercity_Joint2', zone = 'X1_Undercity_Ziggurat_02', id = 78, town = false,
+        spawn = h.v(0, 0), box = {-60, 60, -60, 60}, key = 'uc2', actors = {}}
+    h.actor('undercity', 'X1_Undercity_WarpPad', 16, 0)
+    local sw = h.actor('undercity', 'X1_Undercity_PortalSwitch', 17, 0, {interactable = not opts.beacon})
+    sw.on_interact = function() if sw.interactable ~= false then h.travel_to(h.P.uc2, 0.5, 'floor portal') end end
+    if opts.beacon then
+        local beacon = h.actor('undercity', 'X1_Undercity_Enticements_SpiritBeaconSwitch', -16, 0)
+        beacon.on_interact = function() beacon.interactable = false; sw.interactable = true end
+    end
+    if opts.barrier then
+        uc.walls = {opts.barrier} -- the objective's area streams in / a gate opens after 4 s
+        h.at(4, function() uc.walls = nil end)
+    end
+    if opts.fight then
+        h.speed = 0 -- a fight holds the player in place for 15 s
+        h.at(15, function() h.speed = 7 end)
+    end
+    h.mod('WonderCity', 'gui').elements.main_toggle:set(true)
+    return h
+end
+case('B7 a floor exit Batmobile rejected once (failed-goal cooldown) is tried again and the floor is left', function()
+    local h = closed_floor({barrier = {12, 22, -5, 5}})
+    ok(h.run_until(function() return h.place == h.P.uc2 end, 120), 'floor 2 reached\n' .. h.tail(30))
+    ok(h.logged('Batmobile rejected the target') >= 1, 'the rejection happened')
+    eq(h.logged('skipping it on this floor'), 0, 'the exit is never skipped for the floor')
+    ok(h.logged('exploring for 20s before trying it again') >= 1, 'set aside for 20 s')
+    eq(#h.errors, 0, 'no host errors')
+end)
+case('B7 a floor exit without progress for 12 s while a fight holds the player is tried again and the floor is left', function()
+    local h = closed_floor({fight = true})
+    ok(h.run_until(function() return h.place == h.P.uc2 end, 120), 'floor 2 reached\n' .. h.tail(30))
+    ok(h.logged('no progress for 12s') >= 1, 'the no-progress bound fired')
+    eq(h.logged('skipping it on this floor'), 0, 'the exit is never skipped for the floor')
+    eq(#h.errors, 0, 'no host errors')
+end)
+case('B7 a Grand Beacon Batmobile rejected once is tried again; its warp-pad portal then leads to floor 2', function()
+    local h = closed_floor({beacon = true, barrier = {-22, -12, -5, 5}})
+    ok(h.run_until(function() return h.place == h.P.uc2 end, 150), 'floor 2 reached\n' .. h.tail(30))
+    ok(h.logged('SpiritBeaconSwitch unreachable (Batmobile rejected the target) - exploring for 20s') >= 1,
+        'the beacon was set aside, not skipped')
+    eq(h.logged('skipping it on this floor'), 0, 'nothing on the way down is skipped for the floor')
+    eq(#h.errors, 0, 'no host errors')
 end)
 
 if #failures > 0 then error(#failures .. ' WonderCity bounds case(s) failed:\n' .. table.concat(failures, '\n')) end

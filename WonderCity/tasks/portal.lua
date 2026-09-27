@@ -23,10 +23,17 @@ local task = {
 -- (RUSH_PORTAL_RANGE), not only within check_distance. Logged once per run.
 local RUSH_PORTAL_RANGE = 150
 local rush_logged_run = nil
--- QQT_Warpigz_v3 (C6, loot_obols rule): a PortalSwitch or warp pad Batmobile
--- rejects (set_target()==false) or that we get no PROGRESS_STEP m closer to
--- in NO_PROGRESS_SECONDS is skipped for the rest of the floor.
+-- QQT_Warpigz_v3 (C6): a PortalSwitch or warp pad Batmobile rejects
+-- (set_target()==false) or that we get no PROGRESS_STEP m closer to in
+-- NO_PROGRESS_SECONDS is set aside while the explorer moves on, then tried
+-- again. It is the floor's only way down, so it is never dropped for the
+-- rest of the floor (live: "failed to leave floor 1"): Batmobile rejects any
+-- goal within 15-25 m of a path it just failed for 15 s, and a fight or a
+-- detour around a wall easily costs 12 s without getting 1 m closer; the
+-- old floor-long skip turned either into a floor that could not be left.
+-- The pause grows per attempt: SKIP_BASE, 2x, ... up to SKIP_MAX seconds.
 local NO_PROGRESS_SECONDS, PROGRESS_STEP = 12, 1
+local SKIP_BASE, SKIP_MAX = 20, 60
 local skip = {generation = nil, keys = {}}
 local approach = {key = nil, best = nil, time = nil, last = nil}
 local PROGRESS_GAP = 2 -- a longer gap (another task ran) starts a fresh window
@@ -39,7 +46,17 @@ local function is_skipped(actor)
     if skip.generation ~= tracker.floor_generation then
         skip.generation, skip.keys = tracker.floor_generation, {}
     end
-    return skip.keys[target_key(actor)] == true
+    local entry = skip.keys[target_key(actor)]
+    return entry ~= nil and get_time_since_inject() < entry.until_t
+end
+-- QQT_Warpigz_v3: set the target aside for a growing pause (see SKIP_BASE).
+local function set_aside(key)
+    local entry = skip.keys[key] or {count = 0}
+    entry.count = entry.count + 1
+    local pause = math.min(SKIP_BASE * 2 ^ (entry.count - 1), SKIP_MAX)
+    entry.until_t = get_time_since_inject() + pause
+    skip.keys[key] = entry
+    return pause, entry.count
 end
 local get_portal = function ()
     local local_player = get_local_player()
@@ -158,11 +175,12 @@ task.Execute = function ()
             why = 'Batmobile rejected the target'
         end
         if why ~= nil then
-            skip.keys[key] = true
+            local pause, attempt = set_aside(key) -- QQT_Warpigz_v3: never for the whole floor
             approach.key, approach.best, approach.time = nil, nil, nil
-            console.print('[WonderCity:portal] ' .. key .. ' unreachable (' .. why .. ') - skipping it on this floor')
+            console.print(string.format('[WonderCity:portal] %s unreachable (%s) - exploring for %ds before trying it again (attempt %d)',
+                key, why, pause, attempt))
             utils.stop_movement()
-            task.status = 'portal unreachable - continuing'
+            task.status = 'portal unreachable - exploring'
             return
         end
         BatmobilePlugin.move(plugin_label)

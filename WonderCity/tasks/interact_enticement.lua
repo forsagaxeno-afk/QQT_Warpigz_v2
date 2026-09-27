@@ -29,12 +29,32 @@ local INTERACT_REFIRE_COOLDOWN = 1.0
 local NO_PROGRESS_SECONDS, PROGRESS_STEP = 12, 1
 local approach = {best = nil, time = nil, last = nil}
 local PROGRESS_GAP = 2 -- a longer gap (another task ran) starts a fresh window
+-- QQT_Warpigz_v3 (live "failed to leave floor 1"): the Grand Spirit Beacon
+-- (X1_Undercity_Enticements_SpiritBeaconSwitch) comes before the floor's
+-- warp pad, so a failed walk to it only sets it aside for a growing pause
+-- (BEACON_ASIDE_BASE, 2x, ... up to BEACON_ASIDE_MAX s) and it is tried
+-- again; a Batmobile rejection is often only its 15 s failed-goal cooldown.
+-- Optional Spirit Hearths are still skipped for the floor.
+local BEACON_ASIDE_BASE, BEACON_ASIDE_MAX = 20, 60
 local function give_up(key, name, why)
-    tracker.enticement[key] = 'unreachable' -- skipped; not counted as interacted
+    local is_beacon = type(name) == 'string' and name:match('SpiritBeaconSwitch') ~= nil
+    local note
+    if is_beacon then
+        tracker.beacon_aside = tracker.beacon_aside or {}
+        local entry = tracker.beacon_aside[key] or {count = 0}
+        entry.count = entry.count + 1
+        local pause = math.min(BEACON_ASIDE_BASE * 2 ^ (entry.count - 1), BEACON_ASIDE_MAX)
+        entry.until_t = get_time_since_inject() + pause
+        tracker.beacon_aside[key] = entry
+        note = string.format('exploring for %ds before trying it again (attempt %d)', pause, entry.count)
+    else
+        tracker.enticement[key] = 'unreachable' -- skipped; not counted as interacted
+        note = 'skipping it on this floor'
+    end
     approach.best, approach.time = nil, nil
     task.interact_time, task.last_interact_call, task.active_key = nil, nil, nil
-    console.print(string.format('[WonderCity:enticement] %s unreachable (%s) - skipping it on this floor',
-        tostring(name), why))
+    console.print(string.format('[WonderCity:enticement] %s unreachable (%s) - %s',
+        tostring(name), why, note))
     utils.stop_movement()
     task.status = 'enticement unreachable - continuing'
 end

@@ -10,6 +10,9 @@ local tracker = {
     boss_kill_time = nil,
     boss_alive = false,
     enticement = {},
+    -- QQT_Warpigz_v3: Grand Beacons set aside after a failed walk
+    -- (floor-qualified key -> {until_t, count}); see interact_enticement.
+    beacon_aside = {},
     done = false,
     chest_failed = false,
     reward_seen = false,
@@ -177,6 +180,7 @@ tracker.observe_world = function (alfred_trip)
     if kind == 'run' then
         tracker.undercity_start_time = now
         tracker.enticement = {}
+        tracker.beacon_aside = {} -- QQT_Warpigz_v3
     end
     return kind
 end

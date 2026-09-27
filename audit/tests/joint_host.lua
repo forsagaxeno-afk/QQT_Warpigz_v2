@@ -1512,7 +1512,16 @@ function J.new(opts)
                 h.goal = nil
             else
                 local nxt = Vec:new(h.pos:x() + dx / d * step, h.pos:y() + dy / d * step, 0)
-                if walkable(nxt) then h.pos = nxt end
+                if walkable(nxt) then h.pos = nxt
+                elseif h.place.slide then
+                    -- QQT_Warpigz_v3: opt-in (place.slide) — like the game's
+                    -- mover, a step that clips a wall corner slides along it.
+                    local sx = Vec:new(h.pos:x() + dx / d * step, h.pos:y(), 0)
+                    local sy = Vec:new(h.pos:x(), h.pos:y() + dy / d * step, 0)
+                    if math.abs(dx) >= math.abs(dy) and walkable(sx) then h.pos = sx
+                    elseif walkable(sy) then h.pos = sy
+                    elseif walkable(sx) then h.pos = sx end
+                end
             end
         end
         -- The combat rotation (not a plugin of the suite) kills enemies in reach.
