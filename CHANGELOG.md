@@ -22,9 +22,16 @@ All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0
   - Open `WarRoom/dashboard/index.html`, or run `WarRoom/server/serve.bat` and open `http://127.0.0.1:8765`. **From your phone or over VPN**: `serve-lan.bat` (read-only, only the dashboard folder, private networks only, access token link; allow the firewall prompt for *Private networks*). Nothing is downloaded from the internet and no account or character names are written.
 - **Event bus** in every plugin (`qqt_events.lua`): plugins report runs, kills, chests, pickups, town trips and Whisper claims. Without WarRoom it does nothing.
 
+### Rosie 1.0.18: a clearer Keep menu
+
+- **Keep, storage & town** now reads top to bottom, first match wins: **1. Always keep** (Always keep Mythics; Keep Uniques with Item Power ≥; *Unique items I always keep* — both plain and Mythic form, always active, the old "Use unique/mythic filter" switch is gone) → **2. In-game loot filter** → **3. Junk** → **4. Uniques** (GA keep, Ancestral / Non-Ancestral actions, *Uniques to salvage or sell*) → **5. Legendary, Rare, Magic, Common** → **6. Seals** → **7. Charms** → **8. Storage** → **9. Town trips**. Options that only matter when another is off are shown only then. All saved choices carry over.
+- Season 14 re-issued Iconic Mythics have one row per name in *Iconic Mythic items to keep* and match by name.
+- Pickup takes an item checked in a keep list whatever the GA sliders, minimum rarity or in-game filter say (a full bag still refuses it).
+- Every Unique / Mythic decision is logged once: `[Rosie] Kept … / Will salvage … / Will sell …`.
+
 ### Changed
 
-- WarPigs 1.1.6, WarPug 1.0.15, Batmobile 2.2.1, ArkhamAsylum 2.1.2, HelltideRevamped 2.6.0, HordeDev 2.2.4, Reaper 1.10.3, WonderCity 2.2.3, SilentRaven 0.2.5, Rosie 1.0.16: report their events to WarRoom (no behaviour change).
+- WarPigs 1.1.6, WarPug 1.0.15, Batmobile 2.2.1, ArkhamAsylum 2.1.2, HelltideRevamped 2.6.0, HordeDev 2.2.4, Reaper 1.10.3, WonderCity 2.2.3, SilentRaven 0.2.5, Rosie 1.0.18: report their events to WarRoom (no behaviour change).
 
 ### Needs a live check
 
@@ -33,7 +40,37 @@ All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0
 
 ### Validation
 
-- `python3 audit/tests/run_tests.py --luajit require`: 91 test files × (Lua 5.4 + LuaJIT), 182 runs, 0 failures. New: `test_qqt_events_bus`, `test_qqt_events_joint`, `test_warroom_collector`, `test_warroom_joint` (full War Plan day with every plugin + WarRoom; counters checked against the event log; WarRoom absent / disabled / broken never changes bot behaviour), `test_warroom_dashboard`, `test_warroom_server`, `test_release_layout`. All dashboard pages rendered in headless Chromium (3 themes × 10 tabs × 2 widths) with no errors.
+- `python3 audit/tests/run_tests.py --luajit require`: 93 test files × (Lua 5.4 + LuaJIT), 186 runs, 0 failures. New: `test_qqt_events_bus`, `test_qqt_events_joint`, `test_warroom_collector`, `test_warroom_joint` (full War Plan day with every plugin + WarRoom; counters checked against the event log; WarRoom absent / disabled / broken never changes bot behaviour), `test_warroom_dashboard`, `test_warroom_server`, `test_release_layout`. All dashboard pages rendered in headless Chromium (3 themes × 10 tabs × 2 widths) with no errors.
+## [3.2.5] — 2026-09-27
+
+**QQT_Warpigz_v3 3.2.5**: Rosie 1.0.17 hotfix. Replace the `Rosie` folder; settings are kept.
+
+### Fixed
+
+- **Rosie stopped after updating to 3.2.4 without restarting QQT** ("Host error: settings.lua:221: attempt to index field 'unique_ip_keep_slider' (a nil value)"). After a Lua reload Rosie reuses its previous menu widgets, and the new *Keep Uniques with Item Power >=* slider was missing from them. The missing widget is now created on reload, and the setting is read nil-safe.
+
+### Validation
+
+- New case in `test_rosie_keep_checked_324.lua` (reload with a pre-3.2.4 cached menu) fails on 3.2.4 and passes now; Rosie test files pass on Lua 5.4 and LuaJIT.
+
+## [3.2.4] — 2026-09-27
+
+**QQT_Warpigz_v3 3.2.4**: Rosie 1.0.16 can keep Uniques by item power, never salvages a checked Unique in its Mythic form, and does much less work on talismans. Replace the `Rosie` folder; settings are kept.
+
+### Added
+
+- **Keep Uniques by item power** (Rosie → town Keep settings → *Ancestral*, under *Unique Greater Affix*): *Keep Uniques with Item Power >=* for plain Uniques (0 = off, the default; 900 keeps max-power items; Mythics follow the Mythic rules). They win over the GA sliders, Salvage / Sell and *Pick up every Unique → Plain Uniques: Drop*. An item whose item power the game does not report is not affected.
+
+### Fixed
+
+- **A checked Unique could be salvaged in its Mythic form** (*unchecked Mythic Uniques* = Salvage with *Use Mythic Unique filter* on). A Unique checked in *Unique items* or in *Mythic Uniques to keep* is now kept in both forms, in town and by *Plain Uniques: Drop*; a name checked in the lists also matches its Season 14 re-issue.
+- **Always keep mythics wins** over *unchecked Mythic Uniques* = Salvage / Sell: while it is on, every Mythic (Mythic Uniques included) is kept. The tooltips say so.
+- Rosie logs each item a keep rule keeps once: `[Rosie] Kept <name>: <reason>` (for example `item power 925 >= 900`).
+- **Talismans: less work, no repeated log lines** (live: game crashes while Rosie handles charms and seals; `[Rosie] Charm kept: ...` repeated every 15–50 s). The charm and seal counts are recounted only when the talisman bag or a talisman setting changes (or every 30 s), not every second, so an open bag or menu no longer reads every talisman's affixes each second. `Seal kept` / `Charm kept` / `Kept` lines appear once per item and reason per game session, also across a Rosie reload.
+
+### Validation
+
+- New `test_rosie_keep_checked_324.lua` (town sell / salvage decision and the Drop sorter; 7 cases) and a new `test_rosie_seal_q10.lua` case (bag and menu open with 23 talismans: 4.6 item reads per talisman per second on 3.2.3, 0 on 3.2.4; one keep line across a reload) fail on 3.2.3 and pass on 3.2.4. `test_rosie_contract.lua` now pins the new precedence. Rosie tests pass with `python3 audit/tests/run_tests.py --luajit require` on Lua 5.4 and LuaJIT; `python3 audit/check_release.py --base HEAD` passes.
 
 ## [3.2.3] — 2026-09-27
 
