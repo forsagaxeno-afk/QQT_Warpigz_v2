@@ -46,6 +46,21 @@ local function unknown(key, now, label)
 end
 local function known(key) gate[key], gate[key .. '_seen'], gate[key .. '_logged'] = nil, nil, nil end
 
+-- QQT_Warpigz_v3 (Q8): the town-service provider (Rosie behind the Alfred
+-- exports) and its readable status, or nil. Rosie publishes the caller name
+-- of its return-leg hand-off as status.raven_handoff (its adapters report
+-- name = 'Rosie', the hand-off queues as its town label).
+function M.town_provider()
+    local p = _G.AlfredTheButlerPlugin or _G.PLUGIN_alfred_the_butler
+    local ok, s = read(p, 'get_status')
+    if ok and type(s) == 'table' then return p, s end
+    return p, nil
+end
+local function town_caller(caller)
+    local _, s = M.town_provider()
+    return type(caller) == 'string' and s ~= nil and s.raven_handoff == caller
+end
+
 function M.can_start(caller)
     local controller = _G.WarPigsPlugin
     if controller == nil then return true end
@@ -57,9 +72,53 @@ function M.can_start(caller)
         return false, 'war_pigs_status_unavailable'
     end
     if status.manages_whispers == true and caller ~= 'WarPigs' then
+        -- QQT_Warpigz_v3 (Q8): WarPigs offers its own Whisper slot only
+        -- between activities, so a whole Helltide night claimed nothing.
+        -- While it delegates (status.whisper_handoff), the town service's
+        -- return-leg hand-off (Rosie in Temis) may claim.
+        if status.whisper_handoff == true and town_caller(caller) then return true end
         return false, 'reserved_by_war_pigs'
     end
     return true
+end
+
+-- QQT_Warpigz_v3 (Q8): WarPigs' delegation, cached from SilentRaven's own
+-- pulse. get_status() reads only the cache: WarPigs' status() reads ours.
+local delegation = {value = false, t = -math.huge, activity = false}
+function M.refresh_delegation(now)
+    if now >= delegation.t and now - delegation.t < 0.5 then return delegation.value end
+    delegation.t = now
+    local ok, s = read(_G.WarPigsPlugin, 'status')
+    delegation.value = ok and type(s) == 'table' and s.manages_whispers == true and s.whisper_handoff == true
+    -- QQT_Warpigz_v3 (Q8): an activity WarPigs runs keeps its own Whisper
+    -- slot closed; a Temis stop of it (Arkham at the Pit obelisk, an activity's
+    -- own bag trip) is claimed by SilentRaven itself (temis_delegated).
+    delegation.activity = delegation.value and s.activity_on == true
+    return delegation.value
+end
+-- QQT_Warpigz_v3 (Q8): SilentRaven may start its own claim in Temis while
+-- WarPigs manages Whispers: WarPigs delegates and runs an activity (its own
+-- Whisper visit only happens between activities).
+function M.temis_delegated()
+    return tracker.managed_by == 'WarPigs' and delegation.value == true and delegation.activity == true
+end
+-- A managed request from someone else than the manager: only the town
+-- service's hand-off while WarPigs delegates (fresh read; can_start agrees).
+function M.delegated(caller)
+    if tracker.managed_by ~= 'WarPigs' or not town_caller(caller) then return false end
+    local ok, s = read(_G.WarPigsPlugin, 'status')
+    return ok and type(s) == 'table' and s.whisper_handoff == true
+end
+-- Whether SilentRaven takes a town trip's hand-off now, plus why not:
+-- standalone its auto-fire setting, managed WarPigs' delegation.
+function M.handoff_ok(settings)
+    if settings.enabled ~= true then return false, 'SilentRaven is disabled' end
+    if tracker.managed_by == nil then
+        if settings.auto_fire == true then return true end
+        return false, 'SilentRaven auto-fire is off'
+    end
+    if tracker.managed_by == 'WarPigs' and delegation.value then return true end
+    return false, 'WarPigs manages Whispers and does not delegate right now (its own Temis check or teleport is under way)'
 end
 
 -- Suite-wide Alfred "live work" reading (contract C1). A teleport flag left
@@ -85,7 +144,7 @@ local function alfred_reason(now, live_only)
     -- QQT_Warpigz_v3: the Alfred/Rosie trip that queued the current request
     -- (Rosie's return-leg hand-off) waits for it: its live work is ours.
     if (tracker.running or tracker.external_trigger) and tracker.external_caller ~= nil
-        and tracker.external_caller == s.name then
+        and (tracker.external_caller == s.name or tracker.external_caller == s.raven_handoff) then -- QQT_Warpigz_v3 (Q8)
         known('hard'); return nil
     end
     if alfred_live_work(s) then known('hard'); return 'alfred_busy' end
@@ -181,6 +240,8 @@ local function war_pigs_reason()
 end
 
 -- mode 'auto'   : new auto-fire (WarPigs, WarPug, Alfred incl. hard need, Looter)
+-- mode 'delegated': a claim WarPigs delegates during its activity (as 'auto'
+--                 without WarPigs, which owns no Temis movement then) -- QQT_Warpigz_v3 (Q8)
 -- mode 'manual' : explicit keybind (WarPug, Alfred live work, Looter)
 -- mode 'run'    : mid-run yield of our own run (Alfred live work, Looter)
 -- Returns true, or false plus the hold reason.
@@ -189,7 +250,7 @@ function M.companions(mode, now)
     local reason
     if mode == 'auto' then reason = war_pigs_reason() end
     if not reason and mode ~= 'run' then reason = war_pug_reason(now) end
-    reason = reason or alfred_reason(now, mode ~= 'auto') or looter_reason(now)
+    reason = reason or alfred_reason(now, mode ~= 'auto' and mode ~= 'delegated') or looter_reason(now) -- QQT_Warpigz_v3 (Q8)
     if reason then return false, reason end
     return true
 end

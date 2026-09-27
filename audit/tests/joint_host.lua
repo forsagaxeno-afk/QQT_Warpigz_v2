@@ -754,7 +754,12 @@ function J.new(opts)
         return h.item_count or 0
     end
     function player:get_inventory_items() return h.inventory or {} end
-    function player:get_consumable_items() return {} end
+    -- QQT_Warpigz_v3 (Q9): h.consumables / h.socketables model those bags;
+    -- h.consumables_error makes the consumable read raise.
+    function player:get_consumable_items()
+        if h.consumables_error then error('host: consumable bag unavailable') end
+        return h.consumables or {}
+    end
     function player:get_dungeon_key_items() return h.keys_items or {} end
     -- Stash contents read only while the stash panel is open (Alfred's
     -- stash-count check relies on that).
@@ -765,7 +770,7 @@ function J.new(opts)
     end
     function player:get_equipped_items() return h.equipped or {} end
     function player:get_talisman_items() return h.talismans or {} end
-    function player:get_socketable_items() return {} end
+    function player:get_socketable_items() return h.socketables or {} end -- QQT_Warpigz_v3 (Q9)
     function player:is_spell_ready() return false end
     function player:get_move_destination() return h.goal or h.pos end
     function player:is_moving() return h.goal ~= nil end
@@ -989,7 +994,16 @@ function J.new(opts)
             end
         end,
         send_key_press = function(key) h.keys[#h.keys + 1] = {key = key, t = h.now}
-            if key == 0x1B then h.panel = false end end,
+            -- QQT_Warpigz_v3 (Q6): Escape also closes an open vendor/stash
+            -- panel and a hand-opened inventory (h.inventory_open); with
+            -- nothing open it opens the game menu (h.game_menu_opens).
+            -- h.escape_ignored: the key reaches no panel (a stuck panel).
+            if key == 0x1B and h.escape_ignored then return end
+            if key == 0x1B and not (h.panel or h.vendor_screen or h.inventory_open) then
+                h.game_menu_opens = (h.game_menu_opens or 0) + 1
+            end
+            if key == 0x1B then h.panel = false end
+            if key == 0x1B and h.rosie then h.vendor_screen, h.vendor_actor, h.inventory_open = false, nil, false end end,
         send_mouse_click = function(x, y)
             h.clicks[#h.clicks + 1] = {x = x, y = y, t = h.now}
             if h.on_click then h.on_click(x, y) end
@@ -1126,7 +1140,10 @@ function J.new(opts)
         lm.move_item_to_stash = function(item)
             h.stash_moves = (h.stash_moves or 0) + 1
             if not (h.vendor_screen and h.vendor_actor == h.temis_stash) then return false end
-            if take(item, h.inventory) then
+            -- QQT_Warpigz_v3 (Q9): a must-keep item (field must_keep) is refused
+            -- by the game (host returns true, nothing moves).
+            if item.must_keep then return true end
+            if take(item, h.inventory) or take(item, h.consumables or {}) or take(item, h.socketables or {}) then
                 h.stashed[#h.stashed + 1] = item
                 h.stash = h.stash or {}; h.stash[#h.stash + 1] = item
             end
@@ -1139,6 +1156,9 @@ function J.new(opts)
         end
         host('is_chat_open', function() return h.chat_open == true end)
         host('is_inventory_open', function()
+            -- QQT_Warpigz_v3 (Q6): h.inventory_open (opened by hand) and
+            -- opts.vendor_inv (every vendor panel shows the inventory).
+            if h.inventory_open == true or (opts.vendor_inv == true and h.vendor_screen == true) then return true end
             return opts.stash_inv == true and h.vendor_screen == true and h.vendor_actor == h.temis_stash
         end)
         host('get_actors_list', function() return actors_here() end)
@@ -1201,10 +1221,15 @@ function J.new(opts)
             function item:get_position() return self.pos end
             item.on_interact = function()
                 if item.picked then return end
+                -- QQT_Warpigz_v3 (Q9): fields.refuse(h, item) true = the game
+                -- refuses the pickup (the drop stays); fields.bag names the bag
+                -- list ('consumables', 'socketables') a picked drop goes to.
+                if item.refuse and item.refuse(h, item) then h.refusals = (h.refusals or 0) + 1; return end
                 item.picked = true
                 for i = #(place.items or {}), 1, -1 do if place.items[i] == item then table.remove(place.items, i) end end
-                h.inventory = h.inventory or {}
-                h.inventory[#h.inventory + 1] = item
+                local bag = item.bag or 'inventory'
+                h[bag] = h[bag] or {}
+                h[bag][#h[bag] + 1] = item
                 h.pickups = (h.pickups or 0) + 1
             end
             place.items = place.items or {}

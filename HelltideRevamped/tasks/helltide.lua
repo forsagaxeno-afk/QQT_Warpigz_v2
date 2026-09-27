@@ -12,6 +12,7 @@ local loot_guard = require "core.loot_guard"
 -- on tracker (no new file-level locals: this chunk is at LuaJIT's limit).
 tracker.hr_mode = require "core.hr_mode"
 tracker.tear_event = require "core.hr_tear_event"
+tracker.hr_cinder_run = require "core.hr_cinder_run" -- QQT_Warpigz_v3 (Q4): cinder run (Hell's Prize gate)
 
 local found_chest = nil
 local found_chest_position = nil -- cached position so we can navigate even when actor unloads
@@ -1083,7 +1084,8 @@ local function scan_and_remember_chests()
         local entry = chest_targets.read(actor)
         if entry and entry.interactable then
             local name, cost = chest_targets.classify(entry.skin, enums.chest_types)
-            if name and (current_cinders < cost or utils.distance_to(entry.position) > WAYPOINT_MAX_DIST) then
+            if name and (current_cinders < cost or utils.distance_to(entry.position) > WAYPOINT_MAX_DIST
+                or tracker.hr_cinder_run.saving()) then -- QQT_Warpigz_v3 (Q4): saving: remember for the run
                 remember_chest(name, cost, actor)
             end
         end
@@ -1125,7 +1127,8 @@ local function find_affordable_remembered_chest()
             chest_temp_blacklist[key] = nil  -- expired
             chest_blacklist_data[key] = nil
         end
-        if current_cinders >= entry.cost and utils.distance_to(entry.position) <= REMEMBERED_CHEST_MAX_DIST then
+        if current_cinders >= entry.cost and utils.distance_to(entry.position) <= REMEMBERED_CHEST_MAX_DIST
+            and tracker.hr_cinder_run.allows(entry.name) then -- QQT_Warpigz_v3 (Q4)
             if not best_entry or entry.cost < best_entry.cost then
                 best_key = key
                 best_entry = entry
@@ -1367,6 +1370,7 @@ local function check_events(self)
             local now_bl = get_time_since_inject()
             local selected = chest_targets.select(get_cached_actors(), enums.chest_types,
                 get_player_position(), current_cinders, WAYPOINT_MAX_DIST, function(entry)
+                    if not tracker.hr_cinder_run.allows(entry.name) then return true end -- QQT_Warpigz_v3 (Q4)
                     local key = chest_key(entry.name, entry.position)
                     local expiry = chest_temp_blacklist[key]
                     if expiry and expiry > now_bl then return true end
@@ -1410,7 +1414,8 @@ local function check_events(self)
         if not farm_chest_entry and settings.farm_cinder_threshold > 0 then
             for key, entry in pairs(remembered_chests) do
                 local shortfall = entry.cost - current_cinders
-                if shortfall > 0 and shortfall < settings.farm_cinder_threshold and utils.distance_to(entry.position) <= 50 then
+                if shortfall > 0 and shortfall < settings.farm_cinder_threshold and utils.distance_to(entry.position) <= 50
+                    and tracker.hr_cinder_run.allows(entry.name) then -- QQT_Warpigz_v3 (Q4)
                     console.print(string.format("[FARM CHEST] %s needs only %d more cinders (%d/%d) — staying to farm",
                         entry.name, shortfall, current_cinders, entry.cost))
                     farm_chest_entry = entry
@@ -1638,6 +1643,7 @@ local helltide_task = {
         if recovery.revive_if_dead(lp) then
             was_dead = true
             clear_movement()
+            tracker.tear_event.release_holds("death") -- QQT_Warpigz_v3 (Q2)
             return
         elseif was_dead then
             was_dead = false
@@ -1652,6 +1658,8 @@ local helltide_task = {
             settings.orb_set_clear(true)
         end
 
+        -- QQT_Warpigz_v3 (Q2): an engaged tear pauses Rosie's pickup first.
+        tracker.tear_event.sync_holds(self.current_state)
         -- QQT_Warpigz_v3 (C6): bounded, see loot_hold below.
         if self:loot_hold(lp) then
             clear_movement()
@@ -3854,6 +3862,7 @@ local helltide_task = {
         end
         clear_movement()
         settings.orb_release()
+        tracker.tear_event.release_holds("stopped") -- QQT_Warpigz_v3 (Q2)
     end,
 
     suspend = function(self)
@@ -4102,13 +4111,14 @@ local helltide_task = {
     -- The chest at a learned spot: any Helltide chest of the spot's kind
     -- (Mystery / regular) within 4 m; the entry takes its name and cost.
     hr_spot_chest = function(self, entry)
-        local want_mystery = entry.name == 'usz_rewardGizmo_Uber'
+        local kind_of = tracker.hr_cinder_run.kind -- QQT_Warpigz_v3 (Q4): prize / mystery / regular
+        local want = kind_of(entry.name)
         local px, py = entry.position:x(), entry.position:y()
         for _, actor in pairs(get_cached_actors()) do
             local e = chest_targets.read(actor)
             if e then
                 local name, cost = chest_targets.classify(e.skin, enums.chest_types)
-                if name and (name == 'usz_rewardGizmo_Uber') == want_mystery then
+                if name and kind_of(name) == want then
                     local dx, dy = e.position:x() - px, e.position:y() - py
                     if dx * dx + dy * dy <= 16 then
                         entry.name, entry.cost = name, cost

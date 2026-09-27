@@ -2,7 +2,7 @@
 
 local M = {
     plugin_label   = 'silent_raven',
-    plugin_version = '0.2.1',
+    plugin_version = '0.2.3',
     plugin_author  = 'magoogle',
 
     -- Skov_Temis waypoint SNO.  Pulled from AlfredTheButler/core/town.lua.
@@ -11,6 +11,9 @@ local M = {
     enabled            = false,
     debug              = false,
     auto_fire          = true,
+    -- QQT_Warpigz_v3 (Q8): seconds a reward may stay ready with no Temis
+    -- visit before a claim trip (claims.lua); 0 = off.
+    claim_trip_after   = 300,
 
     -- Reward picking.  Always priority-based -- the fixed-index slider
     -- and pixel-click fallback paths were removed in favor of one
@@ -52,6 +55,7 @@ M.update = function (gui)
     M.enabled            = g.main_toggle:get()
     M.debug              = g.debug_toggle:get()
     M.auto_fire          = g.auto_fire_toggle:get()
+    if g.claim_trip_slider then M.claim_trip_after = (g.claim_trip_slider:get() or 5) * 60 end -- QQT_Warpigz_v3 (Q8)
 
     M.prefer_legendary       = g.prefer_legendary_toggle:get()
     M.legendary_bonus_weight = g.legendary_bonus_slider:get() or 50

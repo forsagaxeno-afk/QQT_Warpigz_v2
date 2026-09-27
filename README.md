@@ -6,7 +6,7 @@
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v3.0.0.** Test build: v3.1.0-rc.1 (private draft, not yet published). Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
+**Current release: v3.1.0.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
 
 [English changelog](CHANGELOG.md) · [Audit and validation](AUDIT.md) · [Credits](CREDITS.md) · [Version rules](CONTRIBUTING.md)
 
@@ -18,16 +18,16 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 
 | Folder | Role | Component version |
 | --- | --- | --- |
-| `WarPigs` | Master orchestrator and town handoffs | 1.1.4 |
+| `WarPigs` | Master orchestrator and town handoffs | 1.1.5 |
 | `WarPug` | War Plan selection and creation | 1.0.14 |
 | `Batmobile` | Shared navigation | 2.2.0 |
 | `ArkhamAsylum` | The Pit | 2.1.1 |
-| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.3.0 |
+| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.4.0 |
 | `HordeDev` | Infernal Hordes | 2.2.3 |
 | `Reaper` | Boss lairs | 1.10.2 |
 | `WonderCity` | Kurast Undercity | 2.2.1 |
-| `SilentRaven` | Whisper reward checks in Temis | 0.2.2 |
-| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.13 |
+| `SilentRaven` | Whisper reward checks in Temis | 0.2.3 |
+| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.14 |
 
 Nightmare Dungeons are not supported. WarPug excludes those nodes.
 
@@ -52,7 +52,7 @@ If three War Plan teleports do not reach the Horde, WarPigs backs off 60 s and s
 
 ## Whisper behavior
 
-On each stable Temis visit, WarPigs waits for outgoing activity cleanup and observable Alfred/Looter work (a short Looter quiet window) before requesting a reward check. An active WarPug transaction keeps priority. A Looter burst pauses a managed request instead of cancelling it; after accept the claim is never cancelled. Requests have time limits, cancellation and late-callback guards. Managed Whisper requests never teleport or change Looter settings.
+On each stable Temis visit, WarPigs waits for outgoing activity cleanup and observable Alfred/Looter work (a short Looter quiet window) before requesting a reward check. An active WarPug transaction keeps priority. A Looter burst pauses a managed request instead of cancelling it; after accept the claim is never cancelled. Requests have time limits, cancellation and late-callback guards. Managed Whisper requests never teleport or change Looter settings. From 3.1.0 WarPigs also delegates while an activity runs: SilentRaven claims a ready reward on that activity's Temis stops and on Rosie's town trips (before the return portal), and SilentRaven's **Claim trip after** (default 5 minutes, 0 = off) asks Rosie for a Temis trip from the open world (Helltide) when a reward has waited that long. The same hand-off and claim trip work without WarPigs (SilentRaven *Auto-fire in town* on).
 
 SilentRaven verifies the selected reward and observes cache receipt before reporting success. A card is rejected only when it is explicitly invalid; if a claim cannot be verified, one automatic `[SilentRaven] reward diagnostics` dump shows the host's reward fields. Unreadable state or an unconfirmed claim is not reported as completed. See its [integration contract](SilentRaven/README.md).
 

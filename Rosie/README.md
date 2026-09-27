@@ -1,6 +1,6 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.13
+One local addon for pickup, item rules, repairs and storage. Version 1.0.14
 (QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
@@ -82,6 +82,20 @@ literal name/type/class/ID search, class-plus-selected, all-class and selected-o
 views. Saved choices for other classes remain visible. Item labels never own the
 saved choice; the Item ID does.
 
+**Seals and charms** follow the *Talisman* rules wherever the host lists them.
+A seal affix filter that is on with at least one affix checked decides seals: a
+seal carrying at least *Min matching affixes* of the checked affixes (matched by
+affix ID, or by internal name when the ID cannot be read) is kept, every other
+seal takes the seal default action, also while the in-game loot filter is on
+(that filter decides seals only while the seal affix filter is off). Charms keep
+the older order: while the in-game loot filter (Universal or Charms only) is on,
+it decides non-unique charms before the charm affix filter. Unique seals
+(Annihilus, fixed affixes, never "+1 Charm Slot") and mythic seals are kept
+unless *Use unique/mythic seal filter* is on; then an unchecked one follows the
+seal action and affix filter, and *Always keep mythics* still keeps every mythic.
+A seal whose affixes cannot be read (or lists none) is kept. Every seal or charm kept against a Salvage or Sell action is logged once
+with the reason (`[Rosie] Seal kept: <name> (sno=...): <reason>`).
+
 **Queued stash pulls** is an explicit advanced action. Enter a named equipment,
 charm or seal Item ID from the picker, choose Salvage or Sell, add it, then run
 town service. An entry selects **every matching unlocked copy of that Item ID**.
@@ -125,6 +139,28 @@ leaves the ground. A fight that
 keeps the player busy therefore costs a round, not the drop. Disabling pickup and
 enabling it again resets that budget.
 
+**Ghost drops** (QQT_Warpigz_v3 3.1.0). A drop the host keeps listing after the
+game handed it over, or one the player cannot reach, is settled once and then
+ignored while it stays listed (also under a new host identifier; forgotten after
+180 s unlisted, on a world change or a reset), with one line: `[Rosie pickup]
+Took <name> (...)` or `Leaving <name>: ...`. A bag item counts as taken when its
+bag gains that SNO; an item that goes to no bag (Materials such as the Horadric
+Cube Tuning Prisms, crafting, cinders, quest items) after 3.5 s in reach; a
+small bag item (rune, gem, splinter) is left after one full round of clear
+interactions; a non-gear drop with no progress toward it after one 6 s window.
+Only clear time counts: while the player casts, an enemy is within 10 m or the
+game keeps its own move, drops keep the rounds above and are collected after the
+fight. Gear keeps its rounds (it is left as not walkable only when no walkable
+spot exists within reach). A drop left without a receipt gets one more short try
+when your own route brings it back within reach.
+
+**Splinters of the Prime Evils** (Season 15: Splinter of Terror, Destruction,
+Hatred) can be carried one of each per character and cannot be stashed. Rosie
+does not pick one up while you already carry that kind (`[Rosie pickup] Not
+picking up Splinter of Terror (sno=...): already carrying one; ...`, once per
+zone) and never sends a carried one to the stash (`[Rosie:stash] Kept ... in the
+bag: the game does not stash it.`, once). Ordinary Soul Splinters are unchanged.
+
 **Stash.** The stash chest is not an NPC vendor. Rosie walks to within 2 m of the
 nearest Stash actor (within 3 m it interacts after 1.5 s without getting closer),
 preferring one the host reports interactable, interacts with it (again every 0.3 s for
@@ -142,6 +178,31 @@ decided. Queued stash pulls use the same rule, go ahead 2.5 s after the
 interaction as Alfred does, and interact again (at most 3 times) when nothing
 arrives in the bag. Sell, salvage, repair and talisman salvage still require the expected
 NPC (Gambler, Blacksmith, Occultist) to be the current vendor.
+
+**Stash receipts** (QQT_Warpigz_v3 3.1.0). Rosie has one deposit in flight at a
+time, so the item leaving the bag is the receipt, whatever the stash list shows
+(a merge into an existing stack, a stash list without socketables, a partial
+merge): `[Rosie:stash] Deposited <name> (sno=...); n of m unit(s) left the bag
+(stash list +k|unreadable)`. An item that still cannot be confirmed (8 s with an
+ambiguous reading, or 3 attempts that move nothing) or cannot be read is skipped
+for this trip, logged once (`Skipped <name> (sno=...) for this trip: ... The
+stash goes on with the next item.`), and the stash continues; three skips in a
+row end the step (full or closed stash). One item never fails the whole stash any
+more. A trip that skipped items and still leaves a bag need ends as a normal
+failure that is retried after 120 s, naming the items. **Stash socketables**
+now defaults to *When full* (a saved choice is kept), so a full gems / runes bag
+starts a trip and goes to the stash.
+
+**Closing panels.** Rosie closes the vendor and stash panels its own service
+opened: when each step ends (done or failed, before the next step starts), and
+when the trip ends (completed, failed, stopped, disabled). It presses Escape only
+while a panel still reads open (the inventory panel or the vendor-screen flag),
+at most 3 times 0.5 s apart, re-reading the panel before each press
+(`[Rosie] Closed the stash panel it opened (stash done) with 1 Escape press(es).`).
+A panel that closed on its own, a death, a loading screen or a zone change ends
+Rosie's claim on it, so an inventory you open by hand is never closed. A panel
+that still reads open after 3 presses is logged once (`could not close`) and left
+to you.
 
 ## Mythic sorting
 

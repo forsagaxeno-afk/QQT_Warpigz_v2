@@ -48,35 +48,52 @@ local function add_search(name)
     if not gui.elements[scope_name] then gui.elements[scope_name]=combo_box:new(0,get_hash(plugin_label..'_'..scope_name)) end
 end
 
-local function render_checkbox(name,data, show_item_type)
-    local search_name = tostring(name)..'_search'
-    local search_string=string.lower(gui.elements[search_name]:get())
-    local character_class=utils.get_character_class()
-    local scope=gui.elements[tostring(name)..'_scope']
-    scope:render('Show',{'Current class + selected','All classes','Selected only'},'Selected choices stay visible even when searching or playing a different class.')
-    local shown,selected,total=0,0,0
+-- QQT_Warpigz_v3 (Q10, live: host crash with the menu open on the 312-row
+-- seal affix list): the rows of a named list (label, tooltip, lower-case
+-- search text, class set, widget) are built once, not every frame; a frame
+-- reads the scope and search once and each row's checkbox once.
+local SCOPE_OPTIONS={'Current class + selected','All classes','Selected only'}
+local prepared_lists={}
+local function prepared_rows(name,data,show_item_type)
+    local key=tostring(name)..(show_item_type and '|type' or '|plain')
+    local rows=prepared_lists[key]
+    if rows and rows.data==data and rows.count==#data then return rows end
+    rows={data=data,count=#data}
     for _,item in pairs(data) do
-        total=total+1
-        local checked=gui.elements[tostring(name)..'_'..tostring(item.sno_id)]:get()
-        if checked then selected=selected+1 end
         local item_name = item.name
         if show_item_type and item.item_type then
             item_name = item.name .. ' - ' .. item.item_type
         end
-        local visible=false
+        local classes,any={},false
         for _,class in pairs(item.class) do
-            if string.lower(class)=='all' or string.lower(class)==character_class then visible=true end
+            local lower=string.lower(class)
+            classes[lower]=true
+            if lower=='all' then any=true end
         end
-        visible=checked or scope:get()==1 or scope:get()~=2 and visible
-        if visible then
-            local checkbox_name=tostring(name)..'_'..tostring(item.sno_id)
-            local searchable=string.lower(table.concat({item_name,item.item_type or '',item.description or '',
-                table.concat(item.class,' '),item.set or '',tostring(item.sno_id)},' '))
-            if search_string=='' or searchable:find(search_string,1,true) or gui.elements[checkbox_name]:get() then
-                gui.elements[checkbox_name]:render(item_name,(item.description or item_name)..
-                    ' | '..table.concat(item.class,', ')..' | Item ID: '..tostring(item.sno_id))
-                shown=shown+1
-            end
+        rows[#rows+1]={widget=tostring(name)..'_'..tostring(item.sno_id),label=item_name,any=any,classes=classes,
+            search=string.lower(table.concat({item_name,item.item_type or '',item.description or '',
+                table.concat(item.class,' '),item.set or '',tostring(item.sno_id)},' ')),
+            tip=(item.description or item_name)..' | '..table.concat(item.class,', ')..' | Item ID: '..tostring(item.sno_id)}
+    end
+    prepared_lists[key]=rows
+    return rows
+end
+local function render_checkbox(name,data, show_item_type)
+    local search_string=string.lower(gui.elements[tostring(name)..'_search']:get())
+    local character_class=utils.get_character_class()
+    local scope=gui.elements[tostring(name)..'_scope']
+    scope:render('Show',SCOPE_OPTIONS,'Selected choices stay visible even when searching or playing a different class.')
+    local mode=scope:get()
+    local shown,selected,total=0,0,0
+    for _,row in ipairs(prepared_rows(name,data,show_item_type)) do
+        total=total+1
+        local widget=gui.elements[row.widget]
+        local checked=widget:get()
+        if checked then selected=selected+1 end
+        local visible=checked or mode==1 or mode~=2 and (row.any or row.classes[character_class]==true)
+        if visible and (checked or search_string=='' or row.search:find(search_string,1,true)) then
+            widget:render(row.label,row.tip)
+            shown=shown+1
         end
     end
     render_menu_header(string.format('%d shown / %d total; %d selected. Selected choices stay visible.',shown,total,selected))
@@ -177,7 +194,9 @@ gui.elements = cached and cached.elements or {
     affix_import_name = input_text:new(get_hash(plugin_label .. '_affix_import_name')),
 
     socketable_tree = tree_node:new(1),
-    stash_socketables = combo_box:new(0, get_hash(plugin_label .. '_stash_socketables')),
+    -- QQT_Warpigz_v3 (Q5): shipped default "When full" (was Never): a full
+    -- socketables bag (gems, runes) goes to the stash when the stash has room.
+    stash_socketables = combo_box:new(1, get_hash(plugin_label .. '_stash_socketables')),
 
     consumeable_tree = tree_node:new(1),
     stash_consumables = combo_box:new(0, get_hash(plugin_label .. '_stash_consumables')),
@@ -337,10 +356,11 @@ local function render_settings()
     if push_tree(gui.elements.loot_filter_tree, '[In-game Loot Filter]') then
         gui.elements.loot_filter_toggle:render('Enable (Universal)', 'Use the in-game filter for equipment, seals and charms. Protected or unreadable items are retained.')
         if gui.elements.loot_filter_toggle:get() then
-            render_menu_header('Rejected equipment is salvaged. Rejected seals and charms follow their category action. Accepted or unreadable items are kept; locks remain protected.')
+            -- QQT_Warpigz_v3 (Q10, review): a seal affix filter that is on decides seals; charms keep the old order.
+            render_menu_header('Rejected equipment is salvaged. Rejected seals and charms follow their category action. Accepted or unreadable items are kept; locks remain protected. A seal affix filter that is on (with an affix checked) decides seals instead.')
         end
         gui.elements.loot_filter_equipment:render('Enable (Equipment Only)', 'Use in-game loot filter for armor/weapons/jewelry. Ignored if Universal is on.')
-        gui.elements.loot_filter_seal:render('Enable (Seals Only)', 'Use in-game loot filter for seals. Ignored if Universal is on.')
+        gui.elements.loot_filter_seal:render('Enable (Seals Only)', 'Use in-game loot filter for seals. Ignored if Universal is on. The seal affix filter, when on with an affix checked, decides seals instead.') -- QQT_Warpigz_v3 (review)
         gui.elements.loot_filter_charm:render('Enable (Charms Only)', 'Use in-game loot filter for charms. Ignored if Universal is on.')
         if (gui.elements.loot_filter_equipment:get() or gui.elements.loot_filter_seal:get() or gui.elements.loot_filter_charm:get()) and not gui.elements.loot_filter_toggle:get() then
             render_menu_header('Selective mode: loot filter applies to checked categories. Everything else uses Rosie\'s normal rules.')
@@ -463,8 +483,12 @@ local function render_settings()
     end
     if push_tree(gui.elements.talisman_seal_tree, 'Talisman (Seal)') then
         gui.elements.talisman_seal_action:render('Seal default action', {'Keep', 'Salvage', 'Sell'}, 'What to do with seals by default')
-        gui.elements.talisman_seal_affix_filter_toggle:render('Use affix filter', 'Keep seals that have >= N of your checked affixes')
+        gui.elements.talisman_seal_affix_filter_toggle:render('Use affix filter', 'Keep seals that have >= N of your checked affixes; every other seal takes the seal default action. While on with an affix checked, it decides seals instead of the in-game loot filter. Unique and mythic seals follow their own filter below. A seal whose affixes cannot be read is kept and the console says why.') -- QQT_Warpigz_v3 (Q10)
         if gui.elements.talisman_seal_affix_filter_toggle:get() then
+            -- QQT_Warpigz_v3 (review): say where unique seals stand (Annihilus has fixed affixes).
+            if not gui.elements.talisman_seal_mythic_filter_toggle:get() then
+                render_menu_header('Unique seals (Annihilus) and mythic seals are kept; this filter judges them only when "Use unique/mythic seal filter" below is on and they are unchecked there.')
+            end
             gui.elements.talisman_seal_affix_count_slider:render('Min matching affixes', 'How many checked seal affixes must match to keep')
             local name = 'talisman_seal_affix'
             if push_tree(gui.elements[name .. '_tree'], 'Seal Affixes') then
@@ -490,7 +514,7 @@ local function render_settings()
     end
     if push_tree(gui.elements.talisman_charm_tree, 'Talisman (Charm)') then
         gui.elements.talisman_charm_action:render('Charm default action', {'Keep', 'Salvage', 'Sell'}, 'What to do with charms by default')
-        gui.elements.talisman_charm_affix_filter_toggle:render('Use affix filter', 'Keep charms that have >= N of your checked affixes')
+        gui.elements.talisman_charm_affix_filter_toggle:render('Use affix filter', 'Keep charms that have >= N of your checked affixes; every other charm takes the charm default action. When the in-game loot filter (Universal or Charms only) is on, it decides non-unique charms before this filter (shown ones are kept, hidden ones take the charm action).') -- QQT_Warpigz_v3 (Q10, review: charms keep the in-game filter first)
         if gui.elements.talisman_charm_affix_filter_toggle:get() then
             gui.elements.talisman_charm_affix_count_slider:render('Min matching affixes', 'How many checked charm affixes must match to keep')
             local name = 'talisman_charm_affix'

@@ -24,6 +24,7 @@ local policies = {
     recipe={'crafting_items','equipment'},cache={'cache','equipment'},quest={'quest_items'},
     crafting={'crafting_items'},cinders={'cinders'},
 }
+local carry_noted={} -- QQT_Warpigz_v3 (Q9): SNO -> zone of the last "already carrying" line
 local function filter_reason(info,enabled)
     if not enabled then return nil end
     local filtered=Utils.call(info,'is_filtered_by_loot_filter')
@@ -78,10 +79,28 @@ function M.check_want_item(item, ignore_distance)
             local reason,decision=filter_reason(info,s.respect_filter)
             if reason then return false,reason,decision end
         end
-        bag=bag or policy[2]
-        if not bag or bag=='currency' then return true,'accepted '..kind end
+        -- QQT_Warpigz_v3 (Q9, live S15): a character may carry one of each
+        -- Splinter of Evil (rosie/data/carry_once.lua); the game refuses a
+        -- second copy of a kind already carried and Rosie stood on it.
+        local once,once_sno=ItemLogic.carry_once(info)
+        bag=once and once.bag or bag or policy[2]
+        if not bag or bag=='currency' or bag=='materials' then return true,'accepted '..kind end -- QQT_Warpigz_v3 (Q1)
         local inventory,full=Utils.bag_state(bag)
         if not inventory then return false,'bag unavailable: '..bag,'deferred' end
+        if once then -- QQT_Warpigz_v3 (Q9)
+            local held,readable=Utils.list_has_sno(inventory,once_sno)
+            if held then
+                local zone=Utils.call(Utils.host_call(rawget(_G,'get_current_world')),'get_current_zone_name') or '?'
+                if carry_noted[once_sno]~=zone then
+                    carry_noted[once_sno]=zone
+                    console.print(string.format('[Rosie pickup] Not picking up %s (sno=%d): already carrying one; the game allows one per character.',
+                        tostring(once.name),once_sno))
+                end
+                return false,'already carrying '..tostring(once.name)..' (one per character)'
+            end
+            carry_noted[once_sno]=nil
+            if not readable then return false,'carried items unreadable: '..bag,'deferred' end
+        end
         if not full then return true,'accepted '..kind end
         max_stack=max_stack or policy[3]
         if max_stack and max_stack>1 then
@@ -151,6 +170,16 @@ function M.check_want_item(item, ignore_distance)
     return ga>=required, string.format('%s: GA %d, required %d%s [threshold=%s]',ga>=required and 'accepted' or 'below GA minimum',
         ga,required,overridden and ' (slot override enabled)' or '',threshold)
 end
+-- QQT_Warpigz_v3 (Q1): where an accepted drop lands (pickup receipt): its
+-- kind and bag ('equipment', 'consumable', 'socketable', 'talisman',
+-- 'sigil'), or no bag for Materials, currency and anything no bag lists.
+function M.destination(item)
+    local kind,_,_,bag=ItemLogic.classify(Utils.call(item,'get_item_info'))
+    local policy=policies[kind]
+    if kind=='equipment' then bag='equipment' elseif policy then bag=bag or policy[2] end
+    if bag=='currency' or bag=='materials' then bag=nil end
+    return kind,bag
+end
 local reported={}
 function M.describe(item, reason)
     local info=Utils.call(item,'get_item_info')
@@ -183,6 +212,8 @@ function M.report_rejection(item, reason)
     local rarity=Utils.call(info,'get_rarity')
     if type(rarity)~='number' or rarity~=rarity then rarity=0 end
     if rarity<6 and Utils.get_ga_count(info)==0 then return end
+    if type(reason)=='string' and reason:find('already carrying',1,true) then return end -- QQT_Warpigz_v3 (Q9): logged at the decision
+    if type(reason)=='string' and reason:sub(1,15)=='pickup settled:' then return end -- QQT_Warpigz_v3 (Q1 review): settle() logged it once
     if Utils.distance_to(item)>60 then return end
     local id=Pickup.key(item)
     if id and reported[id]~=reason then

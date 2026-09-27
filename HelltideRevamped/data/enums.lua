@@ -11,6 +11,10 @@ local enums = {
         usz_rewardGizmo_Helm = 75,
         usz_rewardGizmo_Uber = 250,
         Helltide_RewardChest_Random = 75,
+        -- QQT_Warpigz_v3 (Q4): Hell's Prize, the War Plan Helltide node's chest
+        -- (d4data Actor Warplan_Helltide_HellsPrize[_PreTorment], lock cost 666
+        -- cinders). Opened only by the cinder run (core/hr_cinder_run.lua).
+        Warplan_Helltide_HellsPrize = 666,
     },
     -- QQT_Warpigz_v3: live_id = the zone id of the optional live Helltide
     -- zone source (core/hr_live.lua). Nahantu and Skovos have no patrol loop.

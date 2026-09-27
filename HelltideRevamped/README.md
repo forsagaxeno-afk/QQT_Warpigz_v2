@@ -77,6 +77,58 @@ when **Manage orbwalker** is on, or when Helltide itself forced them (the
 cinder gate's clear OFF) before the option was switched off. `HelltideRevampedPlugin.status().hold` names any Looteer/Alfred hold, and
 holds longer than a minute are logged once a minute.
 
+**Search after a trap recovery** (QQT_Warpigz_v3 3.1.0). After a Batmobile
+trap the search scans the other towns once (`skip_cached_zone set — cycling
+...` once per scan) and, when the abandoned zone is the only Helltide, returns
+to it right after the last hop (`no other Helltide found — returning to
+<zone>`). A second trap in the same hour returns without another scan (`<zone>
+is the only Helltide this hour (scanned) — returning without another scan`). A
+return fired while you are still in the Helltide's zone but outside its area
+really teleports (a channel that ends within 12 m of where it started counts as
+interrupted and is fired again, at most 5 times). Four returns that never show
+the Helltide buff, or a refused waypoint to this hour's only Helltide, make the
+search wait for the next hour (logged once) instead of scanning towns that
+cannot hold it. The hour's zone and the trap skip belong to the UTC hour in
+which the buff was seen, so a new hour forgets last hour's zone (`new Helltide
+hour — forgetting last hour's zone <zone>`), while a WarPigs enable or a
+re-enable inside this hour's Helltide keeps it. After 3 scans in an hour that
+find nothing (a Helltide in a region without a patrol loop), scans wait 240 s
+instead of 45 s. `Helltide is not active, wait until helltide starts` prints
+once per idle window.
+
+**Tears (Farm mode).** A tear closes while you stand inside its golden
+circle and enemies die there. The bot keeps the tear it engaged until that
+tear closes, standing on it (a push of up to 2 m is not corrected, a push
+further out walks back), then goes to the next tear. A tear's charge counts
+as full only at 99+ (0-100 reading) or when a 0.99-1.0 reading holds for 1 s
+(earlier a 0-100 charge read as closed at 1 %). Only the time inside the
+circle counts: a tear still open after 90 s inside (or 30 s inside without
+any charge/health change once its reading was seen to change), one it cannot
+get closer to for 15 s, or one engaged for 150 s is skipped (logged once);
+the rupture keeps its 300 s cap, and the Realmwalker wait and fight after it
+get their own 180 s. While a tear is engaged no chest is
+opened (the chest waits until the tear is closed). Rosie's pickup is paused
+for the whole tear event, not only inside a tear (`[RIFT] Pausing Looter
+pickup until the tear event is over`): from the arrival at the rupture
+through the cultists, the tears, the linger and the Realmwalker wait and
+fight, but only while you are at the event (within about 45 m of the ring,
+at an engaged tear, or next to the Realmwalker). The walk there (a ring with
+open tears is engaged from up to 110 m), a walk back after a revive and the
+town are never paused, so Rosie still takes what you pass on the way. The
+event is over when the Realmwalker
+dies, or when none showed up within 10 s after the rupture completed (a
+Normal rupture, or Fight Realmwalker off: when the rupture completes). The
+pause is refreshed every 5 s, lasts at most 300 s for the tears and 180 s
+for the Realmwalker, and is
+released on every way out: rupture left or abandoned, reset, zone change,
+Helltide end, Warplan, disable, WarPigs taking over, death, and a script
+reload. Then the bot walks to each drop Rosie wants inside the event area
+until she picks it up (`[RIFT] Tear event over (...) — collecting its
+loot`; at most 10 s per drop and 45 s in all) and moves on from where the
+last drop was, without walking back to the ring. The
+Deathtoll Chamber keeps only the per-tear pause. WarPigs runs Helltide in
+Warplan mode, which never enters tears.
+
 **Do Maiden** takes priority over chest selection while its conditions hold.
 Use **Disable Maiden at Cinders** to release Maiden farming for chest spending.
 The existing Chaos Rift option still uses its source-provided seasonal name;
@@ -150,9 +202,10 @@ events cut-off and the chest resets now follow the UTC minute.
   that Helltide. A buff that is back within 3 s (a buff-list refresh) only
   interrupts the trip.
 - **Event radius** (40 m, Warplan 12 m) and **Events until minute** (45):
-  pyres and flame pillars within reach (Farm mode: unless **Skip legacy
-  Helltide events** is ticked under Tears; it is off by default, and tears
-  in reach are always taken before events). The bot goes to the event it chose
+  pyres and flame pillars within reach (Farm mode: only when **Skip legacy
+  Helltide events** under Tears is unticked or **Hunt tears** is off; the
+  skip is on by default, as in 3.0.0, and tears in reach are always taken
+  before events). The bot goes to the event it chose
   (not a spent one next to it); the walk is given up after 45 s and the
   whole event after 4 minutes, and an event given up on is skipped for 3
   minutes. New Helltide event skins are logged once with **Draw chest
@@ -160,6 +213,59 @@ events cut-off and the chest resets now follow the UTC minute.
 - **Pin the target on the map** (off): the game's map pin marks the chest the
   bot is walking to.
 - **Forget learned data (this zone)** clears that zone's file.
+
+### Cinder run: Spend cinders on chests at (every mode)
+
+**Settings → Spend cinders on chests at** (off by default) with **Cinders**
+(3000). With the option on the bot saves up and then spends, in Farm mode
+and in Warplan / under WarPigs alike:
+
+- **Saving**: below the set amount no Helltide chest is opened. The chests
+  you pass are remembered (and learned) so the run can go back to them; the
+  log says so once per Helltide (`[CINDER RUN] Saving cinders for the run at
+  3000 (have 420): chests are remembered, not opened; ...`). Cinders are lost
+  when the Helltide ends, so in its last minutes (**Spend everything in the
+  last (min)**, at least 2) the savings are spent in the run's order. Not
+  under WarPigs: its Helltide step (War Plan quest *Helltide Harvest*,
+  spend 250 cinders, 750 on Elite, on Tortured Gifts) ends as soon as those
+  cinders are spent and WarPigs then leaves the Helltide, so saving would
+  stall the War Plan and strand the savings. Under WarPigs chests are opened
+  as before and the run starts only when you already hold the amount.
+- **The run**: once you hold that many cinders (and a known chest is
+  affordable) the bot goes on a chest run in this order:
+
+1. **Hell's Prize** (666 cinders), the chest of the War Plan Helltide node
+   *Hell's Prize* (actor `Warplan_Helltide_HellsPrize`, also the
+   `_PreTorment` variant; the 666 cost is the game data lock cost). The
+   actor only spawns when the node is taken, so a Hell's Prize in sight is
+   what counts. A learned Hell's Prize spot is skipped while the War Plan
+   read says the node is not taken (an unknown read keeps it); the start log
+   says what the read gave (`Hell's Prize node taken / not in the War Plan /
+   unknown`; English client only).
+2. **Mystery chests** (Tortured Gift of Mysteries, 250).
+3. The rest, nearest first (patrol-road metres for far chests).
+
+It uses the chests in sight, the remembered chests and the learned spots
+(Hell's Prize spots are learned as their own kind), with the smart chest
+order's bounds: a failed or stuck trip is not retried for 60 s, a chest the
+bot got stuck on 3 times is skipped, trips that leave the Helltide are
+dropped, and without a road route nothing beyond 150 m is picked. A chest
+right next to you is opened on the way only if the run's target stays
+affordable after it. From the moment the run is due no new tear is hunted
+(a tear already started is finished); tears are hunted again as soon as
+the run finds no chest to spend on (they bring cinders). The run ends when
+your cinders fall below the cheapest known chest (`[CINDER RUN] Done: below
+the cheapest known chest (75); cinders 3012 -> 60`), and starts again only
+at the threshold. Switching the option off ends it at once in every mode
+(`Done: the option was switched off`). A task reset (town trip, death) in
+the same Helltide hour resumes it while a known chest is still affordable,
+in every mode. Hell's Prize chests are opened only by this run; with the
+option off nothing changes. In Farm mode the cinder plan still applies below
+250 (a Mystery you can reach comes before a regular chest). The overlay shows
+`Cinder run | Plan: ...` while it runs and `Saving cinders for the run at
+3000` while it saves. The save phase also holds the Helltide chests next to
+a tear event (Tears menu, *Open tear chests*); the free Pandemonium chests
+are still opened.
 
 ### Live data & stats menu
 

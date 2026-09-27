@@ -1,5 +1,5 @@
 local plugin_label   = 'war_pigs'
-local plugin_version = '1.1.4'
+local plugin_version = '1.1.5'
 console.print('Lua Plugin - WarPigs - v' .. plugin_version)
 
 local gui = {}
@@ -76,9 +76,13 @@ gui.render = function()
             'spend a compass; retry the War Plan teleport after a 60 s pause.')
     end
 
+    -- QQT_Warpigz_v3 (Q8): the tooltip names the delegation to Rosie trips.
     gui.elements.manage_whispers:render('Whispers in Temis (SilentRaven)',
         'Check for Whisper rewards on each Temis visit after activity cleanup.\n' ..
-        'Enable the bundled SilentRaven. Waits for Alfred and Looter; never teleports for Whispers.')
+        'Enable the bundled SilentRaven. Waits for Alfred and Looter; WarPigs itself never teleports for Whispers.\n' ..
+        'During an activity SilentRaven claims on a Temis stop of that activity, a Rosie trip hands a ready\n' ..
+        'reward to SilentRaven on its return leg, and SilentRaven\'s Claim trip option may ask Rosie for a\n' ..
+        'trip from the open world (Helltide).')
 
     gui.elements.manage_orbwalker:render('Manage orbwalker',
         'At every handoff (after the outgoing plugin stops, and before and after\n' ..

@@ -806,7 +806,13 @@ case('LOC localized incomplete counter is collecting: no auto-fire, no NPC probe
     eq(c.status().ready, false); eq(c.status().running, false); eq(c.interacts, 0); eq(c.accepts, 0)
     local snap = c.sr_require('silent_raven.whispers').quest_snapshot()
     eq(snap.collecting, true, 'n/m with n < m'); eq(snap.ready, false)
+    -- QQT_Warpigz_v3 (Q8): a complete counter is ready (inferred: one
+    -- bounded probe per visit); only the phrase without a counter keeps the
+    -- old reading.
     c.text = 'Collect Grim Favor (10/10)'
+    snap = c.sr_require('silent_raven.whispers').quest_snapshot()
+    eq(snap.ready, true, 'complete counter'); eq(snap.inferred, true); eq(snap.collecting, false)
+    c.text = 'Collect Grim Favor'
     eq(c.sr_require('silent_raven.whispers').quest_snapshot().ready, false, 'English collect phrase keeps the old reading')
     c.text = 'Return to the Tree of Whispers'
     snap = c.sr_require('silent_raven.whispers').quest_snapshot()

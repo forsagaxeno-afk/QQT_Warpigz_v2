@@ -69,7 +69,7 @@ local function main_pulse()
     if activity_owns_loot() then Pickup.reset(false); return end
     local wanted=ItemManager.get_item_based_on_priority()
     if wanted and Settings.get().loot_priority==1 then wanted=wanted.Item end
-    if wanted then Settings.get().looting=Pickup.step(wanted)
+    if wanted then Settings.get().looting=Pickup.step(wanted,ItemManager.destination(wanted)) -- QQT_Warpigz_v3 (Q1): receipt bag
     else Pickup.release_movement() end
 end
 published={

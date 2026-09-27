@@ -2,6 +2,7 @@
 local Current = require('rosie.data.items')
 local Custom = require('rosie.private.pickup.data.custom_items')
 local Utils = require('rosie.private.pickup.utils.utils')
+local CarryOnce = require('rosie.data.carry_once') -- QQT_Warpigz_v3 (Q9)
 local M = {}
 -- Exact SNO mappings precede skin fallbacks; names containing a gear word
 -- alone are not enough to turn quest objects or cosmetics into equipment.
@@ -48,10 +49,17 @@ local patterns = {
     {'scroll', {'Scroll_Of'}}, {'cache', {'Item_Cache','Reward_Cache','WarPlans_Cache'}},
     {'quest', {'QST','DGN','Glyph','pvp_currency','GamblingCurrency_Key','Experience_PowerUp_Actor'}},
 }
+-- QQT_Warpigz_v3 (Q1, live Tuning Prism ghost): Horadric Cube Tuning Prisms
+-- (d4data X2_HoradricCube_TuningStone_1..8) go to Materials, never to the
+-- consumable bag the generated catalog names, so no bag can confirm them
+-- and a full consumable bag never refuses them.
+local MATERIALS={[2533710]=true,[2533715]=true,[2533718]=true,[2533720]=true,
+    [2533724]=true,[2533727]=true,[2533731]=true,[2533733]=true}
+M.MATERIALS=MATERIALS
 function M.classify(info)
     local id=Utils.call(info,'get_sno_id')
     local known=Current.by_id[id]
-    if known then return known.kind, known.slot, known.stack, known.bag end
+    if known then return known.kind, known.slot, known.stack, MATERIALS[id] and 'materials' or known.bag end -- QQT_Warpigz_v3 (Q1)
     for _,kind in ipairs({'event_items','boss_items','rare_elixirs','basic_elixirs','advanced_elixirs'}) do
         if Custom[kind][id] then return kind end
     end
@@ -65,4 +73,20 @@ function M.classify(info)
     if slot then return 'equipment',slot end
     return 'unknown'
 end
+-- QQT_Warpigz_v3 (Q9): a one-per-character item (rosie/data/carry_once.lua,
+-- the Season 15 Splinters of Evil): its entry and SNO, else nil. A later
+-- build's SNO missing from the data is recognized by its item skin.
+function M.carry_once(info)
+    local id=Utils.call(info,'get_sno_id')
+    if type(id)~='number' then return nil end
+    local known=CarryOnce.by_id[id]
+    if known then return known,id end
+    local skin=Utils.call(info,'get_skin_name')
+    if type(skin)~='string' then return nil end
+    for _,prefix in ipairs(CarryOnce.skins) do
+        if skin:find(prefix,1,true) then return {name=skin,bag='consumable',must_keep=true},id end
+    end
+    return nil
+end
+M.carry_once_data=CarryOnce
 return M

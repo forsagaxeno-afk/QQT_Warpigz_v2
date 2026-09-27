@@ -7,6 +7,7 @@ local pathfinder=require('rosie.movement').for_owner('town')
 local tracker=require 'rosie.private.town.core.tracker'
 local settings=require 'rosie.private.town.core.settings'
 local utils=require 'rosie.private.town.core.utils'
+local vendor=require 'rosie.private.town.core.vendor' -- QQT_Warpigz_v3 (Q6)
 local M={}
 local retired=false
 local held_looter,legacy_resume,held_bat=nil,false,nil
@@ -25,6 +26,19 @@ local finished=false
 local failure_keys={'sell_failed','salvage_failed','salvage_talisman_failed','repair_failed',
     'stash_failed','stash_full','stash_pull_failed','teleport_failed'}
 function M.busy() return tracker.external_trigger or tracker.manual_trigger or tracker.trigger_tasks end
+-- QQT_Warpigz_v3 (Q6): a service step that ends (done or failed) closes the
+-- panel it opened before the next step runs (core/vendor.lua close_tick).
+local STEP_KEYS={'sell','salvage','repair','salvage_talisman','stash','stash_pull'}
+local steps_ended,steps_request={},nil
+local function close_after_steps()
+    if steps_request~=tracker.request_id then steps_request=tracker.request_id; steps_ended={} end
+    for _,key in ipairs(STEP_KEYS) do
+        if not steps_ended[key] and (tracker[key..'_done'] or tracker[key..'_failed']) then
+            steps_ended[key]=true
+            vendor.request_close(key..(tracker[key..'_failed'] and ' failed' or ' done'))
+        end
+    end
+end
 function M.is_retired() return retired end
 function M.suspend() last_tick=nil end
 function M.cleanup_pending() return #pending_cleanup end
@@ -199,6 +213,9 @@ function M.finish(success,reason,kind)
         tracker.fail_permanent=kind=='permanent' or tracker.stash_full==true
     end
     tracker.external_caller=nil
+    -- QQT_Warpigz_v3 (Q6): the trip end (success, failure, latch, cancel,
+    -- disable) closes a panel it left open; controller.lua ticks the close.
+    vendor.request_close('trip '..tracker.outcome)
     console.print('[Rosie] '..tracker.outcome..(tracker.failure_reason and ': '..tracker.failure_reason or ''))
     if callback then
         local ok,why=pcall(callback,{success=success==true,reason=tracker.failure_reason,request_id=tracker.request_id,
@@ -296,6 +313,10 @@ function M.tick()
     -- bounded there) is not service time.
     if not tracker.raven_wait then tracker.service_elapsed=(tracker.service_elapsed or 0)+elapsed end
     if tracker.service_elapsed>=240 then M.finish(false,'Town service or return timed out (240s)'); return false end
+    -- QQT_Warpigz_v3 (Q6): hold the next step while a panel closes (bounded:
+    -- 3 Escape presses 0.5 s apart, 8 s at most; counted as service time).
+    close_after_steps()
+    if vendor.close_tick() then return false end
     return true
 end
 function M.returned()

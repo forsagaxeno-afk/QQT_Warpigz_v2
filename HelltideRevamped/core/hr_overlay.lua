@@ -41,6 +41,7 @@ end
 local function short_name(name)
     name = tostring(name or '?'):gsub('^usz_rewardGizmo_', '')
     if name == 'Uber' then return 'Mystery' end
+    if name == 'Warplan_Helltide_HellsPrize' then return "Hell's Prize" end -- QQT_Warpigz_v3 (Q4)
     return name
 end
 
@@ -59,8 +60,13 @@ end
 local function plan_line(player_pos)
     local order = tracker.hr_chest_order
     local info = order and order.last_plan
-    if type(info) ~= 'table' then return nil end
-    local text = 'Plan: '
+    -- QQT_Warpigz_v3 (Q4): the cinder run's live state (the last pick may be
+    -- stale in Warplan once the run ended): running / saving toward it.
+    local run = tracker.hr_cinder_run
+    local rs = run and run.status and run.status() or nil
+    local saving = rs and rs.saving and string.format('Saving cinders for the run at %d', rs.threshold) or nil
+    if type(info) ~= 'table' then return saving end
+    local text = (rs and rs.active and 'Cinder run | Plan: ') or (saving and saving .. ' | Plan: ') or 'Plan: '
     if (info.reserve or 0) > 0 then
         text = text .. string.format('reserve %d (Mystery known)', info.reserve)
     else

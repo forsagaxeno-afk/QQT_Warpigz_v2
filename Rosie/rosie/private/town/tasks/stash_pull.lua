@@ -268,7 +268,7 @@ task.Execute = function()
             task.status = phase .. ': interacting'
             last_int = now
             if phase == 'PULL' and not stash_base then stash_base = vendor.stash_baseline() end
-            interact_vendor(npc)
+            vendor.interact(npc, phase == 'PULL' and 'STASH' or key) -- QQT_Warpigz_v3 (Q6): a panel Rosie closes
             if phase == 'PULL' then stash_interacted = true end
             return
         end
@@ -323,7 +323,7 @@ task.Execute = function()
                 reset_state()
                 return
             end
-            if npc then interact_vendor(npc) end
+            if npc then vendor.interact(npc, phase == 'PULL' and 'STASH' or key) end -- QQT_Warpigz_v3 (Q6)
             last_int = now
         end
         return
@@ -356,7 +356,7 @@ task.Execute = function()
                 tracker.stash_pull_failed=true; tracker.failure_reason=reason; return
             end
             sub='INTERACTING'; last_int=now; stash_seen_count=-1
-            if npc then interact_vendor(npc) end
+            if npc then vendor.interact(npc,'STASH') end -- QQT_Warpigz_v3 (Q6)
         end
 
         -- An initial bag handle may be replaced by the host during ordinary

@@ -58,7 +58,11 @@ local function finish(result, preserve_path, keep_visit)
     elseif result == 'failed' or result == 'unconfirmed' then
         stats.bump_failure(tracker.last_reason)
     end
-    log.info('run finished: ' .. result .. ' (' .. tostring(tracker.last_reason) .. ')')
+    -- QQT_Warpigz_v3 (Q8): the decision in words (claimed / skipped / not claimed).
+    local said = ' — not claimed'
+    if result == 'success' then said = ' — claimed ' .. tostring(tracker.last_pick_entry and tracker.last_pick_entry.name)
+    elseif result:sub(1, 8) == 'skipped_' then said = ' — skipped' end
+    log.info('run finished: ' .. result .. ' (' .. tostring(tracker.last_reason) .. ')' .. said)
     tracker.finish(result)
 end
 -- Pause bookkeeping shared by own-run companion yields and an owner's
@@ -387,9 +391,10 @@ function M.start(settings, reason, with_tp, callback)
     tracker.last_reason, tracker.external_callback = reason or 'auto', callback
     tracker.attempts, tracker.claim_sent, tracker.confirm_since = 0, false, nil
     tracker.run_started_t = clock()
-    tracker.companion_yield = reason == 'auto' or reason == 'manual'
+    tracker.companion_yield = reason == 'auto' or reason == 'manual' or reason == 'delegated' -- QQT_Warpigz_v3 (Q8)
     tracker.state, tracker.state_t = with_tp and not whispers.in_whisper_town() and 'TELEPORTING' or 'START', clock()
     log.debug(sr_settings, 'run started (' .. tostring(tracker.last_reason) .. ') -> ' .. tracker.state) -- QQT_Warpigz_v3
+    log.info('claiming the Whisper reward (' .. tostring(tracker.last_reason) .. ')') -- QQT_Warpigz_v3 (Q8)
 end
 function M.tick(settings)
     if not tracker.running then return end

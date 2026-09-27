@@ -103,6 +103,10 @@ external = {
             salvage_talisman_failed = tracker.salvage_talisman_failed,
             stash_pull_failed = tracker.stash_pull_failed,
             returned = lifecycle.returned(),
+            -- QQT_Warpigz_v3 (Q8): a with-teleport trip's return leg hands a
+            -- ready Whisper reward over to SilentRaven (tasks/teleport.lua)
+            -- under this caller name (the adapters rename `name`).
+            raven_handoff = settings.plugin_label,
         }
     end,
     -- create_task(caller, on_done)

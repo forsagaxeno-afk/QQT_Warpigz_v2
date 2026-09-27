@@ -5,22 +5,41 @@ local task_manager = require 'rosie.private.town.core.task_manager'
 local tracker      = require 'rosie.private.town.core.tracker'
 local lifecycle    = require 'rosie.private.town.core.lifecycle'
 
-local function get_affix_screen_position(item)
-    local ok,row,col=pcall(function() return item:get_inventory_row(),item:get_inventory_column() end)
-    if not ok or type(row)~='number' or type(col)~='number' or row~=row or col~=col
-        or row<0 or col<0 or row==math.huge or col==math.huge then return nil end
+-- QQT_Warpigz_v3 (Q10, live: host crash while hovering a bag item with the
+-- menu open): the overlay no longer reads every item's slot from the host on
+-- every frame. A census entry reads its row/column at most every
+-- SLOT_MAX_AGE s, and the six layout sliders are read once per frame.
+-- QQT_Warpigz_v3 (review): the cached slot ages out on its own. With the town
+-- service off (pickup only) and the menu closed no census runs, and a slot
+-- cached until the next census kept the box on the old slot after the user
+-- moved the item.
+local SLOT_MAX_AGE = 0.5
+local function slot_of(cache)
+    local now = get_time_since_inject()
+    if cache.slot_row ~= nil and (cache.slot_at == nil or now - cache.slot_at > SLOT_MAX_AGE or now < cache.slot_at) then
+        cache.slot_row = nil
+    end
+    if cache.slot_row == nil then
+        cache.slot_at = now
+        local item=cache.item
+        local ok,row,col=pcall(function() return item:get_inventory_row(),item:get_inventory_column() end)
+        if not ok or type(row)~='number' or type(col)~='number' or row~=row or col~=col
+            or row<0 or col<0 or row==math.huge or col==math.huge then
+            cache.slot_row=false
+        else
+            cache.slot_row,cache.slot_col=row,col
+        end
+    end
+    if not cache.slot_row then return nil end
+    return cache.slot_row,cache.slot_col
+end
+local function get_affix_screen_position(cache, layout)
+    local row,col=slot_of(cache)
+    if not row then return nil end
+    local x = layout.origin_x + col * layout.slot_w
+    local y = layout.origin_y + row * layout.slot_h
 
-    local origin_x   = gui.elements.draw_inventory_origin_x:get()
-    local origin_y   = gui.elements.draw_inventory_origin_y:get()
-    local slot_w     = gui.elements.draw_offset_x:get()
-    local slot_h     = gui.elements.draw_offset_y:get()
-    local box_width  = gui.elements.draw_box_width:get()
-    local box_height = gui.elements.draw_box_height:get()
-
-    local x = origin_x + col * slot_w
-    local y = origin_y + row * slot_h
-
-    return x, y, box_width, box_height
+    return x, y, layout.box_width, layout.box_height
 end
 
 local FONT        = 14
@@ -114,16 +133,25 @@ end
 function drawing.draw_inventory_boxes()
     if not is_inventory_open() then return end
     local items = tracker.cached_inventory
+    if type(items)~='table' or next(items)==nil then return end
+    local e=gui.elements -- QQT_Warpigz_v3 (Q10): widgets read once per frame
+    local layout={origin_x=e.draw_inventory_origin_x:get(),origin_y=e.draw_inventory_origin_y:get(),
+        slot_w=e.draw_offset_x:get(),slot_h=e.draw_offset_y:get(),
+        box_width=e.draw_box_width:get(),box_height=e.draw_box_height:get()}
+    local draw_stash,draw_sell,draw_salvage=e.draw_stash:get(),e.draw_sell:get(),e.draw_salvage:get()
     for _,cache in pairs(items) do
-        local x, y, box_width, box_height = get_affix_screen_position(cache.item)
+        local x, y, box_width, box_height
+        if (draw_stash and cache.is_stash) or (draw_sell and cache.is_sell) or (draw_salvage and cache.is_salvage) then
+            x, y, box_width, box_height = get_affix_screen_position(cache, layout)
+        end
         local draw_affix = false
-        if x and gui.elements.draw_stash:get() and cache.is_stash then
+        if x and draw_stash and cache.is_stash then
             graphics.rect(vec2:new(x, y), vec2:new(x + box_width, y + box_height), color_blue(255), 1, 4)
             draw_affix = true
-        elseif x and gui.elements.draw_sell:get() and cache.is_sell then
+        elseif x and draw_sell and cache.is_sell then
             graphics.rect(vec2:new(x, y), vec2:new(x + box_width, y + box_height), color_pink(255), 1, 3)
             draw_affix = true
-        elseif x and gui.elements.draw_salvage:get() and cache.is_salvage then
+        elseif x and draw_salvage and cache.is_salvage then
             graphics.rect(vec2:new(x, y), vec2:new(x + box_width, y + box_height), color_orange_red(255), 1, 3)
             draw_affix = true
         end

@@ -361,20 +361,31 @@ R.case('task: Farm event reach, the engaged event actor and a bounded stay; Warp
     eq(w.task.current_state, 'MOVING_TO_PYRE')
 end)
 
--- QQT_Warpigz_v3 (night review): with default menu values (Hunt tears on,
--- "Prefer tears" on) the Farm events never ran.
-R.case('task: Farm defaults walk to a flame pillar in the event radius; the skip option turns it off', function()
+-- QQT_Warpigz_v3 (rc.2, user approved): "Skip legacy Helltide events" is on
+-- by default again (as in 3.0.0, menu id rupture_replace_local_events): with
+-- Hunt tears on the Farm defaults never walk to a flame pillar; with the
+-- option off the bot walks to the pillar in the event radius; with Hunt tears
+-- off the skip does not apply.
+R.case('task: Farm defaults skip legacy events when Hunt tears is on; with the option off the bot walks to the pillar', function()
     local s = task_session(1)
+    eq(s.gui.elements.rupture_replace_local_events:get(), true, 'menu default on (rc.1: off)')
+    eq(s.settings.rupture_replace_local_events, true, 'setting default on')
     s.at_minute(20)
-    s.actors = {actor('S04_Helltide_FlamePillar_Switch_Dyn', 30, 0)}
+    s.actors = {actor('S04_Helltide_FlamePillar_Switch_Dyn', 10, 0)}
     s.task:initiate_waypoints(); s.task:explore_helltide()
-    eq(s.task.current_state, 'MOVING_TO_PYRE', 'Farm defaults: the pillar 30 m away')
+    eq(s.task.current_state, 'EXPLORE_HELLTIDE', 'Farm defaults (Hunt tears on): the legacy pillar is skipped')
     local x = task_session(1)
-    x.set('rupture_replace_local_events', true)
+    x.set('rupture_replace_local_events', false)
     x.at_minute(20)
-    x.actors = {actor('S04_Helltide_FlamePillar_Switch_Dyn', 10, 0)}
+    x.actors = {actor('S04_Helltide_FlamePillar_Switch_Dyn', 30, 0)}
     x.task:initiate_waypoints(); x.task:explore_helltide()
-    eq(x.task.current_state, 'EXPLORE_HELLTIDE', '"Skip legacy Helltide events" ticked')
+    eq(x.task.current_state, 'MOVING_TO_PYRE', '"Skip legacy Helltide events" off: the pillar 30 m away')
+    local t = task_session(1)
+    t.set('hunt_rift_toggle', false)
+    t.at_minute(20)
+    t.actors = {actor('S04_Helltide_FlamePillar_Switch_Dyn', 30, 0)}
+    t.task:initiate_waypoints(); t.task:explore_helltide()
+    eq(t.task.current_state, 'MOVING_TO_PYRE', 'Hunt tears off: the skip does not apply')
 end)
 
 R.case('task: an event not reached in 45 s is skipped for 180 s; a stuck interaction is bounded', function()

@@ -98,126 +98,158 @@ end
 -- seals never take the plain in-game-filter action; they always follow the
 -- unique/mythic selection rules below, and "Always keep mythics" (default on,
 -- the old WarPigz Alfred key) keeps every mythic one.
-local function protected_talisman(item)
-    local item_type = utils.get_item_type(item)
-    if item_type ~= 'talisman_seal' and item_type ~= 'talisman_charm' then return false, false end
-    local ok, r = pcall(function() return item:get_rarity() end)
-    if not ok or not valid_rarity(r) then return true, true end -- unreadable: keep
-    local okm, mythic_seal = pcall(function() return item_type == 'talisman_seal' and utils.is_mythic_seal(item) end)
-    local mythic = r >= 8 or (okm and mythic_seal == true)
-    return r == 6 or mythic, mythic
+-- QQT_Warpigz_v3 (Q10, live v3.0.0: a seal without the checked "+1 Charm
+-- Slot" was stashed although the seal action was Salvage): one decision per
+-- talisman (Keep / Salvage / Sell) plus the reason it is kept.
+--  * A seal affix filter that is on with checked affixes decides seals: a
+--    match keeps it, anything else takes the seal action. The in-game loot
+--    filter (Universal or Seals only) used to decide first, so a seal it
+--    showed was kept whatever its affixes, and a seal it hid was salvaged even
+--    WITH the checked affix. It still decides while the affix filter is off.
+--    Charms keep the old order (the in-game loot filter, when on, decides
+--    charms before the charm affix filter): the report was about seals only,
+--    and the new order would destroy charms the in-game filter shows.
+--    (QQT_Warpigz_v3 review)
+--  * Unique (Annihilus) and mythic seals are not judged by the affix filter
+--    unless "Use unique/mythic seal filter" is on: Annihilus has fixed affixes
+--    and never rolls "+1 Charm Slot", so the affix rule would salvage every
+--    one. (QQT_Warpigz_v3 review)
+--  * Affixes are matched by hash (the affix SNO), or by internal name when a
+--    hash cannot be read; checked affixes count once. Unreadable affixes (or
+--    none listed) keep the item. "Min matching affixes" below 1 counts as 1.
+--  * Every keep that overrides a Salvage or Sell action is logged once
+--    ('[Rosie] Seal kept: ...').
+local TALISMAN_KEEP = 0
+local affix_id_by_name = nil
+local function affix_id_of_name(item_type, name)
+    if not affix_id_by_name then
+        affix_id_by_name = {}
+        for _, group in ipairs(item_affix) do
+            local ids = {}
+            for _, affix in ipairs(group.data) do
+                if type(affix.name) == 'string' then ids[affix.name] = affix.sno_id end
+            end
+            affix_id_by_name[group.name] = ids
+        end
+    end
+    local ids = affix_id_by_name[item_type]
+    return ids and ids[name] or nil
 end
-local function talisman_should_act(item, requested_action)
-    if not utils.can_modify_item(item) then return false end
-    local s = utils.settings
-    local protected, mythic = protected_talisman(item)
-    if mythic and s.mythic_always_keep ~= false then return false end
-
-    if s.loot_filter_mode and not protected then
-        local ok, filtered = pcall(function() return item:is_filtered_by_loot_filter() end)
-        if ok then
-            if filtered~=true then return false end
-            local item_type = utils.get_item_type(item)
-            if item_type == 'talisman_seal' then
-                return s.talisman_seal_action == requested_action
-            elseif item_type == 'talisman_charm' then
-                return s.talisman_charm_action == requested_action
-            end
-            return false
+-- How many checked affixes the item carries, or nil and why it cannot tell.
+local function talisman_matches(item, item_type, selected)
+    local ok, affixes = pcall(function() return item:get_affixes() end)
+    if not ok or type(affixes) ~= 'table' then return nil, 'affixes unreadable' end
+    if next(affixes) == nil then return nil, 'no affixes listed (not readable yet)' end
+    local matched, seen = 0, {}
+    for _, affix in pairs(affixes) do
+        local okh, id = pcall(function() return affix.affix_name_hash end)
+        if not okh or type(id) ~= 'number' then
+            local okn, name = pcall(function() return affix:get_name() end)
+            if not okn or type(name) ~= 'string' then return nil, 'an affix is unreadable' end
+            id = affix_id_of_name(item_type, name)
         end
-        return false -- unreadable native filter must keep the item
+        if id ~= nil and selected[id] and not seen[id] then seen[id] = true; matched = matched + 1 end
     end
-
-    local item_type_early = utils.get_item_type(item)
-    local lf_active = not protected and ((item_type_early == 'talisman_seal' and s.loot_filter_seal)
-                   or (item_type_early == 'talisman_charm' and s.loot_filter_charm))
-    if lf_active then
-        local ok, filtered = pcall(function() return item:is_filtered_by_loot_filter() end)
-        if ok then
-            if filtered~=true then return false end
-            if item_type_early == 'talisman_seal' then
-                return s.talisman_seal_action == requested_action
-            elseif item_type_early == 'talisman_charm' then
-                return s.talisman_charm_action == requested_action
-            end
-            return false
-        end
-        return false -- unreadable category filter must keep the item
-    end
-
+    return matched
+end
+local function talisman_decide(item)
     local item_type = utils.get_item_type(item)
-    local ok, r = pcall(function() return item:get_rarity() end)
-    if not ok or not valid_rarity(r) then return false end
-    local rarity = r
-    local meta=current_items[item:get_sno_id()]
-    if rarity_conflicts_with_catalog(meta,rarity,utils.mythic_seals[item:get_sno_id()]~=nil) then
-        return false -- conflicting metadata must not authorize a destructive default
+    if item_type ~= 'talisman_seal' and item_type ~= 'talisman_charm' then return TALISMAN_KEEP, nil, item_type end
+    local s = utils.settings
+    local seal = item_type == 'talisman_seal'
+    local action = seal and s.talisman_seal_action or s.talisman_charm_action
+    if action ~= utils.item_enum.SALVAGE and action ~= utils.item_enum.SELL then action = TALISMAN_KEEP end
+    if not utils.can_modify_item(item) then
+        local okl, locked = pcall(function() return item:is_locked() end)
+        return TALISMAN_KEEP, okl and locked == true and 'locked (favorite)' or 'item not readable', item_type
     end
-
-    local action, affix_filter, affix_count, affix_selected
-    if item_type == 'talisman_seal' then
+    local ok, rarity = pcall(function() return item:get_rarity() end)
+    if not ok or not valid_rarity(rarity) then return TALISMAN_KEEP, 'rarity unreadable', item_type end
+    local okm, mythic_seal = pcall(function() return seal and utils.is_mythic_seal(item) end)
+    local mythic = rarity >= 8 or (okm and mythic_seal == true)
+    if mythic and s.mythic_always_keep ~= false then return TALISMAN_KEEP, 'Mythic (Always keep mythics)', item_type end
+    local protected = rarity == 6 or mythic
+    local affix_filter = seal and s.talisman_seal_affix_filter or (not seal and s.talisman_charm_affix_filter)
+    local selected = seal and s.talisman_seal_affix or s.talisman_charm_affix
+    local affix_rule = affix_filter == true and type(selected) == 'table' and next(selected) ~= nil
+    local loot_filter = s.loot_filter_mode or (seal and s.loot_filter_seal) or (not seal and s.loot_filter_charm)
+    if loot_filter and not protected and not (seal and affix_rule) then -- QQT_Warpigz_v3 (review): seals only
+        local okf, filtered = pcall(function() return item:is_filtered_by_loot_filter() end)
+        if not okf then return TALISMAN_KEEP, 'in-game loot filter unreadable', item_type end
+        if filtered ~= true then return TALISMAN_KEEP, 'the in-game loot filter shows it', item_type end
+        return action, nil, item_type
+    end
+    local sno = item:get_sno_id()
+    if rarity_conflicts_with_catalog(current_items[sno], rarity, utils.mythic_seals[sno] ~= nil) then
+        return TALISMAN_KEEP, 'rarity conflicts with the item catalog', item_type -- never a destructive default
+    end
+    if seal then
         -- Unique and mythic seals share the saved seal selection controls.
-        if rarity==6 or utils.is_mythic_seal(item) then
-            if s.talisman_seal_mythic_filter then
-                if utils.is_correct_mythic_seal(item) then return false end
-            else
-                return false
+        if rarity == 6 or utils.is_mythic_seal(item) then
+            if not s.talisman_seal_mythic_filter then
+                return TALISMAN_KEEP, 'Unique/Mythic seal ("Use unique/mythic seal filter" is off)', item_type
             end
+            if utils.is_correct_mythic_seal(item) then return TALISMAN_KEEP, 'checked in the Unique/Mythic seal list', item_type end
         end
-        action         = s.talisman_seal_action
-        affix_filter   = s.talisman_seal_affix_filter
-        affix_count    = s.talisman_seal_affix_count
-        affix_selected = s.talisman_seal_affix
-    elseif item_type == 'talisman_charm' then
+    else
         -- Unique and mythic charms: keep always, or apply the named selection.
         if rarity == 6 or rarity >= 8 then
-            if s.talisman_charm_unique_filter then
-                if utils.is_correct_unique_charm(item) then return false end
-            else
-                return false
+            if not s.talisman_charm_unique_filter then
+                return TALISMAN_KEEP, 'Unique/Mythic charm ("Use unique/mythic charm filter" is off)', item_type
             end
+            if utils.is_correct_unique_charm(item) then return TALISMAN_KEEP, 'checked in the Unique/Mythic charm list', item_type end
         end
-        -- Set charm (rarity 7): set filter gates which ones to keep; filter off = default action
-        if rarity == 7 then
-            if s.talisman_charm_set_filter then
-                if not utils.is_correct_set_charm(item) then
-                    return s.talisman_charm_action == requested_action
-                end
-                if not s.talisman_charm_affix_filter then return false end
-                -- in set list: affix filter applies below (AND logic — fall through)
-            end
-            -- set filter off: fall through to default action
+        -- Set charm (rarity 7): the set filter gates which ones to keep; in the
+        -- list with the affix filter on, the affix filter applies (AND).
+        if rarity == 7 and s.talisman_charm_set_filter then
+            if not utils.is_correct_set_charm(item) then return action, nil, item_type end
+            if not s.talisman_charm_affix_filter then return TALISMAN_KEEP, 'checked in the set charm list', item_type end
         end
-        action         = s.talisman_charm_action
-        affix_filter   = s.talisman_charm_affix_filter
-        affix_count    = s.talisman_charm_affix_count
-        affix_selected = s.talisman_charm_affix
-    else
-        return false
     end
-    -- Affix filter: keep if matched >= count
-    if affix_filter and affix_selected then
-        local matched = 0
-        for _, affix in pairs(item:get_affixes()) do
-            if affix_selected[affix.affix_name_hash] then matched = matched + 1 end
+    if affix_rule then
+        local matched, why = talisman_matches(item, item_type, selected)
+        if matched == nil then return TALISMAN_KEEP, why, item_type end
+        local need = math.max(1, math.floor(tonumber(seal and s.talisman_seal_affix_count or s.talisman_charm_affix_count) or 1))
+        if matched >= need then
+            return TALISMAN_KEEP, string.format('affix filter: %d of the checked affixes (need %d)', matched, need), item_type
         end
-        if matched >= (affix_count or 1) then return false end
     end
-    return action == requested_action
+    return action, nil, item_type
 end
 
 -- QQT_Warpigz_v2 (M2): a host error reading one item keeps that item; it
 -- never escapes into the census, a task or the service pulse.
-local function safe_talisman_should_act(item, requested_action)
-    local ok, result = pcall(talisman_should_act, item, requested_action)
-    return ok and result == true
+local kept_logged, kept_logged_n = {}, 0
+function utils.talisman_decision(item)
+    local ok, action, why, item_type = pcall(talisman_decide, item)
+    if not ok then action, why, item_type = TALISMAN_KEEP, 'host error: ' .. tostring(action):sub(1, 120), nil end
+    if action ~= utils.item_enum.SALVAGE and action ~= utils.item_enum.SELL then action = TALISMAN_KEEP end
+    if action == TALISMAN_KEEP and why then
+        -- Logged once per kind, SNO and reason, only when the category action
+        -- is not Keep (the case that surprises: "why was this seal kept?").
+        local okt, kind = pcall(function() return item_type or utils.get_item_type(item) end)
+        local s = utils.settings
+        local category = okt and (kind == 'talisman_seal' and s.talisman_seal_action or kind == 'talisman_charm' and s.talisman_charm_action)
+        if category == utils.item_enum.SALVAGE or category == utils.item_enum.SELL then
+            local oks, sno = pcall(function() return item:get_sno_id() end)
+            local key = tostring(kind) .. '|' .. tostring(oks and sno) .. '|' .. why
+            if not kept_logged[key] then
+                if kept_logged_n >= 256 then kept_logged, kept_logged_n = {}, 0 end
+                kept_logged[key], kept_logged_n = true, kept_logged_n + 1
+                local okn, name = pcall(function() return item:get_name() end)
+                console.print(string.format('[Rosie] %s kept: %s (sno=%s): %s', kind == 'talisman_seal' and 'Seal' or 'Charm',
+                    tostring(okn and name or '?'), tostring(oks and sno or '?'), why))
+            end
+        end
+    end
+    return action, why
 end
 function utils.should_salvage_talisman(item)
-    return safe_talisman_should_act(item, utils.item_enum['SALVAGE'])
+    return utils.talisman_decision(item) == utils.item_enum['SALVAGE']
 end
 
 function utils.should_sell_talisman(item)
-    return safe_talisman_should_act(item, utils.item_enum['SELL'])
+    return utils.talisman_decision(item) == utils.item_enum['SELL']
 end
 
 utils.mythics = {
@@ -747,6 +779,11 @@ classify_equipment = function(item,action)
     if item_type == 'cache' then return false, 0, false end
     if item_type == 'unknown' then return false, 0, false end
     if item_type == 'tempering' then return false, 0, false end
+    -- QQT_Warpigz_v3 (Q10): a seal or charm is judged by the talisman rules
+    -- wherever the host lists it, never by the Legendary equipment action.
+    if item_type == 'talisman_seal' or item_type == 'talisman_charm' then
+        return utils.talisman_decision(item) == action, 0, false
+    end
 
     local rarity = item:get_rarity()
     if not valid_rarity(rarity) then return false,0,false end
@@ -914,10 +951,20 @@ local function census_entry(item)
 end
 local function talisman_census(item)
     if utils.settings.skip_favorite and item:is_locked() then return nil end
-    if utils.should_sell_talisman(item) then return 'sell' end
-    if utils.should_salvage_talisman(item) then return 'salvage' end
+    -- QQT_Warpigz_v3 (Q10): one decision (one affix read) per talisman.
+    local action = utils.talisman_decision(item)
+    if action == utils.item_enum['SELL'] then return 'sell' end
+    if action == utils.item_enum['SALVAGE'] then return 'salvage' end
     return 'stash'
 end
+-- QQT_Warpigz_v3 (Q10, live: host crash with the menu open on the seal
+-- filter while hovering a seal): the talisman counts are recounted at most
+-- every TALISMAN_INTERVAL s, not on every census. They are NOT display-only
+-- (QQT_Warpigz_v3 review): the sell tally feeds tracker.sell_count, which the
+-- sell step's is_done() reads, so a request census (force 'now') and a change
+-- in the number of talismans recount at once.
+local TALISMAN_INTERVAL = 1
+local talisman_tally = {at = nil, n = nil, salvage = 0, stash = 0, sell = 0}
 local census_errors = {}
 local function census_error(why)
     local message = tostring(why)
@@ -963,24 +1010,29 @@ function utils.update_tracker_count(local_player,force)
             utils.log('no item??')
         end
     end
-    local salvage_talisman_counter = 0
-    local stash_talisman_counter = 0
     local sell_equipment_counter = sell_counter
-    local sell_talisman_counter = 0
     local talisman_items = local_player:get_talisman_items()
-    for _, item in pairs(talisman_items) do
-        local ok, kind = pcall(talisman_census, item)
-        if not ok then
-            census_error(kind)
-        elseif kind == 'sell' then
-            sell_counter = sell_counter + 1
-            sell_talisman_counter = sell_talisman_counter + 1
-        elseif kind == 'salvage' then
-            salvage_talisman_counter = salvage_talisman_counter + 1
-        elseif kind == 'stash' then
-            stash_talisman_counter = stash_talisman_counter + 1
+    local tally = talisman_tally -- QQT_Warpigz_v3 (Q10)
+    if force == 'now' or tally.at == nil or now - tally.at >= TALISMAN_INTERVAL or now < tally.at
+        or tally.n ~= #talisman_items then
+        tally.at, tally.n, tally.salvage, tally.stash, tally.sell = now, #talisman_items, 0, 0, 0
+        for _, item in pairs(talisman_items) do
+            local ok, kind = pcall(talisman_census, item)
+            if not ok then
+                census_error(kind)
+            elseif kind == 'sell' then
+                tally.sell = tally.sell + 1
+            elseif kind == 'salvage' then
+                tally.salvage = tally.salvage + 1
+            elseif kind == 'stash' then
+                tally.stash = tally.stash + 1
+            end
         end
     end
+    local salvage_talisman_counter = tally.salvage
+    local stash_talisman_counter = tally.stash
+    local sell_talisman_counter = tally.sell
+    sell_counter = sell_counter + sell_talisman_counter
     tracker.cached_inventory = cached_inventory
     local ok_count, host_count = pcall(function() return local_player:get_item_count() end)
     tracker.inventory_count = ok_count and tonumber(host_count) or listed_count

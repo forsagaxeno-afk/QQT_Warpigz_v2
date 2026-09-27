@@ -1,5 +1,5 @@
 local gui = {}
-local version = "v2.3.0"
+local version = "v2.4.0"
 local plugin_label = "helltide_revamped"
 
 local function create_checkbox(value, key)
@@ -58,10 +58,10 @@ gui.elements = {
     -- Pandemonium Ruptures (Farm mode only), ported from upstream HR 2.5.0.
     ruptures_tree = tree_node:new(3),
     hunt_rift_toggle = create_checkbox(true, plugin_label .. "hunt_rift_toggle"),
-    -- QQT_Warpigz_v3 (night review): default off and a new menu id, so the
-    -- Farm events (Event radius / Events until minute) run by default; tears
-    -- are checked before events anyway (check_events Priority 0b).
-    rupture_replace_local_events = create_checkbox(false, plugin_label .. "rupture_replace_local_events_v3"),
+    -- QQT_Warpigz_v3 (rc.2, user approved): on by default again under the
+    -- original 3.0.0 menu id (rc.1 had moved it to a "_v3" id, default off):
+    -- with Hunt tears on, Farm skips the legacy flame pillar / pyre events.
+    rupture_replace_local_events = create_checkbox(true, plugin_label .. "rupture_replace_local_events"),
     rupture_prioritize_surging = create_checkbox(true, plugin_label .. "rupture_prioritize_surging"),
     rupture_hunt_normal = create_checkbox(true, plugin_label .. "rupture_hunt_normal"),
     rupture_hunt_surging = create_checkbox(true, plugin_label .. "rupture_hunt_surging"),
@@ -93,6 +93,9 @@ gui.elements = {
     event_radius = slider_int:new(12, 80, 40, get_hash(plugin_label .. "_event_radius")),
     event_until_min = slider_int:new(30, 55, 45, get_hash(plugin_label .. "_event_until_min")),
     map_pin = create_checkbox(false, plugin_label .. "map_pin"),
+    -- QQT_Warpigz_v3 (Q4): cinder run (every mode).
+    cinder_run = create_checkbox(false, plugin_label .. "cinder_run"),
+    cinder_run_at = slider_int:new(250, 10000, 3000, get_hash(plugin_label .. "_cinder_run_at")),
     forget_zone = button:new(get_hash(plugin_label .. "_forget_zone")),
     -- QQT_Warpigz_v3: live data & stats.
     live_tree = tree_node:new(1),
@@ -123,10 +126,10 @@ local function render_ruptures()
     -- scan log) are no longer shown and stay at fixed values (core/settings.lua).
     if not e.ruptures_tree:push("Tears (Farm mode)") then return end
     e.hunt_rift_toggle:render("Hunt tears",
-        "Farm mode: go to tears first: kill the cultists, close the golden tears, open the chests, then go back to chests/monsters.")
+        "Farm mode: go to tears first: kill the cultists, close the golden tears, open the chests, then go back to chests/monsters. Rosie's pickup waits while you are at the tear event until it is over (Realmwalker killed, or none within 10 s after the rupture completes); then the bot collects the event's drops before it moves on. The walk to a tear and back after a death are never paused.") -- QQT_Warpigz_v3 (Q3, rc.2 review)
     if e.hunt_rift_toggle:get() then
         e.rupture_replace_local_events:render("Skip legacy Helltide events",
-            "Farm mode: never walk to flame pillars / ravenous soul pyres (Event radius and Events until minute then do nothing). Tears in reach are always taken before events.")
+            "On by default. Farm mode: never walk to flame pillars / ravenous soul pyres while hunting tears (Event radius and Events until minute then do nothing). Untick it to run those events too; tears in reach are always taken before events.") -- QQT_Warpigz_v3 (rc.2)
         e.rupture_max_cinders:render("  Pause hunt at cinders",
             "Stop looking for NEW ruptures once you hold this many cinders so they get spent on chests first (0 = always hunt). A rupture already in progress is finished.", 1)
         e.tear_search_dist:render("  Search distance", "Scan this far for ritual rings, rupture gizmos and active tears", 5)
@@ -139,11 +142,23 @@ local function render_ruptures()
         if e.rupture_do_realmwalker:get() then
             e.rupture_rw_wait_sec:render("    Realmwalker wait (sec)", "How long to wait for the Realmwalker to spawn", 1)
         end
-        e.tear_use_charge_ring:render("  Stand on chargeable tears", "Walk onto golden tears and stay put while your rotation clears the adds")
+        -- QQT_Warpigz_v3 (Q2): the bot now stays until the tear closes.
+        e.tear_use_charge_ring:render("  Stand on chargeable tears",
+            "Walk onto each golden tear and stay inside its circle while your rotation kills the adds, until the tear closes (at most 90 s inside one tear), then the next tear. No chest or Rosie pickup detour meanwhile.")
         e.rupture_open_chests:render("  Open tear chests",
-            "Open Pandemonium chests (free) and affordable helltide chests inside the ritual ring. Requires Open Helltide Chest.")
+            "Open Pandemonium chests (free) and affordable helltide chests inside the ritual ring, once the tear you stand in is closed. Requires Open Helltide Chest.") -- QQT_Warpigz_v3 (Q2)
     end
     e.ruptures_tree:pop()
+end
+
+-- QQT_Warpigz_v3 (Q4): cinder run (core/hr_cinder_run.lua), Farm and Warplan.
+local function render_cinder_run()
+    local e = gui.elements
+    e.cinder_run:render("Spend cinders on chests at",
+        "Off by default. On: below this many cinders no Helltide chest is opened (they are remembered; the last minutes of the Helltide, 'Spend everything in the last (min)' but at least 2, spend the savings; not under WarPigs, whose Helltide step ends once its War Plan cinders are spent). Holding at least this many cinders starts a chest run (Farm and Warplan / WarPigs): Hell's Prize first (666, War Plan node Hell's Prize), then Mystery chests (250), then the rest nearest first, using the chests in sight, remembered and learned spots. No new tears are hunted while the run has a chest to go to. The run ends when the cinders fall below the cheapest known chest. Hell's Prize chests are opened only by this run. Requires Open Helltide Chest.") -- QQT_Warpigz_v3 (Q4): save phase
+    if e.cinder_run:get() then
+        e.cinder_run_at:render("  Cinders", "Start the chest run at this many cinders", 1)
+    end
 end
 
 -- QQT_Warpigz_v3: probed only while the live option is shown (reading an
@@ -230,6 +245,7 @@ function gui.render()
         gui.elements.salvage_toggle:render("Salvage with alfred", "Enable salvaging items with alfred")
         gui.elements.silent_chest_toggle:render("Open Silent Chest (key required)", "Open silent chest")
         gui.elements.helltide_chest_toggle:render("Open Helltide Chest", "Open helltide chest")
+        render_cinder_run() -- QQT_Warpigz_v3 (Q4)
         gui.elements.ore_toggle:render("Collect Ore", "Collect ore")
         gui.elements.herb_toggle:render("Collect Herb", "Collect herb")
         gui.elements.shrine_toggle:render("Use Shrine", "Use shrine")

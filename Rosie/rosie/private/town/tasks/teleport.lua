@@ -112,19 +112,29 @@ function extension.is_in_vendor_screen() return false end
 -- 'alfred_busy', and a standalone activity may never stand in Temis
 -- otherwise. Once per trip, after every service and before the walk to the
 -- return portal, Rosie stops moving and queues the Whisper claim (only when
--- SilentRaven is enabled, unmanaged, auto-fire on, a reward ready and not
+-- SilentRaven is enabled, takes the hand-off (auto-fire on standalone, or
+-- WarPigs delegating: QQT_Warpigz_v3 Q8), a reward ready and not
 -- yet claimed this visit), then waits for its callback: at most RAVEN_WAIT
 -- seconds, which are not service time (lifecycle.tick, tracker.raven_wait).
 local RAVEN_WAIT = 100
 local raven = {request = nil, done = true, since = nil}
+-- QQT_Warpigz_v3 (Q8): SilentRaven publishes whether it takes the hand-off
+-- (`handoff`: its auto-fire standalone, WarPigs' delegation when WarPigs
+-- manages Whispers; the night run skipped every managed SilentRaven
+-- silently). An older SilentRaven without the field keeps the standalone
+-- rule. A ready reward that is not handed over names why (once per trip).
 local function raven_plugin()
     local p = rawget(_G, 'SilentRavenPlugin')
     if type(p) ~= 'table' or type(p.get_status) ~= 'function' or type(p.trigger_tasks) ~= 'function' then return nil end
     local ok, s = pcall(p.get_status)
-    if not ok or type(s) ~= 'table' then return nil end
-    if s.enabled ~= true or s.auto_fire ~= true or s.managed_by ~= nil or s.ready ~= true
-        or s.running == true or s.pending == true or s.paused == true
-        or s.last_zone_handled == 'Skov_Temis' then return nil end
+    if not ok or type(s) ~= 'table' or s.enabled ~= true or s.ready ~= true then return nil end
+    local consent = s.handoff
+    if consent == nil then consent = s.auto_fire == true and s.managed_by == nil end
+    local why = (consent ~= true and tostring(s.handoff_reason or 'SilentRaven auto-fire is off or it is managed'))
+        or ((s.running == true or s.pending == true) and 'SilentRaven already has a request')
+        or (s.paused == true and 'SilentRaven is paused')
+        or (s.last_zone_handled == 'Skov_Temis' and 'this Temis visit is already handled') or nil
+    if why then return nil, why end
     return p
 end
 local function raven_finish(message)
@@ -137,8 +147,11 @@ local function raven_handoff()
     local id = tracker.request_id
     if raven.request ~= id then
         raven.request, raven.done, raven.since = id, true, nil
-        local p = raven_plugin()
-        if not p then return false end
+        local p, skip = raven_plugin()
+        if not p then
+            if skip then console.print('[Rosie] no SilentRaven hand-off: ' .. skip) end -- QQT_Warpigz_v3 (Q8)
+            return false
+        end
         pathfinder.clear_stored_path()
         local ok, accepted, why = pcall(p.trigger_tasks, settings.plugin_label, function(result)
             if raven.request == id and not raven.done then

@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- SilentRaven  --  magoogle  --  v0.2.1
+-- SilentRaven  --  magoogle  --  v0.2.3
 --
 -- Standalone Tree-of-Whispers turn-in plugin.  Two trigger paths:
 --
@@ -33,6 +33,7 @@ local log      = require 'silent_raven.log'
 local rewards  = require 'silent_raven.rewards'
 local stats    = require 'silent_raven.stats'
 local coordination = require 'silent_raven.coordination'
+local claims   = require 'silent_raven.claims' -- QQT_Warpigz_v3 (Q8)
 
 -- Auto-fire detection rate.  Quest scan + actor scan are O(n) over the
 -- live stream; cheap but not free, and we don't need higher resolution
@@ -68,7 +69,11 @@ local HOLD_LOG_S                 = 60
 local function refresh_ready(now)
     if (now - (tracker.last_ready_check_t or 0)) < READY_CHECK_INTERVAL_S then return end
     tracker.last_ready_check_t = now
-    tracker.ready = whispers.count_ready_bounties() > 0
+    -- QQT_Warpigz_v3 (Q8): one snapshot for readiness, the decision log and
+    -- the claim trip; WarPigs' delegation is cached in main_pulse (never in get_status).
+    local snapshot = whispers.quest_snapshot()
+    tracker.ready = snapshot ~= nil and snapshot.ready == true
+    claims.observe(now, settings, snapshot)
 end
 
 local function maybe_consume_external_trigger(now)
@@ -112,11 +117,16 @@ local function note_hold(reason, now)
 end
 
 local function maybe_autofire(now, cur_zone)
-    if not settings.auto_fire or tracker.managed_by then return end
+    -- QQT_Warpigz_v3 (Q8): under WarPigs (Whispers managed) a Temis stop of
+    -- a WarPigs activity (Arkham at the Pit obelisk, an activity's own bag
+    -- trip) walked past a ready reward: WarPigs offers its own Whisper slot
+    -- only between activities. While it delegates, SilentRaven claims here.
+    local delegated = coordination.temis_delegated()
+    if not delegated and (not settings.auto_fire or tracker.managed_by) then return end
     -- A queued external request (possibly paused by its guard) owns the slot.
     if tracker.running or tracker.paused or tracker.external_trigger then return end
     if not whispers.player_ready() then return end
-    if not coordination.can_start(nil) then return end
+    if not delegated and not coordination.can_start(nil) then return end
     if not whispers.in_whisper_town() then return end
     if tracker.last_zone_handled == cur_zone then return end
     if not tracker.ready then return end
@@ -131,10 +141,11 @@ local function maybe_autofire(now, cur_zone)
     -- Without WarPigs' Whisper management nobody else admits this run:
     -- WarPug mid-session, Alfred live/pending work, the Looter and an
     -- enabled WarPigs doing town work each own movement or clicks.
-    local clear, reason = coordination.companions('auto', now)
+    local mode = delegated and 'delegated' or 'auto' -- QQT_Warpigz_v3 (Q8)
+    local clear, reason = coordination.companions(mode, now)
     if not clear then note_hold(reason, now); return end
     tracker.hold_reason, tracker.hold_since, tracker.hold_seen_t = nil, nil, nil
-    fsm.start(settings, 'auto', false, nil)
+    fsm.start(settings, mode, false, nil)
 end
 
 local function handle_manual_keybind(now)
@@ -269,7 +280,7 @@ end
 -- side, so anything faster is wasted work.
 local function register_d4remote()
     if d4remote_registered or not (D4Remote and D4Remote.register) then return end
-    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.2.1') end) == true
+    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.2.3') end) == true
 end
 
 local function report_to_d4remote(now)
@@ -346,6 +357,9 @@ local function main_pulse()
     end
 
     handle_manual_keybind(now)
+    -- QQT_Warpigz_v3 (Q8 review): WarPigs' delegation also while a run is in
+    -- flight (its own Whisper request ends it; get_status reads the cache).
+    coordination.refresh_delegation(now)
 
     -- If a run is in flight, just tick the FSM.  Don't refresh "ready"
     -- (already running -- no point) and don't start anything new.
@@ -378,4 +392,4 @@ SilentRavenPlugin   = external
 -- report_to_d4remote retries while D4Remote loads later or register fails.
 register_d4remote()
 
-log.info('loaded magoogle | SilentRaven | v0.2.1')
+log.info('loaded magoogle | SilentRaven | v0.2.3')

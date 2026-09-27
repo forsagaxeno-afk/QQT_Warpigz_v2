@@ -28,7 +28,9 @@ function task.reset_session()
     -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): stash session evidence.
     state = { time=0, progress=0, next_action=0, next_interact=0, interactions=0,
         seen=nil, interacted=false, proven=false, probe_at=math.huge, burst_until=0,
-        base=nil, open_logged=nil, near_since=nil, diag='' }
+        base=nil, open_logged=nil, near_since=nil, diag='',
+        skipped={}, skips=0, noted={} } -- QQT_Warpigz_v3 (Q5): items skipped for this trip
+    tracker.stash_skipped=nil -- QQT_Warpigz_v3 (Q5): names read by tasks/status.lua
     task.set_status(task.status_enum.IDLE)
 end
 function task.suspend()
@@ -46,42 +48,117 @@ local function should_stash_item(item)
         and not (settings.skip_cache and utils.get_item_type(item)=='cache')
 end
 
--- Rebuild from fresh bags after each receipt; never retain a transferred wrapper.
-local function next_item(player)
-    for _,item in pairs(player:get_inventory_items()) do
-        if should_stash_item(item) then return item,'get_inventory_items' end
-    end
-    if tracker.stash_boss_materials then
-        for _,item in pairs(player:get_consumable_items()) do
-            if eligible(item) then return item,'get_consumable_items' end
-        end
-    end
-    if tracker.stash_keys then
-        for _,item in pairs(player:get_dungeon_key_items()) do
-            local sigil=string.lower(item:get_name() or ''):match('dungeonsigil')
-            if eligible(item) and (not sigil or tracker.stash_sigils and item:is_locked()) then
-                return item,'get_dungeon_key_items'
-            end
-        end
-    end
-    if tracker.stash_socketables then
-        for _,item in pairs(player:get_socketable_items()) do
-            if eligible(item) then return item,'get_socketable_items' end
-        end
-    end
-    if tracker.stash_talisman_seal or tracker.stash_talisman_charm then
-        for _,item in pairs(player:get_talisman_items()) do
-            if eligible(item) and not utils.should_salvage_talisman(item) and not utils.should_sell_talisman(item) then
-                return item,'get_talisman_items'
-            end
-        end
-    end
-end
-
 local function units(item)
     local n=item:get_stack_count()
     if type(n)~='number' or n~=n or n<0 or n==math.huge then return nil end
     return math.max(1,n) -- Non-stackable host items may report zero.
+end
+
+-- QQT_Warpigz_v3 (Q5): one item never stops the stash. A candidate is
+-- checked under pcall and needs a readable SNO and stack count; an item that
+-- raises or cannot be read is passed over (logged once per trip), and an
+-- item skipped for this trip (skip below) is not selected again.
+local function note(key,message)
+    if state.noted[key] then return false end
+    state.noted[key]=true
+    log(message)
+    return true
+end
+local function remember_skip(name)
+    local list=tracker.stash_skipped or {}
+    list[#list+1]=tostring(name)
+    tracker.stash_skipped=list
+end
+local function candidate(item,bag,check)
+    local ok,take=pcall(check,item)
+    if not ok then
+        local okn,name=pcall(function() return item:get_name() end)
+        if note('raise:'..tostring(take),'Skipped '..tostring(okn and name or 'an item')..' for this trip: its checks raised ('
+            ..tostring(take)..'). The stash goes on with the next item.') then
+            remember_skip(okn and name or 'an unreadable item')
+        end
+        return false
+    end
+    if not take then return false end
+    local okm,sno,amount=pcall(function() return item:get_sno_id(),units(item) end)
+    if not okm or type(sno)~='number' or sno<=0 or not amount then
+        if note('meta:'..bag..':'..tostring(okm and sno),'Skipped an item in '..bag
+            ..' for this trip: SNO or stack count unreadable. The stash goes on with the next item.') then
+            remember_skip('an unreadable item')
+        end
+        return false
+    end
+    if state.skipped[bag..':'..sno] then return false end
+    -- QQT_Warpigz_v3 (Q5 review): Execute sends with this read (same tick);
+    -- a second read of an expiring wrapper cannot fail or mis-key the item.
+    state.pick_sno,state.pick_amount=sno,amount
+    return true
+end
+-- QQT_Warpigz_v3 (Q9 stash follow-up): a one-per-character Splinter of the
+-- Prime Evils (rosie/data/carry_once.lua must_keep, or its item skin for a
+-- later build's SNO) cannot be stashed: the game refuses the deposit and each
+-- trip spent 3 requests and ~10 s on it (a refusal before the first receipt
+-- also read as "Stash window did not open"). It is never a candidate; logged
+-- once per session.
+local CarryOnce=require('rosie.data.carry_once')
+local kept_noted={}
+local function must_keep(item,sno)
+    local known=CarryOnce.by_id[sno]
+    local name=known and known.must_keep and known.name
+    if not known then
+        local ok,skin=pcall(function() return item:get_skin_name() end)
+        if ok and type(skin)=='string' then
+            for _,prefix in ipairs(CarryOnce.skins or {}) do
+                if skin:find(prefix,1,true) then name=skin; break end
+            end
+        end
+    end
+    if not name then return false end
+    if not kept_noted[sno] then
+        kept_noted[sno]=true
+        log('Kept '..tostring(name)..' in the bag: the game does not stash it.')
+    end
+    return true
+end
+local function consumable_check(item)
+    if not eligible(item) then return false end
+    local ok,sno=pcall(function() return item:get_sno_id() end)
+    return not (ok and type(sno)=='number' and must_keep(item,sno))
+end
+local function stash_check(item) return should_stash_item(item) end
+local function key_check(item)
+    local sigil=string.lower(item:get_name() or ''):match('dungeonsigil')
+    return eligible(item) and (not sigil or tracker.stash_sigils and item:is_locked())
+end
+local function talisman_check(item)
+    return eligible(item) and not utils.should_salvage_talisman(item) and not utils.should_sell_talisman(item)
+end
+
+-- Rebuild from fresh bags after each receipt; never retain a transferred wrapper.
+local function next_item(player)
+    for _,item in pairs(player:get_inventory_items()) do
+        if candidate(item,'get_inventory_items',stash_check) then return item,'get_inventory_items' end
+    end
+    if tracker.stash_boss_materials then
+        for _,item in pairs(player:get_consumable_items()) do
+            if candidate(item,'get_consumable_items',consumable_check) then return item,'get_consumable_items' end -- QQT_Warpigz_v3 (Q9)
+        end
+    end
+    if tracker.stash_keys then
+        for _,item in pairs(player:get_dungeon_key_items()) do
+            if candidate(item,'get_dungeon_key_items',key_check) then return item,'get_dungeon_key_items' end
+        end
+    end
+    if tracker.stash_socketables then
+        for _,item in pairs(player:get_socketable_items()) do
+            if candidate(item,'get_socketable_items',eligible) then return item,'get_socketable_items' end
+        end
+    end
+    if tracker.stash_talisman_seal or tracker.stash_talisman_charm then
+        for _,item in pairs(player:get_talisman_items()) do
+            if candidate(item,'get_talisman_items',talisman_check) then return item,'get_talisman_items' end
+        end
+    end
 end
 local function quantity(player,bag,sno)
     local ok,result=pcall(function()
@@ -89,9 +166,11 @@ local function quantity(player,bag,sno)
         if type(items)~='table' then return nil end
         local count=0
         for _,item in pairs(items) do
-            local id=item:get_sno_id()
-            if type(id)~='number' or id<=0 then return nil end
-            if id==sno then
+            -- QQT_Warpigz_v3 (Q5 review): an entry whose SNO cannot be read
+            -- (raises, 0, not a number) is not this SNO; it no longer voids the
+            -- count of the whole bag (candidate() never selects it).
+            local okid,id=pcall(function() return item:get_sno_id() end)
+            if okid and id==sno then
                 local n=units(item); if not n then return nil end
                 count=count+n
             end
@@ -168,7 +247,39 @@ local function finish()
     release_movement()
     tracker.stash_done=true
     task.set_status(task.status_enum.IDLE)
-    log('All selected deposits observed; continuing town service.')
+    -- QQT_Warpigz_v3 (Q5): name what this trip skipped.
+    local skipped=tracker.stash_skipped and #tracker.stash_skipped>0
+        and ' Skipped for this trip: '..table.concat(tracker.stash_skipped,', ')..'.' or ''
+    log('All selected deposits observed; continuing town service.'..skipped)
+end
+
+-- QQT_Warpigz_v3 (Q5): a single item is bounded on its own. It waits at
+-- most ITEM_WAIT s for an ambiguous receipt, or 3 attempts when nothing
+-- moved, and is then skipped for this trip (logged once) instead of failing
+-- the stash. MAX_SKIPS items skipped in a row with no receipt in between
+-- still fail the step (the stash is full or not accepting anything).
+local ITEM_WAIT,MAX_SKIPS=8,3
+local function received(p,how)
+    log('Deposited '..p.name..' (sno='..p.sno..'); '..how)
+    state.pending=nil; state.progress=state.time; state.interactions=0; state.deposited=true
+    state.proven=true; state.skips=0; state.skip_names=nil
+end
+local function skip(p,why)
+    state.skipped[p.bag..':'..p.sno]=true
+    state.pending=nil; state.retry=nil; state.progress=state.time
+    state.skips=state.skips+1
+    state.skip_names=state.skip_names or {}
+    state.skip_names[#state.skip_names+1]=p.name
+    remember_skip(p.name)
+    log('Skipped '..p.name..' (sno='..p.sno..') for this trip: '..why..'. The stash goes on with the next item.')
+    -- QQT_Warpigz_v3 (Q5 review): the next item gets its own interactions,
+    -- also before the first deposit (two refused items first no longer end
+    -- the step at "did not open after 4 interactions"); MAX_SKIPS bounds it.
+    state.interactions=0
+    if state.skips>=MAX_SKIPS then
+        fail(MAX_SKIPS..' items in a row were not accepted ('..table.concat(state.skip_names,', ')
+            ..'); the stash may be full or not open. '..diag_now())
+    end
 end
 
 local function pending_receipt(player)
@@ -176,18 +287,25 @@ local function pending_receipt(player)
     if not p then return false end
     local source=quantity(player,p.bag,p.sno)
     local destination=quantity(player,'get_stash_items',p.sno)
-    if source and destination and source<=p.source-p.amount and destination>=p.destination+p.amount then
-        log('Deposited '..p.name..' (sno='..p.sno..'); source and stash updated.')
-        state.pending=nil; state.progress=state.time; state.interactions=0; state.deposited=true
-        state.proven=true
+    if source and destination and p.destination and source<=p.source-p.amount and destination>=p.destination+p.amount then
+        received(p,'source and stash updated.')
         return false
     end
     -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): a deposit probe's receipt.
     if p.probe and source and destination and source<=p.source-p.amount and destination>=p.amount then
         -- The probe was sent before the stash list was readable: the bag decides.
-        log('Deposited '..p.name..' (sno='..p.sno..'); probe proved the stash panel open.')
-        state.pending=nil; state.progress=state.time; state.interactions=0; state.deposited=true
-        state.proven=true
+        received(p,'probe proved the stash panel open.')
+        return false
+    end
+    -- QQT_Warpigz_v3 (Q5, live: "Transfer confirmation timed out for
+    -- Rune_Condition_Summons"): Rosie's move is the only command outstanding,
+    -- so the item leaving the bag is the receipt, whatever the stash list
+    -- says. A stack that merges into a stash stack listed with a zero count,
+    -- a stash list without socketables, or a partial merge (the rest stays
+    -- and is selected again as a fresh item) never passed the check above.
+    if source and source<p.source then
+        received(p,string.format('%.0f of %.0f unit(s) left the bag (stash list %s).',p.source-source,p.amount,
+            destination and p.destination and string.format('%+.0f',destination-p.destination) or 'unreadable'))
         return false
     end
     if state.time-p.sent<3 then return true end
@@ -200,12 +318,19 @@ local function pending_receipt(player)
     end
     if source~=p.source or destination~=p.destination then
         -- A partial or unreadable receipt is not permission to repeat a move.
+        -- QQT_Warpigz_v3 (Q5): bounded per item; never a second command.
+        if state.time-p.sent>=ITEM_WAIT then
+            skip(p,string.format('transfer not confirmed after %ds (bag %s -> %s, stash %s -> %s)',ITEM_WAIT,
+                tostring(p.source),tostring(source),tostring(p.destination),tostring(destination)))
+            return false
+        end
         task.set_status('Waiting for stash transfer confirmation: '..p.name)
         return true
     end
     if p.attempts>=3 then
-        fail('No transfer observed for '..p.name..' (sno='..p.sno..', host return='..tostring(p.result)..') after 3 attempts. '..diag_now())
-        return true
+        -- QQT_Warpigz_v3 (Q5): one refused item no longer fails the stash.
+        skip(p,'no transfer observed after 3 attempts (host return='..tostring(p.result)..')')
+        return false
     end
     -- Fresh item selection below; a failed native handle is never reused.
     -- QQT_Warpigz_v2 local patch (review rc.10): nothing moved, so the panel
@@ -227,12 +352,9 @@ function task.Execute()
     state.next_action=state.time+0.3
     local waiting=pending_receipt(player)
     if tracker.stash_failed then return end
-    if waiting then
-        if state.time-state.progress>=45 then
-            fail('Transfer confirmation timed out for '..state.pending.name..'; item kept unresolved.')
-            return
-        end
-    end
+    -- QQT_Warpigz_v3 (Q5): a pending item is bounded by its own wait in
+    -- pending_receipt (3 s, ITEM_WAIT, then skipped); the whole stash no longer
+    -- fails with "Transfer confirmation timed out" for one item.
     local item,bag
     if not waiting then item,bag=next_item(player) end
     if not waiting and not item then finish(); return end
@@ -267,7 +389,7 @@ function task.Execute()
                 state.interactions=state.interactions+1; state.next_interact=state.time+3
                 state.burst_until=state.time+2; state.probe_at=state.time+2
                 if not state.base then state.base=vendor.stash_baseline() end
-                local ok,result=pcall(interact_vendor,actor)
+                local ok,result=pcall(vendor.interact,actor,'STASH') -- QQT_Warpigz_v3 (Q6): a panel Rosie closes
                 state.interacted=true
                 local okp,x,y=pcall(function() local p=actor:get_position(); return p:x(),p:y() end)
                 local okf,flag=pcall(function() return actor:is_interactable() end)
@@ -275,7 +397,7 @@ function task.Execute()
                     state.interactions,distance,tostring(ok and result),okp and x or 0,okp and y or 0,tostring(okf and flag),
                     diag_now()))
             elseif state.time<state.burst_until then
-                pcall(interact_vendor,actor) -- Alfred re-interacts every tick for 2 s
+                pcall(vendor.interact,actor,'STASH') -- Alfred re-interacts every tick for 2 s (QQT_Warpigz_v3 Q6)
             end
         else
             task.set_status(task.status_enum.MOVING)
@@ -301,15 +423,28 @@ function task.Execute()
     if stash_count>=settings.max_stash_items then
         tracker.stash_full=true; fail('Configured stash capacity reached ('..stash_count..'/'..settings.max_stash_items..').'); return
     end
-    local ok,sno,amount,name=pcall(function() return item:get_sno_id(),units(item),item:get_name() end)
-    if not ok or type(sno)~='number' or sno<=0 or not amount then
-        fail('Item metadata unavailable; deposit left unresolved.'); return
-    end
+    -- QQT_Warpigz_v3 (Q5 review): the SNO and stack count are the ones
+    -- candidate() read for this item this tick (never re-read, never a
+    -- "metadata unavailable" stop); the name is only a label (a raising
+    -- get_name() no longer stops the stash).
+    local sno,amount=state.pick_sno,state.pick_amount
+    local okn,name=pcall(function() return item:get_name() end)
+    if not okn or name==nil then name='sno '..tostring(sno) end
     local source=quantity(player,bag,sno)
     local destination=quantity(player,'get_stash_items',sno)
-    if not source or not destination then
-        task.set_status('Waiting for readable stash and bag contents'); return
+    -- QQT_Warpigz_v3 (Q5): the bag decides a receipt, so an unreadable stash
+    -- list no longer blocks a deposit; an unreadable bag waits ITEM_WAIT s
+    -- for this item, then skips it.
+    if not source then
+        local key=bag..':'..sno
+        if state.unreadable~=key then state.unreadable,state.unreadable_at=key,state.time end
+        if state.time-state.unreadable_at>=ITEM_WAIT then
+            skip({bag=bag,sno=sno,name=tostring(name)},'bag contents unreadable for '..ITEM_WAIT..'s')
+            return
+        end
+        task.set_status('Waiting for readable bag contents'); return
     end
+    state.unreadable=nil
     local previous=state.retry
     local attempts=previous and previous.sno==sno and previous.bag==bag and previous.attempts+1 or 1
     -- Capture every field BEFORE the call: a moved wrapper can expire immediately.

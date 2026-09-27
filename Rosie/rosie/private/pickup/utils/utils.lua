@@ -68,6 +68,81 @@ function Utils.bag_items(bag)
     local player=get_local_player()
     return player and Utils.call(player,bags[bag]) or nil
 end
+-- QQT_Warpigz_v3 (Q1): items of `sno` in `bag` (stack counts summed); nil
+-- when the bag cannot be read. A rise after an interaction is a receipt.
+function Utils.sno_count(bag,sno)
+    local items=Utils.bag_items(bag)
+    if type(items)~='table' or type(sno)~='number' then return nil end
+    local n=0
+    for _,item in pairs(items) do
+        if Utils.call(item,'get_sno_id')==sno then
+            local c=Utils.call(item,'get_stack_count')
+            n=n+((type(c)=='number' and c==c and c>0) and c or 1)
+        end
+    end
+    return n
+end
+-- QQT_Warpigz_v3 (Q9): does a bag list already hold this SNO? Returns held,
+-- readable (readable=false when an entry's SNO cannot be read).
+function Utils.list_has_sno(items,sno)
+    if type(items)~='table' or type(sno)~='number' then return false,false end
+    local readable=true
+    for _,item in pairs(items) do
+        local id=Utils.call(item,'get_sno_id')
+        if id==sno then return true,true end
+        if type(id)~='number' then readable=false end
+    end
+    return false,readable
+end
+-- QQT_Warpigz_v3 (Q1): false only when the host reads the point itself as
+-- not walkable (proof that a drop cannot be approached); nil when unknown.
+function Utils.walkable(x,y,z)
+    local u=rawget(_G,'utility')
+    if type(u)~='table' or type(u.is_point_walkeable)~='function' or type(x)~='number' or type(y)~='number' then return nil end
+    local ok,p=pcall(function() return vec3:new(x,y,z or 0) end)
+    if not ok or p==nil then return nil end
+    if type(u.set_height_of_valid_position)=='function' then
+        local ok2,q=pcall(u.set_height_of_valid_position,p)
+        if ok2 and (type(q)=='userdata' or type(q)=='table') then p=q end
+    end
+    local ok3,walk=pcall(u.is_point_walkeable,p)
+    if not ok3 or type(walk)~='boolean' then return nil end
+    return walk
+end
+-- QQT_Warpigz_v3 (Q1 review): a drop only has to be within `reach` of the
+-- player, not on a walkable point (a Mythic on a small prop is taken from in
+-- front of it). false only when the drop's spot AND every sample on two rings
+-- within `reach` read not walkable; true when any reads walkable; nil unknown.
+function Utils.walkable_near(x,y,z,reach)
+    local w=Utils.walkable(x,y,z)
+    if w~=false then return w end
+    local r,unknown=reach or 2,false
+    for _,f in ipairs({0.5,0.95}) do
+        for i=0,7 do
+            local a=i*math.pi/4
+            local s=Utils.walkable(x+math.cos(a)*r*f,y+math.sin(a)*r*f,z)
+            if s==true then return true end
+            if s==nil then unknown=true end
+        end
+    end
+    if unknown then return nil end
+    return false
+end
+-- QQT_Warpigz_v3 (Q1 review): a live enemy within `radius` m of the player
+-- (the fight that swallows pickup interactions and moves). false when unknown.
+function Utils.enemy_near(radius)
+    local ts=rawget(_G,'target_selector')
+    if type(ts)~='table' or type(ts.get_near_target_list)~='function' then return false end
+    local origin=Utils.call(Utils.host_call(rawget(_G,'get_local_player')),'get_position')
+    if not origin then return false end
+    local ok,list=pcall(ts.get_near_target_list,origin,radius)
+    if not ok or type(list)~='table' then return false end
+    for _,a in pairs(list) do
+        local d=Utils.call(origin,'dist_to_ignore_z',Utils.call(a,'get_position'))
+        if type(d)=='number' and d<=radius and Utils.call(a,'is_dead')~=true then return true end
+    end
+    return false
+end
 function Utils.bag_state(bag)
     local items=Utils.bag_items(bag)
     if type(items)~='table' then return nil,nil end

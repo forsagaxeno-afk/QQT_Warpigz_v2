@@ -24,6 +24,12 @@
 --
 -- Warplan / WarPigs never get here (enabled() is Farm mode + 'Smart chest
 -- order'); the legacy selection in tasks/helltide.lua runs unchanged there.
+-- QQT_Warpigz_v3 (Q4): except during a cinder run (core/hr_cinder_run.lua,
+-- every mode): Hell's Prize (666) first (class -2 seen, -1 predicted), then
+-- the classes above; Hell's Prize is never a candidate outside the run, and
+-- a chest on the way is not taken when it would leave too few cinders for
+-- the run's target. While the run saves toward its threshold no chest is a
+-- candidate (they stay remembered; the last minutes spend the savings).
 local clock = require "core.hr_clock"
 local atlas = require "core.hr_atlas"
 local fence = require "core.hr_fence"
@@ -34,6 +40,7 @@ local settings = require "core.settings"
 local hr_mode = require "core.hr_mode"
 local chest_targets = require "core.chest_targets"
 local enums = require "data.enums"
+local run = require "core.hr_cinder_run" -- QQT_Warpigz_v3 (Q4)
 
 local M = {
     ROAD_MIN = 100,         -- farther: along the patrol road (when usable)
@@ -67,7 +74,8 @@ M.last_plan = nil
 local sqrt = math.sqrt
 
 function M.enabled()
-    return settings.smart_order == true and settings.helltide_chest ~= false and hr_mode.is_farm()
+    if settings.smart_order == true and settings.helltide_chest ~= false and hr_mode.is_farm() then return true end
+    return run.engaged() -- QQT_Warpigz_v3 (Q4): the cinder run uses this order in every mode
 end
 
 local function d2(ax, ay, bx, by)
@@ -170,8 +178,8 @@ local function collect(ctx, now)
     return cands, by_key
 end
 
-local function classify(c)
-    local base = is_mystery(c.name) and 0 or 2
+local function classify(c, running)
+    local base = run.class(c.name, running) or (is_mystery(c.name) and 0 or 2) -- QQT_Warpigz_v3 (Q4)
     if c.kind == 'predicted' then return base + 1 end
     return base
 end
@@ -191,8 +199,25 @@ function M.pick(ctx)
     local minutes_left = clock.minutes_left()
     local eligible, mystery_known = {}, 0
     local cinders = tonumber(ctx.cinders) or 0
+    -- QQT_Warpigz_v3 (Q4): the cinder run starts at its threshold and ends
+    -- below the cheapest known chest that is not blacklisted (and that the
+    -- run could pick: no learned Hell's Prize spot while the node is not taken).
+    local cheapest = nil
+    if run.on() then
+        for _, c in ipairs(cands) do
+            local cost = tonumber(c.cost)
+            if cost and (cheapest == nil or cost < cheapest) and not (ctx.blacklisted and ctx.blacklisted(c.key))
+                and run.candidate(c.name, c.kind, true, now) then
+                cheapest = cost
+            end
+        end
+    end
+    local running = run.update(cinders, cheapest, now)
     for _, c in ipairs(cands) do
         local ok = not (ctx.blacklisted and ctx.blacklisted(c.key))
+        -- QQT_Warpigz_v3 (Q4): Hell's Prize only during the run; nothing while
+        -- the run saves toward its threshold (the chests stay remembered).
+        if ok and not run.candidate(c.name, c.kind, running, now) then ok = false end
         -- An unaffordable regular chest can never be picked: no road
         -- planning for it (a Mystery still needs its cost: the reserve).
         if ok and not is_mystery(c.name) and cinders < (tonumber(c.cost) or math.huge) then ok = false end
@@ -216,7 +241,7 @@ function M.pick(ctx)
             end
         end
         if ok then
-            c.class = classify(c)
+            c.class = classify(c, running)
             c.mystery = is_mystery(c.name)
             if c.mystery and plan.reachable(c.cost_est, minutes_left) then mystery_known = mystery_known + 1 end
             eligible[#eligible + 1] = c
@@ -245,8 +270,11 @@ function M.pick(ctx)
     end
     local reserve = plan.reserve(plan_ctx)
     M.last_plan = {reserve = reserve, mystery_known = mystery_known, refused = refused,
-        candidates = #cands, allowed = #allowed, at = now}
-    if #allowed == 0 then return nil end
+        candidates = #cands, allowed = #allowed, at = now, cinder_run = running or nil}
+    if #allowed == 0 then
+        run.note_empty(now) -- QQT_Warpigz_v3 (Q4): nothing to spend on: tears may be hunted
+        return nil
+    end
 
     -- A strict order (class, cost, key); the forward-direction tie-break is
     -- a separate pass (a tolerance inside the comparator is not transitive).
@@ -269,9 +297,13 @@ function M.pick(ctx)
     end
 
     -- Opportunistic: an allowed chest actor right next to the player.
+    -- QQT_Warpigz_v3 (Q4): during a cinder run only when the run's target
+    -- (allowed[1]) stays affordable after it.
     local near = nil
+    local lead_cost = tonumber(allowed[1].cost) or 0
     for _, c in ipairs(allowed) do
         if c.kind == 'visible' and c.distance <= M.OPPORTUNISTIC
+            and (not running or c == allowed[1] or cinders - (tonumber(c.cost) or 0) >= lead_cost)
             and (not near or c.class < near.class or (c.class == near.class and c.distance < near.distance)) then
             near = c
         end
@@ -306,6 +338,7 @@ function M.pick(ctx)
     M.last_plan.target_pos = choice.position
     M.last_plan.target_key = choice.key
     M.last_plan.class = choice.class
+    if running then run.note_target(now) end -- QQT_Warpigz_v3 (Q4)
     return choice
 end
 
@@ -342,6 +375,7 @@ function M.on_reset()
     st.error_logged = logged
     st.reset_seen = atlas.reset_seen_at
     M.last_plan = nil
+    run.on_reset() -- QQT_Warpigz_v3 (Q4)
 end
 
 function M._state() return st end

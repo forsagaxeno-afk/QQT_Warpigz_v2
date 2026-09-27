@@ -33,8 +33,36 @@ local MAX_ROUNDS=3
 local EPISODE_BUDGET=20
 local EPISODE_QUIET=2
 local episode={since=nil,last=nil,capped_until=0}
+-- QQT_Warpigz_v3 (Q1, live Tuning Prism ghost): the host can keep listing a
+-- ground actor the game already gave the player (the prism went to
+-- Materials on the first interaction) or one the player cannot approach.
+-- Only the actor leaving the list used to end a drop, so such a ghost got 3
+-- rounds of busy (live: 33.6 s of Helltide yield), again each time it
+-- streamed out of the list and back. A drop is now SETTLED (not tried again
+-- while listed; same identifier, SNO and spot; forgotten settle_ttl s after
+-- it was last listed, on a world change or reset), logged once, when
+--  * its bag gained its SNO after an interaction in reach (receipt);
+--  * it goes to no bag (Materials, currency, crafting, quest) and was
+--    interacted with in reach for nonbag_clear s of CLEAR time ("taken");
+--  * a small bag item (rune, gem, splinter, sigil, consumable) stays at the
+--    same spot after small_interacts (one full round) CLEAR interactions in
+--    reach and no receipt;
+--  * a round ends without progress toward it during CLEAR time and it is
+--    not gear, or no walkable point within reach of it exists.
+-- QQT_Warpigz_v3 (Q1 review, rc.10 R6): CLEAR means the player could act on
+-- the drop: not casting, no live enemy within fight_radius m and the host
+-- executed Rosie's move. In a fight nothing counts toward a settle and the
+-- drop keeps the bounded rounds (still capped by the 20 s episode budget),
+-- so drops that fall during a fight are collected after it.
+-- Gear (equipment and talisman bags) keeps the bounded rounds (fights, rc.8).
+-- A drop settled without a receipt gets ONE more attempt when the player's
+-- own route brings it back within reach after being away (Rosie never
+-- walks back for it): a fight may have swallowed the interactions.
+local G={nonbag_interacts=3,nonbag_clear=3.5,small_interacts=ROUND_INTERACTS,settle_ttl=180,settle_max=128,same_spot=1.0,
+    away=REACH+2,settled={},count=0,world=nil,retried={},fight_radius=10,movement=require('rosie.movement')}
 M.limits={reach=REACH,round_interacts=ROUND_INTERACTS,round_stall=ROUND_STALL,rest=REST,max_rounds=MAX_ROUNDS,
-    episode_budget=EPISODE_BUDGET}
+    episode_budget=EPISODE_BUDGET,nonbag_interacts=G.nonbag_interacts,small_interacts=G.small_interacts,
+    nonbag_clear=G.nonbag_clear,fight_radius=G.fight_radius,settle_ttl=G.settle_ttl} -- QQT_Warpigz_v3 (Q1)
 local function key(item)
     local ok,id=pcall(loot_manager.get_item_identifier,item)
     if not ok then return nil end
@@ -48,6 +76,24 @@ local function key(item)
     if type(sno)~='number' or type(x)~='number' or type(y)~='number' or type(z)~='number' then return nil end
     return tostring(sno)..':'..string.format('%.1f:%.1f:%.1f',x,y,z)
 end
+-- QQT_Warpigz_v3 (Q1): helpers of the settled drops (see the header).
+local function point_of(item)
+    local p=Utils.call(item,'get_position')
+    local x,y,z=Utils.call(p,'x'),Utils.call(p,'y'),Utils.call(p,'z')
+    if type(x)~='number' or type(y)~='number' then return nil end
+    return {x=x,y=y,z=type(z)=='number' and z or 0}
+end
+local function sno_of(item) return Utils.call(Utils.call(item,'get_item_info'),'get_sno_id') end
+local function unsettle(id) if G.settled[id] then G.settled[id]=nil;G.count=G.count-1 end end
+local function settled_of(id,item)
+    local s=G.settled[id]
+    if not s then return nil end
+    local p=point_of(item)
+    if s.sno~=sno_of(item) or not p or math.abs(p.x-s.x)>G.same_spot or math.abs(p.y-s.y)>G.same_spot then
+        unsettle(id);G.retried[id]=nil;return nil -- a recycled identifier: another drop
+    end
+    return s
+end
 function M.release_movement(clear)
     if movement_owned and clear~=false then pcall(pathfinder.clear_stored_path) end
     movement_owned=false
@@ -56,15 +102,24 @@ end
 function M.observe(items)
     if type(items)~='table' then M.release_movement(); return false end
     local seen,complete={},true
+    -- QQT_Warpigz_v3 (Q1): settled drops are forgotten on a world change and
+    -- settle_ttl s after they were last listed.
+    local now=get_time_since_inject()
+    local world=Utils.call(Utils.host_call(rawget(_G,'get_current_world')),'get_world_id')
+    world=world~=nil and tostring(world) or G.world -- a failed read is no world change
+    if world~=G.world then G.settled,G.count,G.world,G.retried={},0,world,{} end
     for _,item in pairs(items) do
         local id=key(item)
-        if id then seen[id]=true else complete=false end
+        if id then seen[id]=true;if G.settled[id] then G.settled[id].seen=now end else complete=false end
+    end
+    for id,s in pairs(G.settled) do
+        if now-s.seen>G.settle_ttl or now<s.seen then unsettle(id);G.retried[id]=nil end
     end
     -- An unreadable list or identity cannot prove that a previous drop vanished.
     if complete then
         for id in pairs(entries) do
             if not seen[id] then
-                entries[id]=nil
+                entries[id]=nil;G.retried[id]=nil -- QQT_Warpigz_v3 (Q1)
                 if episode.since then episode.since=get_time_since_inject() end -- QQT_Warpigz_v3: progress
             end
         end
@@ -74,6 +129,15 @@ end
 -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): bounded rounds, then a rest.
 function M.blocked(item)
     local id=key(item); if not id then return true,'item identifier unavailable' end
+    local s=settled_of(id,item) -- QQT_Warpigz_v3 (Q1): see the header
+    if s then
+        if s.retry and not G.retried[id] then
+            local d=Utils.distance_to(item)
+            if d>G.away and d~=math.huge then s.away=true
+            elseif s.away and d<=REACH then unsettle(id);G.retried[id]=s.why;return false end
+        end
+        return true,'pickup settled: '..s.why..' (the host still lists it)'
+    end
     local e=entries[id]
     if not e then return false end
     if e.rounds>=MAX_ROUNDS then
@@ -111,6 +175,53 @@ local function fail_round(e,now,why,item,d)
         why=='stall' and 'no progress toward it' or 'interactions did not pick it up',d or -1))
     e.interacts=0;e.best=nil;e.best_at=nil;e.working=false;e.next=0
 end
+-- QQT_Warpigz_v3 (Q1): settle a drop (see the header); one line per drop and outcome.
+local function settle(id,item,why,line,retry,d)
+    local p=point_of(item) or {x=0,y=0}
+    if not G.settled[id] then G.count=G.count+1 end
+    if G.count>G.settle_max then G.settled,G.count={},1 end
+    local now=get_time_since_inject()
+    local before=G.retried[id]
+    -- QQT_Warpigz_v3 (Q1 review): a second retry is already blocked by G.retried;
+    -- receipt = a bag receipt proved the take (the only verdict that never carries over).
+    G.settled[id]={sno=sno_of(item),x=p.x,y=p.y,seen=now,why=why,retry=retry==true,away=d>REACH,
+        receipt=why=='taken' and retry~=true}
+    entries[id]=nil
+    if episode.since and why=='taken' then episode.since=now end -- only a pickup is progress (20 s budget)
+    if before==why then return end
+    local ok,interactable=pcall(function() return item:is_interactable() end)
+    console.print(string.format('[Rosie pickup] %s %s%s [interactable=%s]',why=='taken' and 'Took' or 'Leaving',
+        item_name(item),line,ok and tostring(interactable) or '?'))
+end
+-- QQT_Warpigz_v3 (Q9): a drop the game refused (or Rosie could not reach)
+-- is remembered by SNO and spot too, not only by identifier: if the host
+-- lists it again under a new identifier after it streamed out and back in,
+-- the verdict carries over (no new attempts, no new line) until settle_ttl.
+-- A drop a bag receipt proved taken never carries over: a second copy of the
+-- same SNO at the same spot is a real drop. QQT_Warpigz_v3 (Q1 review): a
+-- no-bag 'taken' (no receipt, the live prism ghost) carries over like
+-- 'refused' and 'unreachable'. The spot must match within
+-- G.same_actor m (a re-listed actor keeps its position; drops of one kill
+-- scatter farther apart and each gets its own verdict).
+G.same_actor=0.2
+local function settled_spot(id,item)
+    if G.count<=0 or G.retried[id] then return nil end
+    local sno=sno_of(item)
+    if type(sno)~='number' then return nil end
+    local p
+    for _,s in pairs(G.settled) do
+        if not s.receipt and s.sno==sno then -- QQT_Warpigz_v3 (Q1 review)
+            p=p or point_of(item)
+            if not p then return nil end
+            if math.abs(p.x-s.x)<=G.same_actor and math.abs(p.y-s.y)<=G.same_actor then
+                G.count=G.count+1
+                G.settled[id]={sno=sno,x=s.x,y=s.y,seen=get_time_since_inject(),why=s.why,retry=false,away=false}
+                return G.settled[id]
+            end
+        end
+    end
+    return nil
+end
 -- QQT_Warpigz_v3: true when this episode's budget is spent (see the header).
 local function episode_spent(now,e)
     if not episode.last or now-episode.last>=EPISODE_QUIET or now<(episode.last or now) then episode.since=now end
@@ -129,16 +240,64 @@ local function episode_spent(now,e)
         EPISODE_BUDGET,count,rest))
     return true
 end
-function M.step(item)
+-- QQT_Warpigz_v3 (Q1 review): true while the player cannot act on a drop
+-- (see the header): casting, a live enemy within fight_radius m, or the host
+-- kept its current move instead of Rosie's pickup move. Read at most every 0.25 s.
+local function fighting(now)
+    if G.fight_at and now>=G.fight_at and now-G.fight_at<0.25 then return G.fight end
+    G.fight_at=now
+    local spell=Utils.call(Utils.host_call(rawget(_G,'get_local_player')),'get_active_spell_id')
+    local fight=type(spell)=='number' and spell>0
+    if not fight then
+        local st=Utils.host_call(G.movement.status)
+        fight=type(st)=='table' and st.owner=='pickup' and type(st.detail)=='string'
+            and st.detail:find('host kept',1,true)~=nil
+    end
+    G.fight=fight or Utils.enemy_near(G.fight_radius)
+    return G.fight
+end
+function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemManager.destination
     if M.blocked(item) then M.release_movement(); return false end
     local id=key(item); local now=get_time_since_inject()
     if not id then M.release_movement(); return false end
     local e=entries[id]
-    if not e then e={rounds=0,rest_until=0,interacts=0,next=0};entries[id]=e end
+    if not e and settled_spot(id,item) then M.release_movement(); return false end -- QQT_Warpigz_v3 (Q9)
+    if not e then
+        -- QQT_Warpigz_v3 (Q1): gear keeps the rounds; 'nonbag' has no receipt.
+        e={rounds=0,rest_until=0,interacts=0,next=0,bag=bag,sno=sno_of(item),reach=0,
+            class=(kind==nil or bag=='equipment' or bag=='talisman') and 'gear' or bag and 'small' or 'nonbag'}
+        entries[id]=e
+    end
+    -- QQT_Warpigz_v3 (Q1): another drop went first meanwhile (it may share
+    -- this SNO): read this drop's bag baseline again before its next interaction.
+    if G.last~=id then e.receipt=nil;G.last=id end
     if episode_spent(now,e) then M.release_movement(); return false end
     if movement_owned and movement_key~=id then M.release_movement() end
     local d=Utils.distance_to(item)
     if d==math.huge then M.release_movement(); return false end
+    -- QQT_Warpigz_v3 (Q1 review): CLEAR time in reach (see the header).
+    local fight=fighting(now)
+    if fight then e.fight_at=now end
+    if d<=REACH and not fight then
+        if e.clear_last and now>=e.clear_last and now-e.clear_last<=0.5 then e.clear=(e.clear or 0)+now-e.clear_last end
+        e.clear_last=now
+    else e.clear_last=nil end
+    -- QQT_Warpigz_v3 (Q1): receipts and settle rules (see the header).
+    if e.receipt then
+        local n=Utils.sno_count(e.bag,e.sno)
+        if n and n>e.receipt then
+            settle(id,item,'taken',' (now in the '..e.bag..' bag; the host still lists it on the ground, ignoring it)',false,d)
+            M.release_movement();return false
+        end
+    end
+    if e.class=='nonbag' and e.reach>=G.nonbag_interacts and (e.clear or 0)>=G.nonbag_clear then -- QQT_Warpigz_v3 (Q1 review)
+        settle(id,item,'taken',' (it goes to no bag; the host still lists it on the ground, ignoring it)',true,d)
+        M.release_movement();return false
+    end
+    if e.class=='small' and e.reach>=G.small_interacts then
+        settle(id,item,'refused',string.format(': still on the ground after %d interactions in reach (the game did not take it)',e.reach),true,d)
+        M.release_movement();return false
+    end
     -- Progress is measured toward the drop, not as selection time: a fight
     -- that keeps the player busy ends a round, never the drop. A pause, a
     -- town trip or another drop first restarts the measurement.
@@ -147,7 +306,20 @@ function M.step(item)
     if not e.best or d<e.best-PROGRESS or d<=REACH then e.best=math.min(d,e.best or d);e.best_at=now end
     -- QQT_Warpigz_v2 local patch: a round that ends with rounds left keeps the busy flag for this frame
     -- (the next pulse wakes it or serves another drop; review rc.10).
-    if d>REACH and now-e.best_at>=ROUND_STALL then fail_round(e,now,'stall',item,d);M.release_movement();return e.rounds<MAX_ROUNDS end
+    if d>REACH and now-e.best_at>=ROUND_STALL then
+        -- QQT_Warpigz_v3 (Q1): not gear, or no walkable point within reach of
+        -- it: no more rounds. QQT_Warpigz_v3 (Q1 review): only a CLEAR window
+        -- settles; a fight in it keeps the bounded rounds.
+        if not (e.fight_at and e.fight_at>=e.best_at) then
+            local p=e.class=='gear' and point_of(item)
+            local proof=p and Utils.walkable_near(p.x,p.y,p.z,REACH)==false and 'not walkable' or nil
+            if e.class~='gear' or proof then
+                settle(id,item,'unreachable',string.format(': cannot reach it (%s, distance %.1f)',proof or 'no progress',d),true,d)
+                M.release_movement();return false
+            end
+        end
+        fail_round(e,now,'stall',item,d);M.release_movement();return e.rounds<MAX_ROUNDS
+    end
     if e.interacts>=ROUND_INTERACTS then fail_round(e,now,'interact',item,d);M.release_movement();return e.rounds<MAX_ROUNDS end
     if now<e.next then return e.working==true end
     if d>REACH then
@@ -165,6 +337,15 @@ function M.step(item)
     else
         e.next=now+INTERACT_GAP
         M.release_movement()
+        -- QQT_Warpigz_v3 (Q1): the bag reading before the first interaction
+        -- in reach, and the spot the in-reach count belongs to.
+        local p=point_of(item)
+        if p and e.spot and (math.abs(p.x-e.spot.x)>G.same_spot or math.abs(p.y-e.spot.y)>G.same_spot) then
+            e.reach=0;e.clear=0;e.spot=nil -- QQT_Warpigz_v3 (Q1 review): another spot, another count
+        end
+        if not e.spot then e.spot=p end
+        if e.bag and e.receipt==nil then e.receipt=Utils.sno_count(e.bag,e.sno) end
+        if not fight then e.reach=e.reach+1 end -- QQT_Warpigz_v3 (Q1 review): only CLEAR interactions count
         e.interacts=e.interacts+1
         pcall(interact_object,item)
     end
@@ -173,6 +354,8 @@ function M.step(item)
 end
 function M.reset(clear_movement)
     M.release_movement(clear_movement); entries={}
+    G.settled,G.count,G.retried,G.last=({}),0,({}),nil -- QQT_Warpigz_v3 (Q1)
+    G.fight_at,G.fight=nil,nil -- QQT_Warpigz_v3 (Q1 review)
     episode.since,episode.last,episode.capped_until=nil,nil,0 -- QQT_Warpigz_v3
 end
 return M

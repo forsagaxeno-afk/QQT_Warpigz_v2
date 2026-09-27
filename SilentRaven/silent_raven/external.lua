@@ -7,6 +7,7 @@ local external = {}
 local function caller_valid(caller) return type(caller) == 'string' and caller ~= '' end
 
 function external.get_status()
+    local handoff, handoff_reason = coordination.handoff_ok(settings) -- QQT_Warpigz_v3 (Q8)
     return {
         api_version = 2, name = settings.plugin_label,
         version = settings.plugin_version, author = settings.plugin_author,
@@ -16,6 +17,10 @@ function external.get_status()
         -- QQT_Warpigz_v3: the user's auto-fire choice (Rosie's return-leg
         -- hand-off respects it). Additive.
         auto_fire = settings.auto_fire == true,
+        -- QQT_Warpigz_v3 (Q8): whether a town trip's return leg may hand a
+        -- ready reward over now (auto-fire standalone, WarPigs' delegation
+        -- when managed), and why not. Rosie reads it. Additive.
+        handoff = handoff, handoff_reason = handoff_reason,
         last_reason = tracker.last_reason, last_result = tracker.last_result,
         last_result_t = tracker.last_result_t, all_task_done = tracker.all_task_done,
         state = tracker.state, attempts = tracker.attempts,
@@ -68,7 +73,10 @@ local function queue(caller, callback, with_tp, guard)
     if callback ~= nil and type(callback) ~= 'function' then return false, 'invalid_callback' end
     if guard ~= nil and type(guard) ~= 'function' then return false, 'invalid_guard' end
     if not settings.enabled then return false, 'disabled' end
-    if tracker.managed_by and tracker.managed_by ~= caller then return false, 'managed' end
+    -- QQT_Warpigz_v3 (Q8): WarPigs may delegate the town service's hand-off.
+    local delegated = not with_tp and tracker.managed_by ~= nil and tracker.managed_by ~= caller
+        and coordination.delegated(caller)
+    if tracker.managed_by and tracker.managed_by ~= caller and not delegated then return false, 'managed' end
     if with_tp and tracker.managed_by then return false, 'managed_no_teleport' end
     if tracker.running or tracker.external_trigger then return false, 'busy' end
     if tracker.paused then return false, 'paused' end

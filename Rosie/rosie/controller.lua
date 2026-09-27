@@ -66,6 +66,7 @@ function M.new(cached,conflict)
         -- here, at load, instead of being required lazily.
         app.pickup_settings=require('rosie.private.pickup.src.settings')
         app.task_manager=require('rosie.private.town.core.task_manager')
+        app.town_vendor=require('rosie.private.town.core.vendor') -- QQT_Warpigz_v3 (Q6)
         local town_utils=require('rosie.private.town.core.utils')
         UniqueSorter.configure({utils=town_utils,tracker=tracker,lifecycle=life})
         -- The census keeps items the sorter is about to drop out of "bag full".
@@ -96,7 +97,7 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.13';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.14';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
         for _,key in ipairs({'trigger_tasks','trigger_tasks_with_teleport'}) do
@@ -236,6 +237,9 @@ function M.new(cached,conflict)
             return
         end
         if not installation_valid() then return end
+        -- QQT_Warpigz_v3 (Q6): close a panel Rosie's own service opened, also
+        -- after the trip, a stop or a disable (bounded: town/core/vendor.lua).
+        if app.town_vendor then pcall(app.town_vendor.close_tick) end
         if peer_owns_loot() then Movement.yield('pickup') end
         if not Movement.status().cleanup_pending then Movement.suspend_if_unavailable() end
         if not Movement.retry_cleanup() or not life.retry_cleanup() then

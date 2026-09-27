@@ -34,6 +34,7 @@ local M = {
     SAVE_EVERY = 300,
     REOPEN_GRACE = 30,
     MYSTERY = 'usz_rewardGizmo_Uber',
+    PRIZE = 'Warplan_Helltide_HellsPrize', -- QQT_Warpigz_v3 (Q4): its own spot kind 'prize'
 }
 
 local zones = {}        -- key -> {spots = {}, dirty = false, loaded = false}
@@ -76,6 +77,7 @@ local function zone_data(key)
 end
 
 local function spot_type(name)
+    if name == M.PRIZE then return 'prize' end -- QQT_Warpigz_v3 (Q4)
     return name == M.MYSTERY and 'mystery' or 'regular'
 end
 
@@ -128,7 +130,7 @@ local function parse_spot(z, parts)
     -- v1|spot|type|name|cost|x|y|z|seen|miss|last_hour|exit_idx
     if #parts ~= 12 then return end
     local kind, name = parts[3], parts[4]
-    if kind ~= 'mystery' and kind ~= 'regular' then return end
+    if kind ~= 'mystery' and kind ~= 'regular' and kind ~= 'prize' then return end -- QQT_Warpigz_v3 (Q4): + prize
     local cost = enums.chest_types[name]
     if not cost or spot_type(name) ~= kind then return end
     local x, y, zz = tonumber(parts[6]), tonumber(parts[7]), tonumber(parts[8])
@@ -263,7 +265,7 @@ local function spot_at(pos, name)
     if not x then return nil end
     local z = M.load_zone(current)
     if name then return find_spot(z, spot_type(name), x, y) end
-    return find_spot(z, 'mystery', x, y) or find_spot(z, 'regular', x, y)
+    return find_spot(z, 'mystery', x, y) or find_spot(z, 'regular', x, y) or find_spot(z, 'prize', x, y) -- QQT_Warpigz_v3 (Q4)
 end
 M.spot_at = spot_at
 

@@ -77,4 +77,77 @@ function M.stash_signals(seen,base)
         or (sdk and not other and not b.sdk) and 'sdk' or nil
     return why~=nil,n,diag,why
 end
+-- QQT_Warpigz_v3 (Q6, live: "Rosie | menu_open — Waiting for chat or
+-- inventory to close."): Rosie closes the panels its own service opened.
+-- M.interact() is how every Rosie task opens a vendor or the stash; it
+-- records the panel as Rosie's. M.request_close() (a step end, the trip end,
+-- a failure, a stop) lets M.close_tick() press Escape (0x1B) only while that
+-- panel reads open (Escape with nothing open opens the game menu): the
+-- inventory panel (the stash shows it; live: pickup's menu_open) or, for an
+-- NPC, the identity-checked vendor screen (M.is_open, never the bare flag).
+-- At most CLOSE_PRESSES presses CLOSE_GAP s apart, the panel re-read before each.
+-- The record ends once the panel reads closed after the interaction settled,
+-- on death, loading or a zone change, so a panel the player opens by hand
+-- later is never Rosie's to close.
+local CLOSE_PRESSES,CLOSE_GAP,CLOSE_SETTLE,CLOSE_LIMIT=3,0.5,1.5,8
+local panel={}
+M.panel=panel
+local function zone_now()
+    return try(function() return get_current_world():get_current_zone_name() end)
+end
+function M.panel_reads_open(key)
+    if try(function() return is_inventory_open() end)==true then return true end
+    return key~=nil and key~='STASH' and M.is_open(key)
+end
+-- key: 'STASH' or an NPC key of utils.npc_enum ('GAMBLER', 'BLACKSMITH', ...).
+function M.interact(actor,key)
+    panel.owned={key=key,what=string.lower(tostring(key or 'vendor')),at=get_time_since_inject(),zone=zone_now()}
+    panel.close=nil
+    return interact_vendor(actor)
+end
+function M.request_close(why)
+    if panel.owned and not panel.close then
+        panel.close={why=tostring(why or 'service end'),since=get_time_since_inject(),presses=0,next=0}
+    end
+end
+function M.closing() return panel.close~=nil end
+local function release(message)
+    if message then console.print('[Rosie] '..message) end
+    panel.owned,panel.close=nil,nil
+    return false
+end
+-- Returns true while a close is in progress (a trip holds its next step).
+function M.close_tick()
+    local own,job=panel.owned,panel.close
+    if not own then panel.close=nil; return false end
+    local now=get_time_since_inject()
+    local alive=try(function() return get_local_player():is_dead()==false end)==true
+    local zone=zone_now()
+    if not alive or zone==nil or zone=='[sno none]' or (own.zone~=nil and zone~=own.zone) then return release() end
+    if not job then
+        -- Watch only: a settled panel that reads closed is no longer Rosie's.
+        if now-own.at>=CLOSE_SETTLE and now>=(own.check or 0) then
+            own.check=now+0.25
+            if not M.panel_reads_open(own.key) then release() end
+        end
+        return false
+    end
+    if now<job.next then return true end
+    local label=own.what..' panel it opened ('..job.why..')'
+    if not M.panel_reads_open(own.key) then
+        -- A fresh interaction may still be opening its panel.
+        if now-own.at<CLOSE_SETTLE and now-job.since<CLOSE_LIMIT then job.next=now+0.1; return true end
+        return release(job.presses>0 and 'Closed the '..label..' with '..job.presses..' Escape press(es).' or nil)
+    end
+    if job.presses>=CLOSE_PRESSES or now-job.since>=CLOSE_LIMIT then
+        return release('Rosie could not close the '..label..' after '..job.presses
+            ..' Escape press(es); it still reads open. Close it by hand.')
+    end
+    -- Escape would close the chat first; wait (bounded by CLOSE_LIMIT).
+    if try(function() return is_chat_open() end)==true then job.next=now+CLOSE_GAP; return true end
+    local sent=pcall(function() utility.send_key_press(0x1B) end)
+    if not sent then return release('Rosie cannot press Escape to close the '..label..'.') end
+    job.presses=job.presses+1; job.next=now+CLOSE_GAP
+    return true
+end
 return M

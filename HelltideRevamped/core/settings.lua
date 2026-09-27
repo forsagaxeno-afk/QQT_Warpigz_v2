@@ -30,7 +30,7 @@ local settings = {
     mode = 1,
     -- Pandemonium Ruptures (Farm mode, core/hr_tear_event.lua).
     hunt_rift = true,
-    rupture_replace_local_events = false, -- QQT_Warpigz_v3: Farm events on by default
+    rupture_replace_local_events = true, -- QQT_Warpigz_v3 (rc.2): skip legacy events while hunting tears (3.0.0 default)
     rupture_prioritize_surging = false, -- S14 option, not shown (2.2.1)
     rupture_hunt_normal = true,
     rupture_hunt_surging = true,
@@ -60,6 +60,9 @@ local settings = {
     event_radius = 40,
     event_until_min = 45,
     map_pin = false,
+    -- QQT_Warpigz_v3 (Q4): cinder run (every mode, core/hr_cinder_run.lua).
+    cinder_run = false,
+    cinder_run_at = 3000,
     -- QQT_Warpigz_v3: live data & stats (every mode).
     live_api = false,
     live_source = 0,        -- 0 = helltides.com, 1 = diablo4.life
@@ -100,6 +103,7 @@ local setting_controls = {
     cinder_plan = "cinder_plan", max_carry = "max_carry", dump_min = "dump_min",
     smart_order = "smart_order", road_routing = "road_routing", learn = "learn", fence = "fence",
     event_radius = "event_radius", event_until_min = "event_until_min", map_pin = "map_pin",
+    cinder_run = "cinder_run", cinder_run_at = "cinder_run_at", -- QQT_Warpigz_v3 (Q4)
     live_api = "live_api", live_source = "live_source", live_poll_min = "live_poll_min",
     overlay = "overlay", overlay_x = "overlay_x", overlay_y = "overlay_y", overlay_rows = "overlay_rows",
     dashboard = "dashboard", dashboard_sec = "dashboard_sec",
@@ -116,6 +120,7 @@ local synced_controls = {
     -- QQT_Warpigz_v3
     "cinder_plan", "max_carry", "dump_min", "smart_order", "road_routing", "learn", "fence",
     "event_radius", "event_until_min", "map_pin",
+    "cinder_run", "cinder_run_at", -- QQT_Warpigz_v3 (Q4)
     "live_api", "live_source", "live_poll_min", "overlay", "overlay_x", "overlay_y", "overlay_rows",
     "dashboard", "dashboard_sec",
 }

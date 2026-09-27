@@ -2,6 +2,208 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.1.0] — 2026-09-27
+
+![QQT Warpigz Suite v3](https://raw.githubusercontent.com/forsagaxeno-afk/QQT_Warpigz_v2/claude/qqt-diablo4-plugins-orchestrator-4439v5/assets/branding/qqt-warpigz-suite-v3.png)
+
+**QQT_Warpigz_v3 3.1.0** is a public release. Every plugin was audited on its own (the activity plugin + Rosie + your combat script, no WarPigs / WarPug) and under WarPigs. This fixes the 49 defects the overnight audit confirmed and the 10 issues reported from live play; each fix has a regression test that fails on the old code. HelltideRevamped gets a **Smart farm** for Farm mode, a **cinder run**, tears the bot really closes, and loot collected after the tear event. All credits for the original foundation go to **@ZEWX — LONG LIVE LEGEND**.
+
+### Upgrade from 3.0.0
+
+- Close QQT. Back up `WarPug/positions.txt` (your Reroll / Confirm positions) first. The package ships it uncalibrated.
+- Replace the ten plugin folders (`WarPigs`, `WarPug`, `Batmobile`, `ArkhamAsylum`, `HelltideRevamped`, `HordeDev`, `Reaper`, `WonderCity`, `SilentRaven`, `Rosie`) with the ones in the zip's `scripts/` folder, then put your `positions.txt` back.
+- Menu settings are kept. Keep your own combat / Orbwalker script.
+- Coming from 2.x: follow the 3.0.0 notes first (delete the old folders with a version in their name, remove Alfred / Looter).
+
+### Highlights
+
+- **HelltideRevamped Smart farm** (Farm mode, no WarPigs needed; every part has its own option):
+  - Mystery chests first, nearest along the patrol road.
+  - A cinder plan that keeps 250 for a Mystery chest you can still reach.
+  - Road routing for far chests.
+  - Chest spots and the Helltide border learned while farming.
+  - *Stay inside the Helltide*.
+- **Live data & stats**:
+  - On-screen stats (cinders per minute / hour, earned / spent / lost, chests, deaths).
+  - An offline web dashboard.
+  - An opt-in live Helltide zone (helltides.com or diablo4.life).
+  - The Helltide hour now follows **UTC**.
+- **Cinder run** (HelltideRevamped *Settings → Spend cinders on chests at*, default **off**, *Cinders* 3000, range 250–10000; needs *Open Helltide Chest*):
+  - Once you hold that many cinders, the bot opens chests in this order: **Hell's Prize** (666; only there when you took the War Plan node *Hell's Prize*), then **Mystery** chests (250), then the rest, nearest first.
+  - It uses chests in sight, remembered chests and learned spots, and stops below the cheapest known chest.
+  - No new tear is hunted while the run has a chest to go to.
+  - The run works in every mode (Farm, Warplan, under WarPigs).
+  - **Save phase**: with the option on and HelltideRevamped on its own (Farm, or Warplan without WarPigs), chests below the threshold are remembered, not opened. The last minutes of the Helltide (*Spend everything in the last (min)*, at least 2) spend the savings.
+  - Under WarPigs chests open as before, because the War Plan Helltide step ends once its cinders are spent. The run starts there only when you already hold the amount.
+- **Tears** (Farm mode):
+  - The bot stands inside each golden tear until it closes, then goes to the next one.
+  - Time limits: at most 90 s inside one tear, 150 s per tear in all, 300 s per rupture.
+  - No chest or pickup detour while it stands there. The tear chests are opened once the tear is closed.
+- **Loot after the tear event** (Farm mode):
+  - Rosie's pickup waits from the arrival at the rupture until the Realmwalker dies, or 10 s after the rupture completes with no Realmwalker.
+  - Then the bot walks to each drop Rosie wants in the event area (at most 10 s per drop, 45 s in all) before moving on.
+  - The walk to the rupture and back after a death are not paused.
+  - WarPigs always runs Helltide in Warplan mode, which does no tears.
+- **Rosie**:
+  - The stash no longer stops on one item.
+  - Rosie closes the stash / vendor panels she opened.
+  - A *Splinter of the Prime Evils* you already carry is neither picked up nor sent to the stash.
+  - The seal affix filter now decides seals.
+  - Drops the host keeps listing after they were taken ("ghost" pickups, such as the Tuning Prism) no longer hold the farm.
+- **SilentRaven claims Whisper rewards under WarPigs and standalone**:
+  - Rosie's town trips hand a ready reward over on the return leg in both modes.
+  - During a WarPigs activity, SilentRaven claims on that activity's Temis stops.
+  - New *Claim trip after (minutes, 0 = off)* (default 5): a reward that waits that long with no Temis visit asks Rosie for a town trip from the open world (Helltide).
+  - Enable SilentRaven in its own menu (it starts off).
+
+### Changed defaults
+
+- Rosie **Stash socketables** is now **When full** (was *Never*), so a full gems / runes bag goes to the stash. This applies to new installs and to a choice you never saved; a saved choice is kept.
+- HelltideRevamped **Skip legacy Helltide events** (3.0.0's *Prefer tears over legacy Helltide events*, renamed; Farm mode, while *Hunt tears* is on, no pyres or flame pillars) is **on** by default again and uses its original setting, so your 3.0.0 choice is kept. The rc.1 test build had turned it off under a new setting.
+- Rosie seals: while the seal **Use affix filter** is on with at least one affix checked, it decides seals **instead of the in-game loot filter**. A seal without your affix takes the *Seal default action*, even when the game filter shows it. Charms keep the old order: the in-game filter decides first.
+- Rosie seals: a seal whose affixes cannot be read, or that lists none, is kept (it used to be salvaged when the list was empty). The console says why once.
+- Rosie seals: unique (Annihilus) and mythic seals are still kept unless *Use unique/mythic seal filter* is on.
+- SilentRaven **Claim trip after** is new and **5 minutes** by default; set 0 to turn it off.
+- SilentRaven under WarPigs: while WarPigs' *Whispers in Temis* is on (default), a claim on a Temis stop during an activity does not need SilentRaven's own *Auto-fire in town*; WarPigs' option is the consent. SilentRaven itself must be enabled.
+- HelltideRevamped **Spend cinders on chests at** is new and **off**; with it off nothing changes.
+
+### Fixed
+
+#### Rosie
+
+- **Stash**: a rune / gem stack whose deposit the host did not confirm used to stop the whole service ("Transfer confirmation timed out … item kept unresolved"), and Rosie then waited for *Run town service*.
+  - An item that leaves the bag now counts as deposited.
+  - An item that still cannot be confirmed (8 s, or 3 attempts) is skipped for this trip, logged once, and the stash goes on with the next item.
+  - A trip that still leaves the bag full is retried after 120 s instead of latching.
+  - An unreadable item no longer becomes a host error that switches the town service off.
+- **Panels**: the stash / vendor panel Rosie opened is closed at the end of each step and of each trip, including a failed or stopped one.
+  - Rosie presses Escape only while the panel reads open, at most 3 times, never while chat is open.
+  - A panel you opened yourself is never closed.
+  - Pickup no longer stays parked on "menu_open".
+- **Ghost drops**: a drop the host keeps listing after it was taken (Protector's Tuning Prism), or one Rosie cannot reach, is handled once with one line (`Took …` / `Leaving …`). It used to get 3 rounds (about 18 s) every time it came back into view.
+  - Drops that fall during a fight keep their rounds and are collected after the fight.
+  - Tuning Prisms count as Materials, so they are taken with a full consumable bag.
+- **Splinters of the Prime Evils** (Terror, Destruction, Hatred: one of each per character) are skipped on the ground while you carry that kind (one line per zone) and never sent to the stash, which refuses them.
+- **Seals**: with *Seal default action = Salvage* and the affix filter on (for example *+1 Charm Slot*), a seal without the affix is salvaged and a seal with it is kept, whatever the in-game loot filter shows.
+  - A seal the host lists in the equipment bag follows the seal rules.
+  - A seal kept against Salvage / Sell is logged once with the reason.
+- **Crash with the menu open** on the 312-row seal affix list while hovering a seal: the per-frame work on that path is cut (menu preview at most every 0.5 s, list rows built once, bag slots cached for 0.5 s).
+- Pickup pauses taken by other plugins expire after 60 s.
+- A drop Rosie cannot take holds activities for at most 20 s.
+- A failed town step no longer ends the trip at once.
+- A trip requested from Kurast or Caldeum is served in Temis.
+- Town selection tables are rebuilt at most once a second.
+
+#### HelltideRevamped
+
+- **Waypoint loop after a trap recovery** (live):
+  - The other towns are scanned once per trap. If the abandoned zone is the only Helltide, the bot returns; a second trap in the same hour returns without another scan.
+  - A return from inside the Helltide's zone really teleports; it used to log `Returning to known helltide zone` every few seconds without moving.
+  - A new UTC hour forgets last hour's zone.
+  - If the only Helltide cannot be reached by waypoint, the bot waits for the next hour instead of scanning.
+  - After 3 empty scans in an hour, scans slow down to every 4 minutes.
+- **Tears**: the bot left every tear after 12–18 s.
+  - A 0–100 charge read as closed at 1 %.
+  - A chest or a Rosie pickup pulled the player out of the circle.
+  - A tear 25–30 m away bounced between two states without being approached.
+- The Hell's Prize chest (666 cinders) is known; it used to log "no known cost, ignored".
+- A Rosie refusal or a failed trip no longer freezes standalone farming.
+- A waypoint refused 3 times is skipped for the hour.
+- The Looter hold inside a Helltide is bounded (15 s without progress).
+- Pyre / flame pillar events walk to the event they chose (the walk is bounded).
+- A chest paid for by the bot's own click counts as opened.
+- An interrupted teleport channel no longer counts toward the waypoint skip.
+
+#### SilentRaven
+
+- **No reward in a whole night under WarPigs** (live). WarPigs claimed only between activities, and Rosie's hand-off skipped a WarPigs-managed SilentRaven. Both are fixed; see *Highlights*.
+- A complete objective counter (`10/10`, any language) or a progress of 1 now counts as ready.
+- One console line per decision says why a ready reward was not taken yet (`reward ready but skipped because …`, `claim trip waits because …`, `[Rosie] no SilentRaven hand-off: …`).
+- The console prints the real version (it showed v0.2.1).
+- Readiness no longer depends on English quest text.
+- Pit, Reaper, Undercity and Helltide wait for a running claim in Temis instead of teleporting away.
+- *Debug logging* works.
+
+#### WarPigs / WarPug
+
+- WarPigs lets SilentRaven claim during its activities. Its status gains `whisper_handoff` and `activity_on`, both additive.
+- The 55–59 off-window follows the UTC minute.
+- WarPigs no longer adopts a Reaper left enabled from an earlier session.
+- Repeated lines are logged once, and a missing plugin shows in the status line.
+- With WarPigs off, a running activity pauses a WarPug session instead of halting it.
+
+#### HordeDev, Reaper, ArkhamAsylum, WonderCity, Batmobile
+
+- **HordeDev**:
+  - A run left outside the Horde is reset instead of idling at the Caldeum gate.
+  - The pylon pause of Rosie pickup is always released.
+  - It prints about 13 times fewer console lines.
+  - A stuck Rosie no longer stops chest opening.
+- **Reaper**:
+  - A stuck or refusing Rosie no longer traps it.
+  - Altar clicks and chest retries are bounded.
+  - After a death it walks back to the fight.
+  - Less console spam.
+- **ArkhamAsylum**:
+  - In-Pit town trips work again.
+  - Exploration waits for Rosie pickup for at most 15 s.
+  - With Rosie, town trips go to Temis even with *Home town* = Cerrigar.
+- **WonderCity**:
+  - A boss sighting no longer stops exploration.
+  - Walks to enticements, portals, warp pads and bosses are bounded.
+  - The reward phase survives a script reload.
+- **Batmobile**:
+  - No false "trapped / giving up".
+  - A progressing long route is not hijacked.
+  - Evade in *unstuck* follows *Use evade*.
+  - The Warlock's **Rampage** is offered in Movement Rules.
+- **Standalone farming**: only one activity plugin runs at a time without WarPigs. A second enabled one waits and says why on its overlay.
+
+### Needs a live check
+
+- **Rosie**:
+  - The `[interactable=…]` value on `Took` / `Leaving` lines for ghost drops.
+  - No `Leaving X` line while enemies are close.
+  - Whether a carried Splinter shows in the consumable bag with the same SNO.
+  - Whether a second Splinter of another kind is still picked up.
+  - Whether Liquid Rainbow follows the same one-per-character rule (inferred).
+  - Which `Deposited … (stash list +0 | unreadable)` form the host gives.
+  - That one Escape closes the stash, and that the game menu never opens after a trip.
+  - No crash with the seal affix list open.
+  - The reason on any `[Rosie] Seal kept` line.
+- **Tears**:
+  - The real circle size: the bot stops within 1 m and walks back beyond 2 m.
+  - The charge scale (`Tear charge reads 0-100` appears once if it is 0–100).
+  - Whether the Realmwalker spawns within 10 s.
+  - That the loot pass leaves no drops behind.
+- **Cinder run**:
+  - The Hell's Prize actor name, and that opening it takes exactly 666 cinders.
+  - The War Plan node read (`unknown` on non-English clients).
+  - Very long first trips to a far remembered Hell's Prize.
+- **Helltide search**:
+  - A `4 returns to X without the Helltide buff` line would mean the waypoint town lies outside the Helltide area.
+  - The 12 m "did not move" threshold of a same-zone return.
+- **SilentRaven**:
+  - The Season 15 Whisper quest name. `no Whisper quest (Bounty_Meta_*) in the quest list` means it is named differently.
+  - Whether Helltide farming earns Grim Favor.
+  - The `claim trip waits because …` reasons.
+- From rc.1:
+  - Whether unspent cinders vanish when the Helltide ends.
+  - The chest reset minutes.
+  - The Rampage cast.
+  - `os.rename`, and helltides.com / diablo4.life reachability from QQT.
+
+### Validation
+
+- `python3 audit/tests/run_tests.py --luajit require`: 82 test files × (Lua 5.4 + LuaJIT), 164 runs, 0 failures.
+- New regression files in this release (each case checked to fail on the pre-fix code):
+  - `test_rosie_ghost_pickup`, `test_rosie_pickup_fight_q1`, `test_rosie_splinters_q9`, `test_rosie_stash_q5`, `test_rosie_panel_q6`, `test_rosie_seal_q10`
+  - `test_silentraven_q8`, `test_silentraven_q8_bounds`
+  - `test_helltide_search_cycle`, `test_helltide_tears_stand`, `test_helltide_tears_event`, `test_helltide_tears_joint`, `test_helltide_cinder_run`, `test_helltide_cinder_run_joint`
+  - plus the rc.1 files listed under [3.1.0-rc.1] in `CHANGELOG.md`.
+- Mutation runs on the new code (one fix reverted at a time): these tests catch every mutant except a few that do not change behaviour.
+- `python3 audit/check_release.py --base c6433d8`: PASS.
+
 ## [3.1.0-rc.1] — 2026-09-27
 
 Test build, released as a private draft (not published). Includes everything from 3.0.0. An overnight audit of every plugin, each checked **standalone for plain farming** (the activity plugin + Rosie + your own combat script, no WarPigs / WarPug) as well as under WarPigs, plus the HelltideRevamped *Smart farm*. Components: WarPigs 1.1.4, WarPug 1.0.14, Batmobile 2.2.0, ArkhamAsylum 2.1.1, HelltideRevamped 2.3.0, HordeDev 2.2.3, Reaper 1.10.2, WonderCity 2.2.1, SilentRaven 0.2.2, Rosie 1.0.13.

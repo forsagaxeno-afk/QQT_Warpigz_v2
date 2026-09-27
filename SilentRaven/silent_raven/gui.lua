@@ -1,7 +1,7 @@
 -- gui.lua  --  user-facing settings tree + version label
 
 local plugin_label   = 'silent_raven'
-local plugin_version = '0.2.2'
+local plugin_version = '0.2.3'
 local plugin_author  = 'magoogle'
 
 -- Lazy-required so a malformed core/rewards.lua doesn't kill the GUI
@@ -23,6 +23,8 @@ gui.elements = {
 
     main_toggle                = cb(false, 'main_toggle'),
     auto_fire_toggle           = cb(true,  'auto_fire'),
+    -- QQT_Warpigz_v3 (Q8): claim trip delay in minutes (0 = off).
+    claim_trip_slider          = si(0, 60, 5, 'claim_trip_minutes'),
     debug_toggle               = cb(false, 'debug'),
 
     manual_fire_keybind        = keybind:new(0x0A, true, get_hash(plugin_label .. '_manual_fire')),
@@ -91,7 +93,11 @@ function gui.render()
         'Master enable for SilentRaven.  Auto-fires whisper turn-ins when in town and exposes SilentRavenPlugin to other scripts.')
 
     gui.elements.auto_fire_toggle:render('Auto-fire in town',
-        'When enabled, SilentRaven claims ready Whisper rewards in Temis. WarPigs manages admission while its Whisper option is enabled. Disable auto-fire for external requests only.')
+        'When enabled, SilentRaven claims ready Whisper rewards in Temis. WarPigs manages admission while its Whisper option is enabled (it then claims between activities, and SilentRaven claims a Temis stop during a WarPigs activity). Disable auto-fire for external requests only.') -- QQT_Warpigz_v3 (Q8)
+
+    -- QQT_Warpigz_v3 (Q8)
+    gui.elements.claim_trip_slider:render('Claim trip after (minutes, 0 = off)',
+        'A reward ready this long with no Temis visit asks Rosie for a town trip; Rosie hands the claim over on its return leg. Only in the open world (Helltide, not a Pit, Undercity, Horde or lair), with Rosie, the Looter and WarPug idle and no enemy close. Standalone, or under WarPigs with its Whispers option off: follows Auto-fire. Under WarPigs with that option on: only while WarPigs delegates (no own Whisper visit or teleport under way). At most one trip per interval.')
 
     render_menu_header('Diagnostics')
     gui.elements.debug_toggle:render('Debug logging',

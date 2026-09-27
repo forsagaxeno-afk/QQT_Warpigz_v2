@@ -48,7 +48,7 @@ function extension.move()
 end
 function extension.interact()
     local npc = extension.get_npc()
-    if npc then interact_vendor(npc) end
+    if npc then vendor.interact(npc,'OCCULTIST') end -- QQT_Warpigz_v3 (Q6): a panel Rosie closes
 end
 function extension.execute()
     local player = get_local_player()

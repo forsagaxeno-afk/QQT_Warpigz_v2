@@ -25,7 +25,14 @@ local function render(app)
             ..'never picked up again (Rosie remembers that exact item). Mythics, locked items and Uniques your keep rules '
             ..'protect (Unique filter, GA override, Always keep mythics, Mythic Unique filter) are never dropped.')
     end
-    app.refresh_preview()
+    -- QQT_Warpigz_v3 (Q10, live: host crash with the menu open): the preview
+    -- (a forced rebuild of every named-item selection, about 3,800 widget
+    -- reads, plus a bag census) ran on every menu frame; now at most every
+    -- 0.5 s. The counts below come from the last preview.
+    local now=get_time_since_inject()
+    if not app.preview_at or now-app.preview_at>=0.5 or now<app.preview_at then
+        app.preview_at=now;app.refresh_preview()
+    end
     local status=app.overlay_status and app.overlay_status() or app.status()
     render_menu_header(status.detail)
     if app.notice then render_menu_header(app.notice) end

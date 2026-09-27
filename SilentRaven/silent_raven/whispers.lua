@@ -80,13 +80,35 @@ local function quest_name_matches(name)
     return false
 end
 
--- QQT_Warpigz_v3: an objective counter 'n/m' (any client language) with
--- n < m is still collecting.
-local function counter_incomplete(text)
+-- QQT_Warpigz_v3: an objective counter 'n/m' (any client language): n < m
+-- is still collecting, n >= m is complete; nil without a counter. The host's
+-- own progress fields (has_progress / progress_ratio) are read when the text
+-- has no counter: >= 1 is complete, a partial 0 < ratio < 1 is collecting.
+-- A ratio of 0 is no evidence (Q8 review): a turn-in 'go to' objective may
+-- report 0/1, and a localized turn-in text has no English hint to set ready.
+local function counter_state(text, objective)
     local n, m = text:match('(%d+)%s*/%s*(%d+)')
     n, m = tonumber(n), tonumber(m)
-    return n ~= nil and m ~= nil and n < m
+    if n ~= nil and m ~= nil and m > 0 then return n < m and 'incomplete' or 'complete' end
+    local ratio = type(objective) == 'table' and objective.has_progress == true and tonumber(objective.progress_ratio) or nil
+    if ratio and ratio >= 1 then return 'complete' end
+    if ratio and ratio > 0 then return 'incomplete' end
+    return nil
 end
+-- QQT_Warpigz_v3 (Q8 review): the first `limit` bytes of text, cut on a UTF-8
+-- character boundary (a Cyrillic letter is 2 bytes; a cut lead byte printed
+-- the quest-state log line as invalid UTF-8).
+local function utf8_head(text, limit)
+    if #text <= limit then return text end
+    local n = limit
+    while n > 0 do
+        local b = text:byte(n + 1)
+        if b < 0x80 or b >= 0xC0 then break end
+        n = n - 1
+    end
+    return text:sub(1, n)
+end
+M.utf8_head = utf8_head
 
 -- Tri-state read. A failed quest read is unknown, never evidence of a claim.
 -- QQT_Warpigz_v3: readiness does not depend on the client language. The
@@ -112,11 +134,17 @@ M.quest_snapshot = function ()
                 for _, objective in pairs(objectives) do
                     local text = type(objective) == 'table' and objective.text or nil
                     if type(text) == 'string' and text ~= '' then
+                        -- QQT_Warpigz_v3: the first meta objective, for the
+                        -- quest-state log line (claims.lua).
+                        if meta and not result.detail then result.detail = name .. ': ' .. utf8_head(text, 90) end
                         text = text:lower()
-                        local collecting = text:find('collect grim favor', 1, true) ~= nil
+                        -- QQT_Warpigz_v3: a complete counter (Grim Favor
+                        -- 10/10) is not collecting, whatever the language.
+                        local counter = meta and counter_state(text, objective) or nil
+                        local collecting = counter == 'incomplete'
+                            or (counter == nil and text:find('collect grim favor', 1, true) ~= nil)
                         if meta then
                             meta_read = true
-                            if counter_incomplete(text) then collecting = true end
                             if collecting then meta_incomplete = true end
                         end
                         if collecting then result.collecting = true end

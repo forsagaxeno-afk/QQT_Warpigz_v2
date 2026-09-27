@@ -3666,6 +3666,18 @@ function orchestrator.is_busy()
     return false
 end
 
+-- QQT_Warpigz_v3 (Q8): WarPigs' Whisper delegation (external.status
+-- whisper_handoff): its own SilentRaven request and teleport sequence idle.
+function orchestrator.whisper_handoff_ok()
+    return not raven_bridge:is_busy() and teleport_transition.state == 'IDLE'
+end
+-- QQT_Warpigz_v3 (Q8): an activity WarPigs enabled keeps its own Whisper slot
+-- closed (whisper_safe) and WarPigs owns no Temis movement then, so a
+-- delegating WarPigs lets SilentRaven claim a Temis stop of that activity.
+function orchestrator.activity_on()
+    return next(owned) ~= nil
+end
+
 local function base_status_line()
     local names = {}
     for n in pairs(owned) do names[#names+1] = n end

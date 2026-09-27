@@ -296,19 +296,23 @@ case('farm prioritises a visible rupture over an affordable chest and runs it to
     s.actors[#s.actors + 1] = tear
     s.tick(5.5)
     eq(s.helltide.current_state, 'RIFT_CLOSE_TEARS', 'closing the tear')
-    -- a free Pandemonium chest drops in the ring: interrupt and open it
+    -- a free Pandemonium chest drops in the ring. QQT_Warpigz_v3 (Q2): the
+    -- engaged tear is finished first (no chest detour), then the chest
     local pchest = actor(SKIN.chest, 33, 0)
     s.actors[#s.actors + 1] = pchest
     s.tick(1.5)
+    eq(s.helltide.current_state, 'RIFT_CLOSE_TEARS', 'no chest detour while the tear is engaged')
+    -- tear closed
+    tear.hp = 1
+    s.tick(1.5)
     eq(s.helltide.current_state, 'RIFT_OPEN_CHEST')
+    ok(s.logged('Tear closed after') == 1, 'tear close logged once')
     s.pos = v(33, 0, 0)
     s.tick(1.5)
     ok(s.interactions[1] == pchest, 'Pandemonium chest opened')
     pchest.interactable = false
     s.tick(4)
     ok(s.helltide.current_state ~= 'RIFT_OPEN_CHEST', 'resumed the rupture')
-    -- tear closed
-    tear.hp = 1
     s.pos = v(30, 0, 0)
     s.tick(7)
     ok(s.logged('Surging rupture complete') >= 1, 'rupture completed after the linger')
@@ -507,10 +511,16 @@ case('unreachable rupture chest is skipped after the approach watchdog; chest tr
     s.pos = v(29, 0, 0)
     local tear = actor(SKIN.tear, 31, 0, {hp = 40})
     s.actors[#s.actors + 1] = tear
-    -- A live tear keeps moving (else it is skipped as static after 12 s).
+    -- (rc.1 skipped a tear as static after 12 s; QQT_Warpigz_v3 Q2 no longer does.)
     s.before_tick = function() tear.pos = v(31, 0, math.floor(s.now) % 2) end
     s.tick(6)
     eq(s.helltide.current_state, 'RIFT_CLOSE_TEARS')
+    -- QQT_Warpigz_v3 (Q2): no chest detour while a tear is engaged; the
+    -- chests below are taken in the linger after it (kept long here).
+    s.controls.rupture_linger_sec:set(60)
+    tear.hp = 1
+    s.tick(0.5)
+    eq(s.helltide.current_state, 'RIFT_STAY_ACTIVE')
     local far = actor(SKIN.chest, 60, 0) -- 31 m out, player never gets closer
     s.actors[#s.actors + 1] = far
     s.tick(1.5)
@@ -532,6 +542,44 @@ case('unreachable rupture chest is skipped after the approach watchdog; chest tr
     s.tick(4)
     ok(s.helltide.current_state ~= 'RIFT_OPEN_CHEST', 'resumed after the chest')
     eq(s.tear.session().chest_tries, nil, 'tries reset for the next chest')
+end)
+
+-- QQT_Warpigz_v3 (rc.2 cross-lane, Q4 x Q2/Q3): the cinder run's save phase
+-- also holds the Helltide chests a tear event would open in its ring (rc.2
+-- lanes: the tear side opened any affordable usz_rewardGizmo_* and spent the
+-- savings); Pandemonium chests stay free; with the option off nothing changes.
+local function tear_ring_chest(opts)
+    local s = session({enabled = true, mode = 1, cinders = 500})
+    if opts.run then s.controls.cinder_run:set(true); s.controls.cinder_run_at:set(3000) end
+    s.settings:update_settings()
+    normal_rupture(s, 30)
+    s.pos = v(29, 0, 0)
+    local tear = actor(SKIN.tear, 31, 0, {hp = 40})
+    s.actors[#s.actors + 1] = tear
+    s.tick(6)
+    eq(s.helltide.current_state, 'RIFT_CLOSE_TEARS')
+    s.controls.rupture_linger_sec:set(60)
+    tear.hp = 1
+    s.tick(0.5)
+    eq(s.helltide.current_state, 'RIFT_STAY_ACTIVE')
+    s.ring_chest = actor(CHEST, 32, 0) -- usz_rewardGizmo_1H, 150 cinders
+    s.actors[#s.actors + 1] = s.ring_chest
+    s.tick(1.5)
+    return s
+end
+case('cinder run save phase: a tear event does not open a Helltide chest in its ring; Pandemonium chests stay free', function()
+    local off = tear_ring_chest({run = false})
+    eq(off.helltide.current_state, 'RIFT_OPEN_CHEST', 'option off: the affordable ring chest is opened as before')
+    local s = tear_ring_chest({run = true})
+    ok(s.helltide.current_state ~= 'RIFT_OPEN_CHEST', 'saving (500 < 3000): the ring chest is held (rc.2 lanes: opened)')
+    s.tick(3)
+    eq(s.states.RIFT_OPEN_CHEST, nil, 'never detoured to it')
+    eq(#s.interactions, 0, 'never interacted with it')
+    eq(s.logged('[CINDER RUN] Saving cinders for the run at 3000'), 1, 'the save line once\n' .. table.concat(s.logs, '\n'))
+    local pchest = actor(SKIN.chest, 33, 0)
+    s.actors[#s.actors + 1] = pchest
+    s.tick(2.5) -- (1 s actor cache + 0.75 s chest scan)
+    eq(s.helltide.current_state, 'RIFT_OPEN_CHEST', 'a free Pandemonium chest is still opened while saving')
 end)
 
 case('GUI mode defaults to Farm for manual use; maiden/chaos toggles say Farm only', function()

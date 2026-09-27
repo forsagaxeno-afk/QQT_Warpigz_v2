@@ -50,6 +50,15 @@ function task.Execute()
     if tracker.trigger_tasks and complete() then
         if tracker.need_trigger then
             task.status='Service needs remain'
+            -- QQT_Warpigz_v3 (Q5): items the stash skipped this trip (not
+            -- confirmed or unreadable) may go on the next trip: a retryable
+            -- failure (cooldown, fail streak), never the permanent latch.
+            local skipped=tracker.stash_skipped
+            if type(skipped)=='table' and #skipped>0 then
+                lifecycle.finish(false,'Stash skipped '..#skipped..' item(s) it could not confirm ('
+                    ..table.concat(skipped,', ')..'); bag needs remain')
+                return
+            end
             -- QQT_Warpigz_v2: a complete service that cannot clear the need will
             -- not clear it on a retry either (protected items, settings).
             lifecycle.finish(false,'Town service left inventory or repair needs unresolved; check protected items and service settings','permanent')

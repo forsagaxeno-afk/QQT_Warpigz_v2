@@ -67,6 +67,10 @@ function M.hunt_ruptures()
             return false, string.format("cinders %d >= %d (spend on chests first)", cinders, cap)
         end
     end
+    -- QQT_Warpigz_v3 (Q4): no new tear hunt while the cinder run walks to a
+    -- chest (core/hr_cinder_run.lua); a tear in progress is finished.
+    local run = tracker.hr_cinder_run
+    if run and run.busy and run.busy() then return false, "cinder run: spending cinders on chests" end
     return true, nil
 end
 
@@ -112,8 +116,9 @@ function M.event_in_reach(actor, dist)
     return true
 end
 
--- Farm mode with ruptures on and "Skip legacy Helltide events" ticked (off by
--- default, QQT_Warpigz_v3) replaces the legacy pyre / flame pillar events.
+-- Farm mode with ruptures on and "Skip legacy Helltide events" ticked (on by
+-- default again, QQT_Warpigz_v3 rc.2, as in 3.0.0) replaces the legacy pyre /
+-- flame pillar events.
 function M.skip_local_events()
     return M.is_farm() and settings.hunt_rift == true
         and settings.rupture_replace_local_events == true

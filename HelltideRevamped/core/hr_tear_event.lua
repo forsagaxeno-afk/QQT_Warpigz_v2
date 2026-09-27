@@ -23,6 +23,9 @@ local enums = require "data.enums"
 local skins = require "data.hr_tear_skins"
 local leash = require "core.hr_rupture_leash"
 local hr_mode = require "core.hr_mode"
+local stand = require "core.hr_tear_stand" -- QQT_Warpigz_v3 (Q2): stand in the tear until it closes
+local loot = require "core.hr_tear_loot" -- QQT_Warpigz_v3 (Q3): no looting until the whole event is over
+local cinder_run = require "core.hr_cinder_run" -- QQT_Warpigz_v3 (rc.2): the save phase holds ring chests too
 
 local M = { skins = skins }
 local helpers = {}      -- bound by tasks/helltide.lua (move_to, clear_movement, get_actors, get_kill_target)
@@ -43,9 +46,9 @@ local C = {
     PORTAL_POST_KILL_WAIT = 30,
     TEAR_ATTACK_DIST = 4,
     TEAR_STAND_MAX = 0.7,
-    TEAR_CLOSE_STUCK_S = 18,
+    -- QQT_Warpigz_v3 (Q2): TEAR_CLOSE_STUCK_S (18) and TEAR_STATIC_SKIP_S
+    -- (12) are gone; the per-tear bounds live in core/hr_tear_stand.lua.
     TEAR_SKIP_TTL_S = 45,
-    TEAR_STATIC_SKIP_S = 12,
     RITUAL_CONTEXT_DIST = 45,
     SPAWN_WAIT_S = 5,
     HOLD_AREA_MAX_S = 30,
@@ -53,6 +56,7 @@ local C = {
     APPROACH_NO_PROGRESS_S = 20,
     APPROACH_PROGRESS_M = 4,
     RUPTURE_MAX_S = 300,
+    RW_CHAIN_MAX_S = loot.C.RW_CHAIN_MAX_S, -- QQT_Warpigz_v3 (rc.2 review): Realmwalker wait + fight + portal
     CHAMBER_MAX_S = 480,
     POLL_TTL = 0.5,
     KILL_SCAN_TTL = 2.0,
@@ -270,6 +274,7 @@ local function resume_patrol(self, states, msg, abandoned)
     clear_movement()
     self.current_state = states.EXPLORE_HELLTIDE
     sess = {}
+    stand.sync_pause(false, now(), "rupture left") -- QQT_Warpigz_v3 (Q2)
 end
 
 -- ── scans ──────────────────────────────────────────────────────────────────
@@ -346,6 +351,10 @@ end
 
 -- tears ---------------------------------------------------------------------
 local function tear_key(actor, skin)
+    -- QQT_Warpigz_v3 (Q2): the actor id keeps one key for a moving tear
+    -- (focus, skip and stand bounds); the position key is the fallback.
+    local id = mcall(actor, "get_id")
+    if type(id) == "number" then return string.format("%s#%d", skin or "tear", id) end
     local pos = actor_pos(actor)
     if not pos then return skin or "tear" end
     return string.format("%s_%d_%d", skin or "tear", math.floor(pos:x()), math.floor(pos:y()))
@@ -362,34 +371,28 @@ local function skip_tear(actor, skin, reason)
     if reason then log(string.format("[RIFT] Skipping tear %s — %s", skin or "?", reason)) end
 end
 
-local function charge_open(progress)
+-- QQT_Warpigz_v3 (Q2): the 0-1 / 0-100 scale is inferred (hr_tear_stand
+-- charge_full); ">= 0.99" closed every tear at 1 % on a 0-100 scale.
+local function charge_open(progress, actor, skin)
     if type(progress) ~= "number" then return true end
-    return not (progress >= 99 or progress >= 0.99)
+    local key = progress >= 0.99 and progress <= 1.001 and actor and tear_key(actor, skin) or nil
+    return not stand.charge_full(progress, now(), key)
 end
 
 local function is_chargeable(skin) return skin_matches(skin, skins.chargeable) end
 
--- Chargeable / micro tears that never move or drain are decorative — skip.
+-- QQT_Warpigz_v3 (Q2): a tear only charges while the player stands in it,
+-- so "position and charge unchanged for 12 s" skipped every tear the bot was
+-- not standing in (and the one it stood in when the charge read nil). The
+-- no-progress check now runs on the engaged tear only, on inside-the-circle
+-- time (core/hr_tear_stand.lua); a tear is not viable only while skipped.
 local function tear_motion_viable(actor, skin)
-    if tear_is_skipped(actor, skin) then return false end
-    local pos = actor_pos(actor)
-    if not pos then return true end
-    sess.tear_motion = sess.tear_motion or {}
-    local key = tear_key(actor, skin)
-    local tag = string.format("%.0f_%.0f_%.0f:%s", pos:x(), pos:y(), pos:z(),
-        tostring(actor_attr(actor, "CHARGEABLE_GIZMO_PROGRESS")))
-    local entry = sess.tear_motion[key]
-    local t = now()
-    if not entry or entry.tag ~= tag then
-        sess.tear_motion[key] = { tag = tag, since = t }
-        return true
-    end
-    if t - entry.since >= C.TEAR_STATIC_SKIP_S then
-        skip_tear(actor, skin, string.format("static %.0fs (not viable)", t - entry.since))
-        sess.tear_motion[key] = nil
-        return false
-    end
-    return true
+    return not tear_is_skipped(actor, skin)
+end
+
+-- Charge progress and health (hr_tear_stand.signal).
+local function tear_signal(actor)
+    return stand.signal(actor_attr(actor, "CHARGEABLE_GIZMO_PROGRESS"), actor_hp(actor))
 end
 
 local function is_stand_on_tear(tear, skin)
@@ -405,11 +408,11 @@ local function is_active_tear(actor, skin)
     local operated = actor_attr(actor, "GIZMO_HAS_BEEN_OPERATED")
     if operated == 1 or operated == true then return false end
     local progress = actor_attr(actor, "CHARGEABLE_GIZMO_PROGRESS")
-    if skin:match("Chargeable") then return charge_open(progress) end
+    if skin:match("Chargeable") then return charge_open(progress, actor, skin) end
     local hp = actor_hp(actor)
     if skin:match("MicroRupture") then
         if hp and hp > 1 then return true end
-        if progress ~= nil then return charge_open(progress) end
+        if progress ~= nil then return charge_open(progress, actor, skin) end
         return false
     end
     return not (hp and hp <= 1)
@@ -540,7 +543,10 @@ local function can_open_event_chest(skin)
     if is_pandemonium_chest(skin) then return true end
     local c = cinders()
     for name, cost in pairs(enums.chest_types) do
-        if skin:match(name) and c >= cost then return true end
+        -- QQT_Warpigz_v3 (rc.2, Q4 x Q2/Q3): a cinder chest in the ring obeys
+        -- the cinder run's save phase like every other chest gate (option off:
+        -- allowed as before); Pandemonium chests above cost nothing.
+        if skin:match(name) and c >= cost then return cinder_run.allows(name) end
     end
     return false
 end
@@ -702,43 +708,91 @@ local function scan(self, states, max_dist, require_ritual_for_tear)
 end
 
 -- ── tear closing ───────────────────────────────────────────────────────────
-local function close_tears_at(self, states, anchor, r)
-    local tear = find_best_tear(anchor, r + 25)
+-- QQT_Warpigz_v3 (Q2): the engaged tear is kept until it closes, is gone or
+-- is skipped (it was re-picked by distance every tick and dropped after 18 s).
+local function focused_tear()
+    local key = sess.tear_focus_key
+    if not key then return nil end
+    for _, actor in pairs(get_actors()) do
+        local skin = actor_skin(actor)
+        if skin_matches(skin, skins.tears) and tear_key(actor, skin) == key and is_active_tear(actor, skin) then
+            return actor
+        end
+    end
+    return nil
+end
+
+local function release_focus()
+    sess.focus_tear, sess.tear_focus_key, sess.tear_focus_since, sess.tear_standing = nil, nil, nil, nil
+end
+
+local function close_tears_at(self, states, anchor, r, pad)
+    local tear = focused_tear()
+    if not tear and sess.tear_focus_key then
+        -- QQT_Warpigz_v3 (Q2): the engaged tear closed (or left the actor list).
+        sess.tears_closed = (sess.tears_closed or 0) + 1
+        log(string.format("[RIFT] Tear closed after %.0fs in its circle (%d this rupture)",
+            stand.inside_seconds(sess, sess.tear_focus_key), sess.tears_closed))
+        release_focus()
+    end
+    tear = tear or find_best_tear(anchor, r + (pad or 30))
     if not tear then
-        sess.focus_tear, sess.tear_focus_key, sess.tear_focus_since = nil, nil, nil
+        release_focus()
         return false
     end
     local skin = actor_skin(tear)
     local key = tear_key(tear, skin)
+    local t = now()
     if sess.tear_focus_key ~= key then
-        sess.tear_focus_key, sess.tear_focus_since = key, now()
+        sess.tear_focus_key, sess.tear_focus_since, sess.tear_standing = key, t, nil
+        -- The raw charge/health once per tear: the live log shows the scale.
+        log(string.format("[RIFT] Engaging tear %s (dist=%.1f, charge=%s, hp=%s) — standing in it until it closes",
+            skin or "?", dist(tear), tostring(actor_attr(tear, "CHARGEABLE_GIZMO_PROGRESS")), tostring(actor_hp(tear))))
         if settings.log_tear_candidates then
             -- Live check: the CHARGEABLE_GIZMO_PROGRESS scale (0-1 or 0-100)
             -- is unverified; charge_open() accepts both until it is known.
             log(string.format("[RIFT] tear focus %s hp=%s progress(raw)=%s", skin or "?",
                 tostring(actor_hp(tear)), tostring(actor_attr(tear, "CHARGEABLE_GIZMO_PROGRESS"))))
         end
-    elseif now() - (sess.tear_focus_since or now()) >= C.TEAR_CLOSE_STUCK_S then
-        skip_tear(tear, skin, "not closing — trying next glint")
-        sess.focus_tear, sess.tear_focus_key, sess.tear_focus_since = nil, nil, nil
+    end
+    local d = dist(tear)
+    local charge = settings.tear_use_charge_ring ~= false and is_chargeable(skin)
+    -- Bounded per tear (C6): inside-the-circle time, approach and wall time.
+    local why = stand.work(sess, key, d, tear_signal(tear), t, charge and stand.C.STAND_OUT or C.TEAR_ATTACK_DIST)
+    if why then
+        skip_tear(tear, skin, why)
+        release_focus()
         return false
     end
     sess.focus_tear = tear
     combat_on()
-    local d = dist(tear)
-    local charge = settings.tear_use_charge_ring ~= false and is_chargeable(skin)
-    local in_range, close
     if charge then
-        in_range, close = d <= C.TEAR_STAND_MAX + 0.35, d <= C.TEAR_STAND_MAX + 3
-    else
-        in_range, close = d <= C.TEAR_ATTACK_DIST, true
-    end
-    if in_range then
+        -- Stop on the glint, walk back only when pushed out of the circle
+        -- (hysteresis: no re-centering on every sub-metre drift).
+        if d <= stand.C.STAND_IN or (sess.tear_standing and d <= stand.C.STAND_OUT) then
+            sess.tear_standing = true
+            clear_movement()
+        else
+            sess.tear_standing = nil
+            move_to(tear, d <= stand.C.STAND_IN + 3)
+        end
+    elseif d <= C.TEAR_ATTACK_DIST then
         clear_movement()
     else
-        move_to(tear, close)
+        move_to(tear, true)
     end
     return true
+end
+
+-- QQT_Warpigz_v3 (Q3): once the event is over, walk to the drops Rosie
+-- wants in the event area before leaving (core/hr_tear_loot.lua; bounded).
+local loot_ctx = {
+    move_to = function(pos, precise) move_to(pos, precise) end,
+    clear = function() clear_movement() end,
+}
+local function collect_loot(s, r, why)
+    loot_ctx.anchor, loot_ctx.radius, loot_ctx.rw_pos = s.anchor, r + loot.C.AREA_PAD, s.rw_anchor
+    return loot.collect(s, now(), why, loot_ctx)
 end
 
 -- ── state handlers (one function per state keeps upvalues low) ─────────────
@@ -828,20 +882,26 @@ H.RIFT_WAIT_OPEN = function(self, states, s, r)
 end
 
 H.RIFT_CLOSE_TEARS = function(self, states, s, r)
-    if close_tears_at(self, states, s.anchor, r) then return end
+    -- QQT_Warpigz_v3 (Q2): same reach as RIFT_STAY_ACTIVE (r + 30); a tear
+    -- 25-30 m out bounced between the two states and was never approached.
+    if close_tears_at(self, states, s.anchor, r, 30) then return end
     self.current_state = states.RIFT_STAY_ACTIVE
 end
 
 H.RIFT_STAY_ACTIVE = function(self, states, s, r)
     combat_on()
+    -- QQT_Warpigz_v3 (Q3): the event is over; its loot is collected first.
+    if loot.collecting(s) and collect_loot(s, r) then return end
     refine_type(s, r)
     if find_best_tear(s.anchor, r + 30) then
         s.no_tear_since = nil
         self.current_state = states.RIFT_CLOSE_TEARS
         return
     end
+    -- QQT_Warpigz_v3 (rc.2 review): a finished loot window never walks back
+    -- to the ring first (loot.done below resumes patrol, or reroutes).
     if leash.enforce(s, s.anchor, get_actors(), move_to,
-        { busy = s.focus_tear ~= nil or kill_target() ~= nil }) then
+        { busy = s.focus_tear ~= nil or kill_target() ~= nil or loot.done(s) }) then
         return
     end
     if not realmwalker_chain(s) then
@@ -850,6 +910,10 @@ H.RIFT_STAY_ACTIVE = function(self, states, s, r)
         if epos and pos_dist(epos, s.anchor) > r * 2 then
             local new_type = rupture_type_label(actor_skin(elsewhere))
             if (TYPE_RANK[new_type] or 0) >= (TYPE_RANK[s.rupture_type] or 1) or not s.no_tear_since then
+                -- QQT_Warpigz_v3 (Q3): this rupture's loot first; the next
+                -- rupture gets its own pause.
+                if collect_loot(s, r, "rupture complete") then return end
+                loot.reset(s)
                 blacklist_area(s.anchor, actor_skin(s.starter), C.BLACKLIST_TTL, "completed")
                 s.anchor, s.starter, s.rupture_type = epos, elsewhere, new_type
                 s.no_tear_since, s.move_best, s.move_best_t = nil, nil, nil
@@ -864,6 +928,12 @@ H.RIFT_STAY_ACTIVE = function(self, states, s, r)
         end
     end
     s.no_tear_since = s.no_tear_since or now()
+    -- QQT_Warpigz_v3 (Q3): loot collected (the player may be away from the
+    -- ring now): no walk back and second linger.
+    if loot.done(s) then
+        return resume_patrol(self, states, string.format("[RIFT] %s rupture complete — resuming patrol",
+            s.rupture_type or "Pandemonium"))
+    end
     if route_to_chamber_portal(self, states, s.anchor, r + 70) then return end
     local hold = find_closest_actor(skins.hold_area, r + 10)
     local center = (hold and actor_pos(hold)) or s.anchor
@@ -882,10 +952,15 @@ H.RIFT_STAY_ACTIVE = function(self, states, s, r)
         end
         if realmwalker_chain(s) then
             s.rw_wait_started = now()
+            -- QQT_Warpigz_v3 (rc.2 review): the chain's own bound (M.execute).
+            s.rw_chain_at = s.rw_wait_started
+            loot.rw_chain(s, s.rw_wait_started)
             log(string.format("[RIFT] %s rupture complete — waiting for Realmwalker", s.rupture_type))
             self.current_state = states.RIFT_WAIT_REALMWALKER
             return
         end
+        -- QQT_Warpigz_v3 (Q3): no Realmwalker chain: the event is over.
+        if collect_loot(s, r, "rupture complete") then return end
         resume_patrol(self, states, string.format("[RIFT] %s rupture complete — resuming patrol",
             s.rupture_type or "Pandemonium"))
     end
@@ -958,12 +1033,20 @@ H.RIFT_WAIT_REALMWALKER = function(self, states, s, r)
     local boss = find_realmwalker(r + 70)
     if boss then
         s.rw_anchor = actor_pos(boss)
+        loot.interrupt(s) -- QQT_Warpigz_v3 (Q3): a late Realmwalker's fight is gated again
         log("[RIFT] Realmwalker spawned — engaging")
         self.current_state = states.RIFT_KILL_REALMWALKER
         return
     end
     if chamber_wanted(s) and route_to_chamber_portal(self, states, s.anchor, r + 70) then return end
-    if now() - (s.rw_wait_started or now()) >= (settings.rupture_rw_wait_sec or 25) then
+    local waited = now() - (s.rw_wait_started or now())
+    local wait_max = settings.rupture_rw_wait_sec or 25
+    -- QQT_Warpigz_v3 (Q3): no Realmwalker within RW_ABSENT_S after the
+    -- rupture completed: the event is over; collect its loot (the wait for a
+    -- late Realmwalker goes on meanwhile).
+    local absent = math.min(loot.C.RW_ABSENT_S, wait_max)
+    if waited >= absent and collect_loot(s, r, string.format("no Realmwalker within %ds", absent)) then return end
+    if waited >= wait_max then
         resume_patrol(self, states, "[RIFT] Realmwalker wait timed out — resuming patrol")
     end
 end
@@ -973,16 +1056,20 @@ H.RIFT_KILL_REALMWALKER = function(self, states, s, r)
     local boss = find_realmwalker(r + 70)
     if boss then
         sess.focus_tear = boss
+        s.rw_anchor = actor_pos(boss) or s.rw_anchor -- QQT_Warpigz_v3 (Q3): its drops land here
         local d = dist(boss)
         if d > 14 then move_to(boss, d <= 8) else clear_movement() end
         return
     end
     sess.focus_tear = nil
-    if chamber_wanted(s) and route_to_chamber_portal(self, states, s.anchor, r + 70) then return end
     if not s.rw_kill_done_at then
         log("[RIFT] Realmwalker defeated")
         s.rw_kill_done_at = now()
     end
+    -- QQT_Warpigz_v3 (Q3): the event is over; its loot first, then the
+    -- chamber or the patrol.
+    if collect_loot(s, r, "Realmwalker defeated") then return end
+    if chamber_wanted(s) and route_to_chamber_portal(self, states, s.anchor, r + 70) then return end
     if not chamber_wanted(s) or now() - s.rw_kill_done_at > C.PORTAL_POST_KILL_WAIT then
         resume_patrol(self, states, "[RIFT] Realmwalker chain done — resuming patrol")
     end
@@ -992,6 +1079,9 @@ H.RIFT_ENTER_CHAMBER = function(self, states, s, r)
     if in_deathtoll_chamber() then
         s.chamber_anchor = get_player_position()
         s.chamber_enter_started = now()
+        -- QQT_Warpigz_v3 (rc.2 review): the Realmwalker chain has its own
+        -- bound now; the chamber keeps at least CHAMBER_MAX_S - RUPTURE_MAX_S.
+        s.started_at = math.max(s.started_at or now(), now() - C.RUPTURE_MAX_S)
         self.current_state = states.CHAMBER_START_RITUAL
         return
     end
@@ -1056,7 +1146,8 @@ end
 
 H.CHAMBER_CLOSE_TEARS = function(self, states, s, r)
     combat_on()
-    if close_tears_at(self, states, s.chamber_anchor or s.anchor, r) then return end
+    -- QQT_Warpigz_v3 (Q2): same reach as CHAMBER_STAY_ACTIVE (r + 35).
+    if close_tears_at(self, states, s.chamber_anchor or s.anchor, r, 35) then return end
     self.current_state = states.CHAMBER_STAY_ACTIVE
 end
 
@@ -1180,12 +1271,22 @@ function M.execute(self, states)
     local s = sess
     s.started_at = s.started_at or now()
     local cap = s.chamber_anchor and C.CHAMBER_MAX_S or C.RUPTURE_MAX_S
-    if now() - s.started_at > cap then
+    -- QQT_Warpigz_v3 (rc.2 review): tears that each close within their own
+    -- 90 s bound left the Realmwalker too little of the rupture-wide cap:
+    -- the chain (wait, fight, portal) has its own RW_CHAIN_MAX_S, and the
+    -- post-event loot window runs on its own C6 bounds (hr_tear_loot).
+    local since, what = s.started_at, "Rupture"
+    if s.rw_chain_at and not s.chamber_anchor then
+        since, cap, what = s.rw_chain_at, C.RW_CHAIN_MAX_S, "Realmwalker chain"
+    end
+    if now() - since > cap and not loot.collecting(s) then
         return resume_patrol(self, states, string.format(
-            "[RIFT] Rupture took longer than %ds — resuming patrol", cap), true)
+            "[RIFT] %s took longer than %ds — resuming patrol", what, cap), true)
     end
     local r = settings.tear_event_radius or 12
-    if state ~= states.RIFT_OPEN_CHEST and CHEST_SCAN_STATES[state]
+    -- QQT_Warpigz_v3 (Q2): never leave an engaged tear for a chest; the
+    -- chest is opened once the tear is closed (or skipped).
+    if state ~= states.RIFT_OPEN_CHEST and CHEST_SCAN_STATES[state] and not s.tear_focus_key
         and try_interrupt_for_chest(self, states, s.chamber_anchor or s.anchor, r + C.CHEST_SCAN_PAD) then
         return
     end
@@ -1204,6 +1305,7 @@ local CREDITED = {
     "started_at", "wait_started", "move_best_t", "rw_wait_started", "no_tear_since",
     "tear_focus_since", "hold_since", "chest_best_t", "chest_loot_started",
     "rw_kill_done_at", "chamber_enter_started",
+    "rw_chain_at", -- QQT_Warpigz_v3 (rc.2 review)
 }
 function M.credit_yield(gap)
     if type(gap) ~= "number" or gap <= 0 then return end
@@ -1214,12 +1316,52 @@ function M.credit_yield(gap)
     for _, entry in pairs(s.tear_motion or {}) do
         if type(entry.since) == "number" then entry.since = entry.since + gap end
     end
+    stand.credit(s, gap) -- QQT_Warpigz_v3 (Q2): per-tear stand bounds
+    loot.credit(s, gap) -- QQT_Warpigz_v3 (Q3): post-event loot window
 end
 
 -- Full reset (helltide task reset / new session).
 function M.on_reset()
     sess = {}
     area_blacklist = {}
+    stand.sync_pause(false, now(), "reset") -- QQT_Warpigz_v3 (Q2)
+    stand.reset_scale_probe()
+end
+
+-- QQT_Warpigz_v3 (Q2): Rosie's pickup is paused while a tear is engaged
+-- (core/hr_tear_stand.lua). Called by the helltide task every tick before
+-- its Looter hold, so a busy Looter never pulls the player out of the
+-- circle; released in a non-rupture state and in Warplan.
+-- QQT_Warpigz_v3 (Q3): the pause now lasts from the first tick at the
+-- rupture until the whole event is over (core/hr_tear_loot.lua), at most
+-- PAUSE_MAX_S per rupture (that cap covers the per-tear pause too).
+local EVENT_PAUSE_MSG = "[RIFT] Pausing Looter pickup until the tear event is over (Realmwalker killed, or none within 10s)"
+-- QQT_Warpigz_v3 (rc.2 review): both pauses hold only while the player is
+-- at the event: never on the walk to a ring whose tears are already open
+-- (engaged from up to tear_search_dist), on a revive walk-back, or on the
+-- town tick after a teleport out (this runs before the "Left helltide
+-- zone" check), so Rosie keeps taking what she passes outside the event
+-- area (the post-event loot window only covers that area).
+function M.sync_holds(state)
+    local t = now()
+    local rift = M.is_rift_state(state) and hr_mode.is_farm()
+        and (utils.is_in_helltide() or M.holds_zone(state))
+    local fkey = rift and sess.tear_focus_key or nil
+    local at_tear = stand.at_tear(sess, fkey, fkey and sess.focus_tear and dist(sess.focus_tear))
+    local event = rift and loot.gate_wants(sess, state, t, settings.tear_event_radius or 12, at_tear)
+    local g = sess.loot_gate
+    local engaged = at_tear and not (g and g.expired)
+    local over = loot.over_reason(sess)
+    local why = (over and ("tear event over: " .. over)) or (g and g.expired and "pause cap")
+        or (rift and loot.away(sess) and "away from the rupture") or (rift and "tear done") or "rupture left"
+    if stand.sync_pause(event or engaged, t, why, event and EVENT_PAUSE_MSG or nil) then
+        loot.note_held(sess)
+    end
+end
+
+-- Disable, task switch, death (helltide task): drop the pause now.
+function M.release_holds(why)
+    stand.sync_pause(false, now(), why)
 end
 
 return M
