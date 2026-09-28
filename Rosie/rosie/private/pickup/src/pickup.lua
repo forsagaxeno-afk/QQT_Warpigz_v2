@@ -77,7 +77,8 @@ local episode={since=nil,last=nil,capped_until=0}
 --    YIELD.confirm s while the player moves YIELD.moved m makes Rosie step back without clearing that path; the
 --    drop is not walked to (nor woken) for YIELD.rest s, doubling per yield of
 --    that drop up to YIELD.max s (its rounds still bound it, C6). Within
---    REACH it is still interacted with (QQT_Warpigz_v3 1.0.22).
+--    REACH it is still interacted with and no foreign move is counted
+--    meanwhile (QQT_Warpigz_v3 1.0.22).
 --    QQT_Warpigz_v3 1.0.22: every YIELD.per_round yields of a drop fail one
 --    of its rounds.
 local G={nonbag_interacts=3,nonbag_clear=3.5,small_interacts=ROUND_INTERACTS,settle_ttl=180,settle_max=128,same_spot=1.0,
@@ -386,6 +387,10 @@ local function foreign_move(e,item,now)
     local player=Utils.host_call(rawget(_G,'get_local_player'))
     local dest,here,spot=xy(Utils.call(player,'get_move_destination')),xy(Utils.call(player,'get_position')),xy(Utils.call(item,'get_position'))
     if not dest or not here or not spot or flat(dest,here)<=YIELD.far or flat(dest,spot)<=YIELD.far then e.foreign=nil;return false end
+    -- QQT_Warpigz_v3 1.0.22 (review): a yielded drop in REACH is only
+    -- interacted with (no move): the mover carrying the player over it is no
+    -- new yield (a second one failed a round mid-pass, YIELD.per_round).
+    if e.yield_until and now<e.yield_until and flat(here,spot)<=REACH then e.foreign=nil;return false end
     local st=movement_owned and Utils.host_call(G.movement.status)
     local sent=type(st)=='table' and st.owner=='pickup' and st.sent
     if sent and flat(dest,sent)<=YIELD.sent then e.foreign=nil;return false end

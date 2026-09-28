@@ -433,6 +433,38 @@ case('d3: drops the game refuses (no pickup): busy ends after 20 s and stays off
     h.assert_clean('d3')
 end)
 
+-- QQT_Warpigz_v3 1.0.22 (review): a gate that blocks is_busy also stops the
+-- episode clock: no cap (nor its line) is reached while paused, and the
+-- resume starts a fresh episode.
+case('d5: paused just before the 20 s stall cap: no cap while paused; the resume starts a fresh 20 s episode', function()
+    local h = new({distance = 30})
+    worldstone_run(h)
+    local sc, m = h.G.Scavenger, mimic(h)
+    for i, p in ipairs({{1, 0}, {0, 1}, {-1, 0}, {0, -1}}) do -- refused: enough rounds for both episodes
+        legendary(h, p[1], p[2], {name = 'Helm_Legendary_Generic_04' .. i, refuse = function() return true end})
+    end
+    local first
+    ok(h.run_until(function(hh) first = first or (sc.is_busy() and hh.now) or nil; return first ~= nil end, 3), 'busy\n' .. h.tail(8))
+    h.run(m.CAP - 0.6 - (h.now - first))
+    ok(sc.is_busy(), 'still busy just before the cap')
+    eq(sc.pause('Worldstone'), true)
+    local busy_paused = 0
+    h.run(3, function() if sc.is_busy() then busy_paused = busy_paused + 1 end end)
+    eq(busy_paused, 0, 'false while paused')
+    eq(h.logged('Busy as Scavenger for'), 0, 'no cap and no cap line while paused (the gate comes before the episode)')
+    eq(sc.resume('Worldstone'), true)
+    local again, off
+    h.run(m.CAP + 2, function(hh)
+        local busy = sc.is_busy()
+        if busy and not again then again = hh.now end
+        if again and not off and not busy then off = hh.now end
+    end)
+    ok(again and off, 'busy again after the resume, then capped\n' .. h.tail(8))
+    ok(math.abs((off - again) - m.CAP) <= 0.3, 'a fresh 20 s episode after the resume: ' .. tostring(off - again))
+    eq(h.logged('Busy as Scavenger for 20s without a pickup'), 1, 'one cap line, after the resume')
+    h.assert_clean('d5')
+end)
+
 case('d4: Navigator without Worldstone: nothing is counted: no cap, no log, no walk hold for the same stream', function()
     local h = new({distance = 30})
     local nav = fake_navigator(h); nav.active = false
@@ -883,6 +915,17 @@ case('i: gates, status and wanted items: dead, loading, disabled, paused, town t
     eq(#sc.get_wanted_items(), 0, 'none while Worldstone is gone')
     h.G.Worldstone = ws.api
     ok(#sc.get_wanted_items() >= 2, 'listed again')
+    -- QQT_Warpigz_v3 1.0.22 (review): none outside the orbwalker behavior
+    -- (Behavior "Orbwalk" while the orbwalker is not in Clear mode).
+    pgui(h).general.behavior_combo:set(1)
+    h.orb.mode = h.G.orb_mode.none
+    h.frame()
+    eq(#sc.get_wanted_items(), 0, 'none outside the orbwalker behavior')
+    h.orb.mode = h.G.orb_mode.clear
+    h.frame()
+    ok(#sc.get_wanted_items() >= 2, 'listed in Clear mode')
+    pgui(h).general.behavior_combo:set(0)
+    h.orb.mode = h.G.orb_mode.none
     ok(h.run_until(function() return sc.is_busy() end, 3), 'busy walking to a drop')
     eq(sc.get_status().state, 'looting')
     h.dead = true

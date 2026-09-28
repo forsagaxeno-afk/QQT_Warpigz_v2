@@ -70,6 +70,32 @@ case('Y1 a mover walks the player over a yielded drop on its route (pickup dista
     h.assert_clean('Y1')
 end)
 
+-- QQT_Warpigz_v3 1.0.22 (review): Y1 took its drop on the 1st interaction.
+-- A drop the game takes only on its Nth interaction needs the whole pass:
+-- foreign_move kept counting the mover while Rosie stood on the drop and
+-- interacted, a second yield came 0.3 s in (HEAD: 'yield 2'; with
+-- YIELD.per_round=2: a failed round, the drop rests 8 s mid-pass and is lost).
+for _, n in ipairs({2, 3}) do
+    case('Y1.' .. n .. ' the same pass with a drop taken on its interaction ' .. n .. ': one yield, no failed round, taken', function()
+        local h = new()
+        local tries = 0
+        local item = h.drop('pit', 15, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_015', bag = 'sink',
+            refuse = function() tries = tries + 1; return tries < n end})
+        local r = route(h, item, 30)
+        print(string.format('  Y1.%d: picked=%s at x=%s, interactions=%d, yields=%d, failed rounds=%d', n, tostring(item.picked),
+            r.picked_x and string.format('%.1f', r.picked_x) or '-', tries,
+            h.logged('[Rosie pickup] Another move took the player off'), h.logged('failed (')))
+        ok(r.first_yield, 'yielded first\n' .. h.tail(10))
+        eq(h.logged('[Rosie pickup] Another move took the player off'), 1, 'one yield: none while Rosie stands on the drop\n' .. h.tail(10))
+        eq(h.logged('failed ('), 0, 'no round failed mid-pass\n' .. h.tail(10))
+        eq(item.picked, true, 'taken on its interaction ' .. n .. ' as the player passed over it\n' .. h.tail(10))
+        ok(math.abs(r.picked_x - 15) <= 2.5, 'taken in reach: x=' .. string.format('%.1f', r.picked_x))
+        eq(r.rosie_moves_after_yield, 0, 'no Rosie move after the yield')
+        eq(r.reversals, 0, 'the player never walked back')
+        h.assert_clean('Y1.' .. n)
+    end)
+end
+
 case('Y2 a yielded drop off the route is not walked to while the yield lasts (the 3.3.2 walk hold stays)', function()
     local h = new()
     local item = h.drop('pit', 12, 6, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_014'})

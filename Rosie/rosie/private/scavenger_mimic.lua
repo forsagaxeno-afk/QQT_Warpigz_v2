@@ -9,7 +9,9 @@
 --    Rosie is alive, _G.Worldstone is a table and no real Scavenger owns the
 --    global, read on every call. Out of effect everything below is inert (no
 --    table, condition false, no busy episode, cap log or walk hold): without
---    Worldstone Rosie behaves exactly like 1.0.21.
+--    Worldstone Rosie behaves exactly like 1.0.21. Only the global is read: a
+--    Worldstone switched off in its own menu may keep it (unconfirmed live;
+--    tools/ApiProbe logs Worldstone.get_status() for a running flag).
 --  * _G.Scavenger (marked _rosie=true) is published GRACE s after Rosie first
 --    saw Worldstone (or Navigator, whichever is later: a real Scavenger loads
 --    with Navigator). A real Scavenger is never overwritten. Out of effect
@@ -21,7 +23,8 @@
 --    table while published. There is no known unregister: it answers is_busy,
 --    so it is false out of effect.
 --  * is_busy: pickup worked a wanted drop (Pickup.step true) within DEBOUNCE s.
---    Never for the fight hold's busy-without-moving (a drop at the feet is
+--    Never for the fight hold's busy-without-moving (the transitional
+--    Pickup.fight_wait_busy of pickup/main.lua included; a drop at the feet is
 --    worked in a fight: busy for that moment), a paused, disabled or retired
 --    Rosie, the option off, a dead player, a loading screen or a town trip
 --    (the trip holds Navigator itself). C6: one busy episode ends after CAP s
@@ -216,8 +219,9 @@ end
 -- QQT_Warpigz_v3 1.0.22 (review): only drops Rosie would work now. None
 -- while out of effect, off, paused, dead, loading, on a town trip, in the
 -- cool-down, outside the orbwalker behavior or while an activity owns the
--- loot; never a drop the fight holds, nor a settled, exhausted, resting or
--- yielded one. Read at most every WANTED_TTL s; a copy for the caller.
+-- loot; never a drop the fight holds, nor a settled, exhausted or resting
+-- one, nor a yielded one farther than reach (pickup.lua: one in reach is
+-- still taken). Read at most every WANTED_TTL s; a copy for the caller.
 local function wanted_now()
     local now=now_s()
     if blocked()~=nil or cooling(now) or on('owned') or Settings.should_execute()~=true then S.wanted_at=nil;return {} end
