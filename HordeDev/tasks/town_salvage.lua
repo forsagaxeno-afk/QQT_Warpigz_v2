@@ -35,16 +35,17 @@ local function salvage_low_greater_affix_items_with_filter()
 
     local inventory_items = local_player:get_inventory_items()
     for _, inventory_item in pairs(inventory_items) do
+        repeat -- QQT_Warpigz_v3 2.2.5: `break` skips to the next item (CLAUDE.md: no jump labels)
         if inventory_item then
             -- Check if the item is locked
             if inventory_item:is_locked() then
                 tracker.keep_items = tracker.keep_items + 1
-                goto continue
+                break
             end
 
             if preserve_by_rarity(inventory_item) then
                 tracker.keep_items = tracker.keep_items + 1
-                goto continue
+                break
             end
 
             local skin_name = inventory_item:get_name()
@@ -54,7 +55,7 @@ local function salvage_low_greater_affix_items_with_filter()
             local filter_table = affix_filter:get_filter(skin_name)
             if type(filter_table) ~= "table" or next(filter_table) == nil then
                 tracker.keep_items = tracker.keep_items + 1
-                goto continue
+                break
             end
 
             -- Greater Affix check
@@ -87,7 +88,7 @@ local function salvage_low_greater_affix_items_with_filter()
                         if found_affixes >= settings.affix_salvage_count then
                             -- Keep item only if both Greater Affix and item affix conditions are met
                             tracker.keep_items = tracker.keep_items + 1
-                            goto continue
+                            break
                         end
                     end
                 end
@@ -100,7 +101,7 @@ local function salvage_low_greater_affix_items_with_filter()
                 loot_manager.salvage_specific_item(inventory_item)
             end
         end
-        ::continue::
+        until true
     end
 end
 
@@ -112,16 +113,17 @@ local function salvage_low_greater_affix_items()
 
     local inventory_items = local_player:get_inventory_items()
     for _, inventory_item in pairs(inventory_items) do
+        repeat -- QQT_Warpigz_v3 2.2.5: `break` skips to the next item (CLAUDE.md: no jump labels)
         if inventory_item then
             -- Check if the item is locked
             if inventory_item:is_locked() then
                 tracker.keep_items = tracker.keep_items + 1
-                goto continue
+                break
             end
 
             if preserve_by_rarity(inventory_item) then
                 tracker.keep_items = tracker.keep_items + 1
-                goto continue
+                break
             end
 
             local display_name = inventory_item:get_display_name()
@@ -129,7 +131,7 @@ local function salvage_low_greater_affix_items()
 
             if greater_affix_count >= settings.greater_affix_count and not inventory_item:is_junk() then
                 tracker.keep_items = tracker.keep_items + 1
-                goto continue
+                break
             end
 
             if affix_filter:is_uber_item(inventory_item:get_sno_id()) then
@@ -138,7 +140,7 @@ local function salvage_low_greater_affix_items()
                 loot_manager.salvage_specific_item(inventory_item)
             end
         end
-        ::continue::
+        until true
     end
 end
 

@@ -6,6 +6,8 @@
 --      loot_guard.ready let the exit go with the drop on the ground.
 --   Y2 the pending-drop hold stays bounded (a drop Rosie keeps wanting but
 --      never takes): Reaper 75 s, HordeDev 120 s.
+--   P1 [Coordinator review] only a pickup that can act now (status().ready)
+--      holds the exit for a pending drop; a paused Rosie does not.
 --   S1 [Coordinator request] a busy third-party Scavenger (Navigator's
 --      looter) holds every loot wait like a busy Looter: Reaper loot_ready,
 --      HordeDev loot_guard.ready, Pit exit_pit, Undercity can_exit; and the
@@ -79,13 +81,37 @@ case('Y2 a drop the Looter keeps wanting but never takes holds the exit only up 
         h.drop('pit', 6, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_032', refuse = function() return true end})
         h.G.LooteerPlugin = {get_enabled = function() return true end,
             is_actively_looting = function() return false end, is_idle = function() return true end,
-            evaluate_item = function() return true, 'wanted' end}
+            evaluate_item = function() return true, 'wanted' end,
+            status = function() return {ready = true} end}
         local ready = ready_fn(h, g)
         local t0 = h.now
         eq(ready(h), false, g[1] .. ': a pending drop holds the exit')
         ok(h.run_until(ready, g[4] + 20), g[1] .. ': bounded')
         local after = h.now - t0
         ok(after >= g[4] - 1 and after <= g[4] + 6, string.format('%s: released after %.1f s (bound %d s)', g[1], after, g[4]))
+    end
+end)
+
+case('P1 a pending drop does not hold the exit while the pickup cannot act (status().ready false)', function()
+    -- fake Looter: wants the drop, is not busy, and reports not ready (paused / menu / activity-owned)
+    for _, g in ipairs(GUARDS) do
+        local h = with_rosie({g[1]})
+        h.drop('pit', 6, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_033', refuse = function() return true end})
+        h.G.LooteerPlugin = {get_enabled = function() return true end,
+            is_actively_looting = function() return false end, is_idle = function() return true end,
+            evaluate_item = function() return true, 'wanted' end,
+            status = function() return {enabled = true, paused = true, ready = false, reason = 'paused'} end}
+        local ready = ready_fn(h, g)
+        ok(h.run_until(ready, 5), g[1] .. ': a paused pickup does not hold the exit (pre-fix: held until the bound)')
+    end
+    -- real Rosie, paused by a caller, with a drop it wants 6 m away
+    for _, g in ipairs(GUARDS) do
+        local h = with_rosie({g[1]})
+        h.drop('pit', 6, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_034', refuse = function() return true end})
+        eq(h.as(CONSUMER, function() return h.G.LooteerPlugin.acquire_pause('Consumer') end) ~= false, true, 'paused')
+        h.run(1)
+        local ready = ready_fn(h, g)
+        ok(h.run_until(ready, 6), g[1] .. ': paused Rosie does not hold the exit (pre-fix: held until the bound)')
     end
 end)
 
