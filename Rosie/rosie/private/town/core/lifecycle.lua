@@ -12,8 +12,18 @@ local events=require 'rosie.private.qqt_events' -- QQT_Warpigz_v3
 local foreign=require 'rosie.private.foreign' -- QQT_Warpigz_v3 1.0.21
 local M={}
 local retired=false
-local held_looter,legacy_resume,held_bat=nil,false,nil
+local held_looter,legacy_resume=nil,false
 local bat_checked=false
+-- QQT_Warpigz_v3 1.0.22: Batmobile keeps one shared pause flag. HR's
+-- patrol_move, an activity or Batmobile's own 1 s kept-pause fallback lifted
+-- Rosie's once-per-trip pause and Batmobile drove against Rosie's walks for
+-- the rest of the trip. While a trip holds its peers, Rosie now pauses a
+-- Batmobile that is not paused (at most every REPAUSE_EVERY s; the lift of
+-- Rosie's own pause is logged once per trip). `mine` is true while Rosie's
+-- pause is the last one it knows of: a pause that shows up after Rosie saw its
+-- own lifted is another caller's, and the trip end resumes only Rosie's.
+M.REPAUSE_EVERY=0.5
+local bat_hold={api=nil,mine=false,next_at=-math.huge,lift_logged=false,fail_logged=false}
 -- QQT_Warpigz_v2: a failed trip whose need remains latches the compatibility
 -- API for RETRY_COOLDOWN seconds, then allows another attempt; after
 -- MAX_FAIL_STREAK consecutive failures, or a non-transient failure (stash
@@ -177,16 +187,43 @@ function M.hold_peers()
             bat.stop_long_path(settings.plugin_label)
         end
     end
-    if not held_bat and type(bat.is_paused)=='function' and type(bat.pause)=='function'
-        and bat.is_paused()==false then
-        held_bat=bat
-        if bat.pause(settings.plugin_label)==false then error('Movement peer refused the service pause') end
+    -- QQT_Warpigz_v3 1.0.22: re-pause whenever the shared flag is down (was once per trip).
+    if type(bat.is_paused)~='function' or type(bat.pause)~='function' or bat.is_paused()~=false then return end
+    if bat_hold.mine and bat_hold.api==bat then
+        bat_hold.mine=false
+        if not bat_hold.lift_logged then
+            bat_hold.lift_logged=true
+            local ok,owner=false,nil
+            if type(bat.get_owner)=='function' then ok,owner=pcall(bat.get_owner) end
+            console.print('[Rosie] Another addon resumed Batmobile during the town trip'
+                ..(ok and owner~=nil and ' (movement owner: '..tostring(owner)..')' or '')..': pausing it again')
+        end
+    end
+    local now=get_time_since_inject()
+    if now<bat_hold.next_at then return end
+    bat_hold.next_at=now+M.REPAUSE_EVERY
+    local first=bat_hold.api==nil
+    -- Record the claim before the call: a peer may throw after acquiring it.
+    bat_hold.api,bat_hold.mine=bat,true
+    if first then
+        if bat.pause(settings.plugin_label)==false then bat_hold.mine=false; error('Movement peer refused the service pause') end
+        return
+    end
+    -- A re-pause runs inside the trip tick: a refusal is logged, never raised.
+    local ok,result=pcall(bat.pause,settings.plugin_label)
+    if ok and result==false then bat_hold.mine=false end
+    if (not ok or result==false) and not bat_hold.fail_logged then
+        bat_hold.fail_logged=true
+        console.print('[Rosie] Batmobile refused the town trip pause: '..tostring(ok and 'refused' or result))
     end
 end
 function M.release_peers()
-    local looter,resume,bat=held_looter,legacy_resume,held_bat
+    local looter,resume=held_looter,legacy_resume
     held_looter,legacy_resume=nil,false
-    held_bat=nil
+    -- QQT_Warpigz_v3 1.0.22: only a pause that is still Rosie's is resumed.
+    local bat=bat_hold.mine and bat_hold.api or nil
+    bat_hold.api,bat_hold.mine,bat_hold.next_at=nil,false,-math.huge
+    bat_hold.lift_logged,bat_hold.fail_logged=false,false
     bat_checked=false
     local function release(label,fn)
         pending_cleanup[#pending_cleanup+1]={label=label,run=fn}
