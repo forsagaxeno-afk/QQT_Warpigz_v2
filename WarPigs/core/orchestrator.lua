@@ -1884,6 +1884,53 @@ function dispatch.teleport_casting()
     return ok and id == dispatch.TELEPORT_SPELL_ID
 end
 
+-- QQT_Warpigz_v3 1.1.9: War Plan landing detection for TELEPORTING (Undercity
+-- teleport storm, audit/reviews/undercity_teleports_2026-09-28.md). A landing
+-- is a world/zone change seen on ANY tick (a Rosie hop between the 6 s
+-- samples no longer reads as "unchanged"), a world_id change, or a teleport
+-- cast (186139) that ended with a position jump (a same-zone landing).
+dispatch.LANDING_JUMP = 30.0   -- position change after a finished cast that counts as a landing
+dispatch.LINGER_FAST_MAX = 8   -- helltide-lingering fast Temis retries per TO_TEMIS, then the 30 s cadence
+local function player_place()
+    local ok, world, zone, id, pos = pcall(function()
+        local w, lp = get_current_world(), get_local_player()
+        local wid
+        if w and type(w.get_world_id) == 'function' then wid = w:get_world_id() end
+        return w and w:get_name(), w and w:get_current_zone_name(), wid, lp and lp:get_position()
+    end)
+    if not ok then return nil end
+    return world, zone, id, pos
+end
+-- Called whenever warplan.teleport_to_activity() fires (first call and retries).
+function dispatch.landing_snapshot(T, now)
+    local world, zone, id, pos = player_place()
+    T.snap_world, T.snap_zone, T.snap_world_id, T.snap_pos = world, zone, id, pos
+    T.fired_at, T.cast_seen, T.cast_hold_logged = now, false, false
+end
+-- Returns a landing reason or nil. Observes every tick while TELEPORTING.
+function dispatch.landing_seen(T)
+    local world, zone, id, pos = player_place()
+    if not world or not zone or world == '' or zone == '' or world == 'Limbo' or zone == '[sno none]' then return nil end
+    if world ~= T.snap_world or zone ~= T.snap_zone then return 'world/zone' end
+    if T.snap_world_id ~= nil and id ~= nil and id ~= T.snap_world_id then return 'world id' end
+    if dispatch.teleport_casting() then T.cast_seen = true; return nil end
+    if T.cast_seen then
+        T.cast_seen = false
+        local ok, d = pcall(function() return pos:dist_to(T.snap_pos) end)
+        if ok and type(d) == 'number' and d >= dispatch.LANDING_JUMP then return 'position jump after the cast' end
+    end
+    return nil
+end
+-- True (logged once per call) while our own teleport cast is still channelling.
+function dispatch.own_cast_hold(T, now)
+    if not (dispatch.teleport_casting() and T.fired_at and now - T.fired_at < dispatch.HORDE_CAST_CAP) then return false end
+    if not T.cast_hold_logged then
+        T.cast_hold_logged = true
+        log('teleport retry held — the War Plan teleport is still casting')
+    end
+    return true
+end
+
 -- C6: the current wait of the War Plan entry, shown at once in the status line.
 function dispatch.hwe_status(now, reason)
     dispatch.hwe.reason, dispatch.hwe.reason_at = reason, now
@@ -3102,9 +3149,8 @@ function orchestrator.tick()
             teleport_transition.retries    = 0
             dispatch.delivered             = false
             if _G.warplan and type(warplan.teleport_to_activity) == 'function' then
-                local snap_w = get_current_world()
-                teleport_transition.snap_world = snap_w and snap_w:get_name()
-                teleport_transition.snap_zone  = snap_w and snap_w:get_current_zone_name()
+                -- QQT_Warpigz_v3 1.1.9: world, zone, world_id, position, call time.
+                dispatch.landing_snapshot(teleport_transition, now_)
                 -- WPT-6: a throwing host binding must not escape tick().
                 local fired, err = pcall(warplan.teleport_to_activity)
                 if not fired then
@@ -3272,6 +3318,7 @@ function orchestrator.tick()
                         teleport_transition.last_temis_tp = now
                     end
                     teleport_transition.state      = 'TO_TEMIS'
+                    teleport_transition.linger_retries = 0 -- QQT_Warpigz_v3 1.1.9
                     teleport_transition.started_at = now
                     log('via-Temis preamble: teleport_to_waypoint(Temis) sent')
                 else
@@ -3315,13 +3362,23 @@ function orchestrator.tick()
             -- or a Looter pickup (bounded), and do not count the wait toward
             -- the retry timeout.
             teleport_transition.started_at = now
+        elseif dispatch.teleport_casting()
+            and (now - teleport_transition.last_temis_tp) < dispatch.HORDE_CAST_CAP
+        then
+            -- QQT_Warpigz_v3 1.1.9: our Temis cast is still channelling —
+            -- never re-fire into it (bounded by HORDE_CAST_CAP).
+            teleport_transition.started_at = now
         elseif helltide_lingering_post_quest(wants)
             and (now - teleport_transition.last_temis_tp) >= TEMIS_LINGER_RETRY_INTERVAL
+            and (teleport_transition.linger_retries or 0) < dispatch.LINGER_FAST_MAX
         then
             -- Helltide-lingering fast retry: the channel is being broken by
             -- ongoing damage from the 10s monster spawns and HR is off, so
             -- retry only after a full channel window has elapsed.
-            log('via-Temis preamble: helltide-lingering fast retry — re-firing waypoint')
+            -- QQT_Warpigz_v3 1.1.9: capped at LINGER_FAST_MAX, then the 30 s cadence.
+            teleport_transition.linger_retries = (teleport_transition.linger_retries or 0) + 1
+            log(string.format('via-Temis preamble: helltide-lingering fast retry %d/%d — re-firing waypoint',
+                teleport_transition.linger_retries, dispatch.LINGER_FAST_MAX))
             teleport_to_waypoint(TEMIS_WP)
             teleport_transition.last_temis_tp = now
             teleport_transition.started_at    = now
@@ -3446,6 +3503,8 @@ function orchestrator.tick()
         end
     end
     if teleport_transition.state == 'TELEPORTING' then
+        -- QQT_Warpigz_v3 1.1.9: observed every tick (one reading per tick).
+        local landing = dispatch.landing_seen(teleport_transition)
         -- If a deferred-disable is still pending, abort the teleport — the
         -- outgoing plugin (e.g. InfernalHordes) hasn't finished yet.
         local blocking_pending
@@ -3458,7 +3517,8 @@ function orchestrator.tick()
             teleport_pending               = false
             teleport_incoming_first_seen   = nil
             teleport_holding_logged        = false
-        elseif (now - teleport_transition.started_at) >= TELEPORT_CHECK_INTERVAL then
+        elseif landing or (now - teleport_transition.started_at) >= TELEPORT_CHECK_INTERVAL then
+            -- QQT_Warpigz_v3 1.1.9: a landing seen on any tick confirms at once.
             local w         = get_current_world()
             local cur_world = w and w:get_name()
             local cur_zone  = w and w:get_current_zone_name()
@@ -3480,6 +3540,7 @@ function orchestrator.tick()
             end
             local changed   = cur_world ~= teleport_transition.snap_world
                            or cur_zone  ~= teleport_transition.snap_zone
+                           or landing ~= nil
             -- Secondary confirmation: quest actor visible means we arrived even
             -- if world/zone didn't change (warplan teleported us to the same
             -- zone the actor lives in, e.g. Pit/Undercity → Temis while already
@@ -3499,13 +3560,16 @@ function orchestrator.tick()
                 teleport_transition.snap_zone  = nil
                 dispatch.delivered             = true  -- R2: counted by the next enable attempt
                 log(string.format('teleport confirmed (%s world=%s zone=%s) — releasing enable gate',
-                    arrived_now and 'arrived_when' or 'world/zone',
+                    arrived_now and 'arrived_when' or landing or 'world/zone',
                     tostring(cur_world), tostring(cur_zone)))
             else
                 teleport_transition.started_at = now
                 if dispatch.held('teleporting', dispatch.warplan_hold(wants, now, 'teleporting'), 'teleport retry held — ') then
                     -- WPD-1 / WPD-8: no retry over a companion's live work or
                     -- into a helltide off-window; the wait is not a retry.
+                elseif dispatch.own_cast_hold(teleport_transition, now) then
+                    -- QQT_Warpigz_v3 1.1.9: never re-fire into our own channel
+                    -- (bounded by HORDE_CAST_CAP), as hwe_deliver does.
                 elseif _G.warplan and type(warplan.teleport_to_activity) == 'function' then
                     -- WPT-6: bounded, protected retries. A binding that throws
                     -- or never moves the player releases the gate so the
@@ -3513,6 +3577,7 @@ function orchestrator.tick()
                     teleport_transition.retries = (teleport_transition.retries or 0) + 1
                     local fired, err = false, nil
                     if teleport_transition.retries <= dispatch.WARPLAN_MAX_RETRIES then
+                        dispatch.landing_snapshot(teleport_transition, now) -- QQT_Warpigz_v3 1.1.9
                         fired, err = pcall(warplan.teleport_to_activity)
                     end
                     if fired then
@@ -3728,6 +3793,7 @@ function orchestrator.release_all()
     teleport_holding_logged      = false
     teleport_transition.chest_hold_logged = nil
     teleport_transition.retries           = 0
+    teleport_transition.linger_retries    = 0 -- QQT_Warpigz_v3 1.1.9
     teleport_transition.state             = 'IDLE'
     teleport_transition.started_at        = -math.huge
     teleport_transition.snap_world        = nil
