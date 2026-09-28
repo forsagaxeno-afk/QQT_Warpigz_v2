@@ -24,6 +24,7 @@ One session owns all four. Notes for each are below.
   - Not changed: `alfred.lua` manual hop debounce stays 3 s; `test_secondpass_town.lua:132` (not ours) expects a retry at 3 s. Needs the test owner first.
 - Reaper 1.10.4: altar approach bounded (60 s no progress, Alfred yields don't reset it); a live boss fight on enable/reload is joined; the finishing teleport waits for live Alfred work (≤180 s). Test `test_reaper_audit_v3.lua`.
 - WonderCity 2.2.4: no new trip during a live boss fight (≤90 s); `walk_kurast` holds during a SilentRaven claim. Test `test_wondercity_audit_v3.lua`.
+- HordeDev `town_salvage.lua`: no `goto` (test `test_horde_salvage_v3.lua`). `loot_pending()` also requires `LooteerPlugin.status().ready` (P1).
 - Reaper/HordeDev exits wait for a drop Rosie yielded/rests (`evaluate_item(item,false) and evaluate_item(item,true)`), inside the 75/120 s bound. All four loot waits also hold on a busy `Scavenger.is_busy()`. Test `test_activities_loot_waits_v3.lua`.
 - Open LOWs (not done): 30 s bound on Pit/Undercity normal exit loot wait; `resume_key` never cleared after a trip that never returns; HordeDev tasks without pcall; log spam; actor-scan perf; custom explorer beacon_aside; `cross_traversal` vs `kill_boss`.
 

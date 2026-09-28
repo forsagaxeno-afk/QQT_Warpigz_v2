@@ -187,6 +187,12 @@ local function loot_pending()
     pending.at = now
     local ok, found = pcall(function()
         if type(looter.get_enabled) == 'function' and looter.get_enabled() ~= true then return false end
+        -- QQT_Warpigz_v3 1.10.4 (Coordinator review): only a pickup that can act now
+        -- (Rosie status().ready: enabled, not paused, not activity-owned, world
+        -- loaded, no menu open) holds the exit for a pending drop.
+        if type(looter.status) ~= 'function' then return false end
+        local st = looter.status()
+        if type(st) ~= 'table' or st.ready ~= true then return false end
         for _, item in pairs(actors_manager.get_all_items() or {}) do
             if looter.evaluate_item(item, false) and looter.evaluate_item(item, true) then return true end
         end
