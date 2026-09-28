@@ -24,13 +24,21 @@
 -- travel channel), Limbo, plugin reloads (widget values kept, as QQT keeps
 -- them by hash), full bag, a full lazy stash, elite packs, walls.
 --
--- Default (the suite, both runtimes): a few seeds, a short window across the
--- hour change, invariant hits reported and asserted against the known-issue
--- filters below. The sweep:
+-- Cinders held at :55 are lost (each hour's record: chests opened, cinders
+-- lost, the cheapest chest left closed). The menu is closed while farming.
+--
+-- Default (the suite, both runtimes): seeds 7 and 11 from minute 54 across
+-- the hour change, a forced Rosie trip 2.5 min into the new hour; every
+-- invariant hit is classified (KNOWN / DESIGN / OPEN, the CLASSES table) and
+-- an unclassified one fails. The sweep (one seed = world + chaos + rotation;
+-- the same seed replays exactly):
 --   QQT_SWEEP_SEEDS=1-20 QQT_SWEEP_HOURS=2 luajit -e "SUITE_ROOT='$PWD'" \
 --       audit/tests/test_sweep_S1_helltide_farm.lua
--- (QQT_SWEEP_START_MIN pins the start minute; QQT_SWEEP_ONLY=KIND,... prints
--- only those kinds; QQT_SWEEP_LOG=<file> writes each seed's full log.)
+-- (QQT_SWEEP_START_MIN pins the start minute; QQT_SWEEP_LOG=<prefix> writes
+-- each seed's full log to <prefix>.<seed>.log; QQT_INVARIANTS_LOG=<file>
+-- appends every hit, tab separated.)
+-- Minimised findings (assert the correct behaviour, fail on 3.3.6):
+--   QQT_SWEEP_REPRO=chest_pair|hour_end_tear|road_cost|all luajit ...
 -- Runs under Lua 5.4 and LuaJIT.
 SUITE_ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(SUITE_ROOT .. '/audit/tests/joint_host.lua')
@@ -647,19 +655,24 @@ repro('hour_end_tear', function()
     ok(drop.picked == true, 'the drop the tear pause held back is picked up before the :55 teleport\n' .. h.tail(20))
 end)
 
--- F3 (HelltideRevamped core/hr_roads.lua cost + core/hr_chest_order.lua
--- switch rule): the road cost to a chest starts at the loop point nearest
--- the player (nearest(), any lap). The recorded loops fold back on
--- themselves, so a few metres of movement can move that point to another
--- lap and change the cost by hundreds of metres. The chest order's
--- hysteresis (switch only for half the cost, at most 3 switches a minute)
--- then flips between two chests every 2 s and the third switch pins the
--- farther one for the rest of the minute. Sweep seed 1 (t=2336-2400, the
--- last-minutes dump of hour 1): Boots (-523,-609) road 383 m -> Boots
--- (-740,-594) road 622 m -> back -> (-740,-594) road 773 m, pinned 56 s;
--- the hour ended with 1156 cinders unspent and 75-cinder chests closed.
--- Here: the real jirandai loop, the player positions and chests of that run.
-repro('road_cost_flip', function()
+-- F3 (HelltideRevamped core/hr_roads.lua M.plan / M.cost, used by
+-- core/hr_chest_order.lua and the chest trips): the road route starts at the
+-- ONE loop point nearest the player and ends at the ONE nearest the chest.
+-- The recorded patrol loops pass the same places several times, so those
+-- points are often on different laps and the arc between them runs a long
+-- way round the 6.4-7.4 km loop. Sampled over all five loops (chest trips
+-- of 100 m or more, alternatives on the same level within 15 m of the
+-- player and 40 m of the chest): 22-48 % of the trips cost more than 1.5x
+-- the shortest road route (p90 2.2x-7.1x). A few metres of movement also
+-- move the start to another lap, so the cost jumps by hundreds of metres
+-- and the chest order's hysteresis (half the cost, 3 switches a minute)
+-- flips between two chests and pins the third pick. Sweep seed 1
+-- (t=2336-2400, the last-minutes dump of hour 1): Boots (-523,-609) road
+-- 383 m -> Boots (-740,-594) 622 m -> back -> 773 m, pinned 56 s; the hour
+-- ended with 1156 cinders unspent and 75-cinder chests closed. Seed 3:
+-- "Hell's Prize at 369m (road 3454m)", opened 523 s later.
+-- Here: the real jirandai loop, the player spots and chests of seed 1.
+repro('road_cost', function()
     local h = J.new({rosie = true, dirs = {'Batmobile', HR}, place = 'step', ordered_pairs = true, minute = 51})
     h.mod(HR, 'core.hr_clock')._now = function() return EPOCH0 + h.minute * 60 + math.floor(h.now) % 60 end
     local pts = loop_points('jirandai')
