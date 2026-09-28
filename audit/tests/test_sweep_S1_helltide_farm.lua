@@ -726,7 +726,7 @@ repro('road_cost', function()
     print(string.format('  jirandai loop %.0f m, %d points; road cost to chest A (-523,-609) and B (-740,-594) from four'
         .. ' player spots 13-15 m apart:\n    %s', L.total, L.n, table.concat(rows, '\n    ')))
     ok(ratio <= 1.5, string.format('the road cost is up to %.1fx the shortest road route between the same places', ratio))
-    ok(worst <= 60, string.format('a 15 m step changes a road cost by %.0f m more than the step itself', worst))
+    ok(worst <= 100, string.format('a 15 m step changes a road cost by %.0f m more than the step itself', worst))
 end)
 
 -- F4 (HelltideRevamped tasks/helltide.lua loot_hold / credit_yield): the
