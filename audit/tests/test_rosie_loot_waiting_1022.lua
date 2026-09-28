@@ -49,14 +49,36 @@ local function rosie_moves(h, since)
     return h.count(h.moves, function(m) return m.owner == 'Rosie' and m.t >= since end)
 end
 -- An elite fight_radius-close one way and a wanted drop 7 m (> FIGHT.feet) the other.
+-- L1-L4 test the target contract (Pickup.fight_wait_busy=false); L0 the
+-- transitional default (busy as before, plus has_pending_loot).
+local function target(h) h.mod('Rosie', 'rosie.private.pickup.src.pickup').fight_wait_busy = false end
 local function fight_wait(h)
     local enemy = h.actor('pit', 'Dark_Conjurer', 6, 0, {enemy = true, elite = true, health = 1e9})
     local item = h.drop('pit', -7, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_030'})
     return enemy, item
 end
 
+case('L0 transitional default: a fight wait still reports busy (exit guards keep waiting) and is also published as has_pending_loot()', function()
+    local h = new()
+    eq(h.mod('Rosie', 'rosie.private.pickup.src.pickup').fight_wait_busy, true, 'default until the exit guards read has_pending_loot')
+    local enemy, item = fight_wait(h)
+    local t0 = h.now
+    h.run(3)
+    eq(busy(h), true, 'busy during the fight wait (as in 1.0.21)')
+    eq(pending(h), true, 'has_pending_loot()')
+    eq(status(h).loot_waiting, true, 'status().loot_waiting')
+    eq(rosie_moves(h, t0), 0, 'no Rosie move during the fight')
+    enemy.health = 0; h.remove_actor(enemy)
+    ok(h.run_until(function() return item.picked == true end, 15), 'taken after the fight\n' .. h.tail(8))
+    h.run(0.3)
+    eq(pending(h), false, 'nothing pending afterwards')
+    eq(busy(h), false, 'not busy afterwards')
+    h.assert_clean('L0')
+end)
+
 case('L1 a drop that waits for the fight: not busy, idle, has_pending_loot and status().loot_waiting; taken after the fight, then no longer pending', function()
     local h = new()
+    target(h)
     local enemy, item = fight_wait(h)
     local t0 = h.now
     local busy_pulses, idle_false, pending_pulses, pulses = 0, 0, 0, 0
@@ -93,6 +115,7 @@ end)
 
 case('L2 a farm plugin that yields to a busy Looter keeps fighting; an exit guard that also reads has_pending_loot() waits for the drop', function()
     local h = new()
+    target(h)
     local enemy, item = fight_wait(h)
     -- Farm model: stands still (yields) while the Looter is busy, else walks
     -- to the enemy. Exit model (Reaper / HordeDev shape): leaves after 3 s
@@ -127,6 +150,7 @@ end)
 
 case('L3 the wait is not published while Rosie is off or pickup is paused (stale after 1 s), and is again when pickup resumes', function()
     local h = new()
+    target(h)
     fight_wait(h)
     h.run(3)
     eq(pending(h), true, 'waiting before the pause')
@@ -145,6 +169,7 @@ end)
 
 case('L4 (C6) an enemy that never dies: pending until the fight hold\'s 45 s cap, then the drop is taken and nothing is pending', function()
     local h = new()
+    target(h)
     local _, item = fight_wait(h)
     local t0 = h.now
     local busy_seen = false

@@ -325,6 +325,12 @@ local YIELD={confirm=0.3,rest=4,max=30,far=REACH+0.5,sent=1.5,moved=0.5,per_roun
 M.limits.fight_feet,M.limits.fight_calm,M.limits.fight_max=FIGHT.feet,FIGHT.calm,FIGHT.max
 M.limits.yield_rest,M.limits.yield_max=YIELD.rest,YIELD.max
 M.limits.yield_per_round=YIELD.per_round -- QQT_Warpigz_v3 1.0.23
+-- QQT_Warpigz_v3 1.0.22: a drop that waits for the fight is published as
+-- LooteerPlugin.has_pending_loot(). Until every exit guard (Arkham, Reaper,
+-- HordeDev, WonderCity, HelltideRevamped, SilentRaven, WarPigs) also reads
+-- it, the wait still reports busy too, or those exits would leave the drop.
+-- Set to false once they do (audit/BOARD.md): the farm plugin then fights.
+M.fight_wait_busy=true
 local function xy(v)
     local x,y=Utils.call(v,'x'),Utils.call(v,'y')
     if type(x)~='number' or type(y)~='number' then return nil end

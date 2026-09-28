@@ -115,7 +115,7 @@ function M.new(cached,conflict)
         local loot_status,get_setting=loot.status,loot.getSettings
         loot.status=function()
             local s=loot_status()
-            if not enabled() then s.enabled=false;s.ready=false;s.running=false;s.reason='disabled';s.detail='Rosie is off.' end
+            if not enabled() then s.enabled=false;s.ready=false;s.running=false;s.reason='disabled';s.detail='Rosie is off.';s.loot_waiting=false end -- loot_waiting: QQT_Warpigz_v3 1.0.22
             return s
         end
         loot.getSettings=function(key)
@@ -123,6 +123,8 @@ function M.new(cached,conflict)
             return get_setting(key)
         end
         local loot_enabled=loot.get_enabled
+        local loot_pending=loot.has_pending_loot -- QQT_Warpigz_v3 1.0.22: gated by the master switch like the other reads
+        if type(loot_pending)=='function' then loot.has_pending_loot=function() return enabled() and loot_pending()==true end end
         loot.get_enabled=function() return enabled() and loot_enabled() end
     end
     Movement.configure(function(owner)

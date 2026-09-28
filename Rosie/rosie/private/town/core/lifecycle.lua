@@ -23,6 +23,7 @@ local bat_checked=false
 -- pause is the last one it knows of: a pause that shows up after Rosie saw its
 -- own lifted is another caller's, and the trip end resumes only Rosie's.
 M.REPAUSE_EVERY=0.5
+local requesting=false -- QQT_Warpigz_v3 1.0.22: M.request's own hold_peers call
 local bat_hold={api=nil,mine=false,next_at=-math.huge,lift_logged=false,fail_logged=false}
 -- QQT_Warpigz_v2: a failed trip whose need remains latches the compatibility
 -- API for RETRY_COOLDOWN seconds, then allows another attempt; after
@@ -188,30 +189,37 @@ function M.hold_peers()
         end
     end
     -- QQT_Warpigz_v3 1.0.22: re-pause whenever the shared flag is down (was once per trip).
-    if type(bat.is_paused)~='function' or type(bat.pause)~='function' or bat.is_paused()~=false then return end
+    if type(bat.is_paused)~='function' or type(bat.pause)~='function' then return end
+    local okp,paused=pcall(bat.is_paused)
+    if not okp or paused~=false then return end
     if bat_hold.mine and bat_hold.api==bat then
         bat_hold.mine=false
         if not bat_hold.lift_logged then
             bat_hold.lift_logged=true
             local ok,owner=false,nil
             if type(bat.get_owner)=='function' then ok,owner=pcall(bat.get_owner) end
-            console.print('[Rosie] Another addon resumed Batmobile during the town trip'
-                ..(ok and owner~=nil and ' (movement owner: '..tostring(owner)..')' or '')..': pausing it again')
+            console.print('[Rosie] Batmobile\'s pause was lifted during the town trip'
+                ..(ok and owner~=nil and ' (movement owner: '..tostring(owner)..')' or '')..': Rosie pauses it again')
         end
     end
     local now=get_time_since_inject()
     if now<bat_hold.next_at then return end
     bat_hold.next_at=now+M.REPAUSE_EVERY
-    local first=bat_hold.api==nil
     -- Record the claim before the call: a peer may throw after acquiring it.
     bat_hold.api,bat_hold.mine=bat,true
-    if first then
+    -- Only the request's own claim raises (it refuses the trip); every other
+    -- call runs inside a trip tick, where a raise would switch Rosie off.
+    if requesting then
         if bat.pause(settings.plugin_label)==false then bat_hold.mine=false; error('Movement peer refused the service pause') end
         return
     end
     -- A re-pause runs inside the trip tick: a refusal is logged, never raised.
     local ok,result=pcall(bat.pause,settings.plugin_label)
-    if ok and result==false then bat_hold.mine=false end
+    if ok and result==false then bat_hold.mine=false
+    elseif not ok then
+        local okq,now_paused=pcall(bat.is_paused)
+        bat_hold.mine=okq and now_paused==true
+    end
     if (not ok or result==false) and not bat_hold.fail_logged then
         bat_hold.fail_logged=true
         console.print('[Rosie] Batmobile refused the town trip pause: '..tostring(ok and 'refused' or result))
@@ -313,7 +321,9 @@ function M.request(caller,callback,teleport,manual)
     local t0=get_time_since_inject()
     nav_hold.since,nav_hold.pulse,nav_hold.capped=t0,t0,false
     revive.since,revive.ignored=nil,false
+    requesting=true -- QQT_Warpigz_v3 1.0.22: see hold_peers
     local held,why=pcall(M.hold_peers)
+    requesting=false
     if not held then
         local reason='Cannot acquire service ownership: '..tostring(why)
         M.finish(false,reason)

@@ -81,6 +81,7 @@ local function main_pulse()
     -- status().loot_waiting, for exit checks; bounded by the fight hold's 45 s
     -- cap. fight_busy is the time of the last pulse that saw the wait.
     fight_busy=ItemManager.fight_waiting==true and get_time_since_inject() or false
+    if fight_busy and not wanted and Pickup.fight_wait_busy then Settings.get().looting=true end -- transitional, see pickup.lua
 end
 -- QQT_Warpigz_v3 1.0.22: a wait no pulse has confirmed for 1 s is stale (Rosie
 -- off, pickup paused / owned by an activity, reloaded).

@@ -27,7 +27,7 @@ local function case(name, fn)
     else failures[#failures + 1] = name .. ': ' .. tostring(err); print('FAIL batmobile hold: ' .. name .. ': ' .. tostring(err)) end
 end
 local BAT, ROSIE = 'Batmobile', 'alfred_the_butler'
-local LIFT_LOG = 'Another addon resumed Batmobile during the town trip'
+local LIFT_LOG = "Batmobile's pause was lifted during the town trip"
 local CONSUMER = {name = 'Consumer', dir = ROOT .. '/audit/tests/', loaded = {}}
 local function new()
     local h = J.new({rosie = true, dirs = {BAT}, place = 'pit'})
@@ -221,6 +221,28 @@ case('a Batmobile that refuses a re-pause never raises inside the trip tick', fu
     finish(h, r)
     ok(nav.paused == false, 'Batmobile left unpaused')
     h.assert_clean('refusal')
+end)
+
+case("the requester paused Batmobile, another addon lifts it and Rosie's first pause throws: logged, never raised in the trip tick", function()
+    local h, nav = new()
+    bat(h, 'pause', 'arkham_asylum')
+    fill_bag(h, 25)
+    local r = start_trip(h)
+    to_town(h, r)
+    local api = h.G.BatmobilePlugin
+    local real = api.pause
+    api.pause = function(caller)
+        if caller == ROSIE then error('boom') end
+        return real(caller)
+    end
+    bat(h, 'resume', 'helltide_revamped')
+    h.run(2)
+    api.pause = real
+    eq(h.logged('Batmobile refused the town trip pause'), 1, 'logged once')
+    ok(st(h).running == true or r.done, 'Rosie keeps running')
+    eq(#h.errors, 0, 'no Lua error from the trip tick')
+    finish(h, r)
+    h.assert_clean('first pause in tick')
 end)
 
 print(string.format('batmobile hold: %d checks, %d failures', checks, #failures))
