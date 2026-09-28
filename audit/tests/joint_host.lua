@@ -40,6 +40,11 @@
 --     seeded death / drop (Mythic, also inside a travel channel) / Limbo /
 --     plugin reload / full bag / lazy stash / elite pack / path obstacle.
 --   opts.virtual_os_clock (default with chaos): deterministic os.clock().
+--   (sweep S1) opts.reload_keeps_widgets: a reloaded plugin's widgets load
+--     the values their predecessors held (QQT keeps them by hash);
+--     opts.fast_globals: base names raw in the shared table (speed only);
+--     chaos.channel_drop_if(h, travel): where a channel drop may happen;
+--     a LEFT_DROP hit names the plugin whose teleport started the channel.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = {}
 
@@ -622,6 +627,14 @@ function J.new(opts)
     })
     local function host(name, val) rawset(G, name, val) end
     host('_G', G)
+    -- Sweep (opts.fast_globals, speed only): the Lua base names (pairs,
+    -- math, string, print, os, io ...) are copied into the shared table, so
+    -- a plugin's read of them skips the __index metamethod (about a fifth
+    -- of an hours-long run's CPU). Only an assignment to one of those names
+    -- is then no longer recorded in h.global_writes.
+    if opts.fast_globals then
+        for name, val in pairs(BASE) do rawset(G, name, val) end
+    end
 
     local function resolve(ctx, name)
         local rel = name:gsub('%.', '/')
@@ -742,9 +755,19 @@ function J.new(opts)
     if opts.rosie and not opts.shipped_defaults and persisted.Rosie_pickup_all_uniques == nil then
         persisted.Rosie_pickup_all_uniques = false
     end
+    -- Sweep (opts.reload_keeps_widgets): QQT keeps every menu value by its
+    -- hash for the session, so a widget created again by a plugin reload
+    -- (h.reload, chaos 'reload') loads the value its predecessor held. Off by
+    -- default: older reload scenarios keep the fresh-default model.
+    local live_widgets = {}
     local function stored(key, default)
+        if key ~= nil and opts.reload_keeps_widgets and live_widgets[key] then return live_widgets[key].v end
         if key == nil or persisted[key] == nil then return default end
         return persisted[key]
+    end
+    local function keep_live(key, w)
+        if key ~= nil and opts.reload_keeps_widgets then live_widgets[key] = w end
+        return w
     end
     -- Sweep: every checkbox is registered by its hash key (h.checkboxes[key]
     -- = {w, owner}) and each plugin's '*main_toggle' by folder (h.toggles),
@@ -752,7 +775,7 @@ function J.new(opts)
     -- without calling a plugin getter (several are not read-only).
     h.checkboxes, h.toggles = {}, {}
     host('checkbox', {new = function(_, d, key)
-        local w = widget(stored(key, d == true))
+        local w = keep_live(key, widget(stored(key, d == true)))
         local owner = loading or context
         if type(key) == 'string' then
             h.checkboxes[key] = {w = w, owner = owner and owner.name or '-'}
@@ -760,9 +783,17 @@ function J.new(opts)
         end
         return w
     end})
-    host('combo_box', {new = function(_, d, key) return widget(stored(key, d or 0)) end})
-    host('slider_int', {new = function(_, _, _, d) return widget(d) end})
-    host('slider_float', {new = function(_, _, _, d) return widget(d) end})
+    host('combo_box', {new = function(_, d, key) return keep_live(key, widget(stored(key, d or 0))) end})
+    -- slider:new(min, max, default, hash): the hash is used only with
+    -- opts.reload_keeps_widgets (sweep).
+    host('slider_int', {new = function(_, _, _, d, key)
+        if not opts.reload_keeps_widgets then return widget(d) end
+        return keep_live(key, widget(stored(key, d)))
+    end})
+    host('slider_float', {new = function(_, _, _, d, key)
+        if not opts.reload_keeps_widgets then return widget(d) end
+        return keep_live(key, widget(stored(key, d)))
+    end})
     host('tree_node', {new = function() return widget(false) end})
     host('button', {new = function() local w = widget(false); function w:render() return false end; return w end})
     host('input_text', {new = function(_, d) return widget(d or '') end})
@@ -2032,7 +2063,14 @@ function J.install_invariants(h, user, host)
         if tp.hit and tp.hit.dirty then write_env(tp.hit, true) end
         tp.calls, tp.hit, tp.origin, tp.origin_t = {}, nil, place, h.now
     end
-    function M.on_travel(travel) M.travel_started = h.now; M.travel_why = travel and travel.why end
+    function M.on_travel(travel)
+        M.travel_started = h.now; M.travel_why = travel and travel.why
+        -- Sweep: the plugin whose teleport call started this channel (same
+        -- frame), named in a LEFT_DROP hit ("cast by ...").
+        local c = tp.calls[#tp.calls]
+        local who = c and ((c.owner ~= '-' and c.owner) or c.context)
+        M.travel_by = (c and c.t == h.now) and (tostring(who) .. ' ' .. tostring(c.kind)) or nil
+    end
 
     -- LEFT_DROP --------------------------------------------------------------
     local left_seen = setmetatable({}, {__mode = 'k'})
@@ -2070,7 +2108,8 @@ function J.install_invariants(h, user, host)
     -- still stands in the place it leaves.
     function M.departing(travel)
         local ok, err = pcall(M.check_left, h.place, h.pos,
-            'leaving ' .. tostring(h.place.key) .. ' (' .. tostring(travel and travel.why) .. ')', 'leave')
+            'leaving ' .. tostring(h.place.key) .. ' (' .. tostring(travel and travel.why)
+                .. (M.travel_by and (', cast by ' .. M.travel_by) or '') .. ')', 'leave')
         if not ok then M.internal('departing: ' .. tostring(err)) end
     end
     -- mode 'mark': a cast out of the place; 'leave': the place is left.
@@ -2624,6 +2663,9 @@ function J.install_chaos(h, user, host)
         local allowed = false
         for _, k in ipairs(kinds) do if k == 'drop' then allowed = true end end
         if not allowed or h.place == P.limbo or h.place.town then return end
+        -- Sweep: c.channel_drop_if(h, travel) false = nothing can drop here
+        -- (a scenario's empty zone: no kill, no chest); no draw is spent.
+        if type(c.channel_drop_if) == 'function' and not c.channel_drop_if(h, travel) then return end
         if not chan.chance(c.channel_drop) then return end
         C.n = C.n + 1
         local n = C.n

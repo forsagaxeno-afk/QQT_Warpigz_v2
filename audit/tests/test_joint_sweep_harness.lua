@@ -364,5 +364,51 @@ case('V8 chaos: seeded, replayable, every kind, channel drops, lazy stash', func
     eq(#c.P.pit.items, 1, 'on the ground in the pit')
 end)
 
+-- Sweep S1 additions (test_sweep_S1_helltide_farm.lua): reload keeps the
+-- menu values, fast globals, a chaos channel-drop predicate, and the caster
+-- named in a LEFT_DROP hit.
+case('V9 reload_keeps_widgets, fast_globals, chaos channel_drop_if, LEFT_DROP names the caster', function()
+    local HR = 'HelltideRevamped'
+    local function reloaded(keep)
+        local h = J.new({dirs = {HR}, place = 'pit', reload_keeps_widgets = keep})
+        local e = el(h, HR)
+        e.main_toggle:set(true); e.tear_search_dist:set(150); e.mode:set(0)
+        h.reload(HR)
+        return el(h, HR)
+    end
+    local kept = reloaded(true)
+    eq(kept.main_toggle:get(), true, 'checkbox kept over a reload')
+    eq(kept.tear_search_dist:get(), 150, 'slider kept')
+    eq(kept.mode:get(), 0, 'combo kept')
+    local fresh = reloaded(nil)
+    eq(fresh.main_toggle:get(), false, 'default model: fresh widgets')
+    eq(fresh.tear_search_dist:get(), 110, 'default model: slider default')
+    -- fast globals: base names are raw fields of the shared table
+    local f = J.new({dirs = {}, fast_globals = true})
+    ok(rawget(f.G, 'pairs') ~= nil and rawget(f.G, 'math') ~= nil, 'base names copied')
+    eq(rawget(J.new({dirs = {}}).G, 'pairs'), nil, 'off by default')
+    -- channel_drop_if false: no drop, no draw spent
+    local function channel(pred)
+        local c = J.new({rosie = true, dirs = {}, place = 'pit',
+            chaos = {seed = 3, rate = 1e-9, channel_drop = 1, channel_drop_if = pred}})
+        c.pos = c.v(0, 0)
+        c.travel_to('temis', 1.0, 'waypoint')
+        c.run(0.9)
+        return c.logged('during the waypoint channel')
+    end
+    eq(channel(function() return false end), 0, 'predicate false: no channel drop')
+    eq(channel(function(hh) return hh.place.key == 'pit' end), 1, 'predicate true: the drop comes')
+    -- the caster of the travel is named
+    local h = J.new({rosie = true, dirs = {}, place = 'pit', invariants = true})
+    rosie_on(h, 15)
+    h.as(CONSUMER, function() return h.G.LooteerPlugin.acquire_pause('Consumer') end)
+    h.pos = h.v(0, 0)
+    h.drop('pit', 2, 0, {name = 'Helm_Legendary_Chaos', rarity = 5, ga = 3})
+    h.as(CONSUMER, function() return h.G.teleport_to_waypoint(0x76D58) end)
+    ok(h.run_until(function() return h.place == h.P.limbo end, 3), 'left the pit')
+    local hit = first_hit(h, 'LEFT_DROP')
+    ok(hit and hit.detail:find('(waypoint, cast by Consumer waypoint)', 1, true), 'caster named: ' .. tostring(hit and hit.detail))
+end)
+
 print(string.format('sweep harness: %d checks, %d failures', checks, #failures))
 if #failures > 0 then error(table.concat(failures, '\n')) end
