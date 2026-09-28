@@ -1,5 +1,5 @@
 -- ============================================================
---  Reaper  v1.10.3
+--  Reaper  v1.10.4
 --  by Magoogle
 --
 --  Flow per run:
@@ -315,7 +315,7 @@ on_render(function()
     end
 
     local x, y = 20, 60
-    graphics.text_2d("=== REAPER  v1.10.3  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
+    graphics.text_2d("=== REAPER  v1.10.4  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
     y = y + 20
     if activity_lease.reason then -- QQT_Warpigz_v3
         graphics.text_2d(activity_lease.reason, vec2:new(x, y), 13, color_yellow(255))
@@ -495,6 +495,6 @@ ReaperPlugin = {
 }
 
 console.print("=============================================")
-console.print("  Reaper  v1.10.3  by Magoogle  - Loaded")
+console.print("  Reaper  v1.10.4  by Magoogle  - Loaded")
 console.print("  Enable in menu to start reaping")
 console.print("=============================================")

@@ -206,7 +206,11 @@ end
 -- Hold a lair exit (town teleport / next-run teleport) while the Looter picks
 -- up the boss drops, then require LOOT_QUIET seconds of quiet. Bounded (C6):
 -- after LOOT_HOLD_MAX of continuous busy the exit proceeds with one log line.
-local LOOT_QUIET, LOOT_HOLD_MAX = 3, 30
+-- QQT_Warpigz_v3 1.10.4: Rosie (3.3.2) stays busy without moving while a
+-- drop waits out a fight near the player, for up to 45 s (its fight hold
+-- cap), and only then walks to it (20 s pickup episode). The old 30 s bound
+-- left the lair first and lost the drop; 75 s covers the cap plus a pickup.
+local LOOT_QUIET, LOOT_HOLD_MAX = 3, 75
 local loot = { quiet_since = nil, busy_since = nil, logged = false }
 
 function utils.loot_ready()
