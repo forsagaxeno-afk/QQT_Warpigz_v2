@@ -127,6 +127,7 @@ local function live_reason(reason)
     end
     return reason == 'alfred_busy' or reason == 'alfred_work_pending' or reason == 'war_pug_busy'
         or reason == 'looter_settling' or reason == 'silent_raven_busy'
+        or reason == 'scavenger_busy' or reason == 'butler_busy' -- QQT_Warpigz_v3 1.1.7
         or (type(reason) == 'string' and reason:find('looter_busy', 1, true) == 1)
 end
 local function companion_reason(reason)
@@ -174,6 +175,9 @@ local function companions_clear(advisory_idle, admitted_alfred, gate)
     local looting, source = M.looter_state()
     if looting == nil then return false, 'looter_status_unavailable' end
     if looting then return false, 'looter_busy:' .. source end
+    -- QQT_Warpigz_v3 1.1.7: third-party loot / town owners (bounded by wait_live).
+    if call(_G.Scavenger, 'is_busy') == true then return false, 'scavenger_busy' end
+    if call(_G.Butler, 'is_busy') == true then return false, 'butler_busy' end
     local creator = _G.WarPugPlugin
     if creator then
         local s = call(creator, 'status')

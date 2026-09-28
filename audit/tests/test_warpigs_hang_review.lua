@@ -12,6 +12,13 @@
 --   H4  SilentRaven status unreadable during a WarPigs-owned Whisper
 --       request: the bridge waited for a cancel confirmation forever and
 --       tick() returned early on every pulse.
+-- Auditor review of 1.1.7 (each case fails on the first 1.1.7 push):
+--   H5  the Temis Alfred budget counted wall time, so a long idle visit
+--       (turn-in, planning) spent it and the next plan got no Alfred cycle.
+--   H6  no teleport or Whisper walk waited for a busy third-party Scavenger
+--       (loot) or Butler (town trip).
+--   H7  HR reloaded while owned lost War Plan mode.
+--   H8  status() of an off WarPigs ran alfred_idle()'s hold clocks and logs.
 -- Loads the real orchestrator, SilentRaven bridge, turn-in task and external
 -- API with QQT-shaped host mocks (same fixture as the town integration test).
 local root = assert(SUITE_ROOT) .. '/WarPigs/'
@@ -289,7 +296,98 @@ case('H4 SilentRaven status unreadable during an owned request: bounded', functi
     f.e.SilentRavenPlugin.get_status = get_status
 end)
 
+-- ── H5 (Auditor, 1.1.7 review) ──────────────────────────────────────────────
+case('H5 the Temis Alfred budget counts busy time only, not a long idle visit', function()
+    local f = fixture({teleport = true})
+    f.plugin('ArkhamAsylumPlugin')
+    f.alfred({enabled = true, inventory_full = true}, 60, {'inventory_full'})
+    f.quests = {'WarPlans_QST_TurnIn_Rewards'}
+    truthy(f.until_true(function() return #f.alfred_calls == 1 end, 15), 'turn-in preamble triggers Alfred')
+    f.run(75)                                  -- a 60 s trip
+    f.quests = {}
+    f.run(150)                                 -- turn-in done, planning: Alfred idle
+    f.alfred_status.inventory_full = true      -- the rewards filled the bag
+    f.on_warplan = function() f.world = 'PIT_Test_World' end
+    f.quests = {'WarPlans_QST_ThePit'}
+    truthy(f.until_true(function() return #f.alfred_calls == 2 end, 30),
+        'the next plan still gets its Alfred cycle (60 s busy of 180 s used)')
+    eq(f.logged('Alfred budget of this Temis visit spent'), 0)
+end)
+
+-- ── H6 (Auditor MED: third-party Scavenger / Butler) ───────────────────────
+case('H6 a busy Scavenger / Butler holds the outgoing teleport, bounded', function()
+    local f = fixture({teleport = true, zone = 'Kehj_Somewhere', town = false})
+    f.plugin('ArkhamAsylumPlugin')
+    local scav, butler = true, false
+    f.e.Scavenger = {is_busy = function() return scav end}
+    f.e.Butler = {is_busy = function() return butler end}
+    f.quests = {'WarPlans_QST_ThePit'}
+    f.run(10)
+    eq(f.waypoints, 0, 'no via-Temis teleport while Scavenger collects')
+    truthy(f.logged('Scavenger collecting loot') >= 1, 'hold logged')
+    scav = false
+    truthy(f.until_true(function() return f.waypoints > 0 end, 5), 'teleport once Scavenger is done')
+
+    local g = fixture({teleport = true, zone = 'Kehj_Somewhere', town = false})
+    g.plugin('ArkhamAsylumPlugin')
+    g.e.Scavenger = {is_busy = function() return true end}  -- latched
+    g.quests = {'WarPlans_QST_ThePit'}
+    truthy(g.until_true(function() return g.waypoints > 0 end, 45), 'a latched Scavenger is bounded (30 s)')
+    eq(g.logged('Scavenger collecting loot for'), 1, 'expiry logged once')
+
+    local h = fixture({teleport = true, zone = 'Kehj_Somewhere', town = false})
+    h.plugin('ArkhamAsylumPlugin')
+    h.e.Butler = {is_busy = function() return true end}
+    h.e.Scavenger = {is_busy = function() error('broken addon') end}   -- guarded
+    h.quests = {'WarPlans_QST_ThePit'}
+    h.run(150)
+    eq(h.waypoints, 0, 'no teleport during a Butler town trip')
+    truthy(h.until_true(function() return h.waypoints > 0 end, 45), 'a Butler hold is bounded (180 s)')
+end)
+
+case('H6 the Whisper bridge waits for a busy Butler before walking', function()
+    local f = fixture({whispers = true})
+    f.sr()
+    local butler = true
+    f.e.Butler = {is_busy = function() return butler end}
+    f.run(15)
+    eq(f.sr_triggers, 0, 'no Whisper walk during a Butler trip')
+    butler = false
+    truthy(f.until_true(function() return f.sr_triggers == 1 end, 15), 'Whisper check after the Butler trip')
+end)
+
+-- ── H7 (Auditor LOW: HR reloaded while owned) ──────────────────────────────
+case('H7 HelltideRevamped reloaded while WarPigs owns it: War Plan mode re-asserted', function()
+    local f = fixture({zone = 'Hawe_Verge', town = false})
+    local function hr()
+        local p = f.plugin('HelltideRevampedPlugin')
+        p.ext = 0
+        p.set_external = function(on) if on then p.ext = p.ext + 1 end end
+        return p
+    end
+    local old = hr()
+    f.quests = {'WarPlans_QST_Helltide_TorturedGifts'}
+    truthy(f.until_true(function() return old.enables == 1 end, 10), 'HR enabled by WarPigs')
+    local new = hr(); new.enabled = true
+    f.run(5)
+    eq(new.ext, 1, 'set_external(true) once on the reloaded export')
+    eq(new.enables, 0, 'the running HR is not re-enabled')
+    eq(f.logged('was reloaded while WarPigs owns it'), 1)
+end)
+
+-- ── H8 (Auditor LOW: status() side effects) ────────────────────────────────
+case('H8 WarPigsPlugin.status() of an off WarPigs runs no Alfred hold clocks', function()
+    local f = fixture()
+    f.alfred({enabled = true, paused = true, paused_by = 'X', inventory_full = true})
+    f.e.require('gui').elements.main_toggle.get = function() return false end
+    for _ = 1, 20 do f.now = f.now + 0.5; f.e.WarPigsPlugin.status() end
+    eq(f.logged('Alfred is paused by'), 0, 'no hold clock / log from a status read')
+    eq(f.e.WarPigsPlugin.status().alfred_idle, nil, 'alfred_idle only while WarPigs is on')
+    f.e.require('gui').elements.main_toggle.get = function() return true end
+    eq(f.e.WarPigsPlugin.status().alfred_idle, false, 'an on WarPigs reports it')
+end)
+
 if #failures > 0 then
     error('WarPigs hang review failures:\n  ' .. table.concat(failures, '\n  '))
 end
-print('PASS WarPigs hang review: ' .. checks .. ' checks (H1 unclearable hard need, H2 latched live Alfred, H3 turn-in yield, H4 unreadable SilentRaven)')
+print('PASS WarPigs hang review: ' .. checks .. ' checks (H1 unclearable hard need, H2 latched live Alfred, H3 turn-in yield, H4 unreadable SilentRaven, H5 busy-time budget, H6 Scavenger/Butler, H7 HR reload, H8 pure status)')
