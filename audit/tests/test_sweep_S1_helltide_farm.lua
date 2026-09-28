@@ -647,6 +647,75 @@ repro('hour_end_tear', function()
     ok(drop.picked == true, 'the drop the tear pause held back is picked up before the :55 teleport\n' .. h.tail(20))
 end)
 
+-- F3 (HelltideRevamped core/hr_roads.lua cost + core/hr_chest_order.lua
+-- switch rule): the road cost to a chest starts at the loop point nearest
+-- the player (nearest(), any lap). The recorded loops fold back on
+-- themselves, so a few metres of movement can move that point to another
+-- lap and change the cost by hundreds of metres. The chest order's
+-- hysteresis (switch only for half the cost, at most 3 switches a minute)
+-- then flips between two chests every 2 s and the third switch pins the
+-- farther one for the rest of the minute. Sweep seed 1 (t=2336-2400, the
+-- last-minutes dump of hour 1): Boots (-523,-609) road 383 m -> Boots
+-- (-740,-594) road 622 m -> back -> (-740,-594) road 773 m, pinned 56 s;
+-- the hour ended with 1156 cinders unspent and 75-cinder chests closed.
+-- Here: the real jirandai loop, the player positions and chests of that run.
+repro('road_cost_flip', function()
+    local h = J.new({rosie = true, dirs = {'Batmobile', HR}, place = 'step', ordered_pairs = true, minute = 51})
+    h.mod(HR, 'core.hr_clock')._now = function() return EPOCH0 + h.minute * 60 + math.floor(h.now) % 60 end
+    local pts = loop_points('jirandai')
+    h.P.step.box = {-1300, -150, -900, -150}
+    h.P.step.spawn = h.v(pts[1][1], pts[1][2])
+    h.P.step.helltide = true
+    h.pos = h.v(-310.6, -601.5)
+    h.assert_clean('load')
+    h.mod(HR, 'gui').elements.main_toggle:set(true)
+    local tracker = h.mod(HR, 'core.tracker')
+    ok(h.run_until(function() return type(tracker.waypoints) == 'table' and #tracker.waypoints > 1000 end, 20),
+        'the jirandai loop is loaded\n' .. h.tail(10))
+    local roads = h.mod(HR, 'core.hr_roads')
+    local A, B = h.v(-523.0, -609.3), h.v(-740.3, -594.0)
+    local P = {h.v(-310.6, -601.5), h.v(-304.5, -615.2), h.v(-298.7, -602.0), h.v(-304.1, -615.3)}
+    -- The shortest road route over every loop point near the player (the
+    -- road's 40 m) and near the chest (its 80 m off-road), for comparison.
+    local L = h.as(HR, function() return roads.loop() end)
+    local function best_road(target, p)
+        local near_p, near_t = {}, {}
+        for i = 1, L.n do
+            local dp = math.sqrt((L.xs[i] - p:x()) ^ 2 + (L.ys[i] - p:y()) ^ 2)
+            local dt = math.sqrt((L.xs[i] - target:x()) ^ 2 + (L.ys[i] - target:y()) ^ 2)
+            if dp <= roads.ROAD_MAX then near_p[#near_p + 1] = {i, dp} end
+            if dt <= roads.OFFROAD_MAX then near_t[#near_t + 1] = {i, dt} end
+        end
+        local best = math.huge
+        for _, a in ipairs(near_p) do
+            for _, b in ipairs(near_t) do
+                local f = roads.arc(a[1], b[1], 1)
+                best = math.min(best, a[2] + math.min(f, L.total - f) + b[2])
+            end
+        end
+        return best
+    end
+    local rows, worst, ratio = {}, 0, 0
+    local prev
+    for i, p in ipairs(P) do
+        local ca = h.as(HR, function() return roads.cost(A, p) end)
+        local cb = h.as(HR, function() return roads.cost(B, p) end)
+        local ba, bb = best_road(A, p), best_road(B, p)
+        rows[#rows + 1] = string.format('P%d (%.1f, %.1f): A %.0f m (shortest road %.0f m, straight %.0f m), B %.0f m (%.0f m, %.0f m)',
+            i, p:x(), p:y(), ca, ba, p:dist_to_ignore_z(A), cb, bb, p:dist_to_ignore_z(B))
+        ratio = math.max(ratio, ca / ba, cb / bb)
+        if prev then
+            local moved = p:dist_to_ignore_z(P[i - 1])
+            worst = math.max(worst, math.abs(ca - prev.a) - moved, math.abs(cb - prev.b) - moved)
+        end
+        prev = {a = ca, b = cb}
+    end
+    print(string.format('  jirandai loop %.0f m, %d points; road cost to chest A (-523,-609) and B (-740,-594) from four'
+        .. ' player spots 13-15 m apart:\n    %s', L.total, L.n, table.concat(rows, '\n    ')))
+    ok(ratio <= 1.5, string.format('the road cost is up to %.1fx the shortest road route between the same places', ratio))
+    ok(worst <= 60, string.format('a 15 m step changes a road cost by %.0f m more than the step itself', worst))
+end)
+
 -- QQT_SWEEP_LIB=1: return the builders (scratch drivers, minimisation).
 if env('QQT_SWEEP_LIB') then
     return {J = J, build = build, setup = setup, run_seed = run_seed, summary = summary, classify = classify,
