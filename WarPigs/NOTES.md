@@ -1,11 +1,18 @@
-# WarPigs + WarPug: session notes (WarPigs 1.1.7, WarPug 1.0.16)
+# WarPigs + WarPug: session notes (WarPigs 1.1.9, WarPug 1.0.17)
 
 WarPigs is the orchestrator: it runs a War Plan (Pit, Helltide, Undercity, Hordes, bosses, Whispers) by driving the activity plugins through their APIs, and it calls Rosie for town trips. WarPug is the War Plan creator (planner).
 
 - `WarPigs/core/orchestrator.lua`: step machine; `core/external.lua`: the API, plus `WarPigsPlugin.peek()` (side-effect free; written for WarRoom, archived since 3.3.6).
 - Event bus: step_start / step_done are edges (`emitted_matches`), so they are not repeated per tick.
 - Joint tests: `audit/tests/test_joint_suite.lua`, `test_integration_warpug.lua`, `test_warpug.lua`, `test_activity_lease_joint.lua`.
-- Hang/loop regressions: `audit/tests/test_warpigs_hang_review.lua` (H1–H8), `test_warpug_alfred_bounds.lua` (P1–P4).
+- Hang/loop regressions: `audit/tests/test_warpigs_hang_review.lua` (H1–H8), `test_warpug_alfred_bounds.lua` (P1–P4); teleport casts: `test_warpigs_teleport_casts.lua` (C1–C3).
+
+## 1.1.9 Undercity teleport storm (2026-09-28, audit/reviews/undercity_teleports_2026-09-28.md)
+Fixed (each with a test that fails on 1.1.8):
+- C1 TELEPORTING: no War Plan retry while our own 186139 cast channels (`dispatch.own_cast_hold`, bounded by HORDE_CAST_CAP 15 s, logged once per call). Landing = world/zone change, world_id change, or a finished cast with a position jump ≥ `LANDING_JUMP` 30 (`dispatch.landing_snapshot` / `landing_seen`). A same-zone Temis landing is covered by world_id / position jump (no WonderCity-town lookup needed).
+- C2 TO_TEMIS: no waypoint re-fire while our cast channels (15 s); helltide-lingering fast retries capped at `LINGER_FAST_MAX` 8 per TO_TEMIS (logged `fast retry n/8`), then the 30 s timeout cadence.
+- C3 TELEPORTING observes the place every tick, so a Rosie hop back between the 6 s samples is seen as the landing.
+Live check: Undercity War Plan with Use teleport on → one `warplan.teleport_to_activity() called`, `teleport confirmed (…)`, no `teleport retry` lines.
 
 ## 1.1.7 hang/loop self-review (2026-09-28)
 Fixed (each with a test that fails on 1.1.6):

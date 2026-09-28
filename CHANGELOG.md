@@ -2,6 +2,23 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.7] — 2026-09-28
+
+### Fixed
+
+- **Rosie 1.0.24: a drop is no longer left behind by a town trip** (live: a Mythic that dropped during the Town Portal cast stayed on the ground).
+  - While Rosie prepares or casts the Town Portal, a wanted drop that fits the bag is picked up first; the cast waits (a cast in flight is not counted as a failed try). At most 20 s per trip.
+  - A drop the bag cannot take (the trip is for a full bag) is remembered and picked up on the way back through the portal (at most 30 s; skipped if the world changed).
+  - The Town Portal is no longer re-cast every 3 s while its own channel runs (up to 8 casts per trip before). This was one of the causes of "several teleports before the Undercity".
+  - A trip waits only for a drop pickup can take now (not for one held by a fight or refused).
+  - The stash limit is fixed at the game maximum of 350; the *Max stash items* slider is gone (a saved 300 no longer stops the stash).
+  - No "Item preview failed … waiting for a living player" line while the game loads.
+- **WarPigs 1.1.9: fewer teleports.** The War Plan / Temis teleport is no longer fired again while WarPigs' own teleport is still channelling (it waits up to 15 s); the fast "back to Temis" retry is capped and logged; a quick Rosie trip right after a landing no longer reads as a failed teleport.
+
+### Known issues
+
+- The first stash deposit of a visit can still be lost while the stash is loading (the same Mythic can stay in the bag). A rework of the stash deposit (from BetterAlfred) is in testing for 3.3.8.
+
 ## [3.3.6] — 2026-09-28
 
 ### Fixed
