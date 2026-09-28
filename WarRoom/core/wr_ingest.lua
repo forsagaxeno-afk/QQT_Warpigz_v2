@@ -325,11 +325,12 @@ end
 
 -- SilentRaven (whispers) ---------------------------------------------------
 -- result (SilentRaven fsm finish): 'success'; 'failed' | 'unconfirmed' (a
--- failed run); 'cancelled' and 'skipped_*' (nothing to claim, panel busy:
+-- failed run); 'cancelled', 'disabled' and 'skipped_*' (nothing to claim, panel busy:
 -- WarPigs looks again after every turn-in) are not runs.
 H['silentraven.whisper_claim'] = function(state, ev, now)
     local result = ev.result
-    if result == 'cancelled' or (type(result) == 'string' and result:sub(1, 8) == 'skipped_') then return end
+    -- QQT_Warpigz_v3 3.3.3: 'disabled' (the Enable toggle ended it) is no run either.
+    if result == 'cancelled' or result == 'disabled' or (type(result) == 'string' and result:sub(1, 8) == 'skipped_') then return end
     local ok = result == true or result == 'ok' or result == 'claimed' or result == 'success' or result == 'done'
     if ok then stats.extra_add(state, 'whispers', 'caches', 1) end
     local name = str(ev.name)

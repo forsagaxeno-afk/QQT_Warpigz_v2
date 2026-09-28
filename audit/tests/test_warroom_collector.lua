@@ -145,10 +145,10 @@ package.path = WR .. '?.lua;' .. package.path
 dofile(WR .. 'main.lua')
 ok(type(QQT_WarRoom) == 'table', 'QQT_WarRoom published')
 eq(QQT_WarRoom.dashboard_dir, WR .. 'dashboard/', 'dashboard_dir is the absolute WarRoom/dashboard/')
-eq(QQT_WarRoom.version, '1.0.2', 'version published')
+eq(QQT_WarRoom.version, '1.0.3', 'version published')
 ok(type(callbacks.update) == 'function' and type(callbacks.menu) == 'function', 'callbacks registered')
 local gui = require 'gui'
-eq(gui.version, 'v1.0.2', 'gui version string')
+eq(gui.version, 'v1.0.3', 'gui version string')
 eq(gui.elements.main_toggle:get(), true, 'Enable defaults to ON')
 eq(gui.elements.write_every:get(), 15, 'Write every defaults to 15 s')
 callbacks.menu()
@@ -714,6 +714,78 @@ do
     eq(QQT_WarRoom.enabled, false, 'A5: enabled is false before the first pulse when the toggle is off')
     checkbox.new, package.loaded.gui = saved_new, saved_gui
     callbacks.update, callbacks.menu = saved_cb[1], saved_cb[2]
+end
+
+-- E. QQT_Warpigz_v3 3.3.3 (WarRoom 1.0.3) -------------------------------------
+do
+    -- E1: a set charm (QQT rarity 7, Rosie utils) is its own rarity, never a
+    -- unique: it is not in the unique count nor on the drops list.
+    local ingest, stats = require 'core.wr_ingest', require 'core.wr_stats'
+    local st = collector.state()
+    local items = st.scopes.session.items
+    local unique, set, looted, ndrops = items.by_rarity.unique, items.by_rarity.set or 0, items.looted, #st.feed.drops
+    ingest.handle(st, {source = 'rosie', kind = 'pickup', name = 'Set Charm', rarity = 7, ga = 0}, EPOCH)
+    eq(items.looted, looted + 1, 'E1: the set charm is looted')
+    eq(items.by_rarity.unique, unique, 'E1: a set charm is not a unique')
+    eq(items.by_rarity.set, set + 1, 'E1: counted as set')
+    eq(#st.feed.drops, ndrops, 'E1: a set charm is not a notable drop')
+    local v = stats.view(st.scopes.session, st.flags, require 'core.wr_json')
+    eq(v.items.by_rarity.set, set + 1, 'E1: set in the payload view')
+    eq(stats.rarity('Set'), 'set', 'E1: string rarity Set')
+    eq(stats.rarity(6), 'unique', 'E1: rarity 6 stays unique'); eq(stats.rarity(8), 'mythic', 'E1: rarity 8 mythic')
+
+    -- E2: WarRoom never calls LooteerPlugin.status(): Rosie's pickup status
+    -- runs Settings.update() and expires other plugins' pauses, and WarRoom
+    -- never used what it returned.
+    local plugins = require 'core.wr_plugins'
+    local calls = 0
+    local saved = LooteerPlugin
+    LooteerPlugin = {status = function() calls = calls + 1; return {enabled = true} end}
+    plugins.read_all()
+    eq(calls, 0, 'E2: LooteerPlugin.status is never called')
+    LooteerPlugin = saved
+
+    -- E3: a claim ended by SilentRaven's Enable toggle is no run.
+    local wh = st.scopes.session.activities.whispers
+    local runs, failed_runs = wh.runs, wh.failed
+    ingest.handle(st, {source = 'silentraven', kind = 'whisper_claim', result = 'disabled'}, EPOCH)
+    eq(wh.runs, runs, 'E3: disabled is not a run'); eq(wh.failed, failed_runs, 'E3: nor a failure')
+
+    -- E4: a loaded scope with a string counter or a number in place of a
+    -- table restores only what fits, and the payload still builds.
+    local bad = {since = 1, totals = {gold = 'lots'}, items = {by_rarity = 5, looted = 'x'},
+        activities = {pit = {runs = 'many', ok = 2, extra = 7}}}
+    local sc = stats.restore_scope('alltime', bad, EPOCH)
+    eq(sc.totals.gold, 0, 'E4: string total ignored'); eq(type(sc.items.by_rarity), 'table', 'E4: by_rarity stays a table')
+    eq(sc.activities.pit.runs, 0, 'E4: string runs ignored'); eq(sc.activities.pit.ok, 2, 'E4: numbers restored')
+    eq(type(sc.activities.pit.extra), 'table', 'E4: extra stays a table')
+    local saved_scope = st.scopes.alltime
+    st.scopes.alltime = sc
+    ok(collector.render(EPOCH) ~= nil, 'E4: the payload builds with a restored bad scope')
+    stats.add_item(st, 'rare', 0, EPOCH)
+    st.scopes.alltime = saved_scope
+
+    -- E5: a payload that cannot be built is logged once.
+    local saved_build = payload.build
+    payload.build = function() error('probe') end
+    local n0 = #logs
+    collector.write(EPOCH); collector.write(EPOCH)
+    local lines = 0
+    for i = n0 + 1, #logs do if logs[i]:find('could not be built', 1, true) then lines = lines + 1 end end
+    eq(lines, 1, 'E5: one log line for a payload that cannot be built')
+    payload.build = saved_build
+end
+
+-- E6: a collector error switches WarRoom off, and QQT_WarRoom.enabled with it
+-- (HelltideRevamped writes hr_data.js only while it is true).
+do
+    local saved_tick = collector.tick
+    collector.tick = function() error('probe') end
+    QQT_WarRoom.enabled = true
+    gui.elements.main_toggle.v = true
+    callbacks.update()
+    eq(QQT_WarRoom.enabled, false, 'E6: enabled is false once the collector is off')
+    collector.tick = saved_tick
 end
 
 os.execute('rm -rf "' .. tmp .. '"')

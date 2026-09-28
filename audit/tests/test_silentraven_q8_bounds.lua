@@ -117,6 +117,30 @@ local GATES = {
         h.G.HelltideRevampedPlugin = {getState = function() return state end}
         return function() state = 'EXPLORE_HELLTIDE' end
     end},
+    -- QQT_Warpigz_v3 3.3.3: a third-party loop owning the run (Rosie defers
+    -- its own trip for it too) is never teleported away for a claim.
+    {'TristramLoop owns the run', 'another activity owns the run (TristramLoop, loop)', function(h)
+        local st = {running = true, owns_activity = true, phase = 'loop'}
+        h.G.TRISTRAM_LOOP_STATE = {status = function() return st end}
+        return function() st.owns_activity = false end
+    end},
+    -- QQT_Warpigz_v3 3.3.3 (auditor MED): third-party Butler / Scavenger /
+    -- Navigator (Worldstone) would interrupt the Town Portal cast.
+    {'Butler busy', 'a third-party addon is busy (butler_busy)', function(h)
+        local busy = true
+        h.G.Butler = {is_busy = function() return busy end}
+        return function() busy = false end
+    end},
+    {'Scavenger busy', 'a third-party addon is busy (scavenger_busy)', function(h)
+        local busy = true
+        h.G.Scavenger = {is_busy = function() return busy end}
+        return function() busy = false end
+    end},
+    {'Navigator walking for Worldstone', 'a third-party addon is busy (navigator_busy:Worldstone)', function(h)
+        local st = {is_busy = true, owner = 'Worldstone', priority = 0}
+        h.G.Navigator = {get_status = function() return st end}
+        return function() st.is_busy = false end
+    end},
     {'enemy close', 'enemies are close', function(h)
         local mob = h.actor('helltide', 'Probe_Enemy', h.pos:x() + 3, h.pos:y(), {enemy = true, health = 1e9})
         return function() h.remove_actor(mob) end
@@ -281,6 +305,163 @@ case('H Rosie names a refused hand-off (paused, visit handled, request pending) 
         end), 0, name .. ': no hand-off queued')
         eq(h.logged('[Rosie] waiting for SilentRaven'), 0)
     end
+end)
+
+-- QQT_Warpigz_v3 3.3.3: a third-party loop (TristramLoop, driven by
+-- Worldstone) that owns the run keeps SilentRaven's own auto-fire in Temis
+-- held (it would take movement away from it); the claim starts once it lets go.
+case('T auto-fire in Temis holds while TristramLoop owns the run', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.assert_clean('load')
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    local st = {running = true, owns_activity = true, phase = 'loop'}
+    h.G.TRISTRAM_LOOP_STATE = {status = function() return st end}
+    h.bounty_ready = true
+    h.run(70)
+    h.assert_clean('held')
+    eq(h.logged('[SilentRaven] claiming the Whisper reward'), 0, 'no claim while the loop owns the run\n' .. h.tail(20))
+    eq(h.logged('[SilentRaven] auto-fire waiting'), 1, 'one hold line after 60 s\n' .. h.tail(20))
+    ok(h.logged('activity_owner:TristramLoop') >= 1, 'the hold names the owner\n' .. h.tail(20))
+    st.owns_activity = false
+    ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward') == 1 end, 5),
+        'the claim starts once the loop lets go\n' .. h.tail(20))
+end)
+
+-- QQT_Warpigz_v3 3.3.3 (auditor HIGH): auto-fire in Temis waits for Butler's
+-- trip, Scavenger's pickup and a moving Navigator of another owner; a paused
+-- Navigator moves nobody. While our claim runs, the Navigator pause condition
+-- 'SilentRaven' holds Navigator.
+case('N auto-fire in Temis waits for Butler / Scavenger / a moving Navigator; our claim pauses Navigator', function()
+    local movers = {
+        {'butler_busy', function(h, f) h.G.Butler = {is_busy = function() return f.on end} end},
+        {'scavenger_busy', function(h, f) h.G.Scavenger = {is_busy = function() return f.on end} end},
+        {'navigator_busy:Butler', function(h, f) h.G.Navigator = {get_status = function()
+            return {is_busy = f.on, owner = 'Butler', priority = 10} end} end},
+    }
+    for _, m in ipairs(movers) do
+        local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+        h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+        local f = {on = true}
+        m[2](h, f)
+        h.bounty_ready = true
+        h.run(20)
+        h.assert_clean(m[1])
+        eq(h.logged('[SilentRaven] claiming the Whisper reward'), 0, m[1] .. ': no claim while busy\n' .. h.tail(20))
+        f.on = false
+        ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward') == 1 end, 5),
+            m[1] .. ': the claim starts once it is idle\n' .. h.tail(20))
+    end
+    -- A paused Navigator (Worldstone's looting pause) does not hold the claim;
+    -- the claim registers its pause condition and it holds while the claim runs.
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    local cond = {}
+    h.G.Navigator = {get_status = function() return {is_busy = true, is_paused = true, owner = 'Worldstone'} end,
+        set_pause_condition = function(name, fn) cond[name] = fn end}
+    h.bounty_ready = true
+    local held_while_running = false
+    ok(h.run_until(function()
+        local s = h.as(SR, function() return h.G.SilentRavenPlugin.get_status() end)
+        if s.running and cond.SilentRaven and cond.SilentRaven() == true then held_while_running = true end
+        return h.logged('[SilentRaven] run finished') > 0
+    end, 60), 'the claim ran next to a paused Navigator\n' .. h.tail(20))
+    ok(type(cond.SilentRaven) == 'function', 'pause condition SilentRaven registered')
+    ok(held_while_running, 'Navigator is held while the claim runs')
+    eq(cond.SilentRaven(), false, 'and released after it')
+end)
+
+-- QQT_Warpigz_v3 3.3.3 (auditor LOW): with a companion holding the auto-fire
+-- in Temis, the checks (WarPigs status, ally-actor scan) run at the
+-- ready-check rate, not on every frame.
+case('P held auto-fire in Temis is checked at the ready-check rate, not per frame', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    h.G.LooteerPlugin = {is_actively_looting = function() return true end}
+    local calls = 0
+    h.G.WarPigsPlugin = {status = function() calls = calls + 1; return {enabled = false} end}
+    h.bounty_ready = true
+    h.run(2)
+    calls = 0
+    h.run(10)
+    -- 2 Hz each: the delegation cache, can_start and the WarPigs companion check.
+    ok(calls <= 65, 'WarPigs status calls in 10 s while held: ' .. calls)
+end)
+
+-- QQT_Warpigz_v3 3.3.3 (auditor LOW): a queued request paused by its owner's
+-- 'yield:' guard answer is published (get_status().yielding), so the activity
+-- plugins' raven_claim_active() need not hold their Temis steps for it.
+case('Y a queued request paused by a yield: guard is published as yielding', function()
+    local h = J.new({dirs = {SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    h.mod(SR, 'silent_raven.gui').elements.auto_fire_toggle:set(false)
+    h.bounty_ready = true
+    h.run(1)
+    local answer = 'yield:looter_busy'
+    local accepted = h.as(SR, function()
+        return h.G.SilentRavenPlugin.trigger_tasks('Probe', function() end, function() return false, answer end)
+    end)
+    eq(accepted, true, 'queued')
+    h.run(3)
+    local s = h.as(SR, function() return h.G.SilentRavenPlugin.get_status() end)
+    eq(s.pending, true, 'still queued'); eq(s.running, false, 'not started')
+    eq(s.yielding, true, 'published as yielding')
+    answer = nil
+    h.run(1)
+    s = h.as(SR, function() return h.G.SilentRavenPlugin.get_status() end)
+    ok(s.yielding ~= true, 'not yielding once the request ended or resumed')
+end)
+
+-- QQT_Warpigz_v3 3.3.3 (auditor LOW): an owner's cancel (Rosie after its
+-- hand-off wait) and the Enable toggle end a run through the FSM: one
+-- whisper_claim event, and the visit latched once an accept was sent.
+case('C cancel and disable after an accept emit the event and latch the visit', function()
+    for _, how in ipairs({'cancel', 'disable'}) do
+        local h = J.new({dirs = {SR}, place = 'temis'})
+        local g = h.mod(SR, 'silent_raven.gui').elements
+        g.main_toggle:set(true)
+        g.auto_fire_toggle:set(false)
+        local bus = {seq = 0, ring = {}, max = 512}
+        h.G.QQT_Warpigz_events = bus
+        h.bounty_ready = true
+        h.deliver_reward = function() end -- the accept is sent, the cache never arrives
+        h.run(1)
+        eq(h.as(SR, function() return h.G.SilentRavenPlugin.trigger_tasks('Probe', function() end) end), true)
+        ok(h.run_until(function()
+            local s = h.as(SR, function() return h.G.SilentRavenPlugin.get_status() end)
+            return s.state == 'API_CLAIMING'
+        end, 60), how .. ': accept sent\n' .. h.tail(20))
+        if how == 'cancel' then
+            eq(h.as(SR, function() return h.G.SilentRavenPlugin.cancel('Probe') end), true)
+        else
+            g.main_toggle:set(false)
+        end
+        h.run(1)
+        local claims = 0
+        for i = 1, bus.seq do
+            local e = bus.ring[i]
+            if e and e.source == 'silentraven' and e.kind == 'whisper_claim' then claims = claims + 1 end
+        end
+        eq(claims, 1, how .. ': one whisper_claim event')
+        local s = h.as(SR, function() return h.G.SilentRavenPlugin.get_status() end)
+        eq(s.last_zone_handled, 'Skov_Temis', how .. ': the visit is latched after an accept')
+    end
+end)
+
+-- QQT_Warpigz_v3 3.3.3 (auditor MED): a claim trip the town service ends
+-- before any teleport is not counted against the trip limit.
+case('K a claim trip ended before any teleport is not counted', function()
+    local h = host({rosie = false, dirs = {SR}})
+    local calls = 0
+    local api = {
+        get_status = function() return {enabled = true, name = 'StubTown', raven_handoff = 'stub_town', allow_external = true} end,
+        trigger_tasks_with_teleport = function(caller, cb) calls = calls + 1; cb('cancelled'); return true end,
+    }
+    h.G.AlfredTheButlerPlugin, h.G.PLUGIN_alfred_the_butler = api, api
+    h.set_quests({{name = 'Bounty_Meta_Quest', objectives = {{text = 'Соберите Мрачную Благосклонность (10/10)'}}}})
+    h.run(200)
+    h.assert_clean('K')
+    ok(calls >= 2, 'a trip that never teleported does not use up the inferred limit (trips: ' .. calls .. ')\n' .. h.tail(20))
+    ok(h.logged('no teleport, not counted') >= 1, 'logged as not counted')
 end)
 
 if #failures > 0 then error(table.concat(failures, '\n')) end

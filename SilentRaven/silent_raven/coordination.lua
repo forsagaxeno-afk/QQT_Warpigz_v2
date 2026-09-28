@@ -239,18 +239,75 @@ local function war_pigs_reason()
     return nil
 end
 
--- mode 'auto'   : new auto-fire (WarPigs, WarPug, Alfred incl. hard need, Looter)
+-- QQT_Warpigz_v3 3.3.3: a third-party loop (TristramLoop, driven by
+-- Worldstone) that owns the run, as Rosie reads it (it defers its own
+-- automatic trip for it). Returns its label or nil. A run of ours never starts
+-- over it: the reward stays ready for a later Temis visit or a Rosie trip.
+function M.activity_owner()
+    local peer = rawget(_G, 'TRISTRAM_LOOP_STATE')
+    if type(peer) ~= 'table' or type(peer.status) ~= 'function' then return nil end
+    local ok, st = pcall(peer.status)
+    if ok and type(st) == 'table' and st.running and st.owns_activity then
+        return 'TristramLoop' .. (type(st.phase) == 'string' and (', ' .. st.phase) or '')
+    end
+    return nil
+end
+
+-- QQT_Warpigz_v3 3.3.3: third-party movers and town services (closed
+-- .pak addons; docs/THIRD_PARTY_APIS.md). Every call is guarded and pcall'd.
+-- Butler.is_busy(): its town trip walks Temis through Navigator (priority 10).
+-- Scavenger.is_busy(): Navigator's looter owns the drops.
+-- Navigator.get_status(): busy and not paused for another owner (Worldstone
+-- walking to its portal, Butler's in-town walk). A paused Navigator (our own
+-- pause condition during a claim, Worldstone's looting pause) moves nobody.
+-- Returns a hold reason or nil.
+local function third_call(name, fn)
+    local obj = rawget(_G, name)
+    if type(obj) ~= 'table' or type(obj[fn]) ~= 'function' then return nil end
+    local ok, v = pcall(obj[fn])
+    if ok then return v end
+    return nil
+end
+function M.third_party_reason()
+    if third_call('Butler', 'is_busy') == true then return 'butler_busy' end
+    if third_call('Scavenger', 'is_busy') == true then return 'scavenger_busy' end
+    local st = third_call('Navigator', 'get_status')
+    if type(st) == 'table' and st.is_busy == true and st.is_paused ~= true and st.owner ~= 'SilentRaven' then
+        return 'navigator_busy:' .. tostring(st.owner or '?')
+    end
+    return nil
+end
+-- Navigator pause condition 'SilentRaven': Navigator stands still while a
+-- claim of ours runs (not while it yields: Butler walks through Navigator).
+-- Registered once per Navigator table (it loads after SilentRaven).
+local nav_registered = nil
+function M.register_navigator()
+    local nav = rawget(_G, 'Navigator')
+    if type(nav) ~= 'table' or nav_registered == nav or type(nav.set_pause_condition) ~= 'function' then return end
+    nav_registered = nav
+    pcall(nav.set_pause_condition, 'SilentRaven', function()
+        return tracker.running == true and tracker.yield_since == nil
+    end)
+end
+
+-- mode 'auto'   : new auto-fire (WarPigs, a third-party loop, WarPug, Alfred incl. hard need, Looter)
 -- mode 'delegated': a claim WarPigs delegates during its activity (as 'auto'
 --                 without WarPigs, which owns no Temis movement then) -- QQT_Warpigz_v3 (Q8)
 -- mode 'manual' : explicit keybind (WarPug, Alfred live work, Looter)
 -- mode 'run'    : mid-run yield of our own run (Alfred live work, Looter)
+-- Every mode also waits for Butler, Scavenger and a moving Navigator (3.3.3).
 -- Returns true, or false plus the hold reason.
 function M.companions(mode, now)
     now = now or clock()
     local reason
     if mode == 'auto' then reason = war_pigs_reason() end
+    if not reason and (mode == 'auto' or mode == 'delegated') then -- QQT_Warpigz_v3 3.3.3
+        local owner = M.activity_owner()
+        if owner then reason = 'activity_owner:' .. owner end
+    end
     if not reason and mode ~= 'run' then reason = war_pug_reason(now) end
     reason = reason or alfred_reason(now, mode ~= 'auto' and mode ~= 'delegated') or looter_reason(now) -- QQT_Warpigz_v3 (Q8)
+        or M.third_party_reason() -- QQT_Warpigz_v3 3.3.3: every mode (auto, delegated, manual, mid-run yield)
     if reason then return false, reason end
     return true
 end

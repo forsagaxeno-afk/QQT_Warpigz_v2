@@ -15,9 +15,23 @@ local function escape_char(c)
     return ESCAPES[c] or format('\\u%04x', c:byte())
 end
 
+-- QQT_Warpigz_v3 3.3.3 (WarRoom 1.0.3): a string with nothing to escape
+-- (almost all of them) skips gsub, and object keys are encoded once (a
+-- full dashboard encoded in ~4.4 ms, on the game thread every write).
+local find = string.find
 function M.string(s)
-    local text = tostring(s):gsub('[%c"\\]', escape_char)
-    return '"' .. text .. '"'
+    s = tostring(s)
+    if not find(s, '[%c"\\]') then return '"' .. s .. '"' end
+    return '"' .. s:gsub('[%c"\\]', escape_char) .. '"'
+end
+local KEYS = {} -- bounded: the payload has a fixed key set (plus boss names)
+local key_count = 0
+local function key_string(k)
+    local text = KEYS[k]
+    if text then return text end
+    text = M.string(k) .. ':'
+    if key_count < 4096 then KEYS[k], key_count = text, key_count + 1 end
+    return text
 end
 
 function M.number(n)
@@ -47,8 +61,7 @@ local function encode_object(t, depth, out)
     out[#out + 1] = '{'
     for i, k in ipairs(keys) do
         if i > 1 then out[#out + 1] = ',' end
-        out[#out + 1] = M.string(k)
-        out[#out + 1] = ':'
+        out[#out + 1] = key_string(k)
         encode(t[k], depth + 1, out)
     end
     out[#out + 1] = '}'

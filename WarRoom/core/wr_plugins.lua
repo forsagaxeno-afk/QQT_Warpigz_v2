@@ -1,7 +1,8 @@
 -- QQT_Warpigz_v3: WarRoom reads the other plugins' published status tables
 -- (every call protected, nothing is ever called that changes a plugin:
 -- WarPigs is read through its side-effect-free peek(), never status(),
--- which runs WarPigs' alfred_idle() hold clocks).
+-- which runs WarPigs' alfred_idle() hold clocks; LooteerPlugin.status()
+-- is never called).
 -- read_all() returns key -> {present, enabled, busy, ver, task, st} and
 -- conditions() the alert conditions they report right now.
 local M = {}
@@ -69,10 +70,9 @@ local function read_one(p)
     if type(st.version) == 'string' then r.ver = st.version:gsub('^v', '') end
     local task = text(st.task) or (type(st.state) == 'string' and st.state) or (type(st.status) == 'string' and st.status)
     if task then r.task = (task:gsub('^Current Task: ', '')) end
-    if p.key == 'rosie' then
-        local looter = call(rawget(_G, 'LooteerPlugin'), 'status')
-        if type(looter) == 'table' then r.looter = looter end
-    end
+    -- QQT_Warpigz_v3 3.3.3 (WarRoom 1.0.3): LooteerPlugin.status() is not read:
+    -- it runs Rosie's pickup Settings.update() and expires other plugins'
+    -- pickup pauses, and nothing here used its result.
     return r
 end
 

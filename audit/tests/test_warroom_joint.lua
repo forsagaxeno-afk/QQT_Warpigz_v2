@@ -165,7 +165,16 @@ case('W1 a War Plan day with WarRoom loaded: suite_data.js counters match what h
     local Q = {pit = 'WarPlans_QST_ThePit', uc = 'WarPlans_QST_Undercity', boss = 'WarPlans_QST_BossLair_Andariel',
         ht = 'WarPlans_QST_Helltide_TorturedGifts', turn = 'WarPlans_QST_TurnIn_Rewards'}
     local DEST = {[Q.uc] = 'kurast', [HORDE_Q] = 'bsk', [Q.boss] = 'lair', [Q.ht] = 'helltide'}
-    local h = J.new({dirs = with_warroom({WR}), rosie = true, virtual_os_time = true})
+    -- QQT_Warpigz_v3 3.3.3: deterministic like W2 (CI failed W1 once under
+    -- Lua 5.4 only): sorted pairs, the simulated clock for CPU budgets, and one
+    -- fixed epoch.
+    local h = J.new({dirs = with_warroom({WR}), rosie = true, virtual_os_time = true, ordered_pairs = true})
+    h.G.os.clock = function() return h.now end
+    local real_time = os.time
+    h.G.os.time = function(t) if t ~= nil then return real_time(t) end return 1790500000 + math.floor(h.now) end
+    -- WarRoom's scopes began at load on the wall clock: begin them again on
+    -- the fixed epoch (a scope that begins after a run counts that run again).
+    h.mod(WR, 'core.wr_collector').init({load = false})
     h.assert_clean('load')
     local room = rawget(h.G, 'QQT_WarRoom')
     ok(type(room) == 'table' and room.dashboard_dir == ROOT .. '/WarRoom/dashboard/', 'QQT_WarRoom.dashboard_dir: '

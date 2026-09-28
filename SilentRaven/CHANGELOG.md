@@ -1,3 +1,12 @@
+# 0.2.6 — QQT_Warpigz_v3 3.3.3
+
+- A third-party loop that owns the run (`TRISTRAM_LOOP_STATE.status().owns_activity`, TristramLoop driven by Worldstone) is never interrupted: the claim trip waits (`claim trip waits because another activity owns the run (TristramLoop, …)`) and auto-fire in Temis holds (`activity_owner:TristramLoop`). Rosie already deferred its own trips for it; SilentRaven asked Rosie to teleport away after 5 min of a ready reward. The reward stays ready for a later Temis visit or a Rosie trip's hand-off.
+- Third-party Butler, Scavenger and Navigator (closed addons, `docs/THIRD_PARTY_APIS.md`): auto-fire, the keybind and the mid-run yield wait while `Butler.is_busy()`, `Scavenger.is_busy()` or Navigator moves for another owner (busy and not paused); the claim trip waits for them too (one line each). While a claim runs (not while it yields), the Navigator pause condition `SilentRaven` holds Navigator.
+- A claim trip that ended before any teleport is not counted against the trip limit.
+- Held auto-fire in Temis is checked at 2 Hz, not every frame (WarPigs status calls 22/s → 6/s).
+- `get_status().yielding`: a request paused by its owner's `yield:` guard answer.
+- An owner's cancel (Rosie after its hand-off wait) and the Enable toggle end a run through the FSM: the `whisper_claim` event, and the visit latched once an accept was sent. The run timeout is 90 s (Rosie waits 100 s).
+
 # 0.2.0 — QQT_Warpigz_v2 2.1.0 integration
 
 - A reward card is rejected only when it is explicitly invalid (`valid` false/0) or has no readable SNO; a missing `valid` field no longer rejects every card (live `failed (no_valid_reward)` on a normal 4-card panel). Numeric-string SNOs are accepted.

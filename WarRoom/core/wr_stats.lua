@@ -10,7 +10,9 @@ local M = {
     ACTIVITIES = {'pit', 'helltide', 'undercity', 'hordes', 'bosses', 'whispers'},
     BEST_LABEL = {pit = 'Tier', helltide = 'Cinders', undercity = 'Floor', hordes = '', bosses = '', whispers = ''},
     TOTALS = {'gold', 'gold_spent', 'xp', 'levels', 'paragon', 'deaths', 'obols', 'materials', 'glyph_xp'},
-    RARITIES = {'mythic', 'unique', 'legendary', 'rare', 'magic', 'common'},
+    -- QQT_Warpigz_v3 3.3.3 (WarRoom 1.0.3): 'set' (QQT rarity 7, set charms)
+    -- was counted as unique.
+    RARITIES = {'mythic', 'unique', 'set', 'legendary', 'rare', 'magic', 'common'},
     FATES = {'salvaged', 'sold', 'stashed'},
     HOURLY_MAX = 48,
     DAILY_MAX = 30,
@@ -40,14 +42,17 @@ local function n(v)
 end
 
 -- Copy the numbers of a loaded (untrusted) scope onto a fresh one.
+-- QQT_Warpigz_v3 3.3.3 (WarRoom 1.0.3): numbers only, and never over a
+-- field of another type (a string counter or a number in place of a table
+-- made every payload build raise, so suite_data.js silently stopped).
 local function copy_numbers(dst, src, depth)
     if type(src) ~= 'table' or depth > 4 then return end
     for k, v in pairs(src) do
         if type(k) == 'string' then
-            if type(v) == 'number' then dst[k] = n(v)
-            elseif type(v) == 'string' and #v <= 64 then dst[k] = v
-            elseif type(v) == 'table' then
-                if type(dst[k]) ~= 'table' then dst[k] = {} end
+            local cur = type(dst[k])
+            if type(v) == 'number' and (cur == 'nil' or cur == 'number') then dst[k] = n(v)
+            elseif type(v) == 'table' and (cur == 'nil' or cur == 'table') then
+                if cur == 'nil' then dst[k] = {} end
                 copy_numbers(dst[k], v, depth + 1)
             end
         end
@@ -132,6 +137,7 @@ function M.rarity(value, mythic)
     if mythic == true then return 'mythic' end
     if type(value) == 'number' then
         if value >= 8 then return 'mythic' end
+        if value == 7 then return 'set' end
         if value >= 6 then return 'unique' end
         if value >= 5 then return 'legendary' end
         if value >= 3 then return 'rare' end

@@ -28,9 +28,9 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | `HordeDev` | Infernal Hordes | 2.2.5 |
 | `Reaper` | Boss lairs | 1.10.4 |
 | `WonderCity` | Kurast Undercity | 2.2.4 |
-| `SilentRaven` | Whisper reward checks in Temis | 0.2.5 |
+| `SilentRaven` | Whisper reward checks in Temis | 0.2.6 |
 | `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.20 |
-| `WarRoom` | Read-only web dashboard for the whole suite (gold, XP, runs, loot, Helltide); optional phone/LAN view | 1.0.2 |
+| `WarRoom` | Read-only web dashboard for the whole suite (gold, XP, runs, loot, Helltide); optional phone/LAN view | 1.0.3 |
 
 Nightmare Dungeons are not supported. WarPug excludes those nodes.
 
