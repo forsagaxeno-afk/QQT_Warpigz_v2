@@ -548,10 +548,11 @@ local CLASSES = {
         return hit.kind == 'LEFT_DROP' and hit.detail:find('cast by HelltideRevamped', 1, true) ~= nil
             and hit.detail:find('[dropped during the', 1, true) == nil
     end},
-    {'DESIGN', 'fight / patrol alternation (mean dwell >= 3 s)', function(hit)
+    {'DESIGN', 'fight or chest run / patrol alternation (mean dwell >= 3 s)', function(hit)
         local dwell = tonumber(hit.detail:match('mean dwell ([%d%.]+) s'))
-        return hit.kind == 'LOOP' and dwell ~= nil and dwell >= 3 and hit.detail:find('KILL_MONSTERS', 1, true) ~= nil
-            and hit.detail:find('EXPLORE_HELLTIDE', 1, true) ~= nil
+        return hit.kind == 'LOOP' and dwell ~= nil and dwell >= 3 and hit.detail:find('EXPLORE_HELLTIDE', 1, true) ~= nil
+            and (hit.detail:find('KILL_MONSTERS', 1, true) or hit.detail:find('MOVING_TO_HELLTIDE_CHEST', 1, true)
+                or hit.detail:find('MOVING_TO_REMEMBERED_CHEST', 1, true)) ~= nil
     end},
 }
 local function classify(hit)
