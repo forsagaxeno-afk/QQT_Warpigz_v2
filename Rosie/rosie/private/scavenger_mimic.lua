@@ -1,10 +1,10 @@
--- QQT_Warpigz_v3 1.0.22: Rosie acts as Scavenger (Navigator's own looter,
+-- QQT_Warpigz_v3 1.0.23: Rosie acts as Scavenger (Navigator's own looter,
 -- closed .pak) when no Scavenger addon is installed. Worldstone polls
 -- Scavenger.is_busy() and pauses Navigator ("Worldstone Looting"); without a
 -- Scavenger nothing held Navigator while Rosie walked to a drop, the two
 -- movers took turns on the path and Rosie yielded the drop
 -- (docs/THIRD_PARTY_APIS.md). Rules:
---  * QQT_Warpigz_v3 1.0.22 (owner): on only while Worldstone runs. In effect
+--  * QQT_Warpigz_v3 1.0.23 (owner): on only while Worldstone runs. In effect
 --    (in_effect) = the table is published, the pickup option is on, this
 --    Rosie is alive, _G.Worldstone is a table and no real Scavenger owns the
 --    global, read on every call. Out of effect everything below is inert (no
@@ -34,7 +34,7 @@
 --    Rosie's account. In the cool-down pickup walks to no drop
 --    (Pickup.walk_hold, like the fight hold): Navigator gets the path back.
 --  * pause/resume(caller): the Looter acquire/release_pause under the caller's
---    name. QQT_Warpigz_v3 1.0.22 (review): bounded. A repeated pause never
+--    name. QQT_Warpigz_v3 1.0.23 (review): bounded. A repeated pause never
 --    refreshes the Looter's 60 s TTL; once that pause ends (TTL, PAUSE_MAX s,
 --    a pickup enable) the caller's further pauses are ignored (logged once)
 --    until it calls resume.
@@ -72,7 +72,7 @@ local function real_present()
     return cur~=nil and not (type(cur)=='table' and rawget(cur,'_rosie')==true)
 end
 local function worldstone() return type(rawget(_G,M.PEER))=='table' end
--- QQT_Warpigz_v3 1.0.22 (owner): the one gate of everything the mimic adds (see the header).
+-- QQT_Warpigz_v3 1.0.23 (owner): the one gate of everything the mimic adds (see the header).
 local function in_effect()
     return S.published and on('option') and on('alive') and worldstone() and not real_present()
 end
@@ -81,8 +81,8 @@ local function blocked()
     if not on('alive') then return 'retired' end
     if not on('option') then return 'off' end
     if not S.published then return 'unpublished' end
-    if not worldstone() then return 'no Worldstone' end -- QQT_Warpigz_v3 1.0.22 (owner)
-    if real_present() then return 'Scavenger addon' end -- QQT_Warpigz_v3 1.0.22 (review)
+    if not worldstone() then return 'no Worldstone' end -- QQT_Warpigz_v3 1.0.23 (owner)
+    if real_present() then return 'Scavenger addon' end -- QQT_Warpigz_v3 1.0.23 (review)
     if not on('enabled') then return 'disabled' end
     if on('town_busy') then return 'town' end
     if Settings.is_paused() then return 'paused' end
@@ -145,7 +145,7 @@ local function holds(key)
     Settings.is_paused() -- the Looter's TTL expiry runs here
     return Settings.pause_state().owners[key]==true
 end
--- QQT_Warpigz_v3 1.0.22 (review): the caller's pause episode ends (bounded).
+-- QQT_Warpigz_v3 1.0.23 (review): the caller's pause episode ends (bounded).
 local function spend(key,p,now)
     if holds(key) then Settings.release_pause(key) end
     p.spent=true
@@ -216,7 +216,7 @@ function M.get_status()
     return {name='Rosie',owner='Rosie',version=version(),mimic=true,is_busy=false,is_paused=false,
         is_enabled=false,state='disabled',message='Rosie status unavailable.'}
 end
--- QQT_Warpigz_v3 1.0.22 (review): only drops Rosie would work now. None
+-- QQT_Warpigz_v3 1.0.23 (review): only drops Rosie would work now. None
 -- while out of effect, off, paused, dead, loading, on a town trip, in the
 -- cool-down, outside the orbwalker behavior or while an activity owns the
 -- loot; never a drop the fight holds, nor a settled, exhausted or resting
@@ -294,7 +294,7 @@ function M.tick(handoff)
     if not ok then log_once('tick_err','Scavenger mimic error: '..tostring(why)) end
     return ok
 end
--- QQT_Warpigz_v3 1.0.22 (review): a conflict or a retired instance removes
+-- QQT_Warpigz_v3 1.0.23 (review): a conflict or a retired instance removes
 -- its own table and releases its pauses. True when its table was published.
 local function retire()
     local own=rawget(_G,M.NAME)==M.shim

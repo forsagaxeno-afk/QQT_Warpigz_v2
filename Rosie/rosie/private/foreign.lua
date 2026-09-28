@@ -21,7 +21,7 @@ local function call(t,fn,...)
 end
 M.call=call
 
--- QQT_Warpigz_v3 1.0.22: the Scavenger addon, never Rosie's own Scavenger
+-- QQT_Warpigz_v3 1.0.23: the Scavenger addon, never Rosie's own Scavenger
 -- table (scavenger_mimic.lua, _rosie=true): yielding to it would be yielding
 -- to itself (busy -> reset -> not busy -> oscillation).
 local function real_scavenger()
@@ -100,11 +100,11 @@ end
 
 function M.scavenger_hold()
     local sc=real_scavenger()
-    if not sc then return 'mimic' end -- QQT_Warpigz_v3 1.0.22: Rosie's own table: nothing to pause
+    if not sc then return 'mimic' end -- QQT_Warpigz_v3 1.0.23: Rosie's own table: nothing to pause
     local ok=call(sc,'pause',LABEL)
     if ok then log_once('scav','Scavenger is paused during town trips') end
     return ok
 end
-function M.scavenger_release() call(real_scavenger(),'resume',LABEL) end -- QQT_Warpigz_v3 1.0.22: never Rosie's own table
+function M.scavenger_release() call(real_scavenger(),'resume',LABEL) end -- QQT_Warpigz_v3 1.0.23: never Rosie's own table
 
 return M

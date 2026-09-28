@@ -156,7 +156,7 @@ add_slot_control("unique_focus",4)
 add_slot_control("unique_totem",4)
 gui.elements.item_types.other_consumable_items_toggle=gui.elements.item_types.other_consumable_items_toggle
    or checkbox:new(true,get_hash(plugin_label.."_other_consumable_items_toggle"))
--- QQT_Warpigz_v3 1.0.22: Rosie answers Worldstone's looter calls (only while Worldstone runs, no Scavenger addon installed).
+-- QQT_Warpigz_v3 1.0.23: Rosie answers Worldstone's looter calls (only while Worldstone runs, no Scavenger addon installed).
 gui.elements.act_as_scavenger=gui.elements.act_as_scavenger
    or checkbox:new(true,get_hash(plugin_label.."_act_as_scavenger"))
 
@@ -181,7 +181,7 @@ local function render_settings(status)
       render_menu_header(current.detail)
    end
    render_menu_header("Turn host Auto Loot off to use these pickup filters.")
-   -- QQT_Warpigz_v3 1.0.22: see rosie/private/scavenger_mimic.lua.
+   -- QQT_Warpigz_v3 1.0.23: see rosie/private/scavenger_mimic.lua.
    gui.elements.act_as_scavenger:render("Act as Scavenger for Worldstone/Navigator",
       "Only while Worldstone runs and no Scavenger addon is installed: Worldstone and Navigator wait while Rosie walks to a drop and picks it up (at most 20 s without a pickup, 60 s in one go). In a fight Rosie takes only drops at the feet (Navigator waits for that moment); drops farther away wait until the fight is over (at most 45 s). Off: Rosie does not pose as Scavenger.")
 

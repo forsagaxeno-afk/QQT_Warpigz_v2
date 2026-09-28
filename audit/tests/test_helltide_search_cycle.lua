@@ -368,7 +368,10 @@ case("a new hour this task never saw end (town trip over minutes 55-59): last ho
     eq(s.logged("new Helltide hour — forgetting last hour's zone menestad", t0), 1)
 end)
 
-case('the abandoned zone is also unusable by waypoint: one scan, then wait (no scan cycles until minute 55)', function()
+-- QQT_Warpigz_v3 3.3.3: the waypoint of this hour's only Helltide is retried
+-- every 120 s (it waited for the next hour: one refused or interrupted return
+-- idled the bot for up to 55 minutes).
+case('the abandoned zone is also unusable by waypoint: one scan, then its waypoint retried every 120 s (no scan cycles)', function()
     -- Menestad reached another way (WarPigs War Plan teleport); its waypoint is refused.
     local s = session({zone = 'Frac_Tundra_S', active_zone = 'Frac_Tundra_S', refuse = {[MENESTAD] = true}})
     s.tick(5)
@@ -379,9 +382,11 @@ case('the abandoned zone is also unusable by waypoint: one scan, then wait (no s
     eq(s.scan_fires(t0, MENESTAD), 4, 'scan cycles after the only Helltide proved unreachable')
     eq(s.logged('skip_cached_zone set — cycling through TPs', t0), 1, 'one scan')
     eq(s.logged('no other Helltide found — returning to menestad', t0), 1)
-    eq(s.logged('waypoint menestad unreachable — skipping this hour', t0), 1)
-    eq(s.fires_since(t0, MENESTAD), 1, 'the refused waypoint re-fired')
-    eq(s.logged('cannot be reached by waypoint', t0), 1, 'logged once')
+    eq(s.logged('waypoint menestad unreachable — skipping this hour', t0), 0, 'not given up for the hour')
+    local refused = s.logged("waypoint menestad unreachable — this hour's Helltide, retrying in 120s", t0)
+    ok(refused >= 8 and refused <= 11, 'retried every 120 s in 20 min: ' .. refused)
+    ok(s.fires_since(t0, MENESTAD) <= refused, 'at most one fire per retry: ' .. s.fires_since(t0, MENESTAD))
+    ok(s.logged('cannot be reached by waypoint', t0) >= 1, 'the wait is logged')
     eq(s.logged('Not in helltide, teleport to next town to check', t0), 0)
     -- Minute 55: home town; the next hour searches again (menestad retried).
     s.epoch = HOUR + 56 * 60
@@ -443,21 +448,27 @@ case('outside the Helltide area in its own zone (walk back gave up): search tele
     ok(s.helltide_share(60) > 0.9, 'farming again')
 end)
 
-case('returns that never show the buff are bounded (zone skipped for the hour, logged once)', function()
+case('returns that never show the buff are bounded (4 returns, then a 120 s wait, logged)', function()
     local s = farming_menestad()
     local t0 = s.now
     s.outside, s.waypoint_outside = true, true   -- the waypoint itself is outside the Helltide area
-    s.tick(15 * 60)
-    ok(s.logged('Returning to known helltide zone: menestad', t0) <= 4,
-        'bounded "Returning": ' .. s.logged('Returning to known helltide zone: menestad', t0))
-    ok(s.fires_since(t0, MENESTAD) <= 4, 'returns: ' .. s.fires_since(t0, MENESTAD))
-    eq(s.logged('4 returns to menestad without the Helltide buff', t0), 1)
-    eq(s.logged('waypoint menestad unreachable — skipping this hour', t0), 1)
+    local seen
+    for _ = 1, 15 * 60 do
+        s.tick(1)
+        if s.logged('4 returns to menestad without the Helltide buff', t0) > 0 then seen = s.now break end
+    end
+    ok(seen, 'the fruitless returns were bounded')
+    eq(s.logged('Returning to known helltide zone: menestad', t0), 4, '4 returns before the wait')
+    s.tick(15 * 60 - (seen - t0))
+    local returns = s.logged('Returning to known helltide zone: menestad', t0)
+    ok(returns <= 4 * 8, 'bounded "Returning" in 15 min: ' .. returns)
+    ok(s.fires_since(t0, MENESTAD) <= returns, 'returns: ' .. s.fires_since(t0, MENESTAD))
+    eq(s.logged('waypoint menestad unreachable — skipping this hour', t0), 0, 'never given up for the hour')
     -- QQT_Warpigz_v3 (Q7 review): farmed this hour, so it is this hour's
     -- only Helltide: wait for the next hour (logged once), never scan the
     -- other four towns (they cannot hold it).
     eq(s.scan_fires(t0, MENESTAD), 0, 'scan teleports after the bound')
-    eq(s.logged('the only Helltide this hour (menestad) cannot be reached by waypoint', t0), 1)
+    ok(s.logged('the only Helltide this hour (menestad) cannot be reached by waypoint', t0) >= 1)
     eq(s.logged('Not in helltide, teleport to next town to check', t0), 0)
 end)
 
@@ -545,16 +556,33 @@ case("Q7 review: such an enable where this hour's only Helltide refuses its wayp
     eq(s.logged('Not in helltide, teleport to next town to check', t1), 0)
 end)
 
-case("Q7 review: a walk-out return to this hour's zone whose waypoint is refused waits (no 4-town scans all hour)", function()
+case("Q7 review: a walk-out return to this hour's zone whose waypoint is refused waits and retries (no 4-town scans all hour)", function()
     local s = warpigs_next_hour({refuse = {[MENESTAD] = true}})
     local t1 = s.now
     s.outside = true
     s.tick(15 * 60)
-    eq(s.logged('Returning to known helltide zone: menestad', t1), 1)
-    eq(s.logged('waypoint menestad unreachable — skipping this hour', t1), 1)
-    eq(s.logged('cannot be reached by waypoint', t1), 1, 'the wait is logged once')
+    local returns = s.logged('Returning to known helltide zone: menestad', t1)
+    ok(returns >= 6 and returns <= 8, 'retried every 120 s: ' .. returns)
+    eq(s.logged('waypoint menestad unreachable — skipping this hour', t1), 0)
+    ok(s.logged('cannot be reached by waypoint', t1) >= 1, 'the wait is logged')
     eq(s.scan_fires(t1, MENESTAD), 0, 'scanned four towns that cannot hold this hour\'s Helltide')
     eq(s.logged('Not in helltide, teleport to next town to check', t1), 0)
+end)
+
+case("3.3.3: one refused return to this hour's zone (a fight at the edge) is retried, not a wait until the next hour", function()
+    local s = warpigs_next_hour({refuse = {[MENESTAD] = true}})
+    local t1 = s.now
+    s.outside = true
+    for _ = 1, 300 do
+        s.tick(1)
+        if s.logged("waypoint menestad unreachable", t1) > 0 then break end
+    end
+    eq(s.logged("waypoint menestad unreachable — this hour's Helltide, retrying in 120s", t1), 1, 'refused once')
+    s.refuse = {}                               -- the next channel is not refused
+    s.tick(4 * 60)
+    ok(s.fires_since(t1, MENESTAD) >= 2, 'the return was fired again')
+    eq(s.zone, 'Frac_Tundra_S')
+    ok(s.buffed(), 'back in the Helltide within minutes, not next hour')
 end)
 
 case("Q7 review: HR started inside a Helltide (no search tick that hour); next hour last hour's zone is dropped on the first tick", function()

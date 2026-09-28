@@ -6,7 +6,7 @@
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v3.3.2.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
+**Current release: v3.3.3.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
 
 **New here? Read the [step-by-step user guide](docs/GUIDE_EN.md)** (install, setup, WarPigs automation or one activity by hand, troubleshooting).
 
@@ -24,12 +24,12 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | `WarPug` | War Plan selection and creation | 1.0.16 |
 | `Batmobile` | Shared navigation | 2.2.2 |
 | `ArkhamAsylum` | The Pit | 2.1.3 |
-| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.1 |
+| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.2 |
 | `HordeDev` | Infernal Hordes | 2.2.5 |
 | `Reaper` | Boss lairs | 1.10.4 |
 | `WonderCity` | Kurast Undercity | 2.2.4 |
 | `SilentRaven` | Whisper reward checks in Temis | 0.2.6 |
-| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.22 |
+| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.23 |
 | `WarRoom` | Read-only web dashboard for the whole suite (gold, XP, runs, loot, Helltide); optional phone/LAN view | 1.0.3 |
 
 Nightmare Dungeons are not supported. WarPug excludes those nodes.

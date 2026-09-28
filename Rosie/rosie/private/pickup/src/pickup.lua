@@ -78,7 +78,7 @@ local episode={since=nil,last=nil,capped_until=0}
 --    drop is not walked to (nor woken) for YIELD.rest s, doubling per yield of
 --    that drop up to YIELD.max s (its rounds still bound it, C6). Within
 --    REACH it is still interacted with and no foreign move is counted
---    meanwhile (QQT_Warpigz_v3 1.0.22).
+--    meanwhile (QQT_Warpigz_v3 1.0.23).
 --    QQT_Warpigz_v3 1.0.22: every YIELD.per_round yields of a drop fail one
 --    of its rounds.
 local G={nonbag_interacts=3,nonbag_clear=3.5,small_interacts=ROUND_INTERACTS,settle_ttl=180,settle_max=128,same_spot=1.0,
@@ -151,7 +151,7 @@ function M.observe(items)
                 if gone and gone.touched and gone.world==world then announce(gone) end
                 entries[id]=nil;G.retried[id]=nil -- QQT_Warpigz_v3 (Q1)
                 if episode.since then episode.since=get_time_since_inject() end -- QQT_Warpigz_v3: progress
-                M.progress_at=now -- QQT_Warpigz_v3 1.0.22 (review): progress for the Scavenger mimic's cap
+                M.progress_at=now -- QQT_Warpigz_v3 1.0.23 (review): progress for the Scavenger mimic's cap
             end
         end
     end
@@ -183,7 +183,7 @@ function M.blocked(item)
         end
     end
     -- QQT_Warpigz_v3 3.3.2: stepped back for another mover (see the header).
-    -- QQT_Warpigz_v3 1.0.22 (review): the yield holds walks only; a yielded
+    -- QQT_Warpigz_v3 1.0.23 (review): the yield holds walks only; a yielded
     -- drop within REACH (another mover brought the player over it) is still
     -- interacted with: an interaction sends no move, so no tug of war.
     if e.yield_until and get_time_since_inject()<e.yield_until and Utils.distance_to(item)>REACH then
@@ -266,7 +266,7 @@ local function settle(id,item,why,line,retry,d)
     if why=='taken' and entries[id] then announce(entries[id]) end -- QQT_Warpigz_v3: suite event
     entries[id]=nil
     if episode.since and why=='taken' then episode.since=now end -- only a pickup is progress (20 s budget)
-    if why=='taken' then M.progress_at=now end -- QQT_Warpigz_v3 1.0.22 (review): the Scavenger mimic's cap
+    if why=='taken' then M.progress_at=now end -- QQT_Warpigz_v3 1.0.23 (review): the Scavenger mimic's cap
     if before==why then return end
     local ok,interactable=pcall(function() return item:is_interactable() end)
     console.print(string.format('[Rosie pickup] %s %s%s [interactable=%s]',why=='taken' and 'Took' or 'Leaving',
@@ -380,7 +380,7 @@ end
 -- QQT_Warpigz_v3 1.0.22: keep the hold observed while a wanted drop rests.
 function M.fight_refresh(now) fight_hold(now or get_time_since_inject()) end
 -- True while a drop farther than FIGHT.feet m waits for the fight to end.
--- QQT_Warpigz_v3 1.0.22 (review): or a drop farther than REACH m while
+-- QQT_Warpigz_v3 1.0.23 (review): or a drop farther than REACH m while
 -- M.walk_hold(now) (scavenger_mimic.lua: the cool-down after its cap) gives
 -- Navigator the path back without a tug of war; drops in reach are still taken.
 function M.fight_deferred(item,now)
@@ -397,7 +397,7 @@ local function foreign_move(e,item,now)
     local player=Utils.host_call(rawget(_G,'get_local_player'))
     local dest,here,spot=xy(Utils.call(player,'get_move_destination')),xy(Utils.call(player,'get_position')),xy(Utils.call(item,'get_position'))
     if not dest or not here or not spot or flat(dest,here)<=YIELD.far or flat(dest,spot)<=YIELD.far then e.foreign=nil;return false end
-    -- QQT_Warpigz_v3 1.0.22 (review): a yielded drop in REACH is only
+    -- QQT_Warpigz_v3 1.0.23 (review): a yielded drop in REACH is only
     -- interacted with (no move): the mover carrying the player over it is no
     -- new yield (a second one failed a round mid-pass, YIELD.per_round).
     if e.yield_until and now<e.yield_until and flat(here,spot)<=REACH then e.foreign=nil;return false end
