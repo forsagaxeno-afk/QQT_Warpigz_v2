@@ -220,5 +220,20 @@ case('a revive that spans the automatic start is not waited on again by the trip
     h.assert_clean('one clock')
 end)
 
+case('a revive during the 600 s deferral: the revive line is printed only when it releases the start', function()
+    local h = new({place = 'pit'})
+    enable(h)
+    owner(h, 'revive') -- from the start of the need, never ends
+    fill_bag(h, 25)
+    h.run(300)
+    eq(h.logged('Rosie no longer waits on it'), 0, 'no revive line while the deferral still holds the start')
+    eq(st(h).running, false)
+    ok(h.run_until(function() return st(h).running == true end, 320), 'trip after the deferral\n' .. h.tail())
+    eq(h.logged('Rosie no longer waits on it'), 1, 'the line comes with the release')
+    owner(h, 'fight')
+    completes(h)
+    h.assert_clean('deferred revive line')
+end)
+
 print(string.format('Rosie town main 1.0.22: %d checks', checks))
 if #failures > 0 then error(#failures .. ' failing case(s):\n' .. table.concat(failures, '\n')) end
