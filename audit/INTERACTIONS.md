@@ -25,7 +25,7 @@ Gaps marked **(F)** have a finding on the BOARD.
 | Batmobile ↔ HordeDev | C3 via `core/movement.lua`, set-once waypoint | test_horde_audit, test_joint_suite | respawn wipe after the stage-3 re-teleport (F) |
 | Batmobile ↔ Reaper | `navigation_owner`, C3 | test_integration_reaper, test_integration_batmobile | none found |
 | Batmobile ↔ WonderCity | long paths in Kurast and the Undercity | test_integration_wondercity, test_live_wondercity_teleports | `walk_kurast` long paths during a Raven claim (F) |
-| Batmobile ↔ Looter (freeroam) | yields to `is_actively_looting` 10 s, then drives 5 s | test_integration_batmobile | no `Scavenger.is_busy()` (BOARD request) |
+| Batmobile ↔ Looter (freeroam) | yields to `is_actively_looting` 10 s, then drives 5 s | test_integration_batmobile | none found |
 | Batmobile ↔ any caller | pause is one shared flag; `stop_long_path`/`clear_target`/`reset` are not owner-scoped | test_integration_batmobile (release, R11) | per-caller pause missing (F) |
 
 ## WarPigs ↔ plugins
@@ -51,15 +51,16 @@ Gaps marked **(F)** have a finding on the BOARD.
 | Pair | Contract (observed) | Tests | Gaps |
 |---|---|---|---|
 | Navigator/Worldstone ↔ Rosie town | Worldstone waits on `AlfredTheButlerPlugin.get_status()`; Rosie 1.0.21: `set_pause_condition`, `stop()` before the cast, stillness wait | test_rosie_foreign_mover (unmerged 1.0.21) | pause condition inherits every unbounded busy state; `returned` stays true while idle (F) |
-| Scavenger ↔ Rosie pickup | yield while `is_busy()` (1.0.21) | test_rosie_foreign_mover (unmerged) | reset every frame while Scavenger is busy (1.0.21 review) |
-| Scavenger/Butler ↔ farm plugins, WarPigs, Batmobile freeroam | should wait on `is_busy()` (BOARD request) | none | WarPigs, SilentRaven and all farm plugins read neither (F) |
+| Rosie pickup ↔ Worldstone/Navigator | none in 1.0.21 (Worldstone waits on `Scavenger.is_busy()`, seen). Rosie 1.0.22 (in progress): Scavenger mimic plus the `"Rosie Looting"` pause condition | test_rosie_scavenger_mimic (1.0.22) | Rosie yields drops to Navigator moves, so drops are lost; a yielded drop stays blocked in reach; YIELD blind spot (F) |
+| Butler ↔ WarPigs | hold teleports while `Butler.is_busy()` | none | WarPigs does not read it (F, LOW) |
+| Scavenger | **not in the owner's setup** (enabled only to observe Worldstone); Rosie 1.0.22 publishes a mimic when no real one exists | test_rosie_scavenger_mimic | a real Scavenger is still yielded to, and the mimic must never be treated as a foreign looter |
 | Butler ↔ SilentRaven | none today | none | auto-fire during a Butler trip (F, HIGH) |
 | Butler ↔ Rosie | only one town service at a time | none | Rosie does not check `Butler.is_busy()` before a trip |
 | TristramLoop ↔ Rosie | `owns_activity` / `controls_loot` / `phase=='revive'` | test_rosie_bag_waits_331, test_rosie_contract | revive phase has no bound (F); start-log spam (F) |
 | TristramLoop ↔ SilentRaven | none | none | the claim trip ignores `owns_activity` (F) |
 
 ## Coverage gaps across the suite
-- No joint test loads a fake Navigator, Scavenger, Butler or Worldstone next to WarPigs, SilentRaven or a farm plugin. Only Rosie 1.0.21 has one.
+- No joint test loads a fake Navigator, Butler or Worldstone next to WarPigs, SilentRaven or a farm plugin. Only Rosie 1.0.21 has one.
 - No test covers a plugin reload while another plugin owns it (HR under WarPigs), or a reload mid-fight (Reaper).
 - No test covers death with a pending town need, or a stuck revive phase.
 - There is no pending-loot contract. Every exit guard infers "loot left" from `is_actively_looting`, which is false during Rosie's fight hold (1.0.20 reports busy there instead, and that has its own cost) and during yield rests.

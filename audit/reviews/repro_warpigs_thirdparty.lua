@@ -92,16 +92,15 @@ end
 local PIT = 'WarPlans_QST_ThePit'
 local HT = 'WarPlans_QST_Helltide_TorturedGifts'
 
-case('third-party Scavenger / Butler busy do not hold the outgoing teleport', function()
+case('third-party Butler busy does not hold the outgoing teleport', function()
     local f = fixture({teleport = true, world = 'Sanctuary_Eastern_Continent', zone = 'Kehj_Somewhere', town = false})
-    f.e.Scavenger = {is_busy = function() return true end}
     f.e.Butler = {is_busy = function() return true end, get_status = function() return {is_busy = true, step = 'stash'} end}
     f.plugin('ArkhamAsylumPlugin', {})
     f.quests = {PIT}
     f.run(5)
-    print('waypoints fired while Scavenger/Butler busy: ' .. f.waypoints .. ', warplan: ' .. f.teleports)
+    print('waypoints fired while Butler busy: ' .. f.waypoints .. ', warplan: ' .. f.teleports)
     for _, m in ipairs(f.logs) do if m:find('teleport', 1, true) then print('  ' .. m) end end
-    eq(f.waypoints, 0, 'no via-Temis teleport while Scavenger is collecting / Butler is on its town trip')
+    eq(f.waypoints, 0, 'no via-Temis teleport while Butler is on its town trip')
 end)
 
 case('HelltideRevamped reloaded while WarPigs owns it: Warplan mode never re-asserted', function()
