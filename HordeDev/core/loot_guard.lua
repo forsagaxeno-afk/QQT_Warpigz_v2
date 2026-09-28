@@ -66,9 +66,13 @@ function M.ready()
         end
         return true
     end
-    busy_since, busy_logged = nil, false
+    -- QQT_Warpigz_v3 2.2.5: a quiet gap shorter than QUIET_SECONDS does not
+    -- end the busy episode. A Looter busy 2 s / idle 1 s over and over
+    -- re-armed LOOTER_MAX_HOLD on every quiet sample and held forever.
     quiet_since = quiet_since or now
-    return now - quiet_since >= QUIET_SECONDS
+    if now - quiet_since < QUIET_SECONDS then return busy_logged end -- a spent bound stays released
+    busy_since, busy_logged = nil, false
+    return true
 end
 
 -- Reason text while the Looter is holding HordeDev (nil when not holding).

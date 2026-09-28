@@ -226,9 +226,12 @@ function utils.loot_ready()
         end
         return true
     end
-    loot.busy_since, loot.logged = nil, false
+    -- QQT_Warpigz_v3 1.10.4: a quiet gap shorter than LOOT_QUIET does not end
+    -- the busy episode (a flapping Looter re-armed LOOT_HOLD_MAX forever).
     loot.quiet_since = loot.quiet_since or now
-    return now - loot.quiet_since >= LOOT_QUIET
+    if now - loot.quiet_since < LOOT_QUIET then return loot.logged end -- a spent bound stays released
+    loot.busy_since, loot.logged = nil, false
+    return true
 end
 
 -- Reason text while the Looter holds a lair exit (nil when not holding).
