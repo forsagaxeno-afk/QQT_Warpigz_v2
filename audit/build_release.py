@@ -19,7 +19,7 @@ DOCS = {"README.md": "README.md", "CHANGELOG.md": "CHANGELOG.md", "AUDIT.md": "A
         "CREDITS.md": "CREDITS.md", "audit/LIVE_CHECKLIST.md": "LIVE_CHECKLIST.md",
         "docs/INSTALL_RU.txt": "УСТАНОВКА_RU.txt",
         "docs/GUIDE_EN.md": "docs/GUIDE_EN.md"}
-SKIP = {".gitignore", "Thumbs.db", ".DS_Store"}
+SKIP = {".gitignore", "Thumbs.db", ".DS_Store", "NOTES.md"}  # NOTES.md: session notes, not for players
 # Placeholder files that keep otherwise empty runtime folders in the package.
 KEEP = ".keep"
 # QQT_Warpigz_v3: files the plugins generate on the user's machine never ship:
