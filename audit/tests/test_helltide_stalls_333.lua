@@ -494,6 +494,36 @@ case('audit: an un-started rupture (interactable starter) is not judged dead in 
     ok(s.rift_s <= 50, string.format('%.0fs at an un-started rupture', s.rift_s))
 end)
 
+case('review: a rupture started after its starter was seen (starter used, only an ActiveUIMarker) is not abandoned', function()
+    local s = session()
+    local starter = actor(SKIN.normal_starter, 20, 2)
+    s.actors = {starter, actor(SKIN.hold, 20, 0)}
+    s.tick(4)
+    ok(rift(s), 'at the site, not started yet')
+    -- the player starts it: the switch is used, the event marker appears
+    starter.interactable = false
+    s.actors[#s.actors + 1] = actor('S14_Rupture_SMP_ActiveUIMarker', 22, 0)
+    s.tick(12)
+    eq(s.logged('No live rupture here'), 0, 'a started rupture is not left as dead after 6 s')
+    eq(s.logged('— abandoned'), 0, 'not abandoned and blacklisted as a dead site')
+    ok(s.logged('Live rupture confirmed (event marker)') >= 1, 'the marker upgrades the evidence')
+end)
+
+case('review: a chaos rift that bounces INTERACT <-> STAY_NEAR is still given up (one watch for all its states)', function()
+    local s = session({controls = {chaos_rift_toggle = true}})
+    local gizmo = actor('S10_ChaosRiftChoiceGizmo', 1, 0)
+    s.actors = {gizmo}
+    watch_states(s, {MOVING_TO_CHAOS_RIFT = true, INTERACT_CHAOS_RIFT = true, STAY_NEAR_CHAOS_RIFT = true})
+    local wb = s.before_tick
+    s.before_tick = function()
+        wb()
+        gizmo.interactable = math.floor(s.now / 3) % 2 == 0 -- the interaction never takes
+    end
+    s.tick(300)
+    ok(s.logged('Giving up on the chaos rift') >= 1, 'given up')
+    ok(s.in_s <= 200, string.format('%.0fs at a chaos rift in 300 s', s.in_s))
+end)
+
 case('audit: a living Realmwalker near a finished site (Fight Realmwalker off) does not re-arm it', function()
     local s = session({rw = false})
     s.actors = {actor(SKIN.hold, 20, 0), actor(SKIN.boundary, 32, 0),

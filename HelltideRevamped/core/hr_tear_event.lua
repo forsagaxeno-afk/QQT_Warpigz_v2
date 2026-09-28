@@ -1414,7 +1414,11 @@ local function check_live(self, states, s, r, t)
         if ev == "tear" then s.tears_seen = true end
         return false
     end
-    if weak and not s.live_seen then
+    -- QQT_Warpigz_v3 3.3.3 (review): the starter was used and the event
+    -- marker appeared: a started rupture (the marker upgrades 'starter';
+    -- its quiet cap starts again from here).
+    if weak and (not s.live_seen or (s.live_seen == "starter" and ev == "marker")) then
+        if s.live_seen == "starter" then s.quiet_since, s.grace_since = nil, nil end
         s.live_seen = ev
         log(ev == "marker" and "[RIFT] Live rupture confirmed (event marker)"
             or "[RIFT] Rupture not started yet (its starter is interactable)")

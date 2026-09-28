@@ -230,7 +230,12 @@ local function reset(token, result)
         -- moment later. A trip that left from the Helltide counts as a buff
         -- sighting now, so the helltide task keeps its 15 s grace instead of
         -- search resetting HR and teleporting away.
-        if request_from_helltide then tracker.helltide_seen_at = get_time_since_inject() end
+        -- (review) Not while the player is still in town: the 15 s grace
+        -- would send the helltide task walking back from there.
+        local okt, in_town = pcall(utils.player_in_town)
+        if request_from_helltide and okt and in_town == false then
+            tracker.helltide_seen_at = get_time_since_inject()
+        end
     end
     request_from_helltide = nil
     tracker.needs_salvage = false

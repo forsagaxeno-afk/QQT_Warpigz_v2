@@ -4085,8 +4085,12 @@ local helltide_task = {
 
     -- QQT_Warpigz_v3 3.3.3: a target given up by hr_watch_tick.
     hr_watch_skipped = function(self, target)
-        local watch = tracker.hr_watch
-        return watch.skipped(watch.key(target), get_time_since_inject())
+        local watch, now = tracker.hr_watch, get_time_since_inject()
+        if watch.skipped(watch.key(target), now) then return true end
+        -- (review) a chaos rift given up as a whole
+        local ok, skin = pcall(function() return target:get_skin_name() end)
+        return ok and type(skin) == "string" and skin:find("ChaosRift", 1, true) ~= nil
+            and watch.skipped("chaos rift", now)
     end,
 
     -- QQT_Warpigz_v3 3.3.3: the ore / herb / shrine / goblin / silent chest /
@@ -4107,6 +4111,10 @@ local helltide_task = {
             target, what = find_closest_target("Hell_Prop_Chest_Rare_Locked"), "silent chest"
         else target, what = find_closest_target("S10_ChaosRiftChoiceGizmo"), "chaos rift" end
         local key = watch.key(target, what)
+        -- (review) the chaos rift states are watched as one: a fixed key (the
+        -- gizmo is gone while STAY_NEAR waits); the gizmo's own key is skipped too.
+        local gizmo_key
+        if watch.GROUP[st] then gizmo_key, key = target and key or nil, what end
         local hp
         if st == S.CHASE_GOBLIN and target then
             local ok, h = pcall(function() return target:get_current_health() end)
@@ -4117,6 +4125,7 @@ local helltide_task = {
         console.print(string.format("[HELLTIDE] Giving up on the %s (%s) — skipping it for %ds",
             what, why, watch.C.SKIP_S))
         watch.skip(key, now)
+        watch.skip(gizmo_key, now)
         watch.clear()
         found_ore, found_herb, found_silent_chest_position = nil, nil, nil
         clear_movement()

@@ -24,7 +24,12 @@ M.LIMITS = {
     MOVING_TO_ORE = 30, MOVING_TO_HERB = 30, MOVING_TO_SHRINE = 30,
     CHASE_GOBLIN = 60, MOVING_TO_SILENT_CHEST = 45,
     MOVING_TO_CHAOS_RIFT = 45, INTERACT_CHAOS_RIFT = 45,
+    STAY_NEAR_CHAOS_RIFT = 180,
 }
+-- States watched as one (review: INTERACT <-> STAY_NEAR bounced and reset
+-- the record each time), and states that stand still by design (no stall).
+M.GROUP = {MOVING_TO_CHAOS_RIFT = 'CHAOS_RIFT', INTERACT_CHAOS_RIFT = 'CHAOS_RIFT', STAY_NEAR_CHAOS_RIFT = 'CHAOS_RIFT'}
+M.NO_STALL = {STAY_NEAR_CHAOS_RIFT = true}
 
 local rec = nil      -- the watched target {state, key, t0, moved_t, anchor, hp}
 local skips = {}     -- key -> until
@@ -71,10 +76,13 @@ function M.watch(state, key, now, pos, hp)
         rec = nil
         return nil
     end
-    if not rec or rec.state ~= state or rec.key ~= key then
-        rec = {state = state, key = key, t0 = now, moved_t = now, anchor = pos, hp = hp}
+    local group = M.GROUP[state] or state
+    if not rec or rec.group ~= group or rec.key ~= key then
+        rec = {group = group, key = key, t0 = now, moved_t = now, anchor = pos, hp = hp}
         return nil
     end
+    -- a group's cap is its longest member's
+    if M.GROUP[state] then limit = M.LIMITS.STAY_NEAR_CHAOS_RIFT end
     if pos and (not rec.anchor or pos:dist_to(rec.anchor) >= M.C.MOVE_M) then
         rec.anchor, rec.moved_t = pos, now
     end
@@ -82,6 +90,7 @@ function M.watch(state, key, now, pos, hp)
         if type(rec.hp) == 'number' and hp < rec.hp - 0.5 then rec.moved_t = now end
         if type(rec.hp) ~= 'number' or hp < rec.hp then rec.hp = hp end
     end
+    if M.NO_STALL[state] then rec.moved_t = now end
     if now - rec.moved_t >= M.C.STALL_S then
         return string.format('no progress for %ds', M.C.STALL_S)
     end

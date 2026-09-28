@@ -1097,6 +1097,29 @@ case('3.3.3 minute 55 after a scan found the Helltide: search goes to town, not 
     eq(s.teleports[before + 1] and s.teleports[before + 1].id, 0x1CE51E, 'the first teleport after :55 is the idle town')
 end)
 
+-- QQT_Warpigz_v3 3.3.3 (review): a trip that completes while the player is
+-- still in town is not a buff sighting (the grace made the helltide task
+-- "walk back" from town).
+case('3.3.3 a trip completing in town does not stamp a buff sighting (no walk back from town)', function()
+    local s = session({salvage = true, zone = 'Scos_Coast'})
+    rosie_like(s)
+    s.full = false
+    s.tick(5)
+    s.full = true
+    s.tick(2)
+    eq(#s.triggers, 1, 'trip requested')
+    s.in_helltide = false
+    local player = s.env.get_local_player()
+    local town = 0
+    player.get_attribute = function() return town end
+    s.zone, town = TOWN_ZONE, 1       -- in town when the callback fires
+    s.alfred_cb_at = s.now + 20
+    local seen0 = s.tracker.helltide_seen_at
+    s.tick(30)
+    eq(s.tracker.helltide_seen_at, seen0, 'no buff sighting stamped in town')
+    eq(s.logged('Left helltide zone'), 0, 'the helltide task walked back from town')
+end)
+
 print(string.format('Helltide integration: %d cases, %d checks, %d failures', cases, checks, #failures))
 if #failures > 0 then error('Helltide integration failures:\n' .. table.concat(failures, '\n')) end
 print('PASS: test_integration_helltide (' .. cases .. ' cases)')
