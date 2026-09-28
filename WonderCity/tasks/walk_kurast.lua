@@ -18,6 +18,10 @@ local task = {
 }
 
 local LONG_PATH_RETRY    = 2.0  -- seconds between navigate_long_path retries on failure
+-- 2.2.6 re-review: after LONG_PATH_FAILS failed long routes in a row (no
+-- progress since), retry only every LONG_PATH_BACKOFF s (each failure is a
+-- 10k-iteration A* search: a live hitch).
+local LONG_PATH_FAILS, LONG_PATH_BACKOFF = 3, 15.0
 local LONG_PATH_ARRIVED  = 5.0  -- meters from target to consider arrived
 
 -- Stuck watchdog: if the walk makes no progress for STUCK_WINDOW_S while this
@@ -40,11 +44,14 @@ local PROGRESS_M           = 2.0
 local STUCK_WINDOW_S       = 20.0
 local RECOVERY_COOLDOWN_S  = 15.0
 -- Live report: "TPs to the entrance 5 times in a row, then starts the run".
--- At most MAX_RECOVERIES re-teleports per walk (2.2.6: the landing and a
--- world-key change no longer reset the count; it also stays within a rolling
--- RECOVERY_WINDOW_S across walks cut by a town trip). Once capped, the walk
--- hands off to Batmobile's long path to the destination (another route than
--- the recorded one) instead of re-driving the blocked node; logged once.
+-- At most MAX_RECOVERIES re-teleports per RECOVERY_WINDOW_S (2.2.6: the
+-- landing and an 'outside' world-key change no longer reset the count).
+-- Once capped, the walk hands off to Batmobile's long path to the destination
+-- (another route than the recorded one) instead of re-driving the blocked
+-- node, logged once; the cap expires RECOVERY_WINDOW_S after it engaged (a
+-- block that only a fresh landing clears still gets in: at most twice per
+-- 5 minutes). A new walk (a real arrival, a 'run', an arrival from another
+-- zone, release_control) starts with a fresh budget.
 local MAX_RECOVERIES       = 2
 local RECOVERY_WINDOW_S    = 300
 local STALL_PASSED_NODES   = 3
@@ -55,11 +62,14 @@ local REFUSED_CREDIT_MAX   = 30
 -- in the first RECOVERY_QUIET_S after our recovery cast (the host may report
 -- the cast a pulse late).
 local CAST_SPELL, CAST_CAP_S, RECOVERY_QUIET_S = 186139, 15, 1.5
+local END_NEAR_M = 25
 task.last_recovery     = -999
 task.recoveries        = 0
 task.recovery_times    = {}
 task.stall             = nil  -- {key = walk index at the recovery}
-task.capped            = false
+task.capped            = false -- false, or the time the cap engaged
+task.lp_fails          = 0
+task.lp_started        = false
 task.refused_credit    = 0
 task.cast_since        = nil
 task.last_exec         = nil
@@ -123,7 +133,6 @@ end
 local function end_walk()
     if task.stall or task.capped or #task.recovery_times > 0 or task.walk_idx then
         task.stall, task.capped, task.recovery_times, task.recoveries = nil, false, {}, 0
-        task.recovery_cap_logged, task.long_fallback_logged = nil, nil
         task.walk_idx = nil
         if task.long_fallback and utils.own_long_path then
             utils.own_long_path = false
@@ -131,7 +140,18 @@ local function end_walk()
         end
         task.long_fallback = false
     end
+    task.lp_fails, task.lp_started = 0, false
     reset_progress()
+end
+
+-- 2.2.6 re-review: leave the long-path fallback (own route stopped).
+local function leave_fallback()
+    if task.long_fallback and utils.own_long_path then
+        utils.own_long_path = false
+        BatmobilePlugin.stop_long_path(plugin_label)
+    end
+    task.long_fallback = false
+    task.lp_fails, task.lp_started = 0, false
 end
 
 -- Returns true if recovery fired (caller should bail out of the rest of
@@ -146,7 +166,13 @@ local function watchdog(player_pos, advanced)
         -- 2.2.6: only walking past the stall point ends a stall episode
         -- (a landing or a walk back to it does not).
         task.stall, task.capped, task.recovery_times, task.recoveries = nil, false, {}, 0
-        task.recovery_cap_logged = nil
+        leave_fallback() -- 2.2.6 re-review: back to the recorded path
+    end
+    -- 2.2.6 re-review: the cap expires RECOVERY_WINDOW_S after it engaged
+    -- (it was a latch: a block only a fresh landing clears froze the walk).
+    if task.capped and (now - task.capped >= RECOVERY_WINDOW_S or now < task.capped) then
+        task.capped, task.recovery_times, task.recoveries = false, {}, 0
+        leave_fallback()
     end
     local dist = utils.distance(player_pos, destination_proxy())
     if task.progress_time == nil or casting or advanced
@@ -155,13 +181,14 @@ local function watchdog(player_pos, advanced)
         task.refused_credit = 0
         task.best_dist = dist
         task.progress_time = now
+        task.lp_fails = 0
         return false
     end
     if now - task.progress_time < STUCK_WINDOW_S then return false end
     if now - task.last_recovery < RECOVERY_COOLDOWN_S then return false end
     if task.capped or recent_recoveries(now) >= MAX_RECOVERIES then
         if not task.capped then
-            task.capped = true
+            task.capped = now
             console.print(string.format(
                 '[wonder_city walk_kurast] still not moving after %d re-teleports — no further teleports; handing the walk to Batmobile\'s long path',
                 task.recoveries))
@@ -171,7 +198,11 @@ local function watchdog(player_pos, advanced)
     task.recovery_times[#task.recovery_times + 1] = now
     task.recoveries = #task.recovery_times
     task.last_recovery = now
-    task.stall = {key = task.walk_idx}
+    -- 2.2.6 re-review: keep the furthest stall point (two alternating stalls
+    -- reset each other's budget when the key was overwritten).
+    local key = task.walk_idx
+    if task.stall and task.stall.key and (key == nil or task.stall.key > key) then key = task.stall.key end
+    task.stall = {key = key}
     console.print(string.format(
         '[wonder_city walk_kurast] stuck %.1fs near (%.1f,%.1f) — re-teleporting to town waypoint (%d/%d)',
         now - task.progress_time, player_pos:x(), player_pos:y(), task.recoveries, MAX_RECOVERIES))
@@ -210,8 +241,13 @@ end
 local function drive_long_path(target, now)
     BatmobilePlugin.resume(plugin_label)
     if not BatmobilePlugin.is_long_path_navigating() then
-        if (now - task.last_long_path_attempt) < LONG_PATH_RETRY then return end
+        -- 2.2.6 re-review: a route we started that ended without progress
+        -- is a failure; after LONG_PATH_FAILS of them, back off.
+        if task.lp_started then task.lp_fails, task.lp_started = task.lp_fails + 1, false end
+        local retry = task.lp_fails >= LONG_PATH_FAILS and LONG_PATH_BACKOFF or LONG_PATH_RETRY
+        if (now - task.last_long_path_attempt) < retry then return end
         task.last_long_path_attempt = now
+        task.lp_started = true
         -- WCY-5: remember the autonomous route is ours to stop.
         if BatmobilePlugin.navigate_long_path(plugin_label, target) then utils.own_long_path = true end
     end
@@ -234,9 +270,25 @@ task.shouldExecute = function ()
         player_pos:x() ~= 0 and player_pos:y() ~= 0 and
         portal == nil and
         (brazier == nil and utils.distance(player_pos, destination_proxy()) > LONG_PATH_ARRIVED)
-    -- 2.2.6: in town and done walking (arrived / brazier / portal): the
-    -- walk's recoveries do not count against the next one.
-    if in_town and not walking then end_walk() end
+    -- 2.2.6: a walk that really completed (a valid position at the
+    -- destination, the brazier or the portal within END_NEAR_M) or a new
+    -- arrival from another zone (teleport_kurast delivered, or this task saw
+    -- the zone change) starts the next walk with a fresh budget. A (0,0)
+    -- sample or a brazier flickering at the edge of streaming does not.
+    local arrivals = utils.kurast_arrivals or 0
+    if arrivals ~= task.seen_arrivals then task.seen_arrivals = arrivals; end_walk() end
+    if in_town and task.was_in_town == false then end_walk() end
+    task.was_in_town = in_town
+    if in_town and not walking and player_pos:x() ~= 0 and player_pos:y() ~= 0 then
+        local function near(actor)
+            if actor == nil then return false end
+            local ok, d = pcall(function() return utils.distance(player_pos, actor:get_position()) end)
+            return ok and type(d) == 'number' and d <= END_NEAR_M
+        end
+        if utils.distance(player_pos, destination_proxy()) <= LONG_PATH_ARRIVED or near(brazier) or near(portal) then
+            end_walk()
+        end
+    end
     return walking
 end
 
@@ -336,6 +388,10 @@ task.on_cancel = function ()
     end
     task.long_fallback = false
 end
+
+-- 2.2.6 re-review: release_control (disable, a WarPigs hand-off) ends the
+-- walk: a later visit starts with a fresh budget, never capped.
+task.on_release = function () end_walk() end
 
 task.reset = function (transition)
     reset_progress()

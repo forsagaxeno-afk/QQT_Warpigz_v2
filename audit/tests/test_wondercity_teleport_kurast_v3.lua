@@ -121,7 +121,7 @@ check("run/floor transitions and a bare reset() still clear the trip", function(
 end)
 
 -- Review round 2026-09-28 16:30 (fail on a2a5c57):
-check('T2: a 5 s channel then a 4 s non-Limbo gap before arrival -> exactly 1 cast (a2a5c57: 4)', function()
+check('T2: a 5 s channel then a 4 s non-Limbo gap before arrival -> exactly 1 cast (a2a5c57: 2)', function()
     local f = fixture(5)
     f.pulse()
     eq(f.teleports, 1, 'first cast')

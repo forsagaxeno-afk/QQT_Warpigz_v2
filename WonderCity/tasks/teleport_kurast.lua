@@ -80,7 +80,12 @@ local function clear_trip()
 end
 task.shouldExecute = function ()
     -- QQT_Warpigz_v3 WonderCity 2.2.6: arriving in town ends the trip.
-    if task.casts > 0 and utils.player_in_zone(settings.town_zone) then clear_trip() end
+    if task.casts > 0 and utils.player_in_zone(settings.town_zone) then
+        clear_trip()
+        -- 2.2.6 re-review: an arrival from another zone ends walk_kurast's
+        -- previous walk (its recovery budget and cap).
+        utils.kurast_arrivals = (utils.kurast_arrivals or 0) + 1
+    end
     return not utils.player_in_zone(settings.town_zone) and
         not utils.player_in_zone('[sno none]') and
         not utils.player_in_undercity()
