@@ -11,6 +11,8 @@ local lifecycle = require 'rosie.private.town.core.lifecycle'
 local town_movement = require 'rosie.private.town.core.town_movement'
 local pathfinder = require('rosie.movement').for_owner('town') -- QQT_Warpigz_v3
 local foreign = require 'rosie.private.foreign' -- QQT_Warpigz_v3 1.0.21
+local ItemManager = require 'rosie.private.pickup.src.item_manager' -- QQT_Warpigz_v3 1.0.24
+local PickupSettings = require 'rosie.private.pickup.src.settings' -- QQT_Warpigz_v3 1.0.24
 
 local task = base_task.new_task()
 local status_enum = {
@@ -81,6 +83,121 @@ local function teleport_with_debounce()
     debounce_time = get_time_since_inject()
     teleport_to_waypoint(utils.get_town().waypoint_sno)
     task.set_status(status_enum['EXECUTE'])
+end
+-- QQT_Warpigz_v3 1.0.24 (owner, live 3.3.5: a Mythic dropped during the Town
+-- Portal cast; Rosie went to town and Worldstone moved on, the drop was lost).
+-- On the outbound leg a wanted drop in pickup range is never left behind:
+--  * it fits the bag: the trip lends the player to pickup (the cast waits, or
+--    the pickup walk interrupts it: that cast is refunded), at most
+--    PICK_BUDGET s per trip, then the cast goes on;
+--  * the bag is full (the trip's reason): its spot is remembered and, back
+--    through the Town Portal, pickup takes it before the trip completes (at
+--    most RETURN_WAIT s; skipped when the world changed). The trip stays busy
+--    meanwhile, so Worldstone and the farm plugins keep waiting.
+local PICK_BUDGET, RETURN_WAIT, RETURN_GRACE = 20, 30, 1.5
+local tp = {request = nil}
+task.PICK_BUDGET, task.RETURN_WAIT = PICK_BUDGET, RETURN_WAIT -- tests
+local function item_label(item)
+    local ok, name = pcall(function() return item:get_skin_name() end)
+    return ok and name or 'a drop'
+end
+local function tp_scan(now)
+    if tp.scan_at and now >= tp.scan_at and now - tp.scan_at < 0.25 then return end
+    tp.scan_at = now
+    local ok, fits, room = pcall(ItemManager.trip_drops)
+    if ok then tp.fits, tp.room = fits, room else tp.fits, tp.room = nil, nil end
+end
+local function pickup_busy() return PickupSettings.get().looting == true end
+local function tp_session()
+    if tp.request ~= tracker.request_id then
+        tp.request, tp.spent, tp.since, tp.last, tp.capped = tracker.request_id, 0, nil, nil, false
+        tp.left, tp.back, tp.fits, tp.room, tp.scan_at, tp.named, tp.spot = nil, nil, nil, nil, nil, nil, nil
+    end
+end
+local function tp_spot(item)
+    local world = get_current_world()
+    local okp, x, y = pcall(function() local p = item:get_position(); return p:x(), p:y() end)
+    if not world or not okp then return nil end
+    return {id = world:get_world_id(), name = world:get_name(), zone = world:get_current_zone_name(),
+        x = x, y = y, label = item_label(item)}
+end
+local function tp_remember(item)
+    tp.left = tp_spot(item)
+    if tp.left then
+        console.print(string.format('[Rosie] %s dropped near the Town Portal, but the bag is full: Rosie picks it up when it comes back',
+            tp.left.label))
+    end
+end
+-- In town while the outbound pickup still held the player (the cast landed
+-- before the pickup walk interrupted it): the lend ends, and the drop is
+-- taken on the way back.
+local function tp_arrived()
+    if not tp.since then return end
+    tp.since = nil
+    lifecycle.lend_pickup(false)
+    if tp.spot and not tp.left and tracker.return_required then
+        tp.left = tp.spot
+        console.print('[Rosie] The Town Portal landed before '..tp.left.label..' was picked up: Rosie picks it up when it comes back')
+    end
+end
+-- True while the outbound leg picks up a drop (the cast waits).
+local function outbound_pickup()
+    tp_session()
+    local now = get_time_since_inject()
+    if tp.since then tp.spent = tp.spent + math.max(0, now - tp.last); tp.last = now end
+    tp_scan(now)
+    if tp.room and not tp.left and tracker.return_required then tp_remember(tp.room) end
+    local want = not tp.capped and tp.spent < PICK_BUDGET and (tp.fits ~= nil or tp.since ~= nil and pickup_busy())
+    if want and not tp.since then
+        if not lifecycle.lend_pickup(true) then tp.capped = true; return false end
+        tp.since, tp.last = now, now
+        tp.spot = tp.fits and tp_spot(tp.fits) or nil
+        -- A cast in flight is interrupted by the pickup walk: never an attempt.
+        if debounce_time >= 0 and not cast.refunded and outbound_attempts > 0 then
+            cast.refunded = true; outbound_attempts = outbound_attempts - 1
+        end
+        local label = tp.fits and item_label(tp.fits) or 'a drop'
+        if tp.named ~= label then
+            tp.named = label
+            console.print('[Rosie] '..label..' dropped near the Town Portal: picking it up before the cast')
+        end
+    end
+    if want then task.set_status('Picking up a drop before the Town Portal'); return true end
+    if tp.since then
+        tp.since = nil
+        lifecycle.lend_pickup(false)
+        if tp.spent >= PICK_BUDGET and not tp.capped then
+            tp.capped = true
+            console.print(string.format('[Rosie] Pickup before the Town Portal took %ds; casting now', PICK_BUDGET))
+        end
+    end
+    return false
+end
+-- True while the return leg picks up the drop the full bag left behind.
+local function return_pickup()
+    tp_session()
+    if not tp.left then return false end
+    local now = get_time_since_inject()
+    if not tp.back then
+        local world = get_current_world()
+        if not world or world:get_world_id() ~= tp.left.id or world:get_name() ~= tp.left.name
+            or world:get_current_zone_name() ~= tp.left.zone then
+            console.print('[Rosie] '..tp.left.label..' was left in another world; not going back for it')
+            tp.left = nil; return false
+        end
+        if not lifecycle.lend_pickup(true) then tp.left = nil; return false end
+        tp.back = now
+        console.print(string.format('[Rosie] Back from town: picking up %s (at most %ds)', tp.left.label, RETURN_WAIT))
+    end
+    tp_scan(now)
+    local waiting = now - tp.back < RETURN_WAIT and (now - tp.back < RETURN_GRACE or tp.fits ~= nil or pickup_busy())
+    if waiting then task.set_status('Picking up the drop left at the Town Portal'); return true end
+    lifecycle.lend_pickup(false)
+    if now - tp.back >= RETURN_WAIT then
+        console.print(string.format('[Rosie] %s was not picked up within %ds; the trip completes', tp.left.label, RETURN_WAIT))
+    end
+    tp.left = nil
+    return false
 end
 local extension = {}
 function extension.get_npc()
@@ -258,7 +375,9 @@ task.Execute = function ()
     if not player or player:is_dead() or tracker.external_pause then return end
     if tracker.visited_town and not utils.is_in_town() then
         if not tracker.return_required then return end -- QQT_Warpigz_v3: no return leg
-        if lifecycle.returned() then extension.done()
+        if lifecycle.returned() then
+            if return_pickup() then return end -- QQT_Warpigz_v3 1.0.24
+            extension.done()
         elseif not utils.player_in_zone('[sno none]') then extension.failed() end
         return
     end
@@ -267,9 +386,11 @@ task.Execute = function ()
         outbound=true
         task.retry = 0
         lifecycle.hold_peers()
+        if outbound_pickup() then return end -- QQT_Warpigz_v3 1.0.24
         teleport_with_debounce()
     else
         if outbound then reset_session(); outbound=false end
+        if tp.request == tracker.request_id then tp_arrived() end -- QQT_Warpigz_v3 1.0.24
         if tracker.return_required and raven_handoff() then return end -- QQT_Warpigz_v3
         task.baseExecute()
     end

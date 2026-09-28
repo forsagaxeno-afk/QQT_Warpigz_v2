@@ -245,7 +245,37 @@ function M.hold_peers()
         console.print('[Rosie] Batmobile refused the town trip pause: '..tostring(ok and 'refused' or result))
     end
 end
+-- QQT_Warpigz_v3 1.0.24: a wanted drop near the Town Portal cast (or at the
+-- return spot) is taken before the trip goes on: the trip lends the player to
+-- pickup by lifting Rosie's own Looter pause (tasks/teleport.lua bounds it).
+-- Refused (false) when another caller also pauses pickup or pickup is off.
+local lent=false
+function M.pickup_lent() return lent end
+function M.lend_pickup(on)
+    local looter=held_looter
+    if on then
+        if lent then return true end
+        if type(looter)~='table' or type(looter.release_pause)~='function' or type(looter.acquire_pause)~='function' then return false end
+        local okr=pcall(looter.release_pause,'Rosie')
+        if not okr then return false end
+        local oks,st=pcall(looter.status)
+        local oke,en=pcall(looter.get_enabled)
+        if not oks or type(st)~='table' or st.paused==true or not oke or en~=true then
+            pcall(looter.acquire_pause,'Rosie')
+            return false
+        end
+        lent=true
+        return true
+    end
+    if lent then
+        lent=false
+        if type(looter)=='table' and type(looter.acquire_pause)=='function' then pcall(looter.acquire_pause,'Rosie') end
+    end
+    return false
+end
 function M.release_peers()
+    -- QQT_Warpigz_v3 1.0.24: a lent pause is not held: nothing to release.
+    if lent then lent=false; held_looter=nil end
     local looter,resume=held_looter,legacy_resume
     held_looter,legacy_resume=nil,false
     -- QQT_Warpigz_v3 1.0.22: only a pause that is still Rosie's is resumed.
