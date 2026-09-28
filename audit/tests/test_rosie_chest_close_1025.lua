@@ -26,6 +26,15 @@
 -- Every case except the ones named "control" fails on Rosie 1.0.24, except
 -- C11 and C12 (they guard the first 1.0.25 build's regressions; 1.0.24
 -- passes them).
+-- Review round 3 (second 1.0.25 build, de12a7d): C13 (a stale destination
+-- of a player who stopped short of a chest counted as walking toward a
+-- passive monster) fails there and on 1.0.24. C11 now asserts the order
+-- (no Rosie move before the elite dies), so it fails on fd70b6d whatever ran
+-- before it (at a 0.033 s frame C11 can fail on every build, 1.0.24 too:
+-- Arkham/Batmobile in the joint host may never reach the elite). The
+-- helpers no longer assume the joint
+-- host's 0.1 s frame: cast_once holds the cast 0.2 s, busy time is counted
+-- with each frame's real step, K6 matches its distance by pattern.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
 local checks, failures = 0, {}
@@ -79,7 +88,19 @@ local function rotation(h)
 end
 -- The host has reported a player cast once (the engaged rule's evidence),
 -- then the player stops casting.
-local function cast_once(h) rotation(h); h.spell = 111; h.frame(); h.spell = nil; h.frame() end
+-- Review round 3: held 0.2 s (at least 0.15 s), so Rosie's pulse (at most
+-- every 0.05 s) sees it whatever the frame step.
+local function cast_once(h) rotation(h); h.spell = 111; h.run(0.2); h.spell = nil; h.frame() end
+-- Seconds `pred` held, counted with each frame's real step (review round 3:
+-- the counters added 0.1 per frame whatever the frame step).
+local function meter(h, pred)
+    local m = {s = 0, last = h.now}
+    function m.each(hh)
+        if pred(hh) then m.s = m.s + (hh.now - m.last) end
+        m.last = hh.now
+    end
+    return m
+end
 -- An interaction counter on a drop.
 local function counted(it)
     local take = it.on_interact
@@ -210,7 +231,10 @@ case('C9 another mover walks the player to a monster 9 m away, no cast yet: the 
     h.run(3.5)
     local m = h.actor('pit', 'Joint_Monster', 9, 0, {enemy = true, health = 1e9, reach = 0})
     local function mover(hh) hh.as(CONSUMER, function() return hh.G.pathfinder.request_move(m.pos) end) end
-    h.run(0.3, mover) -- a farm plugin already walks the player to it
+    -- a farm plugin already walks the player to it. Review round 3: 0.6 s
+    -- (0.5 m at speed 1): a destination counts only once the player moves
+    -- (0.25 m within 0.8 s), since the host keeps stale destinations (C13)
+    h.run(0.6, mover)
     local t0 = h.now
     local d = h.drop('pit', -6, 0, helm(5))
     h.run(1.5, mover)
@@ -240,8 +264,14 @@ case('C11 Pit (Arkham + Batmobile), a killable elite 8 m ahead and a drop 5 m be
     h.run(3.5)
     local x0, y0 = h.pos:x(), h.pos:y()
     local elite = h.actor('pit', 'Dark_Conjurer', x0 + 8, y0, {enemy = true, elite = true, health = 300})
+    local t0 = h.now
     local item = h.drop('pit', x0 - 5, y0, helm(11))
     ok(h.run_until(function() return (elite.health or 0) <= 0 end, 20), 'the elite dies (first 1.0.25 build: never within 30 s)\n' .. h.tail(8))
+    -- review round 3: the order itself (first 1.0.25 build: Rosie walked to
+    -- the drop and took it at 0.9 s, whatever ran before this case). Counted
+    -- as Rosie's moves: Arkham may still carry the player over the drop
+    -- (taken at the feet, allowed during a fight)
+    eq(rosie_moves(h, t0), 0, 'no Rosie move before the elite died\n' .. h.tail(8))
     ok(h.run_until(function() return item.picked == true end, 20), 'the drop is taken after the fight\n' .. h.tail(8))
 end)
 
@@ -256,6 +286,24 @@ case('C12 a fight hold costs no enemy scan per pulse (the calm tail reads the ho
     h.run(5)
     ts.get_near_target_list = real
     ok(n <= 30, string.format('%d target-list scans in 5 s of a fight hold (first 1.0.25 build: 66, one per pulse)', n))
+end)
+case('C13 a stale destination: the player stopped 2.5 m short of a chest, the host still reports the chest; a passive monster 6.5-7 m away (4 m past it): the spill is all taken, no hold', function()
+    -- review round 3 (probe_stale_toward): the 'toward' rule trusted the
+    -- destination of a player who no longer moves (test_rosie_back_forth_332 B7)
+    for _, mx in ipairs({6.5, 7}) do
+        local h = new()
+        cast_once(h)
+        h.run(3.5) -- the last cast is more than 3 s old
+        local player = h.G.get_local_player()
+        local chest = h.v(2.5, 0)
+        player.get_move_destination = function() return h.goal or chest end -- the host keeps the chest as destination
+        h.actor('pit', 'Passive_Ghoul', mx, 0, {enemy = true, health = 100, reach = 0})
+        local items = {h.drop('pit', 0.8, 0, helm(1)), h.drop('pit', -1.6, 0, helm(2)),
+            h.drop('pit', -3.4, 1.2, helm(3)), h.drop('pit', -4.1, -1.5, helm(4))}
+        h.run(6)
+        eq(picked(items), 4, string.format('monster at %.1f m: drops taken (second 1.0.25 build: 2/4, "wait for the fight")\n%s', mx, h.tail(6)))
+        eq(fight_lines(h), 0, 'no fight hold line')
+    end
 end)
 
 -- ── 2. Standing next to a drop the game does not take from there ───────────
@@ -316,8 +364,9 @@ case('K5b a no-bag material the player cannot get closer to (body-blocked): no "
     local f = prism(); f.refuse = take_within(1.2)
     local it = h.drop('pit', 1.7, 0, f)
     local t0 = h.now
-    local busy_s = 0
-    h.run(10, function(hh) if busy(hh) then busy_s = busy_s + 0.1 end end)
+    local bm = meter(h, busy)
+    h.run(10, bm.each)
+    local busy_s = bm.s
     eq(h.logged('[Rosie pickup] Took Pragmatic Tuning Prism', t0), 0, 'no false Took (1.0.24: after 3.5 s)\n' .. h.tail(6))
     eq(h.logged('[Rosie pickup] Leaving Pragmatic Tuning Prism: still listed after', t0), 1,
         'left with the no-bag wording once the step-in did not bring the player closer\n' .. h.tail(6))
@@ -332,8 +381,9 @@ case('K5d a no-bag ghost (taken into Materials, still listed) 1.7 m from a body-
     local g = h.drop('pit', 1.7, 0, prism())
     g.on_interact = function() g.tries = (g.tries or 0) + 1 end -- the game took it; the host still lists it
     local t0 = h.now
-    local busy_s = 0
-    h.run(30, function(hh) if busy(hh) then busy_s = busy_s + 0.1 end end)
+    local bm = meter(h, busy)
+    h.run(30, bm.each)
+    local busy_s = bm.s
     ok(busy_s <= 5, string.format('busy %.1f s in 30 s (first 1.0.25 build: about 26 s over 3 rounds and the episode cap)', busy_s))
     eq(lines(h, function(l) return l:find('[Rosie pickup]', 1, true) and l:find('Pragmatic Tuning Prism', 1, true)
         and (l:find('Took', 1, true) or l:find('Leaving', 1, true)) end), 1, 'one line\n' .. h.tail(6))
@@ -364,7 +414,9 @@ case('K6 a drop on a prop 2.6 m from its edge, game takes within 3.0 m: interact
     h.run(10)
     ok(it.picked == true, 'taken (1.0.24: 0 interactions beyond 2 m, then a failed round / Leaving)\n' .. h.tail(6))
     eq(h.logged('no progress toward it', t0), 0, 'no stall line')
-    eq(h.logged('[Rosie pickup] Interacting with Helm_Legendary_Generic_067 from 2.6 m (the player gets no closer)', t0), 1, 'logged once')
+    -- review round 3: matched by pattern (at a 0.033 s frame the player stops at 2.1 m, not 2.6 m)
+    eq(lines(h, function(l) return l:find('%[Rosie pickup%] Interacting with Helm_Legendary_Generic_067 from %d%.%d m %(the player gets no closer%)') end),
+        1, 'logged once\n' .. h.tail(6))
 end)
 -- A drop at (8,0) inside a box the player cannot enter: at speed 4 the
 -- player stops at x=5.2, 2.8 m from it.
@@ -377,8 +429,9 @@ case('B2 a prism on a prop (the player stops 2.8 m away): taken, never "Leaving"
     local h = new({speed = 4})
     local it = boxed(h, prism())
     local t0 = h.now
-    local busy_s = 0
-    h.run(10, function(hh) if busy(hh) then busy_s = busy_s + 0.1 end end)
+    local bm = meter(h, busy)
+    h.run(10, bm.each)
+    local busy_s = bm.s
     ok(it.picked == true, 'taken (1.0.24: "Leaving ... cannot reach it (no progress, distance 2.8)")\n' .. h.tail(6))
     eq(h.logged('[Rosie pickup] Leaving', t0), 0, 'never left')
     ok(busy_s <= 2.5 + 1e-6, string.format('busy %.1f s (review S1: <= 2.5 s)', busy_s))
@@ -387,8 +440,9 @@ case('B3 control: a prism on a prop the game takes only within 2 m: exactly one 
     local h = new({speed = 4})
     local it = boxed(h, prism(), 2.0)
     local t0 = h.now
-    local busy_s = 0
-    h.run(20, function(hh) if busy(hh) then busy_s = busy_s + 0.1 end end)
+    local bm = meter(h, busy)
+    h.run(20, bm.each)
+    local busy_s = bm.s
     eq(h.logged('[Rosie pickup] Leaving Pragmatic Tuning Prism: cannot reach it', t0), 1, 'one Leaving line\n' .. h.tail(6))
     ok(busy_s <= 8.5, string.format('busy %.1f s', busy_s))
     ok(it.tries <= 15, 'interactions ' .. it.tries)
@@ -413,14 +467,17 @@ case('B5 Worldstone stand-in: a band drop holds Navigator at most 2.5 s (1.0.24:
     h.run(4)
     ok(h.G.Scavenger and h.G.Scavenger._rosie == true, 'stand-in published')
     local it = boxed(h, prism())
-    local paused = 0
-    h.run(12, function()
+    local pm = meter(h, function()
         local p = false
         for _, fn in pairs(conds) do local okc, on = pcall(fn); if okc and on == true then p = true end end
-        if p then paused = paused + 0.1 end
+        return p
     end)
+    h.run(12, pm.each)
+    local paused = pm.s
     ok(it.picked == true, 'taken\n' .. h.tail(6))
-    ok(paused <= 2.5 + 1e-6, string.format('Navigator paused %.1f s (review S5: <= 2.5 s)', paused))
+    -- review round 3: + 0.15 s, the phase of Rosie's 0.05 s pulses against a
+    -- finer frame (2.6 s at 0.05 / 0.033 s frames, counted with the real step)
+    ok(paused <= 2.5 + 0.15, string.format('Navigator paused %.2f s (review S5: <= 2.5 s + 0.15 s pulse phase)', paused))
 end)
 case('B6 an enemy that never dies 6 m away: a band drop is taken, no "Retrying" rounds', function()
     local h = new({speed = 4, start = {5.2, 0}})

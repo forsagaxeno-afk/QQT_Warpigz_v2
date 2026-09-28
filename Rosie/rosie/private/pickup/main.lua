@@ -33,6 +33,9 @@ local function wanted_in_range(now)
     end
     return false
 end
+-- QQT_Warpigz_v3 1.0.25 (review round 3): Pickup.grace_watch asks whether
+-- the drop it held Navigator for is still wanted (and why not).
+local function still_wanted(item) return ItemManager.check_want_item(item,false) end
 local function activity_owns_loot()
     -- QQT_Warpigz_v3 1.0.21: Navigator's Scavenger owns the drops while busy.
     if foreign.scavenger_busy() then return true end
@@ -122,6 +125,7 @@ local function main_pulse()
         -- (Pickup.step true) makes the Scavenger mimic busy, never the fight wait below.
         if Settings.get().looting==true then Mimic.note_work(get_time_since_inject()) end
     else Pickup.release_movement() end
+    pcall(Pickup.grace_watch,now,still_wanted) -- QQT_Warpigz_v3 1.0.25 (review round 3): a drop lost under the Navigator grace
     -- QQT_Warpigz_v3 1.0.22: a drop that waits for the fight no longer keeps
     -- pickup busy (farm plugins that yield to a busy Looter stood still for
     -- the whole fight). The wait is published apart, has_pending_loot() /
