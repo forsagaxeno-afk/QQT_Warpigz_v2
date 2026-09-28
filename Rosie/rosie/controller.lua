@@ -18,7 +18,9 @@ local function peer_drives_movement()
     local ok2,owner=pcall(bat.get_owner)
     return ok2 and owner~=nil
 end
+local foreign=require('rosie.private.foreign') -- QQT_Warpigz_v3 1.0.21
 local function peer_owns_loot()
+    if foreign.scavenger_busy() then return true end -- QQT_Warpigz_v3 1.0.21: Scavenger's drops
     local peer=rawget(_G,'TRISTRAM_LOOP_STATE')
     if type(peer)~='table' or type(peer.status)~='function' then return false end
     local ok,s=pcall(peer.status)

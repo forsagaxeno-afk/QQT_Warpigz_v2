@@ -10,6 +10,7 @@ local base_task = require 'rosie.private.town.tasks.base'
 local lifecycle = require 'rosie.private.town.core.lifecycle'
 local town_movement = require 'rosie.private.town.core.town_movement'
 local pathfinder = require('rosie.movement').for_owner('town') -- QQT_Warpigz_v3
+local foreign = require 'rosie.private.foreign' -- QQT_Warpigz_v3 1.0.21
 
 local task = base_task.new_task()
 local status_enum = {
@@ -34,6 +35,8 @@ local function teleport_with_debounce()
     local local_player = get_local_player()
     if not local_player or local_player:is_dead() then return end
     if cast.request ~= tracker.request_id then cast.request, cast.logged = tracker.request_id, false end
+    -- QQT_Warpigz_v3 1.0.21: Worldstone re-issues Navigator requests on its own.
+    foreign.quiet_navigator(tracker.request_id)
     if local_player:get_active_spell_id() == 186139 then
         task.set_status(status_enum['EXECUTE'])
     else

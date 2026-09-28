@@ -9,6 +9,7 @@ local settings=require 'rosie.private.town.core.settings'
 local utils=require 'rosie.private.town.core.utils'
 local vendor=require 'rosie.private.town.core.vendor' -- QQT_Warpigz_v3 (Q6)
 local events=require 'rosie.private.qqt_events' -- QQT_Warpigz_v3
+local foreign=require 'rosie.private.foreign' -- QQT_Warpigz_v3 1.0.21
 local M={}
 local retired=false
 local held_looter,legacy_resume,held_bat=nil,false,nil
@@ -84,13 +85,23 @@ function M.add_foreign_hold(adapter)
     M.FOREIGN_HOLDS[#M.FOREIGN_HOLDS+1]=adapter
     return true
 end
+-- The observed peers (docs/THIRD_PARTY_APIS.md): Navigator is held through
+-- its pause condition while a trip is in progress, Scavenger is paused and
+-- resumed under Rosie's own name.
+local function trip_active() return not retired and M.busy() and true or false end
+M.add_foreign_hold({name='Navigator',global='Navigator',
+    hold=function() return foreign.navigator_hold(trip_active) end,
+    release=function(_,_,how) foreign.navigator_release(how) end})
+M.add_foreign_hold({name='Scavenger',global='Scavenger',
+    hold=function() return foreign.scavenger_hold() end,
+    release=function() foreign.scavenger_release() end})
 local function hold_foreign()
     for _,adapter in ipairs(M.FOREIGN_HOLDS) do
         local api=rawget(_G,adapter.global)
         if type(api)=='table' and not foreign_tried[adapter] then
             foreign_tried[adapter]=true
             local ok,result=pcall(adapter.hold,api,settings.plugin_label)
-            if ok and result~=false then held_foreign[#held_foreign+1]={adapter=adapter,api=api}
+            if ok and result~=false then held_foreign[#held_foreign+1]={adapter=adapter,api=api,result=result}
             else console.print('[Rosie] Could not hold '..tostring(adapter.name or adapter.global)..' for the trip: '
                 ..tostring(ok and 'refused' or result)) end
         end
@@ -175,7 +186,7 @@ function M.release_peers()
         -- A foreign peer's release error is logged, never a pending cleanup.
         release(tostring(rec.adapter.name or rec.adapter.global),function()
             if type(rec.adapter.release)=='function' then
-                local ok,why=pcall(rec.adapter.release,rec.api,settings.plugin_label)
+                local ok,why=pcall(rec.adapter.release,rec.api,settings.plugin_label,rec.result)
                 if not ok then console.print('[Rosie] Could not release '..tostring(rec.adapter.name or rec.adapter.global)..': '..tostring(why)) end
             end
             return true
@@ -206,6 +217,8 @@ function M.request(caller,callback,teleport,manual)
     if settings.enabled~=true then return false,'Enable town service first.' end
     if not manual and settings.allow_external~=true then return false,'External requests are disabled.' end
     if M.busy() then return false,'A service is already running.' end
+    -- QQT_Warpigz_v3 1.0.21: one town service at a time with Butler.
+    if foreign.butler_busy() then return false,'Butler is running a town trip.' end
     if tracker.external_pause then return false,'Paused by '..tostring(tracker.pause_caller or 'an external caller') end
     local world=get_current_world(); local player=get_local_player()
     if not player or player:is_dead()~=false then return false,'Waiting for a living player.' end

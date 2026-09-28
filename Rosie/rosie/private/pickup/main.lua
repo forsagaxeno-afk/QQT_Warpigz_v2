@@ -9,7 +9,10 @@ local Utils=require('rosie.private.pickup.utils.utils')
 local active=true
 local published
 local fight_busy=false -- QQT_Warpigz_v3 3.3.2: busy set only by a drop waiting for the fight
+local foreign=require('rosie.private.foreign') -- QQT_Warpigz_v3 1.0.21
 local function activity_owns_loot()
+    -- QQT_Warpigz_v3 1.0.21: Navigator's Scavenger owns the drops while busy.
+    if foreign.scavenger_busy() then return true end
     local peer=rawget(_G,'TRISTRAM_LOOP_STATE')
     if type(peer)~='table' or type(peer.status)~='function' then return false end
     local ok,status=pcall(peer.status)
