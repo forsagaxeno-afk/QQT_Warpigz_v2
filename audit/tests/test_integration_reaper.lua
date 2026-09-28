@@ -493,16 +493,16 @@ case('RPR-6 the town teleport waits for the Looter plus 3 s of quiet', function(
     ok(fired <= busy_until + 4, 'no extra delay once the Looter is quiet')
 end)
 
-case('RPR-6 a never-idle Looter holds the exit at most ~30 s (C6 bound)', function()
+case('RPR-6 a never-idle Looter holds the exit at most ~75 s (C6 bound; 1.10.4: past Rosie\'s 45 s fight hold)', function()
     local e, c = boot()
     local gone = chest_run(e, c, function() return true end)
     local fired
-    while c.now < gone + 60 do
+    while c.now < gone + 100 do
         c.step()
         if not fired and c.town_tps > 0 then fired = c.now end
     end
-    ok(fired and fired - gone >= 30 and fired - gone <= 36, 'bounded Looter hold (' .. tostring(fired and fired - gone) .. ')')
-    eq(c.count('Looter busy for 30s'), 1, 'one log line')
+    ok(fired and fired - gone >= 75 and fired - gone <= 81, 'bounded Looter hold (' .. tostring(fired and fired - gone) .. ')')
+    eq(c.count('Looter busy for 75s'), 1, 'one log line')
 end)
 
 -- ── RPR-10 / C4: orbwalker ownership with the real settings module ──────────

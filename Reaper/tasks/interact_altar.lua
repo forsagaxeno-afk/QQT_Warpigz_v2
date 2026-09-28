@@ -47,6 +47,14 @@ local CLICK_BOUND_SECS  = 30
 local NOT_READY_BOUND   = 30
 local COMMIT_RANGE      = 15   -- post-death hand-over range (Kill Monsters' tether)
 local attempt = { clicks = 0, since = nil, phase = 0, not_ready_since = nil }
+-- QQT_Warpigz_v3 Reaper 1.10.4: an interactable altar that is never reached
+-- had no bound (CLICK_BOUND_SECS starts at the first click): 900 s of walking,
+-- 0 clicks, no hold reason. APPROACH_BOUND seconds of approach ticks without
+-- APPROACH_PROGRESS metres of progress give up (manual: skip, external:
+-- failed). Only Interact Altar's own ticks count (each capped at 1 s), so an
+-- Alfred yield neither advances nor resets the deadline; a new run does.
+local APPROACH_BOUND, APPROACH_PROGRESS = 60, 1.0
+local approach_watch = { elapsed = 0, best = nil, last_tick = nil }
 
 local function check_if_stuck()
     local pos = get_player_position()
@@ -105,9 +113,16 @@ function task.status_text()
     return nil
 end
 
-function task.reset()
+local function clear_approach_watch()
+    approach_watch.elapsed, approach_watch.best, approach_watch.last_tick = 0, nil, nil
+end
+
+-- QQT_Warpigz_v3 Reaper 1.10.4: `yield` = true for an Alfred yield (tasks/alfred.lua),
+-- which keeps the approach deadline; any other reset (new run, stop, give up) clears it.
+function task.reset(yield)
     navigation_owner.release()
     clear_attempt()
+    if yield ~= true then clear_approach_watch() end
     last_interact_time = 0
     last_pos = nil
     last_move_time = 0
@@ -176,6 +191,7 @@ local function mark_summoned(t)
     tracker.summon_zone         = utils.get_zone()
     last_interact_time = 0
     clear_attempt()
+    clear_approach_watch() -- QQT_Warpigz_v3 Reaper 1.10.4
     local boss = rotation.current() -- QQT_Warpigz_v3: suite event
     events.emit('reaper', 'boss_summoned', {boss = boss and boss.id, label = boss and boss.label})
 end
@@ -199,6 +215,41 @@ local function give_up(reason, t, may_resync)
     rotation.advance(reason)
     tracker.reset_run()
     task.reset()
+end
+
+-- QQT_Warpigz_v3 Reaper 1.10.4: a live boss fight (enable/reload mid-fight: the
+-- altar is spent, the boss is up). The boss quest is the primary signal; a
+-- boss-flagged target within COMMIT_RANGE of the player also counts.
+local function live_fight()
+    if utils.boss_quest_active() then return "boss quest active" end
+    local pp = get_player_position()
+    if not pp or not target_selector then return nil end
+    local ok, list = pcall(target_selector.get_near_target_list, pp, COMMIT_RANGE)
+    if not ok or type(list) ~= "table" then return nil end
+    for _, enemy in pairs(list) do
+        local okb, boss = pcall(function() return enemy:is_boss() end)
+        if okb and boss then return "boss nearby" end
+    end
+    return nil
+end
+
+-- QQT_Warpigz_v3 Reaper 1.10.4: approach deadline (see APPROACH_BOUND). Returns
+-- true when it gave up.
+local function approach_expired(altar, t)
+    local dist = utils.distance_to(altar)
+    if dist <= 2.5 then clear_approach_watch(); return false end
+    local w = approach_watch
+    if w.last_tick then w.elapsed = w.elapsed + math.max(0, math.min(t - w.last_tick, 1.0)) end
+    w.last_tick = t
+    if w.best == nil or w.best - dist >= APPROACH_PROGRESS then
+        w.best, w.elapsed = dist, 0
+        return false
+    end
+    if w.elapsed < APPROACH_BOUND then return false end
+    local reason = string.format("Altar not reached (%.0fm away, no progress for %ds)", dist, APPROACH_BOUND)
+    clear_approach_watch()
+    give_up(reason, t, false)
+    return true
 end
 
 local function remember_altar(altar)
@@ -257,6 +308,16 @@ function task.Execute()
     if not altar then return end
 
     if not interactable then
+        -- QQT_Warpigz_v3 Reaper 1.10.4: enabled/reloaded mid-fight (no click of
+        -- this run, altar spent, boss up): join the fight instead of the
+        -- NOT_READY_BOUND skip that teleported away and lost the key.
+        local fight = live_fight()
+        if fight then
+            attempt.not_ready_since = nil
+            console.print("[Reaper] Boss fight already in progress (" .. fight .. ") — joining it.")
+            mark_summoned(t)
+            return
+        end
         -- QQT_Warpigz_v3: after a death inside the same lair the summon is
         -- still live (boss up, altar spent): walk back and fight.
         if tracker.summon_committed(utils.get_zone()) then
@@ -281,6 +342,8 @@ function task.Execute()
         return
     end
     attempt.not_ready_since = nil
+
+    if approach_expired(altar, t) then return end -- QQT_Warpigz_v3 Reaper 1.10.4
 
     -- ---- Unstuck logic ----
     if check_if_stuck() then

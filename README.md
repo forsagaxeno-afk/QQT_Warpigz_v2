@@ -23,11 +23,11 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | `WarPigs` | Master orchestrator and town handoffs | 1.1.7 |
 | `WarPug` | War Plan selection and creation | 1.0.16 |
 | `Batmobile` | Shared navigation | 2.2.2 |
-| `ArkhamAsylum` | The Pit | 2.1.2 |
+| `ArkhamAsylum` | The Pit | 2.1.3 |
 | `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.1 |
-| `HordeDev` | Infernal Hordes | 2.2.4 |
-| `Reaper` | Boss lairs | 1.10.3 |
-| `WonderCity` | Kurast Undercity | 2.2.3 |
+| `HordeDev` | Infernal Hordes | 2.2.5 |
+| `Reaper` | Boss lairs | 1.10.4 |
+| `WonderCity` | Kurast Undercity | 2.2.4 |
 | `SilentRaven` | Whisper reward checks in Temis | 0.2.5 |
 | `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.20 |
 | `WarRoom` | Read-only web dashboard for the whole suite (gold, XP, runs, loot, Helltide); optional phone/LAN view | 1.0.2 |

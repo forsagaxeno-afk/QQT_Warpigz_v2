@@ -27,7 +27,17 @@ utils.player_in_pit = function ()
     local name = world:get_name()
     return name ~= nil and name:match("^PIT_") ~= nil
 end
+-- QQT_Warpigz_v3 Arkham 2.1.3: the third-party Navigator looter (docs/THIRD_PARTY_APIS.md):
+-- a busy Scavenger holds the same loot waits as a busy Looter.
+local function scavenger_busy()
+    local s = Scavenger
+    if type(s) ~= 'table' or type(s.is_busy) ~= 'function' then return false end
+    local ok, busy = pcall(s.is_busy)
+    return ok and busy == true
+end
+utils.scavenger_busy = scavenger_busy
 utils.is_looting = function ()
+    if scavenger_busy() then return true end -- QQT_Warpigz_v3 Arkham 2.1.3
     local looter = LooteerPlugin
     if not looter then return false end
     local function read(fn, ...)

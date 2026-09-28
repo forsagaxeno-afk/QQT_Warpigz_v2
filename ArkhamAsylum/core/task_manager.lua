@@ -14,6 +14,8 @@ local enter_task = nil
 local yield_started = nil
 local pickup_hold_since = nil -- QQT_Warpigz_v3: in-pit Looter yield start (see pickup_yield)
 local current_task = { name = 'Idle', status = 'Idle' } -- Default state when no task is active
+local FORCED_ALFRED_HOLD_MAX = 120 -- QQT_Warpigz_v3 Arkham 2.1.3 (C6)
+local forced_hold = {since = nil, logged = false}
 local function alfred_owns_control()
     return alfred_task and alfred_task.is_busy and alfred_task.is_busy()
 end
@@ -168,14 +170,25 @@ task_manager.execute_tasks = function ()
     -- Only positive Alfred evidence may hold it: an unreadable status never
     -- blocks the forced exit (ARK-9).
     local forced = utils.player_in_pit() and utils.exit_pit_forced()
+    -- QQT_Warpigz_v3 Arkham 2.1.3: past the deadline, Alfred holds the forced exit
+    -- for at most FORCED_ALFRED_HOLD_MAX s (as WonderCity); a status that
+    -- never clears (a third-party Butler) held it forever.
+    local now = get_time_since_inject()
+    if not forced then forced_hold.since, forced_hold.logged = nil, false end
+    local forced_over = forced and forced_hold.since ~= nil and now - forced_hold.since >= FORCED_ALFRED_HOLD_MAX
     -- Town relocation and reward tasks must not preempt an accepted Alfred
     -- trip (including a foreign caller's trip to a different service town).
-    if alfred_task.is_busy and alfred_task.is_busy(forced) then
+    if not forced_over and alfred_task.is_busy and alfred_task.is_busy(forced) then
+        if forced then forced_hold.since = forced_hold.since or now end
         end_pickup_yield() -- QQT_Warpigz_v3
         execute(alfred_task)
         return
     end
     if forced then
+        if forced_over and not forced_hold.logged then
+            forced_hold.logged = true
+            console.print(string.format('[arkham] run timeout: Alfred busy for %.0fs — exiting anyway', now - forced_hold.since))
+        end
         end_pickup_yield() -- QQT_Warpigz_v3
         execute(exit_task)
         return

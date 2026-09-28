@@ -13,7 +13,17 @@ utils.player_in_undercity = function ()
     local zone = world and world:get_current_zone_name()
     return zone ~= nil and zone:match('X1_Undercity_') ~= nil
 end
+-- QQT_Warpigz_v3 WonderCity 2.2.4: the third-party Navigator looter (docs/THIRD_PARTY_APIS.md):
+-- a busy Scavenger holds the same loot waits as a busy Looter.
+local function scavenger_busy()
+    local s = Scavenger
+    if type(s) ~= 'table' or type(s.is_busy) ~= 'function' then return false end
+    local ok, busy = pcall(s.is_busy)
+    return ok and busy == true
+end
+utils.scavenger_busy = scavenger_busy
 utils.is_looting = function ()
+    if scavenger_busy() then return true end -- QQT_Warpigz_v3 WonderCity 2.2.4
     local looter = LooteerPlugin
     if not looter then return false end
     local function read(fn, ...)
@@ -60,6 +70,7 @@ end
 -- something up right now (C5 yield). Unlike is_looting() an unreadable or
 -- unknown contract is NOT busy here: this gates a movement hold.
 utils.looter_busy_known = function ()
+    if scavenger_busy() then return true end -- QQT_Warpigz_v3 WonderCity 2.2.4
     local looter = LooteerPlugin
     if type(looter) ~= 'table' then return false end
     local ok, value
