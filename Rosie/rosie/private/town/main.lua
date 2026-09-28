@@ -37,6 +37,24 @@ local function auto_wait(why)
     console.print(string.format('[Rosie] Bag needs a town trip (bag %s/%s, talismans %s) but it waits: %s',
         tostring(tracker.inventory_count),tostring(settings.max_inventory),tostring(tracker.talisman_inventory_count),why))
 end
+-- QQT_Warpigz_v3 1.0.23: the automatic start waited on another activity's
+-- revive phase without a bound (C6): a phase that stuck held a full bag
+-- forever. It is waited on for REVIVE_LIMIT s of continuous revive (seen
+-- every pulse; a gap, e.g. while dead, starts a new count), logged once.
+local revive={since=nil,seen=nil,logged=false}
+local function revive_holds(owner,now)
+    if not (owner and owner.phase=='revive') then revive.since,revive.seen,revive.logged=nil,nil,false; return false end
+    if not revive.seen or now-revive.seen>2 then revive.since,revive.logged=now,false end
+    revive.seen=now
+    local limit=tonumber(lifecycle.REVIVE_LIMIT) or 60
+    if now-revive.since<limit then return true end
+    if not revive.logged then
+        revive.logged=true
+        console.print(string.format('[Rosie] Another activity has been in its revive phase for %ds: the town trip no longer waits on it',
+            math.floor(now-revive.since)))
+    end
+    return false
+end
 
 local function update_locals()
     local_player = get_local_player()
@@ -82,7 +100,9 @@ local function main_pulse()
     end
 
     if not (settings.get_keybind_state() or tracker.external_trigger or tracker.manual_trigger) then
-        auto_wait('automatic service is off (keybind toggle)')
+        -- QQT_Warpigz_v3 1.0.23: only a bag that needs town logs this wait (a
+        -- bag 3/30 logged it and latched it, so the real need later logged nothing).
+        if tracker.need_trigger then auto_wait('automatic service is off (keybind toggle)') else auto_wait(nil) end
         return
     end
 
@@ -103,18 +123,30 @@ local function main_pulse()
             local owner=ok and type(state)=='table' and state.running and state.owns_activity and state
             local held=owner and 'another activity owns the run' or tracker.external_pause
                 and ('paused by '..tostring(tracker.pause_caller or 'another plugin')) or nil
-            if held and (owner and owner.phase=='revive' or not (waited>=DEFER_ANY or waited>=DEFER_TOWN and lifecycle.in_any_town())) then
+            -- QQT_Warpigz_v3 1.0.23: "never during a revive" is now at most
+            -- REVIVE_LIMIT s of continuous revive (revive_holds above).
+            local reviving=revive_holds(owner,now)
+            if held and (reviving or not (waited>=DEFER_ANY or waited>=DEFER_TOWN and lifecycle.in_any_town())) then
                 auto_wait(held)
                 return
             end
-            if held then
-                console.print(string.format('[Rosie] Bag needs a town trip for %ds (%s): starting it now',math.floor(waited),held))
-                if tracker.external_pause then lifecycle.resume() end
-            end
             if lifecycle.auto_blocked() then auto_wait('last trip '..tostring(tracker.outcome)..': '..tostring(tracker.failure_reason))
             else
+                -- QQT_Warpigz_v3 1.0.23: the override is logged, and a foreign
+                -- pause cleared, only for a trip that starts: it printed every
+                -- pulse while the start was blocked or refused, and cleared the
+                -- pause for nothing. A refused start restores the pause (the
+                -- request refuses while it is set) and logs its reason once.
+                local paused_by=tracker.pause_caller
+                local cleared=held and tracker.external_pause and lifecycle.resume()
                 local accepted,why=lifecycle.request('automatic',nil,true,true)
-                if accepted then need_since=nil; auto_wait(nil) else auto_wait(tostring(why)) end
+                if accepted then
+                    if held then console.print(string.format('[Rosie] Bag needs a town trip for %ds (%s): starting it now',math.floor(waited),held)) end
+                    need_since=nil; auto_wait(nil)
+                else
+                    if cleared and not tracker.external_pause then tracker.external_pause=true; tracker.pause_caller=paused_by end
+                    auto_wait(tostring(why))
+                end
             end
         end
     end
