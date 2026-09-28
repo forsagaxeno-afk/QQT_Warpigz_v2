@@ -346,6 +346,17 @@ local function build_world(h, seed, o)
                     b.interactable = false
                     W.beacons = W.beacons + 1
                     note('beacon', 'Grand Beacon lit on ' .. place.key)
+                    -- o.obols_at_beacon: the lit beacon spills obols 1.5-2 m
+                    -- around it (a repro trigger; no draw from the world rng).
+                    if o.obols_at_beacon then
+                        for k, off in ipairs({{1.5, 0}, {-1.2, 1.2}, {0, -2}}) do
+                            if k <= o.obols_at_beacon then
+                                local it = h.drop(place, bx + off[1], by + off[2],
+                                    {name = 'X1_Undercity_Obols', rarity = 0, obols = true, amount = 10})
+                                it.obols = true
+                            end
+                        end
+                    end
                     local wave = {}
                     for k = 1, rng.int(3, 5) do
                         wave[k] = monster('X1_Undercity_Beacon_Wave_' .. k, bx + rng.range(-6, 6), by + rng.range(-6, 6))
@@ -849,6 +860,7 @@ local function start(seed, o)
         kurast_block = o.kurast_block or tonumber(os.getenv('QQT_SWEEP_KURAST_BLOCK') or ''),
         death_after_chest = o.death_after_chest or os.getenv('QQT_SWEEP_DEATH_AFTER_CHEST') == '1',
         bag_at_brazier = o.bag_at_brazier or tonumber(os.getenv('QQT_SWEEP_BAG_AT_BRAZIER') or ''),
+        obols_at_beacon = o.obols_at_beacon or tonumber(os.getenv('QQT_SWEEP_OBOLS_AT_BEACON') or ''),
         chest_obols = o.chest_obols or tonumber(os.getenv('QQT_SWEEP_CHEST_OBOLS') or '')})
     if h.place == h.P.kurast then h.pos = h.P.kurast.spawn end
     local gui = h.mod(WC, 'gui').elements
@@ -1309,6 +1321,13 @@ local FINDINGS = {
     {id = 'F5', rule = 'WC-exit-after-death-leaves-reward', seed = 2, seconds = 260, title = 'a death next to the '
         .. 'opened reward chest: WonderCity confirms the chest from the checkpoint and exits, the chest loot stays '
         .. '104-107 m away', o = {chaos = false, distance = 15, death_after_chest = true, chest_obols = 0}},
+    {id = 'F6', rule = 'WC-obols-beacon-thrash', seed = 12, seconds = 480, title = 'an obol 2.2 m from a lit Grand '
+        .. 'Beacon: loot_obols excludes it only while the beacon is the closest enticement within 20 m of the PLAYER, '
+        .. 'so it flips at the 20 m boundary (53 switches in 96 s) and is never taken (seeded chaos, default config)',
+        o = {}},
+    {id = 'F7', rule = 'WC-exit-cast-drop', seed = 302, seconds = 320, title = "a Rare dropped 0.3 s into WonderCity's "
+        .. 'exit teleport channel (exit mode Teleport) is left for good (seeded chaos)',
+        o = {exit_mode = 1, distance = 8, tribute = 'none', all_plugins = false, rate = 1.5}},
 }
 local function run_finding(f, strict)
     local passed, err = xpcall(function()
