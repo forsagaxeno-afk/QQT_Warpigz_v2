@@ -15,19 +15,21 @@ local fight_only=false -- QQT_Warpigz_v3 1.0.25: looting=true only for the fight
 -- QQT_Warpigz_v3 1.0.25 (Discord: pickup stopped with no line): a gate that
 -- keeps pickup off while a wanted drop lies in range is logged once per zone
 -- (orbwalker Clear mode, a busy Scavenger addon).
-local gate={clear=nil,scav=nil,check_at=nil}
+local gate={clear=nil,scav=nil,check_at=nil,last=false}
 local function zone_key()
     local w=get_current_world()
     return tostring(Utils.call(w,'get_world_id'))..'|'..tostring(Utils.call(w,'get_current_zone_name'))
 end
--- A wanted drop within the Distance slider (read at most every 0.5 s).
+-- A wanted drop within the Distance slider. QQT_Warpigz_v3 1.0.25 (review):
+-- scanned at most every 1 s (both gates share it); between scans the last
+-- answer, not false.
 local function wanted_in_range(now)
-    if gate.check_at and now>=gate.check_at and now-gate.check_at<0.5 then return false end
-    gate.check_at=now
+    if gate.check_at and now>=gate.check_at and now-gate.check_at<1.0 then return gate.last end
+    gate.check_at,gate.last=now,false
     local items=Utils.host_call(rawget(_G,'actors_manager') and actors_manager.get_all_items)
     for _,item in pairs(type(items)=='table' and items or {}) do
         local ok,want=pcall(ItemManager.check_want_item,item,false)
-        if ok and want==true then return true end
+        if ok and want==true then gate.last=true;return true end
     end
     return false
 end
@@ -112,6 +114,7 @@ local function main_pulse()
     end
     if activity_owns_loot() then Pickup.reset(false); return end
     Pickup.sample_cast(now) -- QQT_Warpigz_v3 1.0.25: the fight hold's engaged rule
+    pcall(Pickup.nav_watch,now) -- QQT_Warpigz_v3 1.0.25 (review): the Navigator stop watchdog
     local wanted=ItemManager.get_item_based_on_priority()
     if wanted and Settings.get().loot_priority==1 then wanted=wanted.Item end
     if wanted then Settings.get().looting=Pickup.step(wanted,ItemManager.destination(wanted)) -- QQT_Warpigz_v3 (Q1): receipt bag
@@ -206,10 +209,21 @@ published={
 LooteerPlugin=published
 -- QQT_Warpigz_v3 1.0.23: Scavenger.pause/resume; owned: no wanted items while an activity owns the loot (review).
 -- QQT_Warpigz_v3 1.0.25: the mimic takes a pause only at the start of a
--- caller's pause episode (Worldstone's Scavenger.pause); that start is logged.
+-- caller's pause episode (Worldstone's Scavenger.pause); that start is logged,
+-- QQT_Warpigz_v3 1.0.25 (review) at most once per PAUSE_LOG_GAP s per caller
+-- (a caller that alternates pause and resume would print every cycle).
+local PAUSE_LOG_GAP=60
+local pause_logged={}
 local function acquire_through_scavenger(caller)
     local result=acquire_pause(caller)
-    if result then console.print('[Rosie pickup] Paused by '..tostring(caller)..' (through Scavenger); pickup waits until it resumes (at most 60 s)') end
+    if result then
+        local now,key=get_time_since_inject(),tostring(caller)
+        local last=pause_logged[key]
+        if not last or now<last or now-last>=PAUSE_LOG_GAP then
+            pause_logged[key]=now
+            console.print('[Rosie pickup] Paused by '..key..' (through Scavenger); pickup waits until it resumes (at most 60 s)')
+        end
+    end
     return result
 end
 Mimic.configure({acquire=acquire_through_scavenger,release=release_pause,owned=activity_owns_loot})

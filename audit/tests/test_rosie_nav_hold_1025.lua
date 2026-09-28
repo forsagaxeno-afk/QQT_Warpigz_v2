@@ -19,7 +19,11 @@
 --   inflight: request_move is skipped while the player moves and
 --             clear_stored_path does not stop the in-game move
 --   ignore  : honours no condition
--- Every case except the ones named "control" fails on Rosie 1.0.24.
+-- Every case except N11, N15, N16 and the ones named "control" or "guard"
+-- fails on Rosie 1.0.24. N11 and N13-N16 fail on the first 1.0.25 build
+-- (fd70b6d, review: its stop() fired on get_status alone, its grace applied
+-- beside an idle Worldstone and sent interactions every frame); 1.0.24 had
+-- no grace, no stop and no force, so it passes N11, N14, N15 and N16.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
 local checks, failures = 0, {}
@@ -57,8 +61,10 @@ local DROPS = {
 -- player dies at that time (the fight hold); o.no_worldstone; o.no_stop:
 -- Navigator without stop(); o.status: 'raises' | 'missing';
 -- o.renav: after a stop Worldstone navigates again 'at_once' or only when
--- Scavenger.is_busy() is false ('idle', the default); o.nav_last: Navigator
--- issues its command after Rosie in each frame (its command always wins).
+-- Scavenger.is_busy() is false ('idle', the default) or 'never'; o.nav_last:
+-- Navigator issues its command after Rosie in each frame (its command always
+-- wins); o.paused_flag='never': get_status never reports is_paused;
+-- o.no_force: the host has no force_move_raw.
 local function run(o)
     o = o or {}
     local h = J.new({rosie = true, dirs = {}, place = 'pit', speed = o.speed or 4,
@@ -73,6 +79,7 @@ local function run(o)
         -- clear_stored_path clears the plugin's stored path, not the move the game executes
         h.G.pathfinder.clear_stored_path = function() h.native = nil end
     end
+    if o.no_force then h.G.pathfinder.force_move_raw = nil end
     local nav = {conditions = {}, names = {}, active = false, paused_frames = 0, walk_frames = 0,
         next_read = -math.huge, cached = false, api = {}, cmds = 0, stops = 0, status_calls = 0}
     local function read_all()
@@ -106,7 +113,7 @@ local function run(o)
             nav.status_calls = nav.status_calls + 1
             if o.status == 'raises' then error('Navigator.get_status exploded') end
             return {state = nav.active and 'travelling' or 'idle', owner = 'Worldstone', is_busy = nav.active,
-                is_paused = nav.last_paused == true, priority = 0, mode = 'travel'}
+                is_paused = o.paused_flag ~= 'never' and nav.last_paused == true, priority = 0, mode = 'travel'}
         end
     end
     function nav.step(hh)
@@ -168,7 +175,7 @@ local function run(o)
         local busy = type(sc) == 'table' and sc._rosie == true and sc.is_busy() == true
         -- Worldstone navigates again after a stop (o.renav)
         if ws.phase == 'walk' and not nav.active and nav.stops > stops then
-            if o.renav == 'at_once' or not busy then stops = nav.stops; walk() end
+            if o.renav ~= 'never' and (o.renav == 'at_once' or not busy) then stops = nav.stops; walk() end
         end
         if busy and not r.busy_first and #r.items > 0 then r.busy_first = h.now - t0 end
         if busy then
@@ -219,8 +226,8 @@ end)
 case('N3 in-flight command with four drops (path following and far target): every drop taken, force_move_raw bounded', function()
     for _, look in ipairs({6, false}) do
         local r = run({label = 'N3 inflight look=' .. tostring(look), model = 'inflight', look = look or nil, walk_at = 13.0})
-        eq(r.picked, #DROPS, 'all picked (1.0.24: 0-1 of 4)\n' .. rosie_tail(r.h))
-        eq(#r.yields, 0, 'no yield')
+        eq(r.picked, #DROPS, 'all picked\n' .. rosie_tail(r.h))
+        eq(#r.yields, 0, 'no yield (1.0.24: 1 yield with look=6; the far target: 0-1 of 4)')
         ok(r.forced <= 13 * #DROPS, 'force_move_raw <= 13 per drop: ' .. r.forced)
         ok(r.portal_t ~= nil, 'the portal is still reached')
     end
@@ -237,14 +244,20 @@ case('N4 Navigator that ignores every condition and has no stop(): one yield per
     ok(r.portal_t ~= nil, 'the player kept advancing: the portal is reached')
     ok(r.yields[1].line:find('paused=false', 1, true), 'the yield line carries Navigator\'s state: ' .. r.yields[1].line)
     ok(r.yields[1].line:find('Rosie Looting=true', 1, true), 'and the Rosie Looting reading')
-    -- four drops: never a second yield for the same drop
+    -- four drops: the grace runs once per drop; a later yield of the same
+    -- drop (after its 4 s rest) is the 1.0.21 one, with no second grace
+    -- (its line still shows the first grace's age)
     local r4 = run({label = 'N4 ignore, no stop(), 4 drops', model = 'ignore', look = 6, no_stop = true, nav_last = true, walk_at = 13.0})
     local per = {}
     for _, y in ipairs(r4.yields) do
         local name = y.line:match('player off (.-);')
         per[name] = (per[name] or 0) + 1
+        if per[name] >= 2 then
+            local g = tonumber(y.line:match('grace=([%d%.]+)s'))
+            ok(g and g >= 4, 'no second grace for ' .. tostring(name) .. ': ' .. y.line)
+        end
     end
-    for name, n in pairs(per) do eq(n, 1, 'yields for ' .. tostring(name)) end
+    for name, n in pairs(per) do ok(n <= 2, 'yields for ' .. tostring(name) .. ': ' .. n) end
     ok(r4.portal_t ~= nil, 'four drops: the portal is reached')
 end)
 
@@ -295,7 +308,7 @@ case('N9 calm tail: Scavenger reads busy within 0.3 s of the kill, never while a
     eq(#r2.yields, 0, 'no yield')
 end)
 
-case('N10 Worldstone pausing pickup through Scavenger: one line per pause episode (1.0.24: silent)', function()
+case('N10 Worldstone pausing pickup through Scavenger: one line per pause episode, at most one per 60 s per caller (1.0.24: silent)', function()
     local h = J.new({rosie = true, dirs = {}, place = 'pit'})
     h.assert_clean('load')
     h.pos = h.v(0, 0)
@@ -318,8 +331,123 @@ case('N10 Worldstone pausing pickup through Scavenger: one line per pause episod
     h.run(1)
     sc.pause('Worldstone')
     h.run(1)
-    eq(h.logged(line), 2, 'a new pause episode, a new line')
+    eq(h.logged(line), 1, 'a new pause episode within 60 s: no new line (a caller cycling pause/resume)')
+    sc.resume('Worldstone')
+    h.run(60)
+    sc.pause('Worldstone')
+    h.run(1)
+    eq(h.logged(line), 2, 'a new pause episode 60 s later, a new line')
     h.assert_clean('N10')
+end)
+
+-- Review of the first 1.0.25 build: its stop() fired 0.5 s into the grace on
+-- get_status alone (busy, not paused), which cannot tell a Navigator that
+-- ignores "Rosie Looting" from one that honours it with a command still in
+-- flight or read late but never reports is_paused. If Worldstone did not
+-- navigate again after the stop, the run froze.
+case('N11 in-flight command, is_paused never reported, no force_move_raw, Worldstone never navigates again: no stop(), no freeze', function()
+    local r = run({label = 'N11 inflight, paused never, no force, renav never', model = 'inflight', walk_at = 13.0,
+        paused_flag = 'never', no_force = true, renav = 'never', limit = 40})
+    eq(r.nav.stops, 0, 'a command in flight is not stopped (first 1.0.25 build: stopped)\n' .. rosie_tail(r.h))
+    ok(r.portal_t ~= nil, 'the portal is reached (first 1.0.25 build: never)')
+end)
+case('N12 guard: Navigator reading its conditions 0.9 s late, is_paused never reported, no force_move_raw, no renavigate: no stop(), no freeze', function()
+    local r = run({label = 'N12 lag 1.0, paused never, no force, renav never', model = 'lag', lag = 1.0, look = 6, walk_at = 13.4, nav_last = true,
+        paused_flag = 'never', no_force = true, renav = 'never', limit = 40})
+    eq(r.nav.stops, 0, 'a read up to 1 s late is not stopped (first 1.0.25 build: stopped)\n' .. rosie_tail(r.h))
+    ok(r.portal_t ~= nil, 'the portal is reached (first 1.0.25 build: never)')
+end)
+case('N13 a Navigator that ignores the hold is stopped once; when nothing navigates again the watchdog says so and Rosie stops no more', function()
+    local r = run({label = 'N13 ignore + stop, renav never', model = 'ignore', look = 6, nav_last = true, renav = 'never', limit = 30})
+    eq(r.nav.stops, 1, 'one stop() (the evidence: new commands while held)\n' .. rosie_tail(r.h))
+    eq(r.h.logged('[Rosie pickup] Navigator has stayed idle 5s since Rosie stopped its request'), 1,
+        'the watchdog line (first 1.0.25 build: none)\n' .. rosie_tail(r.h))
+    -- a new episode: Worldstone navigates again, still ignoring the hold; Rosie no longer stops it
+    local h, nav = r.h, r.nav
+    nav.api.navigate({owner = 'Worldstone', position = h.v(PORTAL[1], PORTAL[2]), arrive_distance = 2})
+    h.drop('pit', h.pos:x() - 3, h.pos:y() + 2, {name = 'Item_Gemstone_Royal_Topaz', sno = 265752, bag = 'socketables', rarity = 0})
+    local y0 = #r.yields
+    for _ = 1, 60 do r.frame() end
+    ok(#r.yields > y0 and r.yields[#r.yields].line:find('Topaz', 1, true), 'the new drop ran its grace, then yielded\n' .. rosie_tail(h))
+    eq(nav.stops, 1, 'no further stop() this session')
+end)
+case('N14 WS idle control: Worldstone installed but Navigator idle, a farm mover takes the path: the 1.0.24 yield (0.3 s), no grace, no force', function()
+    local h = J.new({rosie = true, dirs = {}, place = 'pit', request_move_redundant = 'any'})
+    h.pos = h.v(0, 0)
+    h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end)
+    h.frame()
+    pgui(h).general.distance_slider:set(30)
+    h.G.pathfinder.clear_stored_path = function() h.native = nil end
+    h.G.Navigator = {set_pause_condition = function() end, stop = function() error('never stopped') end,
+        get_status = function() return {state = 'idle', owner = 'Worldstone', is_busy = false, is_paused = false} end}
+    h.G.Worldstone = {get_status = function() return {} end}
+    h.run(4)
+    ok(h.G.Scavenger and h.G.Scavenger._rosie == true, 'stand-in published')
+    local it = h.drop('pit', 8, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_009', refuse = function() return true end})
+    local t0 = h.now
+    h.run(1.0) -- Rosie walks to the drop
+    local t1 = h.now
+    local first
+    h.run(3, function(hh)
+        hh.goal = hh.v(-12, 0) -- the farm plugin's move command (in flight)
+        if not first and hh.logged('Another move took the player off', t0) > 0 then first = hh.now - t1 end
+    end)
+    ok(first and first <= 0.8, 'yielded within 0.8 s (first 1.0.25 build: 2.5 s grace): ' .. tostring(first) .. '\n' .. rosie_tail(h))
+    eq(h.count(h.moves, function(m) return m.kind == 'force_move_raw' and m.owner == 'Rosie' end), 0, 'no force_move_raw')
+    ok(it.picked ~= true)
+end)
+
+case('N15 the grace does not speed up interactions: a refused drop in reach or in the 2-3 m band keeps its cadence (first 1.0.25 build: every frame)', function()
+    -- an in-flight far command the player is not executing (speed 0) and a
+    -- clear_stored_path that does not cancel it: the grace re-asserts every pulse
+    local function tries(worldstone, x, dt)
+        local h = J.new({rosie = true, dirs = {}, place = 'pit'})
+        h.pos = h.v(0, 0)
+        h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end)
+        h.frame()
+        pgui(h).general.distance_slider:set(15)
+        if worldstone then
+            h.G.Navigator = {set_pause_condition = function() end, stop = function() end,
+                get_status = function() return {state = 'travelling', owner = 'Worldstone', is_busy = true, is_paused = true} end}
+            h.G.Worldstone = {get_status = function() return {} end}
+        end
+        h.run(4)
+        h.G.pathfinder.clear_stored_path = function() h.native = nil end
+        h.speed = 0
+        local it = h.drop('pit', x, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_061', refuse = function() return true end})
+        local n, take = 0, it.on_interact
+        it.on_interact = function(hh, a) n = n + 1; if take then take(hh, a) end end
+        h.goal = h.v(30, 0)
+        h.run(3, function(hh) hh.goal = hh.v(30, 0) end, dt)
+        return n
+    end
+    for _, x in ipairs({0.9, 2.5}) do
+        for _, dt in ipairs({0.1, 0.016}) do
+            local with, without = tries(true, x, dt), tries(false, x, dt)
+            ok(with <= 2 * without + 1, string.format('drop at %.1f m, frame %.3f s: %d interactions in 3 s under the grace, %d without (first 1.0.25 build: 28-42 in reach, 13 in the band)',
+                x, dt, with, without))
+        end
+    end
+end)
+
+case('N16 a drop on a ramp (z 3 m): Rosie\'s own in-flight walk is not forced again every resend (the force check is 2D)', function()
+    local h = J.new({rosie = true, dirs = {}, place = 'pit', request_move_redundant = 'any'})
+    h.pos = h.v(0, 0)
+    h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end)
+    h.frame()
+    pgui(h).general.distance_slider:set(15)
+    h.G.pathfinder.clear_stored_path = function() h.native = nil end
+    h.G.Navigator = {set_pause_condition = function() end, stop = function() end,
+        get_status = function() return {state = 'travelling', owner = 'Worldstone', is_busy = true, is_paused = true} end}
+    h.G.Worldstone = {get_status = function() return {} end}
+    h.run(4)
+    local it = h.drop('pit', 6, 4, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_066'})
+    it.pos = h.v(6, 4, 3)
+    h.goal = h.v(-30, 0) -- Navigator's command in flight
+    h.run(4)
+    ok(it.picked == true, 'taken\n' .. rosie_tail(h))
+    local forced = h.count(h.moves, function(m) return m.kind == 'force_move_raw' and m.owner == 'Rosie' end)
+    eq(forced, 1, 'one force_move_raw (first 1.0.25 build: the 3D check forced Rosie\'s own walk again)')
 end)
 
 print(string.format('rosie nav hold 1.0.25: %d checks, %d failures', checks, #failures))

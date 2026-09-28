@@ -161,12 +161,14 @@ function M.move(owner,target,arrive)
     -- owner opened (M.force_for: pickup re-asserting its walk while Rosie's
     -- "Rosie Looting" condition holds Navigator, at most 2.5 s per drop), a
     -- skipped request whose player destination is more than 1.5 m off is sent
-    -- once more with force_move_raw (a live API: ArkhamAsylum portal.lua,
-    -- HelltideRevamped explorerlite.lua). At most once per pace (0.2 s).
+    -- once more with force_move_raw (a live API: Reaper tasks and
+    -- HelltideRevamped explorerlite.lua call it). At most once per pace (0.2 s).
+    -- QQT_Warpigz_v3 1.0.25 (review): the destination is compared in 2D (a
+    -- ramp, or a destination read with z=0, forced every resend).
     if result==false and state.force_until and state.force_owner==owner and now<state.force_until
         and type(native.force_move_raw)=='function' then
-        local dest=point(call(player,'get_move_destination'))
-        if not dest or distance(dest,state.route[state.index])>1.5 then
+        local dest,to=point(call(player,'get_move_destination')),state.route[state.index]
+        if not dest or math.sqrt((dest.x-to.x)^2+(dest.y-to.y)^2)>1.5 then
             local forced=pcall(native.force_move_raw,vector(state.route[state.index]))
             if forced then result=true;state.forced=(state.forced or 0)+1 end
         end
