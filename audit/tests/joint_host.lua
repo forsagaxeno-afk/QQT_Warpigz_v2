@@ -27,6 +27,19 @@
 -- Caldeum gate (h.items, h.sigil_confirms, the Horde portal); every arrival
 -- is recorded (h.arrivals) and may run the place's on_arrive; h.setup_horde
 -- scripts an Infernal Horde (waves, locked door, Council, chest room).
+-- Sweep tooling (QQT_Warpigz_v3 after 3.3.6; details at J.install_invariants,
+-- J.install_rotation and J.install_chaos at the end of this file), all opt-in:
+--   opts.invariants = true | {KIND = false | {thresholds}}  read-only monitors
+--     TELEPORT / LEFT_DROP / STALL / SPAM / LOOP; h.invariant_report(),
+--     h.assert_invariants(label, overrides). QQT_INVARIANTS=1 turns them on
+--     for every host (QQT_INVARIANTS_LOG=<file> appends each hit, tab
+--     separated, with the test file and its lines on the stack).
+--   opts.rotation = true | {...}  a Universal Rotation stand-in (casts at
+--     enemies within 12 m, seeded 3-6 m dashes/evades that can break a channel).
+--   opts.chaos = {seed = N, rate = per_minute, kinds = {...}, only = {n...}}
+--     seeded death / drop (Mythic, also inside a travel channel) / Limbo /
+--     plugin reload / full bag / lazy stash / elite pack / path obstacle.
+--   opts.virtual_os_clock (default with chaos): deterministic os.clock().
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = {}
 
@@ -434,6 +447,7 @@ function J.new(opts)
         end
     end
     h.code_owner = code_owner
+    h.plugin_of_source = plugin_of_source -- sweep: SPAM/LOOP attribute console lines
     local function violation(kind, detail, owner)
         h.violations[#h.violations + 1] = {kind = kind, detail = detail, t = h.now,
             context = context and context.name or (loading and loading.name) or '-',
@@ -491,9 +505,12 @@ function J.new(opts)
     h.stdlib = {string = BASE.string, table = BASE.table, math = BASE.math}
     h.stdlib_keys = {string = copy(BASE.string), table = copy(BASE.table), math = copy(BASE.math)}
     BASE.print = function(...)
+        if h._mute_log then return end -- sweep: an invariant probe's own output
         local parts = {}
         for i = 1, select('#', ...) do parts[#parts + 1] = tostring((select(i, ...))) end
-        h.log[#h.log + 1] = string.format('%.1f [print] %s', h.now, table.concat(parts, ' '))
+        local msg = table.concat(parts, ' ')
+        h.log[#h.log + 1] = string.format('%.1f [print] %s', h.now, msg)
+        if h._inv then h._inv.line(msg) end
     end
     -- Round 5: opts.virtual_os_time makes os.time() (no arguments) follow the
     -- simulated clock, so wall-clock phases (Reaper's chest WAIT_GONE /
@@ -507,13 +524,26 @@ function J.new(opts)
             return epoch + math.floor(h.now)
         end
     end
+    -- Sweep: opts.virtual_os_clock (a step in s, or true = 2e-6; on by
+    -- default with opts.chaos) makes the plugins' os.clock() advance by that
+    -- step per call instead of real CPU time. Batmobile's pathfinder stops on
+    -- a CPU-time budget as well as an iteration cap, so with the real clock
+    -- the same script can walk differently from run to run (and a chaos run
+    -- would not replay exactly). Off by default: older scenarios keep it.
+    local os_clock = os.clock
+    local vclock = opts.virtual_os_clock
+    if vclock == nil and opts.chaos then vclock = true end
+    if vclock then
+        local step, ticks = type(vclock) == 'number' and vclock or 2e-6, 0
+        os_clock = function() ticks = ticks + 1; return ticks * step end
+    end
     BASE.os = setmetatable({date = function(fmt, ...)
         -- QQT_Warpigz_v3: HelltideRevamped reads the UTC minute ('!%M',
         -- core/hr_clock.lua) and so does WarPigs (with a '%M' fallback). Both follow h.minute.
         if fmt == '%M' or fmt == '!%M' then return string.format('%02d', h.minute) end
         if fmt == '!%S' then return '00' end
         return os.date(fmt, ...)
-    end, time = os_time, clock = os.clock, getenv = function() return nil end}, {__index = function(_, k)
+    end, time = os_time, clock = os_clock, getenv = function() return nil end}, {__index = function(_, k)
         h.missing['os.' .. tostring(k)] = (h.missing['os.' .. tostring(k)] or 0) + 1
     end})
     -- Plugins may read their own data files; writes stay in memory.
@@ -716,7 +746,20 @@ function J.new(opts)
         if key == nil or persisted[key] == nil then return default end
         return persisted[key]
     end
-    host('checkbox', {new = function(_, d, key) return widget(stored(key, d == true)) end})
+    -- Sweep: every checkbox is registered by its hash key (h.checkboxes[key]
+    -- = {w, owner}) and each plugin's '*main_toggle' by folder (h.toggles),
+    -- so the invariant monitors can tell which farm plugin is switched on
+    -- without calling a plugin getter (several are not read-only).
+    h.checkboxes, h.toggles = {}, {}
+    host('checkbox', {new = function(_, d, key)
+        local w = widget(stored(key, d == true))
+        local owner = loading or context
+        if type(key) == 'string' then
+            h.checkboxes[key] = {w = w, owner = owner and owner.name or '-'}
+            if owner and not owner.pseudo and key:sub(-11) == 'main_toggle' then h.toggles[owner.name] = w end
+        end
+        return w
+    end})
     host('combo_box', {new = function(_, d, key) return widget(stored(key, d or 0)) end})
     host('slider_int', {new = function(_, _, _, d) return widget(d) end})
     host('slider_float', {new = function(_, _, _, d) return widget(d) end})
@@ -734,6 +777,14 @@ function J.new(opts)
     local graphics_used = {}
     h.graphics_used = graphics_used
     host('graphics', setmetatable({}, {__index = function(_, k)
+        if k == 'text_2d' or k == 'text_3d' then
+            -- Sweep: with the monitors on, the drawn status text is kept per
+            -- plugin (the STALL report quotes it, LOOP reads WarPigs/WarPug).
+            return function(text)
+                graphics_used[k] = (graphics_used[k] or 0) + 1
+                if h._inv then h._inv.overlay(context, text) end
+            end
+        end
         return function() graphics_used[k] = (graphics_used[k] or 0) + 1 end
     end}))
     for _, c in ipairs({'white', 'red', 'green', 'yellow', 'orange', 'blue', 'purple', 'cyan', 'pink', 'gray',
@@ -752,9 +803,12 @@ function J.new(opts)
 
     -- ── time, world, player ─────────────────────────────────────────────────
     host('console', {print = function(...)
+        if h._mute_log then return end -- sweep: an invariant probe's own output
         local parts = {}
         for i = 1, select('#', ...) do parts[#parts + 1] = tostring((select(i, ...))) end
-        h.log[#h.log + 1] = string.format('%.1f %s', h.now, table.concat(parts, ' '))
+        local msg = table.concat(parts, ' ')
+        h.log[#h.log + 1] = string.format('%.1f %s', h.now, msg)
+        if h._inv then h._inv.line(msg) end
     end})
     host('get_time_since_inject', function() return h.now end)
     host('get_gametime', function() return h.now end)
@@ -803,7 +857,19 @@ function J.new(opts)
     -- Stash contents read only while the stash panel is open (Alfred's
     -- stash-count check relies on that).
     function player:get_stash_items()
-        if h.vendor_screen and h.vendor_actor ~= nil and h.vendor_actor == h.temis_stash then return h.stash or {} end
+        if h.vendor_screen and h.vendor_actor ~= nil and h.vendor_actor == h.temis_stash then
+            -- Sweep (chaos 'stash_lazy', or a scenario setting h.stash_lazy =
+            -- {small = N, window = s}): for `window` s after the panel opens
+            -- the host lists only the first `small` stash items (live: 32,
+            -- then the full 300 a moment later).
+            local lazy = h.stash_lazy
+            if lazy and h.now - (h.stash_opened_at or -math.huge) < (lazy.window or 1) then
+                local out = {}
+                for i = 1, math.min(lazy.small or 32, #(h.stash or {})) do out[i] = h.stash[i] end
+                return out
+            end
+            return h.stash or {}
+        end
         if opts.stash_stale and h.place == P.temis then return h.stash or {} end -- opts.stash_stale: a cached list while the panel is closed
         return {}
     end
@@ -837,6 +903,8 @@ function J.new(opts)
         place = type(place) == 'string' and P[place] or place
         h.travel = {at = h.now + (channel or 1), to = place, phase = 'channel', why = why}
         h.casting = true
+        if h._inv then h._inv.on_travel(h.travel) end
+        if h._chaos then h._chaos.on_travel(h.travel, channel or 1) end
     end
     local function note_call(list, rec)
         local owner = code_owner(3)
@@ -846,8 +914,14 @@ function J.new(opts)
         return rec
     end
     host('teleport_to_waypoint', function(sno)
-        note_call(h.waypoints, {sno = sno})
+        local rec = note_call(h.waypoints, {sno = sno})
         local key = h.waypoint_places[sno] or 'cerrigar'
+        -- Sweep (TELEPORT): in this host Rosie's Town Portal cast is the
+        -- waypoint teleport to Temis out of a non-town place (spell 186139).
+        if h._inv then
+            h._inv.teleport(rosie and key == 'temis' and not h.place.town and h.place ~= P.limbo
+                and 'town_portal' or 'waypoint', rec, key)
+        end
         -- Rosie mode: teleporting to Temis out of a non-town place leaves a
         -- town portal in Temis that leads back to the exact spot.
         if rosie and key == 'temis' and not h.place.town and h.place ~= P.limbo then
@@ -857,7 +931,8 @@ function J.new(opts)
         return true
     end)
     host('teleport_to_boss_dungeon', function(id)
-        note_call(h.boss_tps, {id = id})
+        local rec = note_call(h.boss_tps, {id = id})
+        if h._inv then h._inv.teleport('boss_dungeon', rec, tostring(id)) end
         h.travel_to(h.boss_lair or 'lair', 1.0, 'boss_dungeon')
     end)
     -- Reviving is asynchronous: the player stands up at the checkpoint of the
@@ -927,7 +1002,7 @@ function J.new(opts)
             and not (a == h.temis_stash and (opts.stash_fail_first or 0) > (h.stash_fails or 0) and (function() h.stash_fails = (h.stash_fails or 0) + 1; return true end)()) then
             h.vendor_screen, h.vendor_actor = true, a
             if a ~= h.temis_stash then h.last_npc_vendor = a end
-            if a == h.temis_stash then h.stash_opens = (h.stash_opens or 0) + 1 end
+            if a == h.temis_stash then h.stash_opens = (h.stash_opens or 0) + 1; h.stash_opened_at = h.now end
         end
         if a == h.table_actor and h.pos:dist_to_ignore_z(a.pos) <= 4 then h.board.ready = true end
         if a and a.on_interact then a.on_interact(h, a) end
@@ -1257,6 +1332,7 @@ function J.new(opts)
             place = type(place) == 'string' and P[place] or place
             local item = h.gear(fields)
             item.pos = v(x, y)
+            item.dropped_at = h.now -- sweep: LEFT_DROP reports the age of a drop left behind
             function item:get_position() return self.pos end
             item.on_interact = function()
                 if item.picked then return end
@@ -1339,9 +1415,12 @@ function J.new(opts)
             if h.on_confirm then h.on_confirm(path) end
         end,
         teleport_to_activity = function()
-            note_call(h.warplans, {kind = 'teleport'})
+            local rec = note_call(h.warplans, {kind = 'teleport'})
             local dest = h.warplan_dest
             if type(dest) == 'function' then dest = dest(h) end
+            if h._inv then
+                h._inv.teleport('warplan', rec, type(dest) == 'table' and dest.key or dest and tostring(dest) or 'no destination')
+            end
             if dest then h.travel_to(dest, 1.5, 'warplan') end
         end,
     })
@@ -1506,6 +1585,9 @@ function J.new(opts)
         local t = h.travel
         if not t or h.now < t.at then return end
         if t.phase == 'channel' then
+            -- Sweep (LEFT_DROP): judged while the player still stands in the
+            -- place it leaves (Rosie's decision reads the zone and position).
+            if h._inv then h._inv.departing(t) end
             h.casting = false
             h.place, h.pos, h.goal, h.native = P.limbo, P.limbo.spawn, nil, nil
             h.vendor_screen = false
@@ -1531,6 +1613,7 @@ function J.new(opts)
         h.frames = h.frames + 1
         travel_tick()
         run_events()
+        if h._chaos then h._chaos.tick() end -- sweep: seeded chaos (J.new({chaos = ...}))
         if not rosie then
             invoke(h.alfred_ctx, 'update', alfred_tick)
             invoke(h.looter_ctx, 'update', looter_tick)
@@ -1538,6 +1621,9 @@ function J.new(opts)
         for _, rec in ipairs(h.plugins) do
             for _, fn in ipairs(rec.update) do invoke(rec, 'on_update', fn) end
         end
+        -- Sweep: the third-party Universal Rotation (J.new({rotation = ...}))
+        -- runs as its own folder-less plugin after the suite's plugins.
+        if h._rot then invoke(h.rotation_ctx, 'update', h._rot.tick) end
         if h.vendor_screen and h.vendor_actor and h.vendor_actor.pos
             and h.pos:dist_to_ignore_z(h.vendor_actor.pos) > 5 then
             h.vendor_screen, h.vendor_actor = false, nil -- walking away closes the panel
@@ -1581,6 +1667,7 @@ function J.new(opts)
                 for _, fn in ipairs(rec.menu) do invoke(rec, 'on_render_menu', fn) end
             end
         end
+        if h._inv then h._inv.tick() end -- sweep: invariant monitors (read-only)
     end
     function h.run(seconds, each, dt)
         local stop = h.now + seconds - 1e-9
@@ -1678,7 +1765,896 @@ function J.new(opts)
                 label or 'joint', #h.violations, vi.kind, vi.detail, vi.context, vi.owner, vi.t, vi.trace), 2)
         end
     end
+
+    -- ── sweep: invariant monitors, Universal Rotation stub, seeded chaos ──
+    -- All opt-in (see J.install_invariants / J.install_rotation /
+    -- J.install_chaos below). QQT_INVARIANTS=1 in the environment turns the
+    -- monitors on for every J.new that does not pass invariants=false.
+    local inv_opts = opts.invariants
+    if inv_opts == nil and os.getenv('QQT_INVARIANTS') == '1' then inv_opts = true end
+    local sweep_host = {P = P, rosie = rosie, seed = opts.seed or 7}
+    if inv_opts then J.install_invariants(h, inv_opts, sweep_host) end
+    function h.invariant_report()
+        if not h._inv then return 'invariants off (J.new({invariants = true}) or QQT_INVARIANTS=1)', {} end
+        return h._inv.report()
+    end
+    function h.assert_invariants(label, overrides)
+        if not h._inv then error((label or 'joint') .. ': invariants are off; pass J.new({invariants = true})', 2) end
+        local remaining = h._inv.filter(overrides)
+        if #remaining > 0 then
+            error(string.format('%s: %d invariant violation(s):\n%s', label or 'joint', #remaining,
+                h._inv.format(remaining)), 2)
+        end
+    end
+    if opts.rotation then
+        h.rotation_ctx = {name = 'UniversalRotation', pseudo = true, loaded = {}}
+        J.install_rotation(h, opts.rotation, sweep_host)
+    end
+    if opts.chaos then
+        h.chaos_ctx = {name = 'ClickRevive', pseudo = true, loaded = {}}
+        J.install_chaos(h, opts.chaos, sweep_host)
+    end
     return h
+end
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Sweep tooling (QQT_Warpigz_v3 after 3.3.6): invariant monitors, a Universal
+-- Rotation stub and seeded chaos. Test infrastructure only; nothing here is
+-- reachable unless a scenario asks for it (or QQT_INVARIANTS=1, monitors only).
+--
+--   local h = J.new({rosie = true, place = 'pit', invariants = true,
+--       rotation = true, chaos = {seed = 42, rate = 2}})
+--   h.run(600)
+--   print((h.invariant_report()))
+--   h.assert_invariants('S2 pit', {SPAM = false, TELEPORT = 1,
+--       LOOP = function(hit) return hit.detail:find('world.place', 1, true) end})
+--   print(h.chaos.replay())  -- the exact J.new chaos table to replay the run
+--
+-- None of the three draws from math.random (plugins that do see the same
+-- numbers as without them): each has its own Park-Miller stream (J.rng).
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Park-Miller "minimal standard" generator. Every product stays below 2^53,
+-- so Lua 5.4 (integers) and LuaJIT (doubles) produce the same sequence.
+function J.rng(seed)
+    local s = math.floor(tonumber(seed) or 1) % 2147483647
+    if s <= 0 then s = s + 2147483646 end
+    -- Two warm-up steps: the first output of a small seed is tiny (42 ->
+    -- 0.0003), which would bias the first draw of every stream.
+    s = (s * 16807) % 2147483647
+    s = (s * 16807) % 2147483647
+    local r = {}
+    function r.next() s = (s * 16807) % 2147483647; return s / 2147483647 end
+    function r.range(a, b) return a + (b - a) * r.next() end
+    function r.int(a, b) return math.min(b, a + math.floor(r.next() * (b - a + 1))) end
+    function r.chance(p) return r.next() < (p or 0) end
+    function r.pick(list) return list[r.int(1, #list)] end
+    return r
+end
+
+local function mask_numbers(s) return (tostring(s):gsub('%d+', '#')) end
+J.mask_numbers = mask_numbers
+local function merged(defaults, user)
+    local out = {}
+    for k, val in pairs(defaults) do out[k] = val end
+    if type(user) == 'table' then for k, val in pairs(user) do out[k] = val end end
+    return out
+end
+local function one_line(s) return (tostring(s):gsub('[\t\r\n]+', ' ')) end
+
+-- ── invariant monitors ─────────────────────────────────────────────────────
+-- TELEPORT   more than `max` teleport casts (teleport_to_waypoint, Rosie's
+--            Town Portal = the Temis waypoint out of a non-town place,
+--            warplan.teleport_to_activity, teleport_to_boss_dungeon) between
+--            two arrivals in a new place.
+-- LEFT_DROP  a travel channel completes (the player leaves the place) while a
+--            ground item Rosie wants (ItemManager.check_want_item, the
+--            decision behind LooteerPlugin.evaluate_item without its
+--            rejection log) lies within `radius` m of where it stood and
+--            within Rosie's pickup distance (a Unique/Mythic counts anywhere
+--            within `radius`). Judged before the Limbo switch, so Rosie reads
+--            the old zone. Tags: dropped during the channel, already wanted
+--            when the cast started; a drop picked up after a return to the
+--            spot is annotated "picked up later" (the hit stays). Rosie mode
+--            only (ground items exist only there).
+-- STALL      the player stays within `move` m for more than `seconds` s while
+--            alive, not loading, a farm plugin's main toggle is on, and (in
+--            a town) some plugin still sent a command in the last
+--            `town_quiet` s (a quiet town is idle, not stalled).
+-- SPAM       one console line (numbers masked) printed more than `max` times
+--            within `window` s.
+-- LOOP       one state source switching between the same two states more
+--            than `max` times within `window` s. Sources: each task
+--            manager's current task (Arkham, HelltideRevamped + its task
+--            state, HordeDev, Reaper, WonderCity, Rosie town), SilentRaven's
+--            tracker.state, the drawn WarPigs / WarPug status line, the
+--            player's place, and "state A -> B" console lines.
+J.INVARIANT_KINDS = {'TELEPORT', 'LEFT_DROP', 'STALL', 'SPAM', 'LOOP'}
+J.INVARIANT_DEFAULTS = {
+    TELEPORT = {max = 2},
+    LEFT_DROP = {radius = 15},
+    STALL = {seconds = 90, move = 1, town_quiet = 10, poll = 0.5,
+        farm = {'ArkhamAsylum', 'HelltideRevamped', 'HordeDev', 'Reaper', 'WonderCity', 'WarPigs'}},
+    SPAM = {max = 20, window = 60},
+    LOOP = {max = 10, window = 120, poll = 0.25},
+}
+-- Task managers read by LOOP / STALL (get_current_task() only returns a local).
+J.TASK_MODULES = {ArkhamAsylum = 'core.task_manager', HelltideRevamped = 'core.task_manager',
+    HordeDev = 'core.task_manager', Reaper = 'core.task_manager', WonderCity = 'core.task_manager',
+    Rosie = 'rosie.private.town.core.task_manager'}
+J.MYTHIC_MARK = 2628989 -- S14_Mythic_UniquePotency
+
+-- The test file that built the host and its lines on the stack, innermost
+-- first ('45<790': J.new in a helper at line 45, called by a case at 790).
+local function test_site()
+    local file, lines = nil, {}
+    for level = 2, 60 do
+        local info = debug.getinfo(level, 'Sl')
+        if not info then break end
+        local name = type(info.source) == 'string' and info.source:match('(test_[%w_]+%.lua)$')
+        if name and (file == nil or name == file) and #lines < 4 then
+            file = name
+            lines[#lines + 1] = tostring(info.currentline)
+        end
+    end
+    return file or '?', #lines > 0 and table.concat(lines, '<') or '0'
+end
+
+function J.install_invariants(h, user, host)
+    local P = host.P
+    local cfg = {}
+    for _, kind in ipairs(J.INVARIANT_KINDS) do
+        local u = type(user) == 'table' and user[kind] or nil
+        if u == false then cfg[kind] = false else cfg[kind] = merged(J.INVARIANT_DEFAULTS[kind], u) end
+    end
+    local M = {hits = {}, config = cfg, pending_left = {}}
+    h._inv, h.invariants = M, M
+    M.test, M.site = test_site()
+    M.runtime = rawget(_G, 'jit') and 'luajit' or tostring(_VERSION)
+    M.env_log = os.getenv('QQT_INVARIANTS_LOG')
+    M.env_log = M.env_log ~= '' and M.env_log or nil
+
+    -- Every hit is appended to $QQT_INVARIANTS_LOG (tab separated: test,
+    -- J.new line, runtime, kind, time, new|final, detail) when it is set.
+    local function write_env(hit, final)
+        if not M.env_log then return end
+        local f = io.open(M.env_log, 'a')
+        if not f then return end
+        f:write(table.concat({M.test, tostring(M.site), M.runtime, hit.kind, string.format('%.1f', hit.t),
+            final and 'final' or 'new', one_line(hit.detail)}, '\t'), '\n')
+        f:close()
+        hit.dirty = false
+    end
+    function M.hit(kind, detail, data)
+        local hit = {kind = kind, t = h.now, detail = detail, data = data}
+        M.hits[#M.hits + 1] = hit
+        write_env(hit)
+        return hit
+    end
+    local function revise(hit, detail)
+        if hit.detail ~= detail then hit.detail, hit.dirty = detail, true end
+    end
+    local internal_seen = {}
+    function M.internal(msg)
+        msg = one_line(msg):sub(1, 300)
+        if internal_seen[msg] then return end
+        internal_seen[msg] = true
+        M.hit('INTERNAL', 'monitor error (the monitor, not a plugin): ' .. msg)
+    end
+
+    -- Drawn status text per plugin, from the latest frame it drew in.
+    local ov = {lines = {}, frame = {}}
+    M.ov = ov
+    function M.overlay(ctx, text)
+        if not ctx or type(text) ~= 'string' then return end
+        local name = ctx.name
+        local lines = ov.lines[name]
+        if ov.frame[name] ~= h.frames or not lines then
+            lines = {}
+            ov.lines[name], ov.frame[name] = lines, h.frames
+        end
+        if #lines < 4 then lines[#lines + 1] = text end
+    end
+    function M.current_tasks()
+        local out = {}
+        for _, rec in ipairs(h.plugins) do
+            local modname = J.TASK_MODULES[rec.name]
+            local tm = modname and rec.loaded[modname]
+            if type(tm) == 'table' and type(tm.get_current_task) == 'function' then
+                local ok, task = pcall(tm.get_current_task)
+                if ok and type(task) == 'table' then
+                    out[#out + 1] = {dir = rec.name, name = task.name, state = task.current_state, status = task.status}
+                end
+            end
+        end
+        local sr = h.by_dir.SilentRaven
+        local tracker = sr and sr.loaded['silent_raven.tracker']
+        if type(tracker) == 'table' and tracker.state ~= nil then
+            out[#out + 1] = {dir = 'SilentRaven', state = tracker.state}
+        end
+        return out
+    end
+    function M.status_lines()
+        local parts = {}
+        for _, t in ipairs(M.current_tasks()) do
+            local s = t.dir .. ' task=' .. tostring(t.name or '-')
+            if t.state ~= nil then s = s .. ' state=' .. tostring(t.state) end
+            if type(t.status) == 'string' and t.status ~= '' then s = s .. ' (' .. t.status .. ')' end
+            parts[#parts + 1] = s
+        end
+        local names = {}
+        for name in pairs(ov.lines) do names[#names + 1] = name end
+        table.sort(names)
+        for _, name in ipairs(names) do
+            if h.frames - (ov.frame[name] or -1e9) <= 5 then
+                parts[#parts + 1] = name .. ' drew "' .. table.concat(ov.lines[name], ' | '):sub(1, 160) .. '"'
+            end
+        end
+        return table.concat(parts, '; ')
+    end
+
+    -- TELEPORT ---------------------------------------------------------------
+    local tp = {calls = {}, origin = h.place, origin_t = h.now}
+    M.tp = tp
+    local function describe_calls()
+        local out, first = {}, math.max(1, #tp.calls - 5)
+        for i = first, #tp.calls do
+            local c = tp.calls[i]
+            out[#out + 1] = string.format('%s->%s by %s (ctx %s) t=%.1f', c.kind, tostring(c.dest), c.owner, c.context, c.t)
+        end
+        return string.format('%d teleport casts since arriving in %s at t=%.1f (max %d): %s%s', #tp.calls,
+            tostring(tp.origin and tp.origin.key), tp.origin_t, cfg.TELEPORT.max, first > 1 and '... ' or '',
+            table.concat(out, '; '))
+    end
+    local teleport
+    -- Called from the host's teleport functions inside a plugin's callback:
+    -- a monitor error must never reach the plugin.
+    function M.teleport(kind, rec, dest)
+        local ok, err = pcall(teleport, kind, rec, dest)
+        if not ok then M.internal('teleport: ' .. tostring(err)) end
+    end
+    teleport = function(kind, rec, dest)
+        local call = {kind = kind, t = h.now, owner = rec and rec.owner or '-', context = rec and rec.context or '-',
+            dest = dest, from = h.place.key}
+        tp.calls[#tp.calls + 1] = call
+        if cfg.TELEPORT and #tp.calls > cfg.TELEPORT.max then
+            if tp.hit then revise(tp.hit, describe_calls())
+            else tp.hit = M.hit('TELEPORT', describe_calls(), {calls = tp.calls}) end
+        end
+        -- LEFT_DROP: a cast out of a place marks the drops Rosie still wants
+        -- (checked at the end of the frame; reported only if left behind).
+        if cfg.LEFT_DROP and h.place ~= P.limbo then
+            M.pending_left[#M.pending_left + 1] = {place = h.place, pos = h.pos, why = kind .. ' by ' .. call.owner}
+        end
+    end
+    local function arrive(place)
+        if place == tp.origin then return end
+        if tp.hit and tp.hit.dirty then write_env(tp.hit, true) end
+        tp.calls, tp.hit, tp.origin, tp.origin_t = {}, nil, place, h.now
+    end
+    function M.on_travel(travel) M.travel_started = h.now; M.travel_why = travel and travel.why end
+
+    -- LEFT_DROP --------------------------------------------------------------
+    local left_seen = setmetatable({}, {__mode = 'k'})
+    local marked = setmetatable({}, {__mode = 'k'}) -- item -> cast that found it wanted
+    local function marked_mythic(item)
+        for _, a in ipairs(type(item.affixes) == 'table' and item.affixes or {}) do
+            if type(a) == 'table' and a.affix_name_hash == J.MYTHIC_MARK then return true end
+        end
+        return (tonumber(item.rarity) or 0) >= 8
+    end
+    local function evaluate(im, item)
+        -- Host counters a test may assert on are restored; Rosie's own
+        -- console output during the probe is muted.
+        local reads, rays = h.item_count_reads, h.ray_casts
+        h._mute_log = true
+        local ok, wanted, reason = pcall(h.as, 'Rosie', function() return im.check_want_item(item, true) end)
+        h._mute_log = nil
+        h.item_count_reads, h.ray_casts = reads, rays
+        if not ok then M.internal('LEFT_DROP check_want_item: ' .. tostring(wanted)); return false end
+        return wanted == true, reason
+    end
+    local function rosie_pickup()
+        local rec = h.by_dir.Rosie
+        if not host.rosie or not rec then return nil end
+        local master = h.checkboxes and h.checkboxes.Rosie_enabled
+        if master and master.w:get() ~= true then return nil end
+        local im, sm = rec.loaded['rosie.private.pickup.src.item_manager'], rec.loaded['rosie.private.pickup.src.settings']
+        if type(im) ~= 'table' or type(im.check_want_item) ~= 'function' or type(sm) ~= 'table' then return nil end
+        local ok, s = pcall(sm.get)
+        if not ok or type(s) ~= 'table' or s.enabled ~= true then return nil end
+        return im, s
+    end
+    M.left_open = {} -- LEFT_DROP hits whose drop may still be picked up on a return
+    -- The host calls this when a travel channel completes, while the player
+    -- still stands in the place it leaves.
+    function M.departing(travel)
+        local ok, err = pcall(M.check_left, h.place, h.pos,
+            'leaving ' .. tostring(h.place.key) .. ' (' .. tostring(travel and travel.why) .. ')', 'leave')
+        if not ok then M.internal('departing: ' .. tostring(err)) end
+    end
+    -- mode 'mark': a cast out of the place; 'leave': the place is left.
+    function M.check_left(place, pos, why, mode)
+        local c = cfg.LEFT_DROP
+        if not c or not place or place == P.limbo or not pos or not place.items or #place.items == 0 then return end
+        local im, s = rosie_pickup()
+        if not im then return end
+        local reach = math.min(c.radius, tonumber(s.distance) or c.radius)
+        for _, item in ipairs(place.items) do
+            if not item.picked and not left_seen[item] and not item.refuse and item.pos then
+                local d = pos:dist_to_ignore_z(item.pos)
+                local rarity = tonumber(item.rarity) or 0
+                if d <= c.radius and (d <= reach or rarity >= 6) then
+                    local wanted, reason = evaluate(im, item)
+                    if wanted and mode == 'mark' then
+                        marked[item] = marked[item] or string.format('%s at t=%.1f', why, h.now)
+                    elseif wanted then
+                        left_seen[item] = true
+                        local age = item.dropped_at and (h.now - item.dropped_at) or nil
+                        local during = item.dropped_at and M.travel_started and item.dropped_at >= M.travel_started
+                        M.left_open[#M.left_open + 1] = M.hit('LEFT_DROP', string.format(
+                            '%s left %s (sno=%s rarity=%s%s) %.1f m away in %s%s; Rosie: %s; pickup distance %s%s%s',
+                            why, tostring(item.name), tostring(item.sno), tostring(item.rarity),
+                            marked_mythic(item) and ' MYTHIC' or '', d, place.key,
+                            age and string.format(', on the ground %.1f s', age) or '', tostring(reason),
+                            tostring(s.distance), d > reach and ' (beyond it: Unique/Mythic within the radius)' or '',
+                            (during and ' [dropped during the ' .. tostring(M.travel_why) .. ' channel]' or '')
+                                .. (marked[item] and ' [already wanted at the cast: ' .. marked[item] .. ']' or '')),
+                            {item = item, place = place.key, mythic = marked_mythic(item), during_channel = during})
+                    end
+                end
+            end
+        end
+    end
+
+    -- STALL ------------------------------------------------------------------
+    local st = {next_poll = -math.huge, cmds = -1, cmd_t = -math.huge}
+    M.st = st
+    local function command_count()
+        return #h.moves + #h.interactions + #h.vendors + #h.waypoints + #h.clicks + #h.keys + #h.warplans
+            + #h.boss_tps + #h.items + #h.sigil_confirms + (h.engine and h.engine.calls or 0)
+    end
+    local function farm_on()
+        local on = {}
+        for _, dir in ipairs(cfg.STALL.farm) do
+            local w = h.toggles[dir]
+            if w and h.by_dir[dir] and w:get() == true then on[#on + 1] = dir end
+        end
+        return #on > 0 and on or nil
+    end
+    local function stall_end()
+        local a = st.anchor
+        if a and a.hit and a.hit.dirty then write_env(a.hit, true) end
+        st.anchor = nil
+    end
+    local function stall_tick()
+        local c = cfg.STALL
+        if not c or h.now < st.next_poll then return end
+        st.next_poll = h.now + c.poll
+        local cmds = command_count()
+        if cmds ~= st.cmds then st.cmds, st.cmd_t = cmds, h.now end
+        local farm = farm_on()
+        if h.dead or h.place == P.limbo or h.travel or not farm then return stall_end() end
+        local a = st.anchor
+        if not a or a.place ~= h.place or h.pos:dist_to_ignore_z(a.pos) >= c.move then
+            stall_end()
+            st.anchor = {pos = h.pos, t = h.now, place = h.place}
+            return
+        end
+        if h.place.town and h.now - st.cmd_t > c.town_quiet then a.t = h.now; return end -- idle in town
+        if h.now - a.t > c.seconds then
+            local detail = string.format('player stood still at (%.1f, %.1f) in %s for %.0f s (since t=%.1f); farm on: %s; %s',
+                a.pos:x(), a.pos:y(), h.place.key, h.now - a.t, a.t, table.concat(farm, ','), M.status_lines())
+            if a.hit then revise(a.hit, detail) else a.hit = M.hit('STALL', detail) end
+        end
+    end
+
+    -- SPAM and "state A -> B" lines -----------------------------------------
+    local sp = {q = {}, hit = {}}
+    M.sp = sp
+    -- The plugin whose code printed the line: the first plugin frame above
+    -- the host's console.print (plugins often print through a log wrapper).
+    local function line_owner()
+        for level = 3, 14 do
+            local info = debug.getinfo(level, 'S')
+            if not info then return nil end
+            local rec = h.plugin_of_source(info.source)
+            if rec then return rec end
+        end
+        return nil
+    end
+    function M.transition(src, from, to)
+        local c = cfg.LOOP
+        if not c or from == nil or to == nil or from == to then return end
+        local cutoff = h.now - c.window
+        local kept, count, first = {}, 1, h.now
+        for _, e in ipairs(M.lp.trans[src] or {}) do
+            if e.t >= cutoff then
+                kept[#kept + 1] = e
+                if (e.a == from and e.b == to) or (e.a == to and e.b == from) then
+                    count = count + 1
+                    if e.t < first then first = e.t end
+                end
+            end
+        end
+        kept[#kept + 1] = {t = h.now, a = from, b = to}
+        M.lp.trans[src] = kept
+        if count > c.max then
+            local key = src .. '|' .. (from < to and (from .. '|' .. to) or (to .. '|' .. from))
+            -- The mean dwell tells a thrash (a fraction of a second per state)
+            -- from a plugin that alternates for a reason (fight, explore, ...).
+            local detail = string.format('%s switches %s <-> %s %d times within %.0f s (t=%.1f..%.1f, mean dwell %.1f s)',
+                src, from, to, count, c.window, first, h.now, (h.now - first) / math.max(1, count - 1))
+            local hit = M.lp.hit[key]
+            if not hit then hit = M.hit('LOOP', detail); hit.count = count; M.lp.hit[key] = hit
+            elseif count > hit.count then hit.count = count; revise(hit, detail) end
+        end
+    end
+    function M.line(msg)
+        if type(msg) ~= 'string' then return end
+        local ok, err = pcall(function()
+            local c = cfg.SPAM
+            if c then
+                local key = mask_numbers(msg)
+                local q = sp.q[key]
+                if not q then q = {n = 0, head = 1}; sp.q[key] = q end
+                q.n = q.n + 1
+                q[q.n] = h.now
+                local cutoff = h.now - c.window
+                while q[q.head] < cutoff do q[q.head] = nil; q.head = q.head + 1 end
+                local count = q.n - q.head + 1
+                if count > c.max then
+                    local hit = sp.hit[key]
+                    if not hit then
+                        local owner = line_owner()
+                        hit = M.hit('SPAM', string.format('%d times within %.0f s (by %s, ctx %s): %s', count, c.window,
+                            owner and owner.name or '-', h.context_name() or '-', key:sub(1, 200)))
+                        hit.count, hit.key, hit.owner = count, key, owner and owner.name or '-'
+                        sp.hit[key] = hit
+                    elseif count > hit.count then
+                        hit.count = count
+                        revise(hit, string.format('%d times within %.0f s (by %s): %s', count, c.window, hit.owner,
+                            key:sub(1, 200)))
+                    end
+                end
+            end
+            if cfg.LOOP and msg:find('->', 1, true) then
+                local from, to = msg:match('[Ss]tate%s+([%w_%.:]+)%s*%->%s*([%w_%.:]+)')
+                if from then
+                    local owner = line_owner()
+                    M.transition((owner and owner.name or '-') .. '.log', mask_numbers(from), mask_numbers(to))
+                end
+            end
+        end)
+        if not ok then M.internal('line: ' .. tostring(err)) end
+    end
+
+    -- LOOP polling -----------------------------------------------------------
+    M.lp = {cur = {}, trans = {}, hit = {}, next_poll = -math.huge}
+    function M.state(src, state)
+        if state == nil then return end
+        state = mask_numbers(state)
+        local prev = M.lp.cur[src]
+        if prev == state then return end
+        M.lp.cur[src] = state
+        if prev ~= nil then M.transition(src, prev, state) end
+    end
+    local function loop_tick()
+        local c = cfg.LOOP
+        if not c or h.now < M.lp.next_poll then return end
+        M.lp.next_poll = h.now + c.poll
+        for _, t in ipairs(M.current_tasks()) do
+            if t.name ~= nil then M.state(t.dir .. '.task', tostring(t.name)) end
+            if t.state ~= nil then M.state(t.dir .. '.state', tostring(t.state)) end
+        end
+        for _, dir in ipairs({'WarPigs', 'WarPug'}) do
+            local lines = ov.lines[dir]
+            if lines and lines[1] and h.frames - (ov.frame[dir] or -1e9) <= 1 then M.state(dir .. '.status', lines[1]) end
+        end
+        if h.place ~= P.limbo then M.state('world.place', h.place.key) end
+    end
+
+    -- frame end --------------------------------------------------------------
+    M.last_place, M.last_pos = h.place, h.pos
+    function M.tick()
+        local ok, err = pcall(function()
+            if #M.pending_left > 0 then
+                local list = M.pending_left
+                M.pending_left = {}
+                for _, p in ipairs(list) do M.check_left(p.place, p.pos, p.why, 'mark') end
+            end
+            for i = #M.left_open, 1, -1 do
+                local hit = M.left_open[i]
+                local item = hit.data.item
+                if item.picked then
+                    table.remove(M.left_open, i)
+                    revise(hit, hit.detail .. string.format(' [picked up later, back in %s by t=%.1f]', hit.data.place, h.now))
+                    write_env(hit, true)
+                elseif h.now - hit.t > 900 then
+                    table.remove(M.left_open, i)
+                end
+            end
+            if h.place ~= M.last_place then
+                if h.place ~= P.limbo then arrive(h.place) end
+                M.last_place = h.place
+                if st.anchor then stall_end() end
+            end
+            M.last_pos = h.pos
+            loop_tick()
+            stall_tick()
+        end)
+        if not ok then M.internal('tick: ' .. tostring(err)) end
+    end
+
+    -- report -----------------------------------------------------------------
+    function M.format(hits)
+        local out = {}
+        for i, hit in ipairs(hits) do
+            out[#out + 1] = string.format('  %d. [%s] t=%.1f %s', i, hit.kind, hit.t, hit.detail)
+        end
+        return table.concat(out, '\n')
+    end
+    function M.report()
+        if #M.hits == 0 then return 'invariants: no violation', M.hits end
+        local counts, order = {}, {}
+        for _, hit in ipairs(M.hits) do
+            if not counts[hit.kind] then order[#order + 1] = hit.kind end
+            counts[hit.kind] = (counts[hit.kind] or 0) + 1
+        end
+        local head = {}
+        for _, kind in ipairs(order) do head[#head + 1] = kind .. '=' .. counts[kind] end
+        return string.format('invariants: %d violation(s) (%s)\n%s', #M.hits, table.concat(head, ' '), M.format(M.hits)), M.hits
+    end
+    -- overrides[KIND] = false (ignore the kind) | N (allow up to N hits) |
+    -- function(hit) -> true to ignore that hit. INTERNAL is never ignored.
+    function M.filter(overrides)
+        overrides = overrides or {}
+        local left, allowed = {}, {}
+        for _, hit in ipairs(M.hits) do
+            local o = nil
+            if hit.kind ~= 'INTERNAL' then o = overrides[hit.kind] end
+            local skip = false
+            if o == false then skip = true
+            elseif type(o) == 'number' then
+                allowed[hit.kind] = (allowed[hit.kind] or 0) + 1
+                skip = allowed[hit.kind] <= o
+            elseif type(o) == 'function' then skip = o(hit) and true or false end
+            if not skip then left[#left + 1] = hit end
+        end
+        return left
+    end
+    return M
+end
+
+-- ── Universal Rotation stub (third-party combat plugin, no sources) ──────
+-- While an enemy is within `range` m it casts every `cast_every` s at the
+-- nearest one (dps * cast_every damage; the host's own reach-4 kill stays),
+-- and on a cast with probability `move_chance` it dashes or evades 3-6 m
+-- (toward or away from the target, stopping at walls / the place's edge).
+-- `interrupt`: 'dash' (default) a dash breaks a Town Portal / waypoint
+-- channel as in the game, 'cast' every cast does, false the rotation holds
+-- still while the player channels. h.rotation = {casts, dashes, interrupts,
+-- events = {{t, kind, detail}}}.
+J.ROTATION_DEFAULTS = {range = 12, cast_every = 0.6, dps = 60, move_chance = 0.2, dash_min = 3, dash_max = 6,
+    interrupt = 'dash'}
+function J.install_rotation(h, user, host)
+    local P = host.P
+    local c = merged(J.ROTATION_DEFAULTS, user)
+    local rng = J.rng(c.seed or host.seed)
+    local R = {cfg = c, casts = 0, dashes = 0, interrupts = 0, events = {}, next_cast = -math.huge}
+    h.rotation, h._rot = R, R
+    local function note(kind, detail)
+        if #R.events < 5000 then R.events[#R.events + 1] = {t = h.now, kind = kind, detail = detail} end
+    end
+    local function interrupt(why)
+        local t = h.travel
+        if t and t.phase == 'channel' then
+            h.travel, h.casting = nil, false
+            R.interrupts = R.interrupts + 1
+            note('interrupt', why .. ' broke the ' .. tostring(t.why) .. ' channel')
+        end
+    end
+    local atan2 = math.atan2 or math.atan
+    function R.tick()
+        if h.dead or h.place == P.limbo or (h.travel and h.travel.phase ~= 'channel') then return end
+        if c.interrupt == false and h.casting then return end
+        if h.now < R.next_cast then return end
+        local best, bd
+        for _, a in ipairs(h.place.actors) do
+            if a.enemy and (a.health or 100) > 0 and a.pos then
+                local d = a.pos:dist_to_ignore_z(h.pos)
+                if d <= c.range and (not bd or d < bd) then best, bd = a, d end
+            end
+        end
+        if not best then return end
+        R.next_cast = h.now + c.cast_every
+        R.casts = R.casts + 1
+        note('cast', string.format('%s at %.1f m', tostring(best.skin), bd))
+        if c.interrupt == 'cast' then interrupt('a skill cast') end
+        if c.dps > 0 then
+            best.health = (best.health or 100) - c.dps * c.cast_every
+            if best.health <= 0 then
+                best.health, best.interactable = 0, false
+                if best.on_death then best.on_death(h, best) end
+            end
+        end
+        if not rng.chance(c.move_chance) then return end
+        local base = atan2(h.pos:y() - best.pos:y(), h.pos:x() - best.pos:x())
+        local toward = rng.chance(0.5)
+        if toward then base = base + math.pi end
+        local ang, dist = base + rng.range(-0.8, 0.8), rng.range(c.dash_min, c.dash_max)
+        local x0, y0 = h.pos:x(), h.pos:y()
+        local ex, ey = x0, y0
+        for i = 1, math.ceil(dist / 0.5) do
+            local f = math.min(dist, i * 0.5)
+            local nx, ny = x0 + math.cos(ang) * f, y0 + math.sin(ang) * f
+            if not h.walkable(h.v(nx, ny)) then break end
+            ex, ey = nx, ny
+        end
+        if ex == x0 and ey == y0 then return end
+        h.pos = h.v(ex, ey)
+        R.dashes = R.dashes + 1
+        note('dash', string.format('%s %.1f m to (%.1f, %.1f)', toward and 'dash' or 'evade',
+            math.sqrt((ex - x0) ^ 2 + (ey - y0) ^ 2), ex, ey))
+        if c.interrupt then interrupt('an evade') end
+    end
+    return R
+end
+
+-- ── seeded chaos ──────────────────────────────────────────────────────────
+-- J.new({chaos = {seed = N, rate = per_minute, kinds = {...}, only = {n...},
+-- schedule = {{t = abs_time, kind = ..., <params>}...}, ...}}). Injections
+-- arrive as a Poisson stream (`rate` per simulated minute, first one after
+-- `start` s); the kind comes from the seed, every injection's details from
+-- its own stream (seed, n), so `only = {3, 7}` keeps just injections 3 and 7
+-- at the same times with the same draws (to bisect a failure; positions
+-- that depend on where the player is follow the run). The same seed and
+-- scenario replay the whole run exactly: chaos turns on the virtual
+-- os.clock, and opts.ordered_pairs = true removes the other source of
+-- run-to-run drift (pairs order). Channel drops: each travel channel (Town Portal,
+-- waypoint, portal, War Plan) gets a drop inside it with probability
+-- `channel_drop` (Rosie mode). Every injection (and every skip) is logged
+-- as '<t> [chaos] seed=N #n kind: detail' in h.log and h.chaos.log;
+-- h.chaos.replay() returns the J.new chaos table that replays the run.
+-- Kinds: death (+ ClickRevive stand-in revive at the checkpoint after
+-- `revive_after` s unless a plugin revived), drop (Mythic with probability
+-- `mythic`), limbo (2-8 s), reload (one plugin's main.lua via h.reload),
+-- bag_full, stash_lazy (stash full, first reads small), elite (a pack
+-- 8-14 m away), obstacle (a wall across the path for 5-20 s).
+J.CHAOS_KINDS = {'death', 'drop', 'limbo', 'reload', 'bag_full', 'stash_lazy', 'elite', 'obstacle'}
+J.CHAOS_DEFAULTS = {rate = 1.0, start = 5, channel_drop = 0.35, mythic = 0.35, revive_after = 8,
+    limbo_min = 2, limbo_max = 8, obstacle_min = 5, obstacle_max = 20, elite_min = 3, elite_max = 5,
+    elite_health = 400, stash_small = 32, stash_full = 300, stash_window = 1.0, bag_size = 33}
+local function chaos_affix(hash, name) return {affix_name_hash = hash, get_name = function() return name end} end
+function J.install_chaos(h, user, host)
+    local P = host.P
+    local c = merged(J.CHAOS_DEFAULTS, type(user) == 'table' and user or {})
+    local seed = math.floor(tonumber(c.seed) or 1)
+    local master, chan = J.rng(seed), J.rng(seed + 7777)
+    -- Injection n draws its details from its own stream, seeded with the
+    -- n-th value of a seed stream: independent of whether injections before
+    -- it ran (`only`), and not correlated between neighbours.
+    local seed_stream, seeds = J.rng(seed + 31337), {}
+    local function detail_seed(n)
+        while #seeds < n do seeds[#seeds + 1] = math.floor(seed_stream.next() * 2147483646) + 1 end
+        return seeds[n]
+    end
+    local kinds = c.kinds or J.CHAOS_KINDS
+    local only
+    if type(c.only) == 'table' then only = {}; for _, n in ipairs(c.only) do only[n] = true end end
+    local C = {seed = seed, cfg = c, log = {}, n = 0}
+    h.chaos, h._chaos = C, C
+    local function line(n, kind, detail, skipped)
+        local rec = {n = n, t = h.now, kind = kind, detail = detail, skipped = skipped or nil}
+        C.log[#C.log + 1] = rec
+        h.log[#h.log + 1] = string.format('%.1f [chaos] seed=%d #%d %s%s: %s', h.now, seed, n, kind,
+            skipped and ' skipped' or '', tostring(detail))
+        return rec
+    end
+    local I = {}
+    function I.death(r, p, n)
+        if h.dead then return nil, 'already dead' end
+        if h.place == P.limbo or (h.travel and h.travel.phase == 'loading') then return nil, 'loading screen' end
+        if h.place.town and not p.force then return nil, 'in town' end
+        if h.travel and h.travel.phase == 'channel' then h.travel, h.casting = nil, false end
+        h.dead, h.goal, h.native = true, nil, nil
+        local after = p.revive_after or c.revive_after
+        h.at(after, function()
+            if h.dead and not h.reviving then
+                h.invoke(h.chaos_ctx, 'update', function() h.G.revive_at_checkpoint() end)
+                line(n, 'death', 'no plugin revived: ClickRevive stand-in revives at the checkpoint')
+            end
+        end)
+        return string.format('player died at (%.1f, %.1f) in %s', h.pos:x(), h.pos:y(), h.place.key)
+    end
+    function I.drop(r, p)
+        if not host.rosie or not h.drop then return nil, 'needs rosie = true (ground items)' end
+        if h.place == P.limbo or (h.place.town and not p.force) then return nil, 'town or loading screen' end
+        local mythic = p.mythic
+        if mythic == nil then mythic = r.chance(c.mythic) end
+        local ang, dist = r.range(0, 2 * math.pi), r.range(p.min or 2, p.max or 6)
+        local x, y = h.pos:x() + math.cos(ang) * dist, h.pos:y() + math.sin(ang) * dist
+        if not h.walkable(h.v(x, y)) then x, y, dist = h.pos:x(), h.pos:y(), 0 end
+        local fields, label
+        if mythic then
+            fields = {name = 'Helm_Unique_Generic_005', sno = 2647147, rarity = 6, ancestral = true, ga = 1,
+                affixes = {chaos_affix(2662414, 'Helm_Unique_Generic_005'), chaos_affix(J.MYTHIC_MARK, 'S14_Mythic_UniquePotency')}}
+            label = 'Mythic (Leoric, S14_Mythic_UniquePotency)'
+        elseif r.chance(0.5) then
+            fields, label = {name = 'Helm_Legendary_Chaos', rarity = 5, ancestral = true, ga = 3}, 'Legendary GA3'
+        else
+            fields, label = {name = 'Helm_Rare_Joint', rarity = 3, ga = 0}, 'Rare'
+        end
+        local item = h.drop(h.place, x, y, fields)
+        item.chaos = true
+        return string.format('%s dropped %.1f m away at (%.1f, %.1f) in %s%s', label, dist, x, y, h.place.key,
+            p.during_channel and h.travel and (' during the ' .. tostring(h.travel.why) .. ' channel') or '')
+    end
+    function I.limbo(r, p)
+        if h.place == P.limbo or h.travel then return nil, 'already travelling' end
+        local secs = p.seconds or r.range(c.limbo_min, c.limbo_max)
+        local place, pos = h.place, h.pos
+        h.place, h.pos, h.goal, h.native, h.vendor_screen = P.limbo, P.limbo.spawn, nil, nil, false
+        h.at(secs, function()
+            if h.place == P.limbo and not h.travel then h.place, h.pos = place, pos end
+        end)
+        return string.format('loading screen (Limbo) for %.1f s out of %s', secs, place.key)
+    end
+    function I.reload(r, p)
+        if type(h.reload) ~= 'function' then return nil, 'host has no reload' end
+        local dirs = p.dir and {p.dir} or c.reload_dirs or h.dirs
+        local dir = dirs[r.int(1, #dirs)]
+        if not h.by_dir[dir] then return nil, 'not loaded: ' .. tostring(dir) end
+        h.reload(dir)
+        return 'reloaded ' .. dir .. '/main.lua'
+    end
+    function I.bag_full(r, p)
+        if host.rosie then
+            if h.item_count ~= nil then h.item_count = c.bag_size; return 'bag count pinned at ' .. c.bag_size end
+            h.inventory = h.inventory or {}
+            local added = 0
+            while #h.inventory < c.bag_size do
+                h.inventory[#h.inventory + 1] = h.gear({name = 'Helm_Rare_Joint', rarity = 3}); added = added + 1
+            end
+            return string.format('bag filled to %d items (+%d rares)', #h.inventory, added)
+        end
+        h.alfred.inventory_full, h.alfred.need_trigger = true, true
+        return 'Alfred stand-in reports inventory_full + need_trigger'
+    end
+    function I.stash_lazy(r, p)
+        if not host.rosie then return nil, 'needs rosie = true (stash)' end
+        h.stash = h.stash or {}
+        local added = 0
+        while #h.stash < (p.full or c.stash_full) do
+            h.stash[#h.stash + 1] = h.gear({name = 'Helm_Rare_Joint', rarity = 3}); added = added + 1
+        end
+        h.stash_lazy = {small = p.small or c.stash_small, window = p.window or c.stash_window}
+        return string.format('stash holds %d items (+%d); the first %.1f s after opening list only %d',
+            #h.stash, added, h.stash_lazy.window, h.stash_lazy.small)
+    end
+    function I.elite(r, p)
+        if h.place.town or h.place == P.limbo or not h.place.box then return nil, 'town or loading screen' end
+        local count = p.count or r.int(c.elite_min, c.elite_max)
+        local ang0, dist = r.range(0, 2 * math.pi), r.range(8, 14)
+        local cx, cy = h.pos:x() + math.cos(ang0) * dist, h.pos:y() + math.sin(ang0) * dist
+        local placed = 0
+        for i = 1, count do
+            local a = 2 * math.pi * i / count
+            local x, y = cx + 1.5 * math.cos(a), cy + 1.5 * math.sin(a)
+            if not h.walkable(h.v(x, y)) then x, y = h.pos:x() + math.cos(a) * 6, h.pos:y() + math.sin(a) * 6 end
+            local e = h.actor(h.place, 'Chaos_Elite_Pack', x, y,
+                {enemy = true, elite = true, health = c.elite_health, max_health = c.elite_health, chaos = true})
+            e.on_death = function() h.remove_actor(e) end
+            placed = placed + 1
+        end
+        return string.format('%d elites %.1f m away around (%.1f, %.1f) in %s', placed, dist, cx, cy, h.place.key)
+    end
+    function I.obstacle(r, p)
+        if h.place == P.limbo or not h.place.box then return nil, 'loading screen' end
+        local dx, dy
+        if h.goal then dx, dy = h.goal:x() - h.pos:x(), h.goal:y() - h.pos:y() end
+        if not dx or dx * dx + dy * dy < 1 then
+            local ang = r.range(0, 2 * math.pi)
+            dx, dy = math.cos(ang), math.sin(ang)
+        end
+        local len = math.sqrt(dx * dx + dy * dy)
+        dx, dy = dx / len, dy / len
+        local ahead, half = p.ahead or 3, (p.width or 10) / 2
+        local cx, cy = h.pos:x() + dx * ahead, h.pos:y() + dy * ahead
+        local wall
+        if math.abs(dx) >= math.abs(dy) then wall = {cx - 0.5, cx + 0.5, cy - half, cy + half}
+        else wall = {cx - half, cx + half, cy - 0.5, cy + 0.5} end
+        local place = h.place
+        local had = place.walls ~= nil
+        place.walls = place.walls or {}
+        place.walls[#place.walls + 1] = wall
+        local secs = p.seconds or r.range(c.obstacle_min, c.obstacle_max)
+        h.at(secs, function()
+            for i = #(place.walls or {}), 1, -1 do if place.walls[i] == wall then table.remove(place.walls, i) end end
+            if not had and place.walls and #place.walls == 0 then place.walls = nil end
+        end)
+        return string.format('wall x=[%.1f,%.1f] y=[%.1f,%.1f] across the path in %s for %.1f s',
+            wall[1], wall[2], wall[3], wall[4], place.key, secs)
+    end
+    C.injectors = I
+    function C.inject(kind, n, p)
+        p = p or {}
+        local fn = I[kind]
+        if not fn then return line(n, kind, 'unknown kind', true) end
+        local r = J.rng(detail_seed(n))
+        local ok, detail, why = pcall(fn, r, p, n)
+        if not ok then return line(n, kind, 'injector error: ' .. tostring(detail), true) end
+        if detail == nil then return line(n, kind, why or 'not applicable now', true) end
+        return line(n, kind, detail)
+    end
+    -- A scenario may inject by hand (same logging, next injection number).
+    function h.chaos_inject(kind, p)
+        C.n = C.n + 1
+        return C.inject(kind, C.n, p)
+    end
+    local function gap() return -math.log(1 - master.next()) * 60 / math.max(c.rate, 1e-6) end
+    local sched
+    if type(c.schedule) == 'table' then
+        sched = {}
+        for i, e in ipairs(c.schedule) do sched[i] = e end
+        table.sort(sched, function(a, b) return a.t < b.t end)
+        C.sched_i = 1
+    end
+    function C.tick()
+        if sched then
+            while sched[C.sched_i] and h.now >= sched[C.sched_i].t do
+                local e = sched[C.sched_i]
+                C.sched_i = C.sched_i + 1
+                C.n = math.max(C.n, e.n or C.n + 1)
+                C.inject(e.kind, e.n or C.n, e)
+            end
+            return
+        end
+        if C.next_t == nil then C.next_t = h.now + c.start + gap() end
+        while h.now >= C.next_t do
+            local kind = master.pick(kinds)
+            C.n = C.n + 1
+            local n = C.n
+            C.next_t = C.next_t + gap()
+            if not only or only[n] then C.inject(kind, n) end
+        end
+    end
+    function C.on_travel(travel, channel)
+        if sched or not host.rosie or (c.channel_drop or 0) <= 0 then return end
+        local allowed = false
+        for _, k in ipairs(kinds) do if k == 'drop' then allowed = true end end
+        if not allowed or h.place == P.limbo or h.place.town then return end
+        if not chan.chance(c.channel_drop) then return end
+        C.n = C.n + 1
+        local n = C.n
+        local delay = chan.range(0.1, 0.8) * channel
+        if only and not only[n] then return end
+        h.at(delay, function()
+            if h.travel == travel and travel.phase == 'channel' then
+                C.inject('drop', n, {during_channel = true, min = 1, max = 4})
+            else
+                line(n, 'drop', 'the channel ended before the drop', true)
+            end
+        end)
+    end
+    function C.replay()
+        local ks = {}
+        for _, k in ipairs(kinds) do ks[#ks + 1] = string.format('%q', k) end
+        local parts = {string.format('seed = %d', seed), string.format('rate = %s', tostring(c.rate)),
+            'kinds = {' .. table.concat(ks, ', ') .. '}'}
+        for _, key in ipairs({'start', 'channel_drop', 'mythic', 'revive_after'}) do
+            if c[key] ~= J.CHAOS_DEFAULTS[key] then parts[#parts + 1] = key .. ' = ' .. tostring(c[key]) end
+        end
+        return 'chaos = {' .. table.concat(parts, ', ') .. '}'
+    end
+    function C.summary()
+        local out = {}
+        for _, rec in ipairs(C.log) do
+            out[#out + 1] = string.format('#%d t=%.1f %s%s: %s', rec.n, rec.t, rec.kind, rec.skipped and ' (skipped)' or '', rec.detail)
+        end
+        return table.concat(out, '\n')
+    end
+    return C
 end
 
 return J
