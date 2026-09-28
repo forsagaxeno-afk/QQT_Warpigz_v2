@@ -91,6 +91,10 @@ local function blocker(now)
     local world = world_name()
     if world ~= OPEN_WORLD then return 'world', 'the player is not in the open world (' .. tostring(world) .. ')' end
     if in_town() then return 'town', 'the player is in a town other than Temis' end
+    -- QQT_Warpigz_v3 3.3.3: never teleport away from a third-party loop that
+    -- owns the run (a claim is never urgent: a later Temis visit or trip claims).
+    local owner = coordination.activity_owner()
+    if owner then return 'activity', 'another activity owns the run (' .. owner .. ')' end
     local _, st = coordination.town_provider()
     if not st then return 'provider', 'no town service is loaded' end
     if type(st.raven_handoff) ~= 'string' then return 'provider', 'the town service has no SilentRaven hand-off (Rosie required)' end

@@ -10,7 +10,9 @@ local M = {
     ACTIVITIES = {'pit', 'helltide', 'undercity', 'hordes', 'bosses', 'whispers'},
     BEST_LABEL = {pit = 'Tier', helltide = 'Cinders', undercity = 'Floor', hordes = '', bosses = '', whispers = ''},
     TOTALS = {'gold', 'gold_spent', 'xp', 'levels', 'paragon', 'deaths', 'obols', 'materials', 'glyph_xp'},
-    RARITIES = {'mythic', 'unique', 'legendary', 'rare', 'magic', 'common'},
+    -- QQT_Warpigz_v3 3.3.3 (WarRoom 1.0.3): 'set' (QQT rarity 7, set charms)
+    -- was counted as unique.
+    RARITIES = {'mythic', 'unique', 'set', 'legendary', 'rare', 'magic', 'common'},
     FATES = {'salvaged', 'sold', 'stashed'},
     HOURLY_MAX = 48,
     DAILY_MAX = 30,
@@ -132,6 +134,7 @@ function M.rarity(value, mythic)
     if mythic == true then return 'mythic' end
     if type(value) == 'number' then
         if value >= 8 then return 'mythic' end
+        if value == 7 then return 'set' end
         if value >= 6 then return 'unique' end
         if value >= 5 then return 'legendary' end
         if value >= 3 then return 'rare' end

@@ -239,7 +239,21 @@ local function war_pigs_reason()
     return nil
 end
 
--- mode 'auto'   : new auto-fire (WarPigs, WarPug, Alfred incl. hard need, Looter)
+-- QQT_Warpigz_v3 3.3.3: a third-party loop (TristramLoop, driven by
+-- Worldstone) that owns the run, as Rosie reads it (it defers its own
+-- automatic trip for it). Returns its label or nil. A run of ours never starts
+-- over it: the reward stays ready for a later Temis visit or a Rosie trip.
+function M.activity_owner()
+    local peer = rawget(_G, 'TRISTRAM_LOOP_STATE')
+    if type(peer) ~= 'table' or type(peer.status) ~= 'function' then return nil end
+    local ok, st = pcall(peer.status)
+    if ok and type(st) == 'table' and st.running and st.owns_activity then
+        return 'TristramLoop' .. (type(st.phase) == 'string' and (', ' .. st.phase) or '')
+    end
+    return nil
+end
+
+-- mode 'auto'   : new auto-fire (WarPigs, a third-party loop, WarPug, Alfred incl. hard need, Looter)
 -- mode 'delegated': a claim WarPigs delegates during its activity (as 'auto'
 --                 without WarPigs, which owns no Temis movement then) -- QQT_Warpigz_v3 (Q8)
 -- mode 'manual' : explicit keybind (WarPug, Alfred live work, Looter)
@@ -249,6 +263,10 @@ function M.companions(mode, now)
     now = now or clock()
     local reason
     if mode == 'auto' then reason = war_pigs_reason() end
+    if not reason and (mode == 'auto' or mode == 'delegated') then -- QQT_Warpigz_v3 3.3.3
+        local owner = M.activity_owner()
+        if owner then reason = 'activity_owner:' .. owner end
+    end
     if not reason and mode ~= 'run' then reason = war_pug_reason(now) end
     reason = reason or alfred_reason(now, mode ~= 'auto' and mode ~= 'delegated') or looter_reason(now) -- QQT_Warpigz_v3 (Q8)
     if reason then return false, reason end

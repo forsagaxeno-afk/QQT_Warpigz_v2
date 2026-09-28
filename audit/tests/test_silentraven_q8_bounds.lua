@@ -117,6 +117,13 @@ local GATES = {
         h.G.HelltideRevampedPlugin = {getState = function() return state end}
         return function() state = 'EXPLORE_HELLTIDE' end
     end},
+    -- QQT_Warpigz_v3 3.3.3: a third-party loop owning the run (Rosie defers
+    -- its own trip for it too) is never teleported away for a claim.
+    {'TristramLoop owns the run', 'another activity owns the run (TristramLoop, loop)', function(h)
+        local st = {running = true, owns_activity = true, phase = 'loop'}
+        h.G.TRISTRAM_LOOP_STATE = {status = function() return st end}
+        return function() st.owns_activity = false end
+    end},
     {'enemy close', 'enemies are close', function(h)
         local mob = h.actor('helltide', 'Probe_Enemy', h.pos:x() + 3, h.pos:y(), {enemy = true, health = 1e9})
         return function() h.remove_actor(mob) end
@@ -281,6 +288,26 @@ case('H Rosie names a refused hand-off (paused, visit handled, request pending) 
         end), 0, name .. ': no hand-off queued')
         eq(h.logged('[Rosie] waiting for SilentRaven'), 0)
     end
+end)
+
+-- QQT_Warpigz_v3 3.3.3: a third-party loop (TristramLoop, driven by
+-- Worldstone) that owns the run keeps SilentRaven's own auto-fire in Temis
+-- held (it would take movement away from it); the claim starts once it lets go.
+case('T auto-fire in Temis holds while TristramLoop owns the run', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.assert_clean('load')
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    local st = {running = true, owns_activity = true, phase = 'loop'}
+    h.G.TRISTRAM_LOOP_STATE = {status = function() return st end}
+    h.bounty_ready = true
+    h.run(70)
+    h.assert_clean('held')
+    eq(h.logged('[SilentRaven] claiming the Whisper reward'), 0, 'no claim while the loop owns the run\n' .. h.tail(20))
+    eq(h.logged('[SilentRaven] auto-fire waiting'), 1, 'one hold line after 60 s\n' .. h.tail(20))
+    ok(h.logged('activity_owner:TristramLoop') >= 1, 'the hold names the owner\n' .. h.tail(20))
+    st.owns_activity = false
+    ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward') == 1 end, 5),
+        'the claim starts once the loop lets go\n' .. h.tail(20))
 end)
 
 if #failures > 0 then error(table.concat(failures, '\n')) end

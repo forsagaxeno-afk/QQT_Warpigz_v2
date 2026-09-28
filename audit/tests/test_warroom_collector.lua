@@ -145,10 +145,10 @@ package.path = WR .. '?.lua;' .. package.path
 dofile(WR .. 'main.lua')
 ok(type(QQT_WarRoom) == 'table', 'QQT_WarRoom published')
 eq(QQT_WarRoom.dashboard_dir, WR .. 'dashboard/', 'dashboard_dir is the absolute WarRoom/dashboard/')
-eq(QQT_WarRoom.version, '1.0.2', 'version published')
+eq(QQT_WarRoom.version, '1.0.3', 'version published')
 ok(type(callbacks.update) == 'function' and type(callbacks.menu) == 'function', 'callbacks registered')
 local gui = require 'gui'
-eq(gui.version, 'v1.0.2', 'gui version string')
+eq(gui.version, 'v1.0.3', 'gui version string')
 eq(gui.elements.main_toggle:get(), true, 'Enable defaults to ON')
 eq(gui.elements.write_every:get(), 15, 'Write every defaults to 15 s')
 callbacks.menu()
@@ -714,6 +714,36 @@ do
     eq(QQT_WarRoom.enabled, false, 'A5: enabled is false before the first pulse when the toggle is off')
     checkbox.new, package.loaded.gui = saved_new, saved_gui
     callbacks.update, callbacks.menu = saved_cb[1], saved_cb[2]
+end
+
+-- E. QQT_Warpigz_v3 3.3.3 (WarRoom 1.0.3) -------------------------------------
+do
+    -- E1: a set charm (QQT rarity 7, Rosie utils) is its own rarity, never a
+    -- unique: it is not in the unique count nor on the drops list.
+    local ingest, stats = require 'core.wr_ingest', require 'core.wr_stats'
+    local st = collector.state()
+    local items = st.scopes.session.items
+    local unique, set, looted, ndrops = items.by_rarity.unique, items.by_rarity.set or 0, items.looted, #st.feed.drops
+    ingest.handle(st, {source = 'rosie', kind = 'pickup', name = 'Set Charm', rarity = 7, ga = 0}, EPOCH)
+    eq(items.looted, looted + 1, 'E1: the set charm is looted')
+    eq(items.by_rarity.unique, unique, 'E1: a set charm is not a unique')
+    eq(items.by_rarity.set, set + 1, 'E1: counted as set')
+    eq(#st.feed.drops, ndrops, 'E1: a set charm is not a notable drop')
+    local v = stats.view(st.scopes.session, st.flags, require 'core.wr_json')
+    eq(v.items.by_rarity.set, set + 1, 'E1: set in the payload view')
+    eq(stats.rarity('Set'), 'set', 'E1: string rarity Set')
+    eq(stats.rarity(6), 'unique', 'E1: rarity 6 stays unique'); eq(stats.rarity(8), 'mythic', 'E1: rarity 8 mythic')
+
+    -- E2: WarRoom never calls LooteerPlugin.status(): Rosie's pickup status
+    -- runs Settings.update() and expires other plugins' pauses, and WarRoom
+    -- never used what it returned.
+    local plugins = require 'core.wr_plugins'
+    local calls = 0
+    local saved = LooteerPlugin
+    LooteerPlugin = {status = function() calls = calls + 1; return {enabled = true} end}
+    plugins.read_all()
+    eq(calls, 0, 'E2: LooteerPlugin.status is never called')
+    LooteerPlugin = saved
 end
 
 os.execute('rm -rf "' .. tmp .. '"')

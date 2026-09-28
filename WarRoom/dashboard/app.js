@@ -20,8 +20,8 @@
     whispers:  { name: 'Whisper rewards', short: 'Whispers',  plugin: 'SilentRaven',      key: 'raven' }
   };
   var ORDER = ['pit', 'helltide', 'undercity', 'hordes', 'bosses', 'whispers'];
-  var RAR = ['mythic', 'unique', 'legendary', 'rare', 'magic'];
-  var RNAME = { mythic: 'Mythic', unique: 'Unique', legendary: 'Legendary', rare: 'Rare', magic: 'Magic', common: 'Common' };
+  var RAR = ['mythic', 'unique', 'set', 'legendary', 'rare', 'magic'];
+  var RNAME = { mythic: 'Mythic', unique: 'Unique', set: 'Set', legendary: 'Legendary', rare: 'Rare', magic: 'Magic', common: 'Common' };
   var TABS = [['overview', 'Overview'], ['helltide', 'Helltide'], ['pit', 'Pit'], ['undercity', 'Undercity'], ['hordes', 'Hordes'],
     ['bosses', 'Bosses'], ['whispers', 'Whispers'], null, ['items', 'Items'], ['timeline', 'Timeline'], ['bot', 'Bot']];
   var EXTRA = { glyphs_up: 'Glyphs upgraded', chests: 'Chests opened', mystery: 'Mystery chests', cinders: 'Cinders collected',

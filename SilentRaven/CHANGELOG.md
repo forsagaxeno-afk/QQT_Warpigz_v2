@@ -1,3 +1,7 @@
+# 0.2.6 — QQT_Warpigz_v3 3.3.3
+
+- A third-party loop that owns the run (`TRISTRAM_LOOP_STATE.status().owns_activity`, TristramLoop driven by Worldstone) is never interrupted: the claim trip waits (`claim trip waits because another activity owns the run (TristramLoop, …)`) and auto-fire in Temis holds (`activity_owner:TristramLoop`). Rosie already deferred its own trips for it; SilentRaven asked Rosie to teleport away after 5 min of a ready reward. The reward stays ready for a later Temis visit or a Rosie trip's hand-off.
+
 # 0.2.0 — QQT_Warpigz_v2 2.1.0 integration
 
 - A reward card is rejected only when it is explicitly invalid (`valid` false/0) or has no readable SNO; a missing `valid` field no longer rejects every card (live `failed (no_valid_reward)` on a normal 4-card panel). Numeric-string SNOs are accepted.
