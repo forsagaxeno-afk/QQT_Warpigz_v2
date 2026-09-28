@@ -1,6 +1,6 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.21
+One local addon for pickup, item rules, repairs and storage. Version 1.0.22
 (QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
@@ -301,6 +301,19 @@ activity consumers can still use `LooteerPlugin`, `AlfredTheButlerPlugin` and
 separate installed runners. The master gates status and incoming requests. Legacy
 enable/disable methods change their worker preference; enabling the whole product
 requires `RosiePlugin.enable()` or the menu master.
+
+**Worldstone / Navigator without Scavenger.** Worldstone drives the Navigator addon
+and waits for its looter, Scavenger. When Navigator runs and Scavenger is not
+installed, Rosie publishes a Scavenger-compatible `Scavenger` table (`is_busy`,
+`pause`, `resume`, `get_status`, `get_wanted_items`) backed by its pickup, and
+registers the Navigator pause condition `Rosie Looting`. Navigator then waits while
+Rosie walks to a wanted drop or picks it up: never during a fight hold, a pause, a
+town trip or while Rosie is off, and at most 20 s at a time (then 5 s off).
+`Scavenger.pause(caller)` pauses Rosie pickup under that caller's name. A real
+Scavenger addon always wins: Rosie never replaces it and yields to it while it is
+busy. Pickup rules > **Act as Scavenger for Worldstone/Navigator** (on by default)
+turns this off. The console shows `[Rosie] Acting as Scavenger for
+Worldstone/Navigator (no Scavenger installed)` once.
 
 `RosiePlugin` offers `status()`, `enable()`, `disable()`, `service()`, `stop()` and
 `shutdown()`. `status()` returns a fresh snapshot containing phase, detail,

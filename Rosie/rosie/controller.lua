@@ -99,9 +99,17 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.21';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.22';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
+        -- QQT_Warpigz_v3 1.0.22: Rosie as Scavenger for Worldstone/Navigator
+        -- (rosie/private/scavenger_mimic.lua); every gate is bound to this
+        -- instance, so a retired Rosie never holds Navigator. Same version as above.
+        app.mimic=require('rosie.private.scavenger_mimic')
+        app.mimic.configure({version='1.0.22',alive=function() return app.active and not conflict end,
+            enabled=function() return enabled() and loot_gui.elements.main_toggle:get()==true end,
+            town_busy=function() return life.busy() and true or false end,
+            option=function() return loot_gui.elements.act_as_scavenger:get()==true end})
         for _,key in ipairs({'trigger_tasks','trigger_tasks_with_teleport'}) do
             local original=town[key]
             town[key]=function(...)
@@ -124,6 +132,7 @@ function M.new(cached,conflict)
         end
         local loot_enabled=loot.get_enabled
         loot.get_enabled=function() return enabled() and loot_enabled() end
+        app.mimic.tick() -- QQT_Warpigz_v3 1.0.22: a reload replaces Rosie's own old Scavenger table at once
     end
     Movement.configure(function(owner)
         if not enabled() or not life or life.cleanup_pending()>0 then return false end
@@ -239,6 +248,7 @@ function M.new(cached,conflict)
             return
         end
         if not installation_valid() then return end
+        if app.mimic then app.mimic.tick() end -- QQT_Warpigz_v3 1.0.22: publish/remove the Scavenger table (guarded)
         -- QQT_Warpigz_v3 (Q6): close a panel Rosie's own service opened, also
         -- after the trip, a stop or a disable (bounded: town/core/vendor.lua).
         if app.town_vendor then pcall(app.town_vendor.close_tick) end
