@@ -294,6 +294,40 @@ local function glyph_pending()
     return now - trip.glyph_since < GLYPH_DEFER_MAX
 end
 
+-- QQT_Warpigz_v3 Arkham 2.1.3: a hard need (need_repair after a death to the
+-- guardian, a full bag) started a town trip in the middle of a live boss
+-- fight, because this task ranks above kill_boss. A NEW trip waits while a
+-- live boss is within BOSS_DEFER_RANGE, at most BOSS_DEFER_MAX s (one log
+-- line), then starts anyway. A trip already running is never interrupted
+-- (this is only consulted by wants_new_request).
+local BOSS_DEFER_RANGE, BOSS_DEFER_MAX = 30, 90
+local function live_boss_near()
+    local ok, near = pcall(function()
+        local pos = get_player_position()
+        if not pos or not target_selector or type(target_selector.get_near_target_list) ~= 'function' then
+            return false
+        end
+        for _, e in pairs(target_selector.get_near_target_list(pos, BOSS_DEFER_RANGE) or {}) do
+            if e:is_boss() and e:get_current_health() > 0 then return true end
+        end
+        return false
+    end)
+    return ok and near == true
+end
+local function boss_fight_defer()
+    if not in_pit() or not live_boss_near() then
+        trip.boss_since = nil
+        return false
+    end
+    local now = get_time_since_inject()
+    if trip.boss_since == nil then
+        trip.boss_since = now
+        console.print(string.format('[alfred] Alfred trip deferred: live boss within %dm (at most %ds, then the trip starts)',
+            BOSS_DEFER_RANGE, BOSS_DEFER_MAX))
+    end
+    return now - trip.boss_since < BOSS_DEFER_MAX
+end
+
 -- Should a NEW request start now (no own request, no live work)?
 local function wants_new_request(status)
     if status.need_trigger ~= true then return false end
@@ -317,6 +351,7 @@ local function wants_new_request(status)
     end
     if status.paused then return paused_hold(status) end
     if glyph_pending() then return false end
+    if boss_fight_defer() then return false end -- QQT_Warpigz_v3 Arkham 2.1.3
     -- ARK-4: yield to Looter like upgrade_glyph does, bounded.
     if type(utils.looter_hold) == 'function' and utils.looter_hold(LOOTER_HOLD_MAX, 'Alfred trip') then
         return false

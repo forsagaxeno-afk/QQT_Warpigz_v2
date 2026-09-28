@@ -12,7 +12,10 @@ local task = {
     name = 'teleport_cerrigar', -- change to your choice of task name
     status = status_enum['IDLE'],
     debounce_time = -1,
-    debounce_timeout = 3
+    -- QQT_Warpigz_v3 Arkham 2.1.3: 3 s re-cast in the gap between the end of
+    -- the channel and the loading screen (WonderCity 2.1.1 "5 teleports in a
+    -- row"). 8 s covers channel plus loading, as teleport_kurast.
+    debounce_timeout = 8
 }
 local function teleport_with_debounce()
     local local_player = get_local_player()
@@ -23,6 +26,15 @@ local function teleport_with_debounce()
     else
         task.status = status_enum['WAITING'] ..
         string.format('%.2f', task.debounce_time + task.debounce_timeout - get_time_since_inject()) .. 's'
+    end
+    -- QQT_Warpigz_v3 Arkham 2.1.3: a loading screen after the cast is the trip
+    -- still arriving (ported from WonderCity teleport_kurast); every loading
+    -- pulse re-arms the debounce, so no cast lands right after it ends.
+    local world = get_current_world()
+    local world_name = world and world:get_name()
+    if type(world_name) ~= 'string' or world_name:find('Limbo', 1, true) or world_name:find('Loading', 1, true) then
+        task.debounce_time = get_time_since_inject()
+        return
     end
     if task.debounce_time + task.debounce_timeout > get_time_since_inject() then return end
     task.debounce_time = get_time_since_inject()
