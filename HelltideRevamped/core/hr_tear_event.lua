@@ -74,6 +74,12 @@ local C = {
     QUIET_PAD_S = 8,        -- tears seen, all closed: complete after linger + this quiet (walk to the centre included)
     SPENT_TTL = 900,        -- a finished site / a tear stood in without closing is not re-armed without strong evidence
     SPENT_TEAR_INSIDE_S = 20, -- a tear skipped after this long inside its circle is spent
+    -- QQT_Warpigz_v3 3.3.3 (live: "standing around"): a site or tear the bot
+    -- could not reach, and cultists it could not kill or reach, are left
+    -- for this long (the 120 s blacklist re-armed them while they lived).
+    UNREACHABLE_S = 300,
+    GUARD_STALL_S = 20,     -- no cultist hurt and none got closer for this long: leave them
+    GUARD_PROGRESS_M = 2,
 }
 M.C = C
 
@@ -214,6 +220,14 @@ local function is_rupture_marker_skin(skin)
 end
 M.is_rupture_marker_skin = is_rupture_marker_skin
 
+-- QQT_Warpigz_v3 3.3.3 (audit): a rupture switch that can still be used
+-- (the event has not started). Boundary gizmos in skins.starter are not.
+local function startable(actor, skin)
+    skin = skin or actor_skin(actor)
+    return type(skin) == "string" and (skin:find("SwitchGizmo", 1, true) or skin:find("_LE_Gizmo", 1, true)) ~= nil
+        and actor_interactable(actor)
+end
+
 local function rupture_type_label(skin)
     if not skin then return "Unknown" end
     for _, entry in ipairs(skins.type_by_skin) do
@@ -293,10 +307,10 @@ local function blacklist_area(pos, skin, secs, why)
 end
 
 -- ── session ────────────────────────────────────────────────────────────────
-local function resume_patrol(self, states, msg, abandoned)
+local function resume_patrol(self, states, msg, abandoned, secs)
     local s = sess
     if s.anchor then
-        blacklist_area(s.anchor, actor_skin(s.starter), C.BLACKLIST_TTL,
+        blacklist_area(s.anchor, actor_skin(s.starter), secs or C.BLACKLIST_TTL,
             abandoned and "abandoned" or "completed")
     end
     if s.chamber_anchor and s.chamber_anchor ~= s.anchor then
@@ -329,8 +343,11 @@ end
 -- stale handle can keep reporting its last position after it despawned).
 local function listed(target)
     if target == nil then return false end
+    -- QQT_Warpigz_v3 3.3.3 (audit): by id too (the host may hand out a new
+    -- wrapper for the same actor on each call).
+    local id = mcall(target, "get_id")
     for _, actor in pairs(get_actors()) do
-        if actor == target then return true end
+        if actor == target or (type(id) == "number" and mcall(actor, "get_id") == id) then return true end
     end
     return false
 end
@@ -350,7 +367,8 @@ local function find_best_starter(max_dist, skip_blacklisted)
             local apos = skip_blacklisted and actor_pos(actor)
             if type_allowed(label) and d <= max_dist
                 and not (skip_blacklisted and (is_blacklisted(apos)
-                    or (is_spent(apos) and not live_evidence(apos, true)))) then
+                    or (is_spent(apos) and not live_evidence(apos, true, true)
+                        and not startable(actor, skin)))) then
                 local rank = TYPE_RANK[label] or 0
                 if settings.rupture_prioritize_surging ~= false then
                     if rank > best_rank or (rank == best_rank and d < best_d) then
@@ -508,15 +526,33 @@ local function ritual_context_near(pos, radius)
 end
 
 -- guards / bosses -----------------------------------------------------------
+-- Living cultists within radius of anchor, and their total health.
 local function guards_near(anchor, radius)
-    local count = 0
+    local count, total = 0, 0
     for _, actor in pairs(get_actors()) do
         if skin_matches(actor_skin(actor), skins.guards) then
             local hp = actor_hp(actor) or 0
-            if hp > 1 and pos_dist(anchor, actor_pos(actor)) <= radius then count = count + 1 end
+            if hp > 1 and pos_dist(anchor, actor_pos(actor)) <= radius then
+                count, total = count + 1, total + hp
+            end
         end
     end
-    return count
+    return count, total
+end
+
+-- QQT_Warpigz_v3 3.3.3: true once RIFT_KILL_GUARDS made no progress for
+-- GUARD_STALL_S (no cultist lost health, the targeted one got no closer).
+local function guards_stalled(s, r, guard)
+    local t = now()
+    local _, total = guards_near(s.anchor, r + 8)
+    local d = guard and dist(guard) or nil
+    if not s.guard_t or total < (s.guard_hp or total) - 0.5
+        or (d and d < (s.guard_d or math.huge) - C.GUARD_PROGRESS_M) then
+        s.guard_hp, s.guard_d, s.guard_t = total, d, t
+        return false
+    end
+    s.guard_hp = math.min(s.guard_hp or total, total)
+    return t - s.guard_t >= C.GUARD_STALL_S
 end
 
 local function find_enemy(patterns, max_dist, anchor, anchor_radius)
@@ -543,7 +579,12 @@ end
 -- (alive) are strong; 'marker' (an active-event marker or wave proxy) only
 -- counts when strong_only is not set. nil: nothing live there - a leftover
 -- ring, boundary, starter, closed tear, chest or goblin is not a rupture.
-live_evidence = function(anchor, strong_only)
+-- QQT_Warpigz_v3 3.3.3 (audit): an interactable starter within r + 15 is
+-- weak evidence ('starter', like 'marker': an un-started rupture is not
+-- judged dead in 6 s, but it never keeps the site alive past the quiet cap).
+-- no_rw: a living Realmwalker does not count (a finished Surging site whose
+-- Realmwalker lives on was re-armed and completed again every 120 s).
+live_evidence = function(anchor, strong_only, no_rw)
     if not anchor then return nil end
     local r = settings.tear_event_radius or 12
     local marker = nil
@@ -556,9 +597,12 @@ live_evidence = function(anchor, strong_only)
             elseif skin_matches(skin, skins.guards) then
                 if (actor_hp(actor) or 0) > 1 then kind = "cultists" end
             elseif skin_matches(skin, skins.realmwalker_boss) then
-                if (actor_hp(actor) or 100) > 1 then kind = "Realmwalker" end
+                if not no_rw and (actor_hp(actor) or 100) > 1 then kind = "Realmwalker" end
             elseif not strong_only and not marker and skin_matches(skin, skins.live_markers) then
                 if pos_dist(anchor, actor_pos(actor)) <= r + 15 then marker = "marker" end
+            elseif not strong_only and not marker and startable(actor, skin)
+                and pos_dist(anchor, actor_pos(actor)) <= r + 15 then
+                marker = "starter"
             end
             if kind then
                 local reach = (kind == "tear" and r + 30) or (kind == "cultists" and r + 15) or r + 70
@@ -754,7 +798,8 @@ local function scan(self, states, max_dist, require_ritual_for_tear)
         -- already finished is engaged again only with strong live evidence.
         local ap = actor_pos(a)
         return is_rupture_marker_skin(skin) and not is_blacklisted(ap)
-            and not (is_spent(ap) and not live_evidence(ap, true))
+            and not (is_spent(ap) and not live_evidence(ap, true, true)
+                and live_evidence(ap) ~= "starter")
     end)
     if hold then
         -- Without a visible starter the type is unknown (never assume
@@ -856,6 +901,12 @@ local function close_tears_at(self, states, anchor, r, pad)
         -- a spent (or leftover) tear, never re-engaged by the next session.
         if stand.inside_seconds(sess, key) >= C.SPENT_TEAR_INSIDE_S then
             spent_tears[key] = t + C.SPENT_TTL
+        elseif stand.inside_seconds(sess, key) <= 0 then
+            -- QQT_Warpigz_v3 3.3.3: never reached its circle: not live
+            -- evidence for this site (it re-armed the site every 120 s), and
+            -- a rupture whose tears were all out of reach is not completed.
+            spent_tears[key] = t + C.UNREACHABLE_S
+            sess.tear_unreached = true
         end
         release_focus()
         return false
@@ -918,7 +969,8 @@ H.MOVING_TO_RIFT = function(self, states, s, r)
         s.move_best, s.move_best_t = d, t
     elseif t - (s.move_best_t or t) > C.APPROACH_NO_PROGRESS_S then
         return resume_patrol(self, states, string.format(
-            "[RIFT] No progress towards rupture for %ds (dist=%.1f) — giving up", C.APPROACH_NO_PROGRESS_S, d), true)
+            "[RIFT] No progress towards rupture for %ds (dist=%.1f) — giving up", C.APPROACH_NO_PROGRESS_S, d), true,
+            C.UNREACHABLE_S) -- QQT_Warpigz_v3 3.3.3: its cultists re-armed it every 120 s
     end
     move_to(starter or s.anchor, d <= 6)
 end
@@ -952,8 +1004,18 @@ H.RIFT_KILL_GUARDS = function(self, states, s, r)
     if guards_near(s.anchor, r + 8) > 0 then
         local guard = find_enemy(skins.guards, r + 35, s.anchor, r + 15)
         if guard then move_to(guard, dist(guard) <= 8) end
+        -- QQT_Warpigz_v3 3.3.3 (live: "standing around"): a cultist that
+        -- cannot be targeted or reached parked the bot here until the 300 s
+        -- rupture cap, then again every 120 s. Progress: a cultist lost
+        -- health or the nearest one got closer.
+        if guards_stalled(s, r, guard) then
+            return resume_patrol(self, states, string.format(
+                "[RIFT] Cultists not killed or reached for %ds — leaving this rupture", C.GUARD_STALL_S),
+                true, C.UNREACHABLE_S)
+        end
         return
     end
+    s.guard_hp, s.guard_d, s.guard_t = nil, nil, nil
     s.wait_started = now()
     self.current_state = states.RIFT_WAIT_OPEN
 end
@@ -1056,6 +1118,23 @@ H.RIFT_STAY_ACTIVE = function(self, states, s, r)
         if not s.live_seen then
             clear_movement()
             return
+        end
+        -- QQT_Warpigz_v3 3.3.3: its only tears were out of reach: not a
+        -- completed rupture (no stats, no Realmwalker wait).
+        if s.live_seen == "starter" then
+            -- QQT_Warpigz_v3 3.3.3 (audit): it has not started (nothing but an
+            -- interactable starter): wait at the ring for the quiet cap (it
+            -- may start), then leave: not completed, not re-armed for a while.
+            if not s.quiet_over then
+                clear_movement()
+                return
+            end
+            return resume_patrol(self, states, "[RIFT] The rupture never started — leaving it",
+                true, C.UNREACHABLE_S)
+        end
+        if s.tear_unreached and (s.tears_closed or 0) == 0 then
+            return resume_patrol(self, states, "[RIFT] The rupture's tears were out of reach — leaving it",
+                true, C.UNREACHABLE_S)
         end
         -- QQT_Warpigz_v3: one completed tear event for the stats (main.lua sets the hook).
         if not s.completed_counted and type(M.on_complete) == "function" then
@@ -1323,21 +1402,38 @@ local function check_live(self, states, s, r, t)
     if not LIVE_STATES[self.current_state] or loot.collecting(s) or loot.done(s) then return false end
     if s.live_t and t >= s.live_t and t - s.live_t < C.LIVE_TTL then return false end
     s.live_t = t
-    local ev = s.tear_focus_key and "tear" or live_evidence(s.anchor)
-    if ev and ev ~= "marker" then
-        if not s.live_seen or s.live_seen == "marker" then
+    -- QQT_Warpigz_v3 3.3.3 (audit): the Realmwalker counts only when this
+    -- rupture would fight it.
+    local ev = s.tear_focus_key and "tear" or live_evidence(s.anchor, false, not realmwalker_chain(s))
+    local weak = ev == "marker" or ev == "starter"
+    if ev and not weak then
+        if not s.live_seen or s.live_seen == "marker" or s.live_seen == "starter" then
             log(string.format("[RIFT] Live rupture confirmed (%s)", ev))
         end
         s.live_seen, s.quiet_since, s.quiet_over, s.grace_since = ev, nil, nil, nil
         if ev == "tear" then s.tears_seen = true end
         return false
     end
-    if ev == "marker" and not s.live_seen then
-        s.live_seen = "marker"
-        log("[RIFT] Live rupture confirmed (event marker)")
+    -- QQT_Warpigz_v3 3.3.3 (review): the starter was used and the event
+    -- marker appeared: a started rupture (the marker upgrades 'starter';
+    -- its quiet cap starts again from here).
+    if weak and (not s.live_seen or (s.live_seen == "starter" and ev == "marker")) then
+        if s.live_seen == "starter" then s.quiet_since, s.grace_since = nil, nil end
+        s.live_seen = ev
+        log(ev == "marker" and "[RIFT] Live rupture confirmed (event marker)"
+            or "[RIFT] Rupture not started yet (its starter is interactable)")
     end
-    if not s.live_seen then
-        if self.current_state == states.MOVING_TO_RIFT and dist(s.anchor) > C.LIVE_SCAN_M then return false end
+    -- QQT_Warpigz_v3 3.3.3 (audit): the grace and quiet timers run only at
+    -- the site. Away from it (a revive at a checkpoint, a knock-back, the
+    -- walk there) its actors are not listed: that is not a dead rupture.
+    if dist(s.anchor) > C.LIVE_SCAN_M then
+        s.grace_since = nil
+        if not s.quiet_over then s.quiet_since = nil end
+        return false
+    end
+    -- An un-started rupture holds off the grace only while its starter is
+    -- still there (a starter that despawned proves nothing).
+    if not s.live_seen or (s.live_seen == "starter" and ev ~= "starter") then
         s.grace_since = s.grace_since or t
         if t - s.grace_since >= C.LIVE_GRACE_S then
             resume_patrol(self, states, string.format(
@@ -1354,6 +1450,7 @@ local function check_live(self, states, s, r, t)
         log(string.format("[RIFT] Rupture quiet for %ds (no open tear, cultist or Realmwalker) — finishing it", cap))
         clear_movement()
         self.current_state = states.RIFT_STAY_ACTIVE
+        return true -- QQT_Warpigz_v3 3.3.3 (audit): not the old state's handler this tick
     end
     return false
 end
@@ -1391,6 +1488,7 @@ function M.activity_label(state)
     if not s.live_seen then
         return state == "MOVING_TO_RIFT" and "Walking to a rupture site" or "Checking a rupture site (nothing live yet)"
     end
+    if s.live_seen == "starter" then return "Rupture not started yet" end -- QQT_Warpigz_v3 3.3.3
     if s.quiet_since or s.quiet_over then return "Rupture ending: no open tear" end
     if state == "MOVING_TO_RIFT" then return "Walking to a Pandemonium rupture" end
     return "Pandemonium rupture"
@@ -1504,6 +1602,7 @@ local CREDITED = {
     "rw_kill_done_at", "chamber_enter_started",
     "rw_chain_at", -- QQT_Warpigz_v3 (rc.2 review)
     "quiet_since", "grace_since", -- QQT_Warpigz_v3 3.3.2
+    "guard_t", -- QQT_Warpigz_v3 3.3.3
 }
 function M.credit_yield(gap)
     if type(gap) ~= "number" or gap <= 0 then return end

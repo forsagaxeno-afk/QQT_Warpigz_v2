@@ -64,10 +64,28 @@ local last_cycle_end_time = nil  -- when the last full scan completed with no re
 -- 6 s). After a refused teleport or TP_MAX_FIRES fires without a teleport
 -- buff or arrival the entry is skipped until the hour ends.
 local TP_MAX_FIRES = 3
+-- QQT_Warpigz_v3 3.3.3 (live: "standing around"): tp.id -> until (inject
+-- clock). The waypoint of this hour's own Helltide is retried after
+-- ONLY_RETRY_S: one refused or interrupted return (a fight at the zone edge)
+-- idled the bot until the next hour.
 local unreachable_tps = {}
-local function mark_unreachable(tp)
-    if unreachable_tps[tp.id] then return end
-    unreachable_tps[tp.id] = true
+local ONLY_RETRY_S = 120
+local function tp_blocked(id)
+    local u = unreachable_tps[id]
+    if not u then return false end
+    if get_time_since_inject() < u then return true end
+    unreachable_tps[id] = nil
+    return false
+end
+local function mark_unreachable(tp, retry_s)
+    if tp_blocked(tp.id) then return end
+    if retry_s then
+        unreachable_tps[tp.id] = get_time_since_inject() + retry_s
+        console.print(string.format("[HelltideRevamped] waypoint %s unreachable — this hour's Helltide, retrying in %ds",
+            tostring(tp.file), retry_s))
+        return
+    end
+    unreachable_tps[tp.id] = math.huge
     console.print("[HelltideRevamped] waypoint " .. tostring(tp.file) .. " unreachable — skipping this hour")
 end
 -- QQT_Warpigz_v3: a channel that started (teleport buff) but left the player
@@ -137,7 +155,10 @@ end
 -- True while this hour's only Helltide cannot be reached by waypoint.
 function SCAN.blocked()
     local mem = scan_hour()
-    if not (mem.only and unreachable_tps[mem.only.id]) then return false end
+    if not (mem.only and tp_blocked(mem.only.id)) then
+        mem.blocked_logged = nil -- QQT_Warpigz_v3 3.3.3: logged again on the next block
+        return false
+    end
     if not mem.blocked_logged then
         mem.blocked_logged = true
         console.print("[HelltideRevamped] the only Helltide this hour (" .. tostring(mem.only.file)
@@ -213,6 +234,17 @@ local search_helltide_task = {
         -- scan. The helltide task took the tick on arrival, so our state may
         -- still be WAITING_FOR_TELEPORT for the abandoned zone, with the
         -- previous scan's count.
+        -- QQT_Warpigz_v3 3.3.3 (audit): the helltide task farmed since our
+        -- last tick (it took the tick on arrival): a pending scan hop or
+        -- teleport wait is stale (at minute 55 it re-fired the scan's
+        -- waypoint before the idle town). Start over from SEARCHING.
+        local seen_at, last_tick = tracker.helltide_seen_at, self._tick_at
+        self._tick_at = get_time_since_inject()
+        if seen_at and last_tick and seen_at > last_tick
+            and (self.current_state == search_helltide_state.WAITING_FOR_TELEPORT
+                or self.current_state == search_helltide_state.TELEPORTING) then
+            tracker.search_restart = true
+        end
         if tracker.search_restart then
             tracker.search_restart = nil
             cycle_tp_count, last_cycle_end_time = 0, nil
@@ -358,7 +390,7 @@ local search_helltide_task = {
         elseif self:arrival_grace() then
             return
         elseif confirmed_helltide_tp and not tracker.skip_cached_zone
-            and not unreachable_tps[confirmed_helltide_tp.id] then -- QQT_Warpigz_v3
+            and not tp_blocked(confirmed_helltide_tp.id) then -- QQT_Warpigz_v3
             -- QQT_Warpigz_v3 (Q7): bounded. SCAN.RETURN_MAX returns that
             -- never showed the buff mark the zone unreachable this hour.
             local now_r = get_time_since_inject()
@@ -370,7 +402,7 @@ local search_helltide_task = {
                 self._returns = nil
                 console.print(string.format("[HelltideRevamped] %d returns to %s without the Helltide buff",
                     SCAN.RETURN_MAX, tostring(confirmed_helltide_tp.file)))
-                mark_unreachable(confirmed_helltide_tp)
+                mark_unreachable(confirmed_helltide_tp, ONLY_RETRY_S) -- QQT_Warpigz_v3 3.3.3: retried
                 -- QQT_Warpigz_v3 (Q7 review): the helltide task farmed it this
                 -- hour, so it is this hour's only Helltide: wait (SCAN.blocked)
                 -- instead of scanning four towns that cannot hold it.
@@ -436,7 +468,7 @@ local search_helltide_task = {
             local n = #enums.helltide_tps
             local abandoned = tracker.skip_cached_zone and confirmed_helltide_tp or nil
             local function skipped(tp)
-                return unreachable_tps[tp.id] or (abandoned and tp.id == abandoned.id)
+                return tp_blocked(tp.id) or (abandoned and tp.id == abandoned.id)
             end
             local cycle_len = 0
             for _, tp in ipairs(enums.helltide_tps) do
@@ -452,7 +484,7 @@ local search_helltide_task = {
                 -- towns until minute 55.
                 local mem = scan_hour() -- QQT_Warpigz_v3 (Q7)
                 if abandoned then mem.only = abandoned end
-                if abandoned and not unreachable_tps[abandoned.id] then
+                if abandoned and not tp_blocked(abandoned.id) then
                     tracker.skip_cached_zone = false
                     console.print("[HelltideRevamped] no other Helltide found — returning to " .. abandoned.file)
                     last_cycle_end_time = nil
@@ -564,12 +596,15 @@ local search_helltide_task = {
                         fired = teleport_to_waypoint(tp.id) ~= false
                     end
                     if not fired then
-                        mark_unreachable(tp)
                         -- QQT_Warpigz_v3 (Q7 review): a return to this hour's
                         -- confirmed zone (farmed this hour: its only Helltide)
                         -- waits (SCAN.blocked) instead of scanning four towns.
+                        -- QQT_Warpigz_v3 3.3.3: and is retried after ONLY_RETRY_S.
                         if confirmed_helltide_tp and confirmed_helltide_tp.id == tp.id then
+                            mark_unreachable(tp, ONLY_RETRY_S)
                             scan_hour().only = tp
+                        else
+                            mark_unreachable(tp)
                         end
                         -- Not a visit: the cycle length shrinks by this entry.
                         cycle_tp_count = math.max(0, cycle_tp_count - 1)
@@ -610,7 +645,7 @@ local search_helltide_task = {
         local okw, waiting = pcall(live.waiting, get_time_since_inject())
         if okw and waiting then return true end
         local ok, tp = pcall(live.zone_tp)
-        if not ok or type(tp) ~= 'table' or unreachable_tps[tp.id] then return false end
+        if not ok or type(tp) ~= 'table' or tp_blocked(tp.id) then return false end
         if tracker.skip_cached_zone and confirmed_helltide_tp and confirmed_helltide_tp.id == tp.id then return false end
         if self._live_tp and self._live_tp.id == tp.id then return false end
         local okh, hour = pcall(function() return tracker.hr_clock and tracker.hr_clock.hour_id() end)
