@@ -3629,6 +3629,11 @@ local helltide_task = {
         local now = get_time_since_inject()
         local nav = km_nav_map[nav_key]
         if not nav then
+            -- QQT_Warpigz_v3 3.3.3 (audit): drop stale cells (the map grew all
+            -- Helltide long and credit_yield walks all of it).
+            for key, old in pairs(km_nav_map) do
+                if now - old.time > 10 then km_nav_map[key] = nil end
+            end
             km_nav_map[nav_key] = { time = now, dist = cur_dist }
         elseif cur_dist < nav.dist - 2 then
             nav.dist = cur_dist

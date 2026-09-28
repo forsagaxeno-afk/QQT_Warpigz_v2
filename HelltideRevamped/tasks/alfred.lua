@@ -34,6 +34,7 @@ local STUCK_NEED_TRIGGER_GRACE = 30.0
 
 local generation = 0
 local request_plugin, request_started, quiet_since
+local request_from_helltide -- QQT_Warpigz_v3 3.3.3: the trip left from the Helltide
 local retry_after = -math.huge
 local RETRY_DELAY, PICKUP_WINDOW, QUIET_WINDOW = 5, 8, 2
 -- C1/C6 bounds: an unreadable status holds like busy for UNKNOWN_HOLD, then
@@ -139,6 +140,11 @@ end
 -- farms on with full bags instead of holding. helltide.lua and
 -- search_helltide.lua read it through core/utils.lua (tracker.alfred_town_blocked).
 local STUCK_RETRY = 120 -- Rosie's RETRY_COOLDOWN
+-- QQT_Warpigz_v3 3.3.3 (audit): a refusal without `stuck` (Rosie: pickup
+-- owns movement, a dead player, loading) latched and the next tick's
+-- stuck == false cleared it: a request every 5 s and HR holding for each.
+-- A refusal now blocks for REFUSAL_HOLD_S whatever `stuck` says.
+local REFUSAL_HOLD_S = 30
 local function town_block(why)
     tracker.needs_salvage = false
     if tracker.alfred_stuck_skip then return end
@@ -147,6 +153,7 @@ local function town_block(why)
         ') — farming on without it until Alfred/Rosie accepts again')
 end
 local function town_unblock()
+    tracker.alfred_refused_until = nil
     if tracker.alfred_stuck_skip == nil then return end
     tracker.alfred_stuck_skip = nil
     console.print('[HelltideRevamped] Town service available again')
@@ -154,6 +161,11 @@ end
 -- status: a readable status table, or nil while it is unreadable.
 local function town_blocked(status)
     if status and status.stuck == true then return true end
+    local refused = tracker.alfred_refused_until
+    if refused then
+        if get_time_since_inject() < refused then return true end
+        tracker.alfred_refused_until = nil
+    end
     local since = tracker.alfred_stuck_skip
     if not since then return false end
     if status and status.stuck == false then
@@ -213,7 +225,14 @@ local function reset(token, result)
         town_block('trip ' .. result)
     else
         tracker.has_salvaged = true
+        -- QQT_Warpigz_v3 3.3.3 (audit): the with-teleport trip ends the moment
+        -- the player is back through the portal; the Helltide buff shows a
+        -- moment later. A trip that left from the Helltide counts as a buff
+        -- sighting now, so the helltide task keeps its 15 s grace instead of
+        -- search resetting HR and teleporting away.
+        if request_from_helltide then tracker.helltide_seen_at = get_time_since_inject() end
     end
+    request_from_helltide = nil
     tracker.needs_salvage = false
     task.status = status_enum['IDLE']
     clear_request()
@@ -231,6 +250,7 @@ local function trigger_alfred()
     local token = generation
     task.status = status_enum.WAITING
     request_plugin, request_started, quiet_since = a, get_time_since_inject(), nil
+    request_from_helltide = utils.is_in_helltide() or nil
     -- QQT_Warpigz_v3: forward the completion result (nil / 'failed' / 'cancelled').
     local ok, accepted, why = pcall(a.trigger_tasks_with_teleport, plugin_label, function(result) reset(token, result) end)
     if ok and accepted == false then
@@ -238,6 +258,10 @@ local function trigger_alfred()
         -- QQT_Warpigz_v3: a refusal (Rosie while stuck) means "unavailable
         -- for now", not "ask again in 5 s": farm on until it is available.
         town_block(why)
+        -- QQT_Warpigz_v3 3.3.3: bounded, even when `stuck` is false; no
+        -- retry-delay hold after a refusal (HR farms on meanwhile).
+        tracker.alfred_refused_until = get_time_since_inject() + REFUSAL_HOLD_S
+        retry_after = -math.huge
         return false
     end
     if ok then town_unblock() end -- QQT_Warpigz_v3: accepted again
@@ -262,6 +286,12 @@ local function decide()
     end
 
     if waiting_for_request(status) then return true, 'waiting for our Alfred trip' end
+
+    -- QQT_Warpigz_v3 3.3.3 (audit): dead: the helltide task revives (this
+    -- task claimed every tick of a refused trip, so revive never ran).
+    local lp = get_local_player()
+    local okd, dead = pcall(function() return lp and lp:is_dead() end)
+    if okd and dead == true then return false end
 
     -- Yield while Alfred is busy under any caller (WarPigs preamble,
     -- other activity plugin transition). trigger_tasks is the live flag
@@ -391,6 +421,7 @@ function task.reset()
     -- QQT_Warpigz_v3: a new session asks again (a still-stuck Rosie keeps
     -- publishing stuck = true, which blocks by itself).
     tracker.alfred_stuck_skip = nil
+    tracker.alfred_refused_until = nil -- QQT_Warpigz_v3 3.3.3
     note_hold(nil)
 end
 

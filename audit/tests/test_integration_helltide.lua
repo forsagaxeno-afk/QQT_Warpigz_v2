@@ -1021,6 +1021,82 @@ case('v3 in-Helltide Looter hold is bounded without bag progress, named in the r
     eq(s.logged('Looter busy'), 1)
 end)
 
+-- QQT_Warpigz_v3 3.3.3 (audit, repro_hr_refuse_loop.lua): Rosie refuses a
+-- trip without `stuck` (pickup owns movement, dead, loading). The latch was
+-- cleared at once by stuck == false: a request every 5 s, HR holding.
+case('3.3.3 a refusal without stuck (Rosie publishes stuck=false) does not loop requests or hold HR', function()
+    local s = session({salvage = true})
+    rosie_like(s)            -- publishes stuck=false
+    s.refuse = true          -- e.g. 'Waiting for pickup movement to release.'
+    local share = helltide_share(s, 60)
+    ok(#s.triggers <= 2, 'request loop: ' .. #s.triggers .. ' requests in 60 s')
+    ok(share > 0.9, 'HR stood still: helltide share ' .. share)
+    -- the bounded latch expires: the trip is asked for again and taken
+    s.refuse = false
+    s.tick(60)
+    ok(s.logged('Town service available again') >= 1, 'asked again after the bounded latch')
+    eq(s.full, false, 'the trip ran once Rosie accepted')
+end)
+
+case('3.3.3 dead with a full bag (Rosie refuses: waiting for a living player): HR revives', function()
+    local s = session({salvage = true})
+    rosie_like(s)
+    local real = s.env.get_local_player()
+    local dead = setmetatable({is_dead = function() return true end}, {__index = real})
+    s.env.get_local_player = function() return dead end
+    local revives = 0
+    s.env.revive_at_checkpoint = function() revives = revives + 1 end
+    s.refuse = true
+    s.tick(60)
+    ok(revives > 0, 'HR never tried to revive in 60 s')
+    ok(#s.triggers <= 2, 'no request loop while dead: ' .. #s.triggers)
+end)
+
+-- QQT_Warpigz_v3 3.3.3 (audit, repro_hr_trip_return.lua): Rosie ends the
+-- trip the moment the player is back in the zone; the Helltide buff shows a
+-- moment later. helltide_seen_at was 40 s old, so search took the tick,
+-- reset HR and teleported away.
+case('3.3.3 a with-teleport trip returns and the buff lags 0.2 s: no search reset, no teleport', function()
+    local s = session({salvage = true, zone = 'Scos_Coast'})
+    rosie_like(s)
+    s.full = false
+    s.tick(5)
+    s.full = true
+    s.tick(2)
+    eq(#s.triggers, 1, 'trip requested')
+    s.in_helltide = false          -- the trip is in town
+    s.alfred_cb_at = s.now + 40    -- a 40 s town trip
+    local prev = s.before_tick
+    local back_at
+    s.before_tick = function()
+        local had = s.alfred_cb_at
+        prev()
+        if had and not s.alfred_cb_at then back_at = s.now end   -- back in the zone
+        if back_at and s.now >= back_at + 0.2 then s.in_helltide = true end
+    end
+    local tp0 = #s.teleports
+    s.tick(60)
+    eq(#s.teleports - tp0, 0, 'teleported away right after the trip returned')
+    eq(s.logged('Returning to known helltide zone'), 0, 'search took over after the trip')
+end)
+
+-- QQT_Warpigz_v3 3.3.3 (audit, repro_hr_min55.lua): the helltide task took
+-- the tick on arrival, search stayed in WAITING_FOR_TELEPORT; at minute 55
+-- it re-fired the scan's waypoint before the idle town.
+case('3.3.3 minute 55 after a scan found the Helltide: search goes to town, not back to the scan waypoint', function()
+    local s = session({zone = 'Skov_Temis', in_helltide = false})
+    s.tick(1)
+    ok(s.teleports[1] ~= nil, 'scan teleport fired')
+    s.zone, s.in_helltide = 'Frac_Tundra_S', true      -- arrived; the helltide task takes over
+    s.tick(30)
+    s.zone = 'Frac_Tundra_N'                             -- farmed into the next sub-zone
+    s.tick(5)
+    local before = #s.teleports
+    s.minute, s.in_helltide = 55, false                  -- the Helltide ends
+    s.tick(10)
+    eq(s.teleports[before + 1] and s.teleports[before + 1].id, 0x1CE51E, 'the first teleport after :55 is the idle town')
+end)
+
 print(string.format('Helltide integration: %d cases, %d checks, %d failures', cases, checks, #failures))
 if #failures > 0 then error('Helltide integration failures:\n' .. table.concat(failures, '\n')) end
 print('PASS: test_integration_helltide (' .. cases .. ' cases)')

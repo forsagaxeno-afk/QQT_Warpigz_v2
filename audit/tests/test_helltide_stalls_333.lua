@@ -427,6 +427,83 @@ case('rupture: a tear the bot cannot reach is not re-engaged, nor counted as a c
     eq(s.logged('rupture complete'), 0, 'a rupture whose only tear was out of reach is not completed')
 end)
 
+-- ── Auditor findings on 2.6.1 (audit/BOARD.md, HelltideRevamped 2.6.1) ──
+case('audit: a death mid-rupture (revive out of actor range) does not finish or abandon the live rupture', function()
+    local s = session()
+    s.actors = {actor(SKIN.normal_starter, 30, 2), actor(SKIN.hold, 30, 0)}
+    local t = actor(SKIN.glint, 32, 0, {progress = 0})
+    t.close_s = 30
+    s.tears = {t}
+    s.actors[#s.actors + 1] = t
+    s.tick(10)
+    eq(state(s), 'RIFT_CLOSE_TEARS', 'standing in the tear')
+    -- died; revived at a checkpoint 200 m away, where the site is not listed
+    local site = s.actors
+    s.actors, s.push, s.frozen = {}, v(-170, 0, 0), true
+    s.tick(25)
+    eq(s.logged('Rupture quiet'), 0, 'no quiet cap while away from the site')
+    eq(s.logged('rupture complete'), 0, 'not completed from the checkpoint')
+    eq(s.logged('No live rupture here'), 0, 'not abandoned from the checkpoint')
+    ok(rift(s), 'the rupture is still the goal: ' .. tostring(state(s)))
+    -- walks back; the site is listed again and the tear still open
+    s.frozen = false
+    local back = false
+    s.before_tick = function()
+        if not back and s.pos:x() > 0 then back = true; s.actors = site end
+    end
+    s.tick(60)
+    ok(back, 'walked back to the site')
+    eq(s.closed, 1, 'the tear was closed after the revive')
+end)
+
+case('audit: the quiet cap changes the state and no old-state handler overwrites it on the same tick', function()
+    local s = session()
+    local cultist = actor('S14_cultist_Melee', 33, 0, {hp = 100})
+    s.actors = {actor(SKIN.normal_starter, 30, 2, {interactable = false}), actor(SKIN.hold, 30, 0), cultist}
+    local wait_at, forced, seen
+    s.tick(1)
+    s.before_tick = function()
+        if s.now > 112 and cultist.hp > 0 then cultist.hp = 0 end -- quiet cap due at 142
+        if seen == false then seen = state(s) end
+        if state(s) == 'RIFT_WAIT_OPEN' and not wait_at then wait_at = s.now end
+        -- white-box: the quiet cap falls due on the tick the WAIT_OPEN
+        -- handler (ring still listed) switches to RIFT_CLOSE_TEARS
+        if wait_at and not forced and s.now - wait_at >= 4.95 then
+            forced = true
+            local sess = s.tear.session()
+            sess.quiet_since, sess.live_t = s.now - 40, nil
+            seen = false
+        end
+    end
+    s.tick(60)
+    ok(forced, 'reached RIFT_WAIT_OPEN')
+    eq(s.logged('Rupture quiet'), 1, 'the quiet cap ran')
+    eq(seen, 'RIFT_STAY_ACTIVE', 'the state after the quiet-cap tick')
+end)
+
+case('audit: an un-started rupture (interactable starter) is not judged dead in 6 s, not completed, not re-armed at once', function()
+    local s = session()
+    s.actors = {actor(SKIN.normal_starter, 20, 2), actor(SKIN.hold, 20, 0)}
+    watch_rift(s)
+    s.tick(15)
+    eq(s.logged('No live rupture here'), 0, 'not left as a dead site after 6 s')
+    ok(rift(s), 'still at the site')
+    s.tick(275)
+    eq(s.logged('rupture complete'), 0, 'not counted as a completed rupture')
+    eq(s.engages, 1, 'engaged once in 290 s')
+    ok(s.rift_s <= 50, string.format('%.0fs at an un-started rupture', s.rift_s))
+end)
+
+case('audit: a living Realmwalker near a finished site (Fight Realmwalker off) does not re-arm it', function()
+    local s = session({rw = false})
+    s.actors = {actor(SKIN.hold, 20, 0), actor(SKIN.boundary, 32, 0),
+        actor(SKIN.surging_starter, 20, 2, {interactable = false}), actor('S14_Golem_Stone_Realmwalker', 60, 0, {hp = 5000})}
+    watch_rift(s)
+    s.tick(400)
+    ok(s.engages <= 1, 'engaged ' .. s.engages .. ' times in 400 s')
+    eq(s.logged('rupture complete'), 0, 'never counted complete')
+end)
+
 print(string.format('Helltide stalls: %d cases, %d checks, %d failures', cases, checks, #failures))
 if #failures > 0 then error('Helltide stalls failures:\n' .. table.concat(failures, '\n')) end
 print('PASS: test_helltide_stalls_333 (' .. cases .. ' cases)')

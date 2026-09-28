@@ -234,6 +234,17 @@ local search_helltide_task = {
         -- scan. The helltide task took the tick on arrival, so our state may
         -- still be WAITING_FOR_TELEPORT for the abandoned zone, with the
         -- previous scan's count.
+        -- QQT_Warpigz_v3 3.3.3 (audit): the helltide task farmed since our
+        -- last tick (it took the tick on arrival): a pending scan hop or
+        -- teleport wait is stale (at minute 55 it re-fired the scan's
+        -- waypoint before the idle town). Start over from SEARCHING.
+        local seen_at, last_tick = tracker.helltide_seen_at, self._tick_at
+        self._tick_at = get_time_since_inject()
+        if seen_at and last_tick and seen_at > last_tick
+            and (self.current_state == search_helltide_state.WAITING_FOR_TELEPORT
+                or self.current_state == search_helltide_state.TELEPORTING) then
+            tracker.search_restart = true
+        end
         if tracker.search_restart then
             tracker.search_restart = nil
             cycle_tp_count, last_cycle_end_time = 0, nil

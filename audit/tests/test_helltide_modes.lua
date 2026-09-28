@@ -492,10 +492,27 @@ case('ring gizmo without a tear: KILL_GUARDS stay is bounded, the rupture comple
     d.pos = v(29, 0, 0)
     d.tick(0.5)
     eq(d.helltide.current_state, 'RIFT_KILL_GUARDS')
+    -- QQT_Warpigz_v3 3.3.3 (audit): its starter is still interactable (the
+    -- rupture may not have started): not judged dead in 6 s, but left once
+    -- the 30 s quiet cap runs out, and not counted complete.
     d.tick(7)
-    eq(d.logged('No live rupture here'), 1, 'a ring with nothing live is left')
+    eq(d.logged('No live rupture here'), 0, 'an interactable starter is not a dead site')
+    ok(d.tear.is_rift_state(d.helltide.current_state), 'still at the site')
+    d.tick(40)
+    eq(d.logged('The rupture never started'), 1, 'left after the quiet cap')
     eq(d.logged('rupture complete'), 0, 'and not counted complete')
     eq(d.tear.is_rift_state(d.helltide.current_state), false, 'back to patrol')
+    -- the same ring once the starter is spent: left within the 6 s grace
+    local e = session({enabled = true, mode = 1})
+    normal_rupture(e, 30)
+    e.starter.interactable = false
+    e.actors[#e.actors + 1] = actor(SKIN.hold, 31, 0)
+    e.tick(1.2)
+    e.pos = v(29, 0, 0)
+    e.tick(0.5)
+    e.tick(7)
+    eq(e.logged('No live rupture here'), 1, 'a ring with nothing live is left')
+    eq(e.logged('rupture complete'), 0, 'and not counted complete')
 end)
 
 case('ring-only rupture is Unknown (no Realmwalker wait) until a starter confirms its type', function()
