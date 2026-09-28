@@ -157,7 +157,7 @@ case('B4 a yielded drop is not woken while its yield lasts, is taken once the ot
 end)
 
 case('B5 Murmuring Obols (loot_manager.is_obols) are never a pickup target, even when the host lists them as lootable and the classification accepts them', function()
-    -- QQT_Warpigz_v3 1.0.23 (Auditor, test quality): the old B5 drop was an
+    -- QQT_Warpigz_v3 1.0.22 (Auditor, test quality): the old B5 drop was an
     -- unrecognized type, refused without the host flag too. This drop is
     -- lootable and classified as an accepted crafting material, so only the
     -- is_obols check keeps Rosie off it; the control twin without the flag is

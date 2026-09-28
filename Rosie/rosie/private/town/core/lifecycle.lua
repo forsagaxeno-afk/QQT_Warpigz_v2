@@ -33,12 +33,25 @@ local bat_hold={api=nil,mine=false,next_at=-math.huge,lift_logged=false,fail_log
 M.RETRY_COOLDOWN=120
 M.MAX_FAIL_STREAK=3
 M.PAUSE_LIMIT=60
--- QQT_Warpigz_v3 1.0.23: a TristramLoop revive phase that sticks held a trip
--- (Batmobile and pickup stay held) without a bound (C6). A trip honours it for
--- REVIVE_LIMIT s of continuous revive, then ignores it (logged once per trip).
--- town/main.lua reads REVIVE_LIMIT for the automatic start.
+-- QQT_Warpigz_v3 1.0.22: a TristramLoop revive phase that sticks held a trip
+-- (Batmobile and pickup stay held) and the automatic start without a bound
+-- (C6). One clock serves both (town/main.lua before the trip, M.tick during
+-- it), so a revive that spans the start is not waited on twice: it is honoured
+-- for REVIVE_LIMIT s since first seen (wall clock, dead time included), then
+-- ignored until a reading sees it end; logged once per revive.
 M.REVIVE_LIMIT=60
-local revive={since=nil,ignored=false}
+local revive={since=nil,logged=false}
+function M.revive_holds(reviving,now)
+    if not reviving then revive.since,revive.logged=nil,false; return false end
+    if not revive.since or now<revive.since then revive.since=now end
+    local limit=tonumber(M.REVIVE_LIMIT) or 60
+    if now-revive.since<limit then return true end
+    if not revive.logged then
+        revive.logged=true
+        console.print(string.format('[Rosie] Another activity has been in its revive phase for %ds: Rosie no longer waits on it',math.floor(limit)))
+    end
+    return false
+end
 local last_tick=nil
 local pending_cleanup,cleanup_next={},0
 local finished=false
@@ -105,7 +118,7 @@ end
 -- The observed peers (docs/THIRD_PARTY_APIS.md): Navigator is held through
 -- its pause condition while a trip is in progress, Scavenger is paused and
 -- resumed under Rosie's own name.
--- QQT_Warpigz_v3 1.0.23: the condition held Navigator (and so Worldstone) for
+-- QQT_Warpigz_v3 1.0.22: the condition held Navigator (and so Worldstone) for
 -- every busy state tick() does not bound (a dead player, a TristramLoop revive
 -- phase, a stopped Rosie pulse). It now also needs a trip tick within NAV_PULSE
 -- s that is not waiting for a dead player or a revive (M.tick sets
@@ -317,10 +330,9 @@ function M.request(caller,callback,teleport,manual)
     tracker.service_elapsed=0; tracker.pause_elapsed=0; last_tick=nil
     tracker.raven_wait=nil -- QQT_Warpigz_v3
     tracker.mover_elapsed=0; motion.x,motion.y,motion.moved_at=nil,nil,nil -- QQT_Warpigz_v3 1.0.21
-    -- QQT_Warpigz_v3 1.0.23: per-trip Navigator hold bounds and revive bound.
+    -- QQT_Warpigz_v3 1.0.22: per-trip Navigator hold bounds and revive bound.
     local t0=get_time_since_inject()
     nav_hold.since,nav_hold.pulse,nav_hold.capped=t0,t0,false
-    revive.since,revive.ignored=nil,false
     requesting=true -- QQT_Warpigz_v3 1.0.22: see hold_peers
     local held,why=pcall(M.hold_peers)
     requesting=false
@@ -416,6 +428,8 @@ function M.status_text()
     if #pending_cleanup>0 then return 'Cleanup pending: retrying release of '..#pending_cleanup..' owned resource(s).' end
     if settings.enabled~=true then return 'Off. Settings remain editable.' end
     if tracker.external_pause then return 'Paused by '..tostring(tracker.pause_caller or 'external caller') end
+    -- QQT_Warpigz_v3 1.0.22: matches get_status().paused_by='Butler'.
+    if not M.busy() and foreign.butler_busy() then return 'Waiting: Butler is running a town trip.' end
     if tracker.failure_reason and not M.busy() then
         local stuck,left=M.stuck()
         if stuck and left then
@@ -468,7 +482,7 @@ function M.tick()
     if settings.enabled~=true then M.cancel('Rosie town service disabled during service'); return false end
     local player=get_local_player(); local world=get_current_world()
     if tracker.external_pause then
-        nav_hold.pulse=now -- QQT_Warpigz_v3 1.0.23: the caller's pause is bounded here (PAUSE_LIMIT)
+        nav_hold.pulse=now -- QQT_Warpigz_v3 1.0.22: the caller's pause is bounded here (PAUSE_LIMIT)
         -- A pause inside a running trip still counts as live work (C1): bound it.
         tracker.pause_elapsed=(tracker.pause_elapsed or 0)+elapsed
         if tracker.pause_elapsed>=M.PAUSE_LIMIT then
@@ -476,10 +490,10 @@ function M.tick()
         end
         return false
     end
-    -- QQT_Warpigz_v3 1.0.23: a living player's load screen (the trip's own
-    -- Town Portal travel) or open chat keeps the Navigator hold alive; a dead
-    -- player or a revive wait does not.
-    if player and player:is_dead()==false and world
+    -- QQT_Warpigz_v3 1.0.22: a load screen (the trip's own Town Portal
+    -- travel; the host may return no world or no player there) or open chat
+    -- keeps the Navigator hold alive; a dead player or a revive wait does not.
+    if not player or not world or player:is_dead()==false
         and (world:get_current_zone_name()=='[sno none]' or is_chat_open()) then nav_hold.pulse=now end
     if not player or player:is_dead()~=false or not world
         or world:get_current_zone_name()=='[sno none]' or is_chat_open() then return false end
@@ -490,15 +504,8 @@ function M.tick()
         reviving=ok and type(status)=='table' and status.running and status.owns_activity
             and status.phase=='revive' and true or false
     end
-    -- QQT_Warpigz_v3 1.0.23: the revive wait is bounded (REVIVE_LIMIT, C6).
-    if not reviving then revive.since=nil
-    elseif not revive.ignored then
-        revive.since=revive.since or now
-        if now-revive.since<M.REVIVE_LIMIT then return false end
-        revive.ignored=true
-        console.print(string.format('[Rosie] TristramLoop has been in its revive phase for %ds during the town trip: the trip continues',M.REVIVE_LIMIT))
-    end
-    nav_hold.pulse=now -- QQT_Warpigz_v3 1.0.23: this tick drives the trip
+    if M.revive_holds(reviving,now) then return false end -- QQT_Warpigz_v3 1.0.22: bounded (REVIVE_LIMIT, C6)
+    nav_hold.pulse=now -- QQT_Warpigz_v3 1.0.22: this tick drives the trip
     M.hold_peers()
     if utils.is_in_town() then tracker.visited_town=true end
     -- QQT_Warpigz_v3: waiting for the SilentRaven hand-off (teleport.lua,

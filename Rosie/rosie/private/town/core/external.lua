@@ -6,7 +6,7 @@ local settings = require 'rosie.private.town.core.settings'
 local tracker = require 'rosie.private.town.core.tracker'
 
 local lifecycle = require 'rosie.private.town.core.lifecycle'
-local foreign = require 'rosie.private.foreign' -- QQT_Warpigz_v3 1.0.23 (read-only: butler_busy)
+local foreign = require 'rosie.private.foreign' -- QQT_Warpigz_v3 1.0.22 (read-only: butler_busy)
 local external
 
 -- QQT_Warpigz_v2 compatibility (bundle contract C1, see AUDIT.md): the suite's
@@ -51,7 +51,7 @@ external = {
     get_status = function ()
         local is_stuck, retry_in = stuck()
         local requested = tracker.external_trigger == true or tracker.manual_trigger == true
-        -- QQT_Warpigz_v3 1.0.23: requests are refused while the third-party
+        -- QQT_Warpigz_v3 1.0.22: requests are refused while the third-party
         -- Butler runs a town trip; without a sign of it farm plugins asked again
         -- every few seconds for the whole Butler trip. Outside a Rosie trip it
         -- reads as a pause by 'Butler' (their pause holds are bounded). Only the
@@ -110,7 +110,7 @@ external = {
             stash_full = tracker.stash_full,
             salvage_talisman_failed = tracker.salvage_talisman_failed,
             stash_pull_failed = tracker.stash_pull_failed,
-            -- QQT_Warpigz_v3 1.0.23: only during the trip (it stayed true while idle).
+            -- QQT_Warpigz_v3 1.0.22: only during the trip (it stayed true while idle).
             returned = (busy and lifecycle.returned()) == true,
             -- QQT_Warpigz_v3 (Q8): a with-teleport trip's return leg hands a
             -- ready Whisper reward over to SilentRaven (tasks/teleport.lua)
@@ -136,7 +136,7 @@ external = {
             if lifecycle.is_retired() then task.status='idle'; return false end
             if task.status == 'waiting' then return true end
             local st = external.get_status()
-            -- QQT_Warpigz_v3 1.0.23: `paused` (also a Butler trip), not only external_pause.
+            -- QQT_Warpigz_v3 1.0.22: `paused` (also a Butler trip), not only external_pause.
             return st.enabled and st.allow_external and not st.paused and not st.running and st.need_trigger
         end
         task.Execute = function()

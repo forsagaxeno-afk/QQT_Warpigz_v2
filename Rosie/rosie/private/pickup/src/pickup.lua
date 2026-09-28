@@ -77,7 +77,7 @@ local episode={since=nil,last=nil,capped_until=0}
 --    YIELD.confirm s while the player moves YIELD.moved m makes Rosie step back without clearing that path; the
 --    drop is not tried (nor woken) for YIELD.rest s, doubling per yield of
 --    that drop up to YIELD.max s (its rounds still bound it, C6).
---    QQT_Warpigz_v3 1.0.23: every YIELD.per_round yields of a drop fail one
+--    QQT_Warpigz_v3 1.0.22: every YIELD.per_round yields of a drop fail one
 --    of its rounds.
 local G={nonbag_interacts=3,nonbag_clear=3.5,small_interacts=ROUND_INTERACTS,settle_ttl=180,settle_max=128,same_spot=1.0,
     away=REACH+2,settled={},count=0,world=nil,retried={},fight_radius=10,movement=require('rosie.movement')}
@@ -179,7 +179,7 @@ function M.blocked(item)
     return false
 end
 M.key=key
--- QQT_Warpigz_v3 1.0.23 (perf): M.blocked changes state only for a settled
+-- QQT_Warpigz_v3 1.0.22 (perf): M.blocked changes state only for a settled
 -- drop (its away/retry mark). With none settled, a caller that does not use
 -- its answer may skip it.
 function M.tracking() return next(G.settled)~=nil end
@@ -233,7 +233,7 @@ local function fail_round(e,now,why,item,d)
     -- QQT_Warpigz_v2 (live rc.13): name the drop Rosie could not take.
     console.print(string.format('[Rosie pickup] %s %s: round %d/%d failed (%s, distance %.1f)',
         e.rounds>=MAX_ROUNDS and 'Gave up on' or 'Retrying',item and item_name(item) or 'item',e.rounds,MAX_ROUNDS,
-        why=='stall' and 'no progress toward it' or why=='yield' and 'another move kept taking the player off it' -- QQT_Warpigz_v3 1.0.23
+        why=='stall' and 'no progress toward it' or why=='yield' and 'another move kept taking the player off it' -- QQT_Warpigz_v3 1.0.22
             or 'interactions did not pick it up',d or -1))
     e.interacts=0;e.best=nil;e.best_at=nil;e.working=false;e.next=0
 end
@@ -324,7 +324,7 @@ local FIGHT={feet=REACH+1,margin=4,calm=1.0,max=45,on=false}
 local YIELD={confirm=0.3,rest=4,max=30,far=REACH+0.5,sent=1.5,moved=0.5,per_round=2}
 M.limits.fight_feet,M.limits.fight_calm,M.limits.fight_max=FIGHT.feet,FIGHT.calm,FIGHT.max
 M.limits.yield_rest,M.limits.yield_max=YIELD.rest,YIELD.max
-M.limits.yield_per_round=YIELD.per_round -- QQT_Warpigz_v3 1.0.23
+M.limits.yield_per_round=YIELD.per_round -- QQT_Warpigz_v3 1.0.22
 -- QQT_Warpigz_v3 1.0.22: a drop that waits for the fight is published as
 -- LooteerPlugin.has_pending_loot(). Until every exit guard (Arkham, Reaper,
 -- HordeDev, WonderCity, HelltideRevamped, SilentRaven, WarPigs) also reads
@@ -339,7 +339,7 @@ end
 local function flat(a,b) return math.sqrt((a.x-b.x)^2+(a.y-b.y)^2) end
 local function fight_hold(now)
     if FIGHT.at and now>=FIGHT.at and now-FIGHT.at<0.25 then return FIGHT.on and not FIGHT.capped end
-    -- QQT_Warpigz_v3 1.0.23: only a waiting drop evaluates the hold. Unread
+    -- QQT_Warpigz_v3 1.0.22: only a waiting drop evaluates the hold. Unread
     -- for longer than FIGHT.calm (+ the 0.25 s cache), the last fight's hold is
     -- stale: a later fight starts its own FIGHT.max instead of being capped at once.
     -- A drop resting after a yield is not read either: its rest keeps the
@@ -389,7 +389,7 @@ local function stand_down(e,item,now)
         console.print(string.format('[Rosie pickup] Another move took the player off %s; leaving it for %ds (yield %d)',
             item_name(item),rest,e.yields))
     end
-    -- QQT_Warpigz_v3 1.0.23: a yield counted no round, so a drop that kept
+    -- QQT_Warpigz_v3 1.0.22: a yield counted no round, so a drop that kept
     -- losing the path came back every YIELD.max s forever. Every
     -- YIELD.per_round yields of a drop fail a round; its rounds bound it (C6).
     if e.yields%YIELD.per_round==0 then fail_round(e,now,'yield',item,Utils.distance_to(item)) end

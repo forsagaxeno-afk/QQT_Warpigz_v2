@@ -1,4 +1,4 @@
--- QQT_Warpigz_v3 Rosie 1.0.23 (Auditor findings on 1.0.21, town core):
+-- QQT_Warpigz_v3 Rosie 1.0.22 (Auditor findings on 1.0.21, town core):
 -- 1. The Navigator pause condition ("Rosie") was `trip in progress`, so every
 --    busy state tick() does not bound (a dead player, a TristramLoop revive
 --    phase that sticks, a load screen that never ends) froze the third-party
@@ -25,8 +25,8 @@ local function eq(actual, expected, message)
 end
 local function case(name, fn)
     local passed, err = xpcall(fn, debug.traceback)
-    if passed then print('PASS town core 1.0.23: ' .. name)
-    else failures[#failures + 1] = name .. ': ' .. tostring(err); print('FAIL town core 1.0.23: ' .. name .. ': ' .. tostring(err)) end
+    if passed then print('PASS town core 1.0.22: ' .. name)
+    else failures[#failures + 1] = name .. ': ' .. tostring(err); print('FAIL town core 1.0.22: ' .. name .. ': ' .. tostring(err)) end
 end
 local CONSUMER = {name = 'Consumer', dir = ROOT .. '/audit/tests/', loaded = {}}
 local function new(opts)
@@ -129,15 +129,25 @@ case('a TristramLoop revive phase that sticks: Navigator released, the trip cont
     eq(nav.held(), false, 'Navigator stays free during the honoured revive wait')
     ok(h.run_until(function() return result.done end, 200), 'the trip ends although the revive phase never does\n' .. h.tail())
     eq(st(h).outcome, 'completed', 'completed\n' .. h.tail())
-    eq(h.logged('revive phase for 60s during the town trip'), 1, 'logged once\n' .. h.tail())
+    eq(h.logged('in its revive phase for 60s: Rosie no longer waits on it'), 1, 'logged once\n' .. h.tail())
     eq(nav.held(), false, 'released after the trip')
-    -- A second trip gets its own bound.
+    -- The same revive, still stuck: a second trip does not wait on it again
+    -- (one clock per revive); a new revive gets its own bound.
     fill_bag(h, 3)
+    local t2 = h.now
     local r2 = start_trip(h)
-    h.run(30)
-    eq(r2.done, nil, 'the second trip honours the revive phase again')
     ok(h.run_until(function() return r2.done end, 200), 'second trip ends\n' .. h.tail())
-    eq(h.logged('revive phase for 60s during the town trip'), 2, 'logged once per trip')
+    ok(h.now - t2 < 45, 'no second REVIVE_LIMIT wait for the same revive: ' .. (h.now - t2))
+    eq(h.logged('in its revive phase for 60s: Rosie no longer waits on it'), 1, 'logged once per revive')
+    tristram(h, 'fight'); h.run(1)
+    fill_bag(h, 3)
+    local r3 = start_trip(h)
+    h.run(0.3)
+    tristram(h, 'revive')
+    h.run(30)
+    eq(r3.done, nil, 'a new revive is honoured again')
+    ok(h.run_until(function() return r3.done end, 200), 'third trip ends\n' .. h.tail())
+    eq(h.logged('in its revive phase for 60s: Rosie no longer waits on it'), 2, 'logged once per revive')
     h.assert_clean('revive')
 end)
 
@@ -153,8 +163,29 @@ case('a revive phase that sticks (no Navigator): the trip is bounded and complet
     eq(st(h).outcome, 'completed', 'completed\n' .. h.tail())
     ok(h.now - t0 >= 60, 'the revive phase was honoured for a while: ' .. (h.now - t0))
     ok(h.now - t0 < 60 + 120, 'bounded: ' .. (h.now - t0))
-    eq(h.logged('revive phase for 60s during the town trip'), 1, 'logged once')
+    eq(h.logged('in its revive phase for 60s: Rosie no longer waits on it'), 1, 'logged once')
     h.assert_clean('revive bound')
+end)
+
+case('a load screen where the host returns no world or no player keeps Navigator held', function()
+    for _, which in ipairs({'world', 'player'}) do
+        local h = new({place = 'pit'})
+        enable(h)
+        fill_bag(h, 3)
+        local nav = fake_navigator(h)
+        local result = start_trip(h)
+        h.run(0.3)
+        eq(nav.held(), true, 'held at the trip start')
+        local name = which == 'world' and 'get_current_world' or 'get_local_player'
+        local real = h.G[name]
+        h.G[name] = function() return nil end
+        local freed = 0
+        h.run(8, function() if not nav.held() then freed = freed + 1 end end)
+        h.G[name] = real
+        eq(freed, 0, 'held through an 8 s load with no ' .. which)
+        ok(h.run_until(function() return result.done end, 200), 'trip ends\n' .. h.tail())
+        h.assert_clean('no ' .. which)
+    end
 end)
 
 case('a trip stuck on a load screen: the NAV_HOLD_MAX cap releases Navigator, logged once', function()
@@ -284,6 +315,7 @@ case('a Butler trip reads as paused by Butler: an HR-like poller makes no reques
     local s = st(h)
     eq(s.paused, true, 'paused while Butler is busy')
     eq(s.paused_by, 'Butler', 'paused_by names Butler')
+    eq(s.state_text, 'Waiting: Butler is running a town trip.', 'the state line agrees')
     eq(s.external_pause, false, 'not an external pause')
     eq(s.pause_caller, nil, 'no pause caller')
     eq(tracker(h).external_pause, false, 'tracker.external_pause untouched')
@@ -332,5 +364,5 @@ case("a Butler trip: Rosie's own automatic trip still waits for it and starts af
     h.assert_clean('butler automatic')
 end)
 
-print(string.format('town core 1.0.23: %d checks, %d failures', checks, #failures))
+print(string.format('town core 1.0.22: %d checks, %d failures', checks, #failures))
 if #failures > 0 then error(table.concat(failures, '\n')) end

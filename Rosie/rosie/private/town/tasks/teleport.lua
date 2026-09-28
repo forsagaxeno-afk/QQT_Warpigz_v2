@@ -27,15 +27,18 @@ local debounce_timeout = 3
 local outbound_attempts = 0
 local outbound = false
 local cast = {refunded = false, logged = false, request = nil} -- QQT_Warpigz_v3 1.0.21
--- QQT_Warpigz_v3 1.0.23: at most MAX_REFUNDS interrupted casts are refunded per
+-- QQT_Warpigz_v3 1.0.22: at most MAX_REFUNDS interrupted casts are refunded per
 -- trip. A nudge after every cast (orbwalker/rotation in a fight) made the 8-cast
 -- cap moot (27 casts, one every 3 s, until the 60 s outbound bound); now 12 at most.
 local MAX_REFUNDS = 4
 cast.refunds = 0
+-- Exported for audit/tests/test_rosie_foreign_mover.lua (the stop-and-go case
+-- needs more than 8 and at most 8+MAX_REFUNDS-1 interrupts).
+task.MAX_REFUNDS = MAX_REFUNDS
 local reset_session = task.reset_session
 function task.reset_session()
     reset_session(); debounce_time=-1; outbound_attempts=0; outbound=false; cast.refunded=false
-    cast.refunds=0 -- QQT_Warpigz_v3 1.0.23: per trip
+    cast.refunds=0 -- QQT_Warpigz_v3 1.0.22: per trip
 end
 local function teleport_with_debounce()
     local local_player = get_local_player()
@@ -55,7 +58,7 @@ local function teleport_with_debounce()
     -- the player has stood still (the live trip spent 8 casts in 24 s).
     if debounce_time>=0 and not cast.refunded and lifecycle.moved_since(debounce_time) then
         cast.refunded=true
-        -- QQT_Warpigz_v3 1.0.23: capped per trip; later interrupted casts count.
+        -- QQT_Warpigz_v3 1.0.22: capped per trip; later interrupted casts count.
         if cast.refunds<MAX_REFUNDS then
             cast.refunds=cast.refunds+1; outbound_attempts=math.max(0,outbound_attempts-1)
             if cast.refunds==MAX_REFUNDS then

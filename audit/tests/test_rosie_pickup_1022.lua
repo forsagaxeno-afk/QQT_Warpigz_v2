@@ -1,4 +1,4 @@
--- QQT_Warpigz_v3 Rosie 1.0.23 (Auditor review of 3.3.2, audit/BOARD.md):
+-- QQT_Warpigz_v3 Rosie 1.0.22 (Auditor review of 3.3.2, audit/BOARD.md):
 --  F  [HIGH] the fight hold went stale between fights: FIGHT.on / since
 --     survived a stretch with no waiting drop, so the next fight hit the 45 s
 --     cap on its first frame and Rosie walked out of it to the drop
@@ -24,8 +24,8 @@ local function eq(actual, expected, message)
 end
 local function case(name, fn)
     local passed, err = xpcall(fn, debug.traceback)
-    if passed then print('PASS pickup 1.0.23: ' .. name)
-    else failures[#failures + 1] = name .. ': ' .. tostring(err); print('FAIL pickup 1.0.23: ' .. name .. ': ' .. tostring(err)) end
+    if passed then print('PASS pickup 1.0.22: ' .. name)
+    else failures[#failures + 1] = name .. ': ' .. tostring(err); print('FAIL pickup 1.0.22: ' .. name .. ': ' .. tostring(err)) end
 end
 local CONSUMER = {name = 'Consumer', dir = ROOT .. '/audit/tests/', loaded = {}}
 local function new()
@@ -263,5 +263,5 @@ case('P3 a settled drop out of pickup range still gets its one retry when the ro
     ok((h.refusals or 0) > tries, 'one more attempt after coming back\n' .. h.tail(8))
 end)
 
-print(string.format('rosie pickup 1.0.23: %d checks, %d failures', checks, #failures))
-if #failures > 0 then error(#failures .. ' pickup 1.0.23 regression(s) failed') end
+print(string.format('rosie pickup 1.0.22: %d checks, %d failures', checks, #failures))
+if #failures > 0 then error(#failures .. ' pickup 1.0.22 regression(s) failed') end

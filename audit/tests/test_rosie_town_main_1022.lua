@@ -1,4 +1,4 @@
--- QQT_Warpigz_v3 Rosie 1.0.23 (Auditor findings on 1.0.19, town/main.lua):
+-- QQT_Warpigz_v3 Rosie 1.0.22 (Auditor findings on 1.0.19, town/main.lua):
 -- 1. "Bag needs a town trip for Ns (...): starting it now" printed every pulse
 --    while the start was then blocked (last trip failed / cancelled) or
 --    refused, and a foreign town pause was cleared for a trip that never ran.
@@ -22,8 +22,8 @@ local function eq(actual, expected, message)
 end
 local function case(name, fn)
     local passed, err = xpcall(fn, debug.traceback)
-    if passed then print('PASS town main 1.0.23: ' .. name)
-    else failures[#failures + 1] = name .. ': ' .. tostring(err); print('FAIL town main 1.0.23: ' .. name .. ': ' .. tostring(err)) end
+    if passed then print('PASS town main 1.0.22: ' .. name)
+    else failures[#failures + 1] = name .. ': ' .. tostring(err); print('FAIL town main 1.0.22: ' .. name .. ': ' .. tostring(err)) end
 end
 local CONSUMER = {name = 'Consumer', dir = ROOT .. '/audit/tests/', loaded = {}}
 local function new(opts)
@@ -163,12 +163,12 @@ case('a revive phase that sticks holds the automatic start for REVIVE_LIMIT s at
     h.run(55)
     eq(st(h).running, false, 'a revive under the bound still holds past the 600 s deferral')
     ok(h.run_until(function() return st(h).running == true end, 10), 'trip once the revive passed its bound\n' .. h.tail())
-    eq(h.logged('in its revive phase for 60s: the town trip no longer waits on it'), 1, 'the bound is logged once\n' .. h.tail(6))
+    eq(h.logged('in its revive phase for 60s: Rosie no longer waits on it'), 1, 'the bound is logged once\n' .. h.tail(6))
     eq(started(h), 1)
     owner(h, 'fight')
     completes(h)
     h.run(5)
-    eq(h.logged('the town trip no longer waits on it'), 1, 'logged once')
+    eq(h.logged('Rosie no longer waits on it'), 1, 'logged once')
     h.assert_clean('revive bound')
 end)
 
@@ -198,12 +198,27 @@ case('the revive bound counts continuous revive only, and follows lifecycle.REVI
     h2.run(25)
     eq(st(h2).running, false, 'held under a 30 s bound')
     ok(h2.run_until(function() return st(h2).running == true end, 10), 'trip after 30 s of revive\n' .. h2.tail())
-    eq(h2.logged('in its revive phase for 30s: the town trip no longer waits on it'), 1)
+    eq(h2.logged('in its revive phase for 30s: Rosie no longer waits on it'), 1)
     owner(h2, 'fight')
     completes(h2)
     h.assert_clean('revive continuous')
     h2.assert_clean('revive limit')
 end)
 
-print(string.format('Rosie town main 1.0.23: %d checks', checks))
+case('a revive that spans the automatic start is not waited on again by the trip (one clock)', function()
+    local h = new({place = 'pit'})
+    enable(h)
+    owner(h, 'fight')
+    fill_bag(h, 25)
+    h.run(590)
+    owner(h, 'revive') -- never ends
+    ok(h.run_until(function() return st(h).running == true end, 70), 'trip after the revive bound\n' .. h.tail())
+    local t0 = h.now
+    completes(h, 120)
+    ok(h.now - t0 < 45, 'the trip did not wait another REVIVE_LIMIT on the same revive: ' .. string.format('%.1f', h.now - t0))
+    eq(h.logged('Rosie no longer waits on it'), 1, 'one line for one revive')
+    h.assert_clean('one clock')
+end)
+
+print(string.format('Rosie town main 1.0.22: %d checks', checks))
 if #failures > 0 then error(#failures .. ' failing case(s):\n' .. table.concat(failures, '\n')) end
