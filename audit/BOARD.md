@@ -8,7 +8,7 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 - [2026-09-28] [Coordinator → Rosie] Rosie cannot cast Town Portal while the third-party **Navigator** (driven by Worldstone) keeps moving the player. The Navigator interrupts the cast, the trip ends `teleport_failed`, and Rosie cannot pause it. Waiting for the owner's `[ApiProbe]` log of what **Butler** (a Navigator-aware Rosie-like addon) sends to Navigator. Then implement the same in Rosie's `lifecycle.hold_peers` / `release_peers`, with a joint-host regression test using a fake Navigator.
 
 ## Ready for review
-- [2026-09-28] [Orchestrator] WarPigs 1.1.7: hang/loop self-review. Bounded Alfred budget per Temis visit (H1 unclearable hard need looped Alfred trips forever, H2 latched live flag bounced TEMIS_ALFRED/SETTLE forever), bounded turn-in Alfred yield (H3), bounded unreadable SilentRaven status in the Whisper bridge (H4). (claude/qqt-warpigs, WarPigs/core/orchestrator.lua, core/tasks/turn_in_rewards.lua, wp_silent_raven.lua, gui.lua, versions.json; test_warpigs_hang_review.lua fails on 1.1.6; WarPigs/WarPug/joint suites green)
+- [2026-09-28] [Orchestrator] WarPigs 1.1.7: hang/loop self-review. Bounded Alfred budget per Temis visit (H1 unclearable hard need looped Alfred trips forever, H2 latched live flag bounced TEMIS_ALFRED/SETTLE forever), bounded turn-in Alfred yield (H3), bounded unreadable SilentRaven status in the Whisper bridge (H4). (claude/qqt-warpigs, WarPigs/core/orchestrator.lua, core/tasks/turn_in_rewards.lua, wp_silent_raven.lua, gui.lua, versions.json, README version cell only (check_release requires it); test_warpigs_hang_review.lua fails on 1.1.6; WarPigs/WarPug/joint suites green)
 
 ## Auditor / critic findings
 (none open)
