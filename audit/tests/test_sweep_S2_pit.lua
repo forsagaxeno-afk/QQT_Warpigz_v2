@@ -160,7 +160,7 @@ local function build_world(h, seed, o)
                 if h.travel then return end -- a second click during the transition does nothing
                 local nxt = run.floors[f + 1]
                 note('descend', place.key .. ' -> ' .. nxt.key)
-                h.travel_to(nxt, 0.3, 'pit_floor_portal')
+                h.travel_to(nxt, W.PORTAL_ENTRY, 'pit_floor_portal')
                 h.travel.started = h.now
             end
         else
@@ -246,7 +246,7 @@ local function build_world(h, seed, o)
                         .. 'player %.1f m away; %s', place.key, prev.key, back.pos:x(), back.pos:y(),
                         h.pos:dist_to_ignore_z(back.pos), table.concat(why, '; ')))
                 end
-                h.travel_to(prev, 0.3, 'pit_back_portal')
+                h.travel_to(prev, W.PORTAL_ENTRY, 'pit_back_portal')
                 h.travel.pos = v(prev.down.pos:x() - 6, prev.down.pos:y())
                 h.travel.started = h.now
             end
@@ -254,6 +254,11 @@ local function build_world(h, seed, o)
         place.on_arrive = function(_, trip)
             place.first_t = place.first_t or h.now
             run.last_floor = place
+            if f == 1 and run.town_portal then
+                h.remove_actor(run.town_portal)
+                if W.portal == run.town_portal then W.portal = nil end
+                run.town_portal = nil
+            end
             if trip and trip.why ~= 'town_portal' then W.floors_entered = W.floors_entered + 1 end
             if trip and (trip.why == 'pit_floor_portal' or trip.why == 'pit_back_portal' or trip.why == 'pit_portal') then
                 place.portal_arrival = {t = h.now, transition = h.now - (trip.started or h.now), why = trip.why}
@@ -294,12 +299,22 @@ local function build_world(h, seed, o)
         local town = h.place
         local portal = h.actor(town, 'EGD_MSWK_World_Portal_01', tower.pos:x() + 4, tower.pos:y() - 6)
         W.portal = portal
+        run.town_portal = portal
+        -- Entering a portal is a loading transition, not a cast: nothing can
+        -- break or replace it (PORTAL_ENTRY: the next frame loads). The pit
+        -- portal stays until floor 1 is reached (first version consumed it
+        -- on the click, and a Rosie Town Portal in the same 0.5 s replaced
+        -- the travel: a pit opened for nothing).
         portal.on_interact = function()
-            h.remove_actor(portal)
-            W.portal = nil
-            h.travel_to(run.floors[1], 0.5, 'pit_portal')
+            if h.travel then return end
+            h.travel_to(run.floors[1], W.PORTAL_ENTRY, 'pit_portal')
             h.travel.started = h.now
         end
+    end
+    -- A portal entry cannot be broken by the rotation or replaced by a cast.
+    W.PORTAL_ENTRY = 0.05
+    function W.portal_entry(tr)
+        return tr and (tr.why == 'pit_portal' or tr.why == 'pit_floor_portal' or tr.why == 'pit_back_portal')
     end
     -- Reset inside a pit ejects the player to the obelisk town.
     -- Scenario invariant GLYPH_TRIP: leaving the Guardian's floor while the
@@ -539,7 +554,18 @@ local function start(seed, o)
     -- call keeps the host's caller attribution for the TELEPORT monitor).
     local tp_log, orig_tp = {}, h.G.teleport_to_waypoint
     h.tp_log = tp_log
+    -- A portal entry (W.portal_entry) is a loading transition: the rotation
+    -- cannot break it and no cast replaces it (the host would do both).
+    local rot_tick = h._rot.tick
+    h._rot.tick = function(...)
+        if W.portal_entry(h.travel) then return end
+        return rot_tick(...)
+    end
     rawset(h.G, 'teleport_to_waypoint', function(sno)
+        if W.portal_entry(h.travel) then
+            h.log[#h.log + 1] = string.format('%.1f [pit] teleport_to_waypoint(0x%X) ignored: entering a portal', h.now, sno)
+            return false
+        end
         local tm = h.mod(ARK, 'core.task_manager')
         local got, task = pcall(function() return tm and tm.get_current_task() end)
         tp_log[#tp_log + 1] = {t = h.now, sno = sno, ctx = h.context_name() or '-', from = h.place.key,
@@ -605,14 +631,15 @@ end
 rule('ARK-portal-dump-spam', 'board', 'SPAM', function(hit)
     return has(hit, 'by ArkhamAsylum') and has(hit, '[portal] ')
 end, 'known BOARD LOW: Arkham [portal] candidate dump every 2 s')
--- A drop that falls inside the 0.3 s floor-portal transition: nobody can
+-- A drop that falls inside the floor-portal transition (0.3 s in the first
+-- sweeps, one frame since) or the reset ejection: nobody can
 -- react (the game loads the next floor at once). Chaos puts one there.
 rule('floor-portal-transition-drop', 'expected', 'LEFT_DROP', function(hit)
     return (has(hit, '(pit_floor_portal)') or has(hit, '(pit_back_portal)') or has(hit, '(dungeon_reset)'))
         and (has(hit, '[dropped during the pit_floor_portal channel]')
             or has(hit, '[dropped during the pit_back_portal channel]')
             or has(hit, '[dropped during the dungeon_reset channel]'))
-end, 'emulator: a drop injected inside the 0.3 s floor-portal / 0.1 s dungeon-reset transition')
+end, 'emulator: a drop injected inside the floor-portal / dungeon-reset transition')
 -- KNOWN (Rosie session): the outbound Town Portal re-cast (every ~3 s, up to
 -- 12 casts with refunds) when the channel breaks (the rotation's cast/evade).
 rule('ROSIE-tp-recast', 'known', 'TELEPORT', function(hit)
@@ -650,8 +677,8 @@ end, "sweep finding: Rosie's trip leaves wanted drops already on the ground (pic
 -- loot area, Rosie never walks beyond its distance.
 rule('ARK-exit-unique-beyond-distance', 'finding', 'LEFT_DROP', function(hit, ctx)
     return has(hit, '(beyond it: Unique/Mythic within the radius)')
-        and (cast_by(ctx, ARK, 'exit_pit') or has(hit, '(dungeon_reset)'))
-end, 'boss Unique/Mythic beyond the pickup distance left at the pit exit')
+        and (cast_by(ctx, ARK, 'exit_pit') or has(hit, '(dungeon_reset)') or has(hit, '(pit_floor_portal)'))
+end, 'a Unique/Mythic beyond the pickup distance left when Arkham leaves a floor (exit or descend)')
 -- FINDING (Arkham tasks/portal.lua): the portal back up is excluded only by
 -- an in-memory blacklist set when the world changes within 5 s of Arkham's
 -- own portal click. A reload of ArkhamAsylum on floor 2+ loses it...
@@ -950,8 +977,8 @@ local FINDINGS = {
         o = {town = 'temis', exit_mode = 0, distance = 15, all_plugins = false, chaos = false, floors = 3,
             start_on_floor = 2}},
     {id = 'F2', rule = 'ARK-back-portal-slow-load', seed = 5, seconds = 300, title = 'a floor transition of 5 s or more '
-        .. '(loading screen 4.7 s here) is "not via portal": no back-portal blacklist, floor ping-pong',
-        o = {chaos = false, floor_loading = 4.7}},
+        .. '(loading screen 5.2 s here) is "not via portal": no back-portal blacklist, floor ping-pong',
+        o = {chaos = false, floor_loading = 5.2}},
     {id = 'F3', rule = 'ROSIE-auto-trip-in-boss-fight', seed = 101, seconds = 200, title = "Rosie's automatic Town "
         .. 'Portal 0.4 s after the bag fills, in melee with the live Pit Guardian (Arkham only defers its own trips)',
         o = {town = 'temis', exit_mode = 0, distance = 15, all_plugins = false, schedule = {{t = 1140, kind = 'bag_full'}}}},
