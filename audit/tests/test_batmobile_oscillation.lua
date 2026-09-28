@@ -1,0 +1,288 @@
+-- QQT_Warpigz_v3 Batmobile 2.2.2: movement oscillation / stuck-loop regressions
+-- (self-review "the bot goes back and forth").  Loads the real navigator,
+-- external, long_path (and main.lua where noted) with QQT-shaped host mocks.
+-- Every case failed on the 2.2.1 tree.
+--   B1 a path node skipped for being closer than movement_step is not walked
+--      back to (node behind the player after a detour; hairpin)
+--   B2 the unstuck side-step node is walked to until reached (it jittered
+--      on the 4 u ring forever and never read as STUCK)
+--   B3 STUCK next to a traversal gizmo is suppressed at most 5 s; a gizmo
+--      that cannot be reached for interact is dropped (was waited on forever)
+-- Runs under Lua 5.4 and LuaJIT.
+local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/Batmobile/'
+local checks, cases, failures = 0, 0, {}
+local function ok(cond, message)
+    checks = checks + 1
+    if not cond then error(message or 'assertion failed', 2) end
+end
+local function case(name, fn)
+    cases = cases + 1
+    local passed, err = pcall(fn)
+    if passed then
+        print('PASS Batmobile oscillation: ' .. name)
+    else
+        failures[#failures + 1] = name .. ': ' .. tostring(err)
+        print('FAIL Batmobile oscillation: ' .. name .. ': ' .. tostring(err))
+    end
+end
+
+local Vec = {}; Vec.__index = Vec
+function Vec:new(x, y, z) return setmetatable({_x = x, _y = y, _z = z or 0}, self) end
+function Vec:x() return self._x end
+function Vec:y() return self._y end
+function Vec:z() return self._z end
+local function v(x, y, z) return Vec:new(x, y, z) end
+local function dist(a, b) local dx, dy = a:x() - b:x(), a:y() - b:y(); return math.sqrt(dx * dx + dy * dy) end
+
+-- opts: walkable(x, y), blocked(x, y), find_path(a, b, custom), speed, seed, actors,
+--       main (load main.lua)
+local function harness(opts)
+    opts = opts or {}
+    local h = {now = 100, logs = {}, moves = {}, rng = opts.seed or 1}
+    h.walkable = opts.walkable or function() return true end
+    local player = {pos = opts.start or v(0, 0), buffs = {}}
+    function player:get_position() return self.pos end
+    function player:get_buffs() return self.buffs end
+    function player:get_attribute() return 0 end
+    function player:get_character_class_id() return 0 end
+    function player:is_dead() return false end
+    function player:get_active_spell_id() return -1 end
+    h.player = player
+    local world = {}
+    function world:get_name() return 'Sanctuary_Eastern_Continent' end
+    function world:get_current_zone_name() return 'Scos_Coast' end
+    function world:get_world_id() return 1 end
+    local settings = {step = 0.5, normalizer = 2, path_smooth_step = 0, log_level = 1, plugin_label = 't',
+        use_movement = false, use_evade = false, spell_interval = 0.15, min_spell_dist = 3,
+        explore_path_budget_ms = 80, prefer_long_paths = false, update_settings = function() end}
+    local tracker = {bench_enabled = false, bench_start = function() end, bench_stop = function() end,
+        bench_count = function() end, bench_report = function() end, bench_set_meta = function() end,
+        evaluated = {}, timer_update = 0, timer_move = 0}
+    -- The game slides along walls; a fully blocked step keeps the player in place.
+    -- opts.blocked(x, y): a blocker the walkability grid does not know (a
+    -- dynamic obstacle); only the player's movement honours it.
+    local function free(x, y) return h.walkable(x, y) and not (opts.blocked and opts.blocked(x, y)) end
+    local function request_move(node)
+        h.moves[#h.moves + 1] = {from = player.pos, to = node}
+        local p = player.pos
+        local dx, dy = node:x() - p:x(), node:y() - p:y()
+        local d = math.sqrt(dx * dx + dy * dy); local s = math.min(opts.speed or 0.35, d)
+        if d > 0 then
+            local np = v(p:x() + dx / d * s, p:y() + dy / d * s, p:z())
+            if free(np:x(), np:y()) then player.pos = np; return end
+            -- slide along the blocking wall on the dominant axis, then the other
+            local ax = v(p:x() + (dx > 0 and 1 or -1) * math.min(s, math.abs(dx)), p:y(), p:z())
+            local ay = v(p:x(), p:y() + (dy > 0 and 1 or -1) * math.min(s, math.abs(dy)), p:z())
+            local first, second = ax, ay
+            if math.abs(dy) > math.abs(dx) then first, second = ay, ax end
+            if free(first:x(), first:y()) then player.pos = first
+            elseif free(second:x(), second:y()) then player.pos = second end
+        end
+    end
+    local env = setmetatable({vec3 = Vec, vec2 = Vec,
+        get_time_since_inject = function() return h.now end,
+        get_local_player = function() return player end,
+        get_player_position = function() return player.pos end,
+        get_current_world = function() return world end,
+        attributes = {PLAYER_IN_TOWN_LEVEL_AREA = 1},
+        console = {print = function(s) h.logs[#h.logs + 1] = tostring(s) end},
+        utility = {set_height_of_valid_position = function(p) return p end,
+            is_point_walkeable = function(p) return h.walkable(p:x(), p:y()) end,
+            can_cast_spell = function() return false end, is_ray_cast_walkeable = function() return true end},
+        actors_manager = {get_all_actors = function() return opts.actors or {} end},
+        cast_spell = {position = function() return true end},
+        pathfinder = {request_move = request_move, clear_stored_path = function() end,
+            force_move_raw = function() end},
+        interact_object = function() end,
+        get_hash = function() return 1 end}, {__index = _G})
+    -- Deterministic shuffle order for unstuck's side-step directions.
+    env.math = setmetatable({random = function(a, b)
+        h.rng = (h.rng * 1103515245 + 12345) % 2147483648
+        local r = h.rng / 2147483648
+        if a == nil then return r end
+        if b == nil then return math.floor(r * a) + 1 end
+        return a + math.floor(r * (b - a + 1))
+    end}, {__index = math})
+    env._G = env
+    local modules = {['core.settings'] = settings, ['core.tracker'] = tracker,
+        ['core.movement_engine'] = {pick = function() return nil end}}
+    local find_path = opts.find_path or function(a, b) return {a, b}, false end
+    modules['core.pathfinder'] = {find_path = function(a, b, custom) return find_path(a, b, custom) end,
+        find_path_debug = opts.find_path_debug or function(a, b) return {a, b}, 2, 0.001, 'found' end,
+        clear_wall_penalty_cache = function() end, last_pathfind = {}}
+    modules['core.explorer'] = {backtracking = false, frontier_count = 5, backtrack = {}, visited = {},
+        priority = 'direction', default_priority = 'direction', update = function() end,
+        select_node = function() return nil end, set_priority = function() end,
+        reset = function() end, clear_frontiers_in_box = function() return 0 end}
+    env.require = function(name)
+        if modules[name] ~= nil then return modules[name] end
+        local chunk = assert(loadfile(root .. name:gsub('%.', '/') .. '.lua', 't', env))
+        modules[name] = chunk()
+        return modules[name]
+    end
+    if opts.main then
+        local function widget(value)
+            return {get_state = function() return value and 1 or 0 end, set = function(_, n) value = n end}
+        end
+        h.freeroam = widget(opts.freeroam == true)
+        modules.gui = {elements = {reset_keybind = widget(false), long_path_set_target = widget(false),
+            long_path_set_target_cursor = widget(false), long_path_test = widget(false),
+            freeroam_keybind_toggle = h.freeroam, draw_keybind_toggle = widget(false),
+            move_keybind_toggle = widget(false)}, render = function() end}
+        modules['core.drawing'] = {draw_nodes = function() end}
+        modules['core.movement_helpers'] = {observe_buffs = function() end}
+        env.checkbox = {new = function() return {get = function() return false end, set = function() end} end}
+        env.on_update = function(fn) h.update = fn end
+        env.on_render_menu = function() end
+        env.on_render = function() end
+        assert(loadfile(root .. 'main.lua', 't', env))()
+        h.ext = env.BatmobilePlugin
+    else
+        h.ext = env.require('core.external')
+    end
+    h.nav = env.require('core.navigator')
+    h.env = env
+    -- One caller tick: 20 Hz update + move.
+    function h.tick(caller)
+        h.now = h.now + 0.05
+        h.ext.update(caller); h.ext.move(caller)
+    end
+    -- Move requests whose direction turned by more than ~135 degrees.
+    function h.reversals(from)
+        local n, prev = 0, nil
+        for i = from or 1, #h.moves do
+            local m = h.moves[i]
+            local dx, dy = m.to:x() - m.from:x(), m.to:y() - m.from:y()
+            local len = math.sqrt(dx * dx + dy * dy)
+            if len > 0.01 then
+                dx, dy = dx / len, dy / len
+                if prev ~= nil and dx * prev[1] + dy * prev[2] < -0.7 then n = n + 1 end
+                prev = {dx, dy}
+            end
+        end
+        return n
+    end
+    function h.logged(pattern)
+        local n = 0
+        for _, line in ipairs(h.logs) do if line:find(pattern, 1, true) then n = n + 1 end end
+        return n
+    end
+    return h
+end
+
+-- ── B1 ──────────────────────────────────────────────────────────────────
+case('B1 a close path node behind the player is not walked back to', function()
+    -- A detour (Looter pickup, a fight) left the player 3 u past the first
+    -- node of its route: the node is behind and closer than movement_step.
+    local goal = v(12, 0)
+    -- The route was planned before the detour; a replan starts at the player.
+    local stale = true
+    local h = harness({find_path = function(a, b)
+        if stale then stale = false; return {v(-3, 0), goal}, false end
+        return {a, b}, false
+    end})
+    h.ext.resume('reaper')
+    ok(h.ext.set_target('reaper', goal) ~= false, 'goal accepted')
+    for _ = 1, 100 do h.tick('reaper') end                    -- 5 s at 7 u/s
+    ok(dist(h.player.pos, goal) <= 1.5, string.format('player reached the goal (at %.1f,%.1f; was stuck '
+        .. 'jittering around x=1)', h.player.pos:x(), h.player.pos:y()))
+    ok(h.reversals() <= 1, 'direction reversals: ' .. h.reversals() .. ' (was one every tick)')
+end)
+
+case('B1 a hairpin corner node closer than movement_step is not re-approached', function()
+    -- Route bends back around a wall end: n1 is 3.5 u away, n2 lies behind
+    -- the player on the other side of the thin wall y=1.
+    local wall = function(x, y) return not (y > 0.8 and y < 1.2 and x < 2.5) end
+    local goal = v(-8, 2)
+    local h = harness({walkable = wall, find_path = function(a)
+        if a:y() > 1 then return {a, goal}, false end
+        return {a, v(3.5, 0), v(3.5, 2), goal}, false
+    end})
+    h.ext.pause('arkham_asylum')
+    ok(h.ext.set_target('arkham_asylum', goal) ~= false, 'goal accepted')
+    for _ = 1, 160 do h.tick('arkham_asylum') end              -- 8 s
+    ok(dist(h.player.pos, goal) <= 1.5, string.format('player reached the goal around the wall (at %.1f,%.1f)',
+        h.player.pos:x(), h.player.pos:y()))
+    ok(h.reversals() <= 3, 'direction reversals: ' .. h.reversals())
+end)
+
+-- ── B2 ──────────────────────────────────────────────────────────────────
+case('B2 the unstuck side-step is reached, then the goal around the pillar', function()
+    -- A pillar the straight route runs into: STUCK -> unstuck injects a
+    -- side-step node 4 u away.  2.2.1 left it after one step (closer than
+    -- movement_step) and walked back to it from the goal leg forever.
+    local pillar = function(x, y) return not (x > 0.6 and x < 2.5 and math.abs(y) < 1.5) end
+    local goal = v(12, 0)
+    for seed = 1, 12 do
+        local h = harness({walkable = pillar, seed = seed,
+            find_path = function(a, b) return {a, b}, false end})
+        h.ext.resume('helltide_revamped')
+        ok(h.ext.set_target('helltide_revamped', goal) ~= false, 'goal accepted')
+        local reached_at = nil
+        for i = 1, 600 do                                      -- 30 s
+            h.tick('helltide_revamped')
+            if dist(h.player.pos, goal) <= 1.5 then reached_at = i / 20; break end
+        end
+        ok(h.logged('unstuck by injecting path') >= 1, 'seed ' .. seed .. ': the side-step was injected')
+        ok(reached_at ~= nil, string.format('seed %d: goal reached around the pillar (stuck at %.1f,%.1f '
+            .. 'after %d side-steps)', seed, h.player.pos:x(), h.player.pos:y(),
+            h.logged('unstuck by injecting path')))
+    end
+end)
+
+case('B2 control: no side-step is pending once the path is replaced', function()
+    local pillar = function(x, y) return not (x > 0.6 and x < 2.5 and math.abs(y) < 1.5) end
+    local h = harness({walkable = pillar, find_path = function(a, b) return {a, b}, false end})
+    h.ext.resume('helltide_revamped')
+    h.ext.set_target('helltide_revamped', v(12, 0))
+    for _ = 1, 40 do
+        h.tick('helltide_revamped')
+        if h.nav.side_step_node ~= nil then break end
+    end
+    ok(h.nav.side_step_node ~= nil, 'side-step pending after STUCK')
+    h.ext.release('helltide_revamped')
+    h.ext.resume('reaper')
+    h.ext.set_target('reaper', v(-10, 0))
+    h.tick('reaper')
+    ok(h.nav.side_step_node == nil, 'a new goal drops the old side-step')
+end)
+
+-- ── B3 ──────────────────────────────────────────────────────────────────
+case('B3 a gizmo the player cannot get within interact range of is dropped, not waited on forever', function()
+    local climb = {get_position = function() return v(10, 0, 0) end,
+        get_skin_name = function() return 'Traversal_Gizmo_FreeClimb_Up' end}
+    local goal = v(20, 0)
+    -- Something the walk grid does not know holds the player 4 u short.
+    local h = harness({actors = {climb}, start = v(3, 0), blocked = function(x) return x > 6.3 end})
+    local interacts = 0
+    h.env.interact_object = function() interacts = interacts + 1 end
+    h.ext.pause('arkham_asylum')
+    ok(h.ext.set_target('arkham_asylum', goal) ~= false, 'goal accepted')
+    ok(h.ext.try_traversal_route('arkham_asylum') == true, 'routed via the climb')
+    local dropped_at = nil
+    for i = 1, 20 * 60 do
+        h.tick('arkham_asylum')
+        if not h.ext.is_traversal_routing() then dropped_at = i / 20; break end
+    end
+    ok(dropped_at ~= nil and dropped_at <= 10, 'traversal routing dropped within 10 s (still routing after '
+        .. tostring(dropped_at or 60) .. ' s; STUCK suppressed ' .. h.logged('STUCK suppressed') .. 'x)')
+    ok(interacts == 0, 'never in interact range')
+    ok(h.logged('not reachable for interact') == 1, 'the drop is logged once')
+    local t = h.ext.get_target()
+    ok(t ~= nil and dist(t, goal) < 1, 'the caller goal is given back')
+    ok(h.nav.trap_blacklisted_trav['Traversal_Gizmo_FreeClimb_Up10,0'] ~= nil, 'the gizmo is blacklisted for a while')
+    -- control: a reachable gizmo is still interacted with
+    local h2 = harness({actors = {climb}, start = v(3, 0)})
+    local n2 = 0
+    h2.env.interact_object = function() n2 = n2 + 1 end
+    h2.ext.pause('arkham_asylum')
+    h2.ext.set_target('arkham_asylum', goal)
+    h2.ext.try_traversal_route('arkham_asylum')
+    for _ = 1, 60 do h2.tick('arkham_asylum') end
+    ok(n2 >= 1, 'a reachable gizmo is interacted with')
+end)
+
+if #failures > 0 then
+    error('Batmobile oscillation: ' .. #failures .. ' of ' .. cases .. ' cases failed:\n  ' .. table.concat(failures, '\n  '))
+end
+print(string.format('PASS Batmobile oscillation suite: %d cases, %d checks', cases, checks))
