@@ -412,6 +412,7 @@ local function choose(best_first)
             local d=Utils.distance_to(item)
             if not rested or d<rested_distance then rested,rested_distance=item,d end
         end
+        if wanted and blocked and Pickup.resting(item) then Pickup.fight_refresh() end -- QQT_Warpigz_v3 1.0.22: the fight hold stays observed
         if wanted and blocked then wanted,reason=false,why end
         -- QQT_Warpigz_v3 3.3.2: a drop off the feet waits for the fight (pickup.lua header).
         local deferred=wanted and Pickup.fight_deferred(item)

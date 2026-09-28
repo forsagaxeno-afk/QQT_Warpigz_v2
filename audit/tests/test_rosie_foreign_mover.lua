@@ -387,7 +387,7 @@ end)
 
 -- QQT_Warpigz_v3 1.0.22 (Auditor, Rosie 1.0.21 LOW): the refund had no test that
 -- fails without it, and it made the 8-cast cap moot.
-case('a stop-and-go Navigator that walks on during each of the first 10 casts: interrupted casts are not attempts', function()
+case('a stop-and-go Navigator that walks on during each of the first 10 casts: interrupted casts are refunded up to MAX_REFUNDS per trip; the trip still completes', function()
     local h = new({place = 'pit'})
     enable(h)
     fill_bag(h, 3)

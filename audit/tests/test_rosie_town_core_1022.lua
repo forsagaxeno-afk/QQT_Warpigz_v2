@@ -98,7 +98,7 @@ case('a dead player: Navigator is released within NAV_PULSE s, held again once a
     h.dead = true
     local took = time_until(h, function() return not nav.held() end, 30)
     ok(took ~= nil and took <= 5.5, 'released while dead: ' .. tostring(took))
-    eq(lc.NAV_PULSE, 5, 'NAV_PULSE'); eq(lc.NAV_HOLD_MAX, 300, 'NAV_HOLD_MAX')
+    eq(lc.NAV_PULSE, 5, 'NAV_PULSE'); eq(lc.NAV_HOLD_MAX, 600, 'NAV_HOLD_MAX')
     h.run(20)
     eq(nav.held(), false, 'stays released while dead')
     eq(st(h).running, true, 'the trip itself still waits for the player')
@@ -188,6 +188,29 @@ case('a load screen where the host returns no world or no player keeps Navigator
     end
 end)
 
+case('a revive that ended unseen does not use up the next revive\'s bound (a reading gap starts a new count)', function()
+    local h = new({place = 'pit'})
+    enable(h)
+    fill_bag(h, 3)
+    local r1 = start_trip(h)
+    h.run(0.3)
+    tristram(h, 'revive')
+    ok(h.run_until(function() return r1.done end, 300), 'trip 1 ends\n' .. h.tail())
+    eq(h.logged('in its revive phase for 60s: Rosie no longer waits on it'), 1, 'trip 1 hit the bound')
+    -- The revive ends while nothing reads it (idle, nothing needed), for 10 min.
+    tristram(h, 'fight')
+    h.inventory = {}
+    h.run(600)
+    tristram(h, 'revive')
+    fill_bag(h, 3)
+    local r2 = start_trip(h)
+    h.run(30)
+    eq(r2.done, nil, 'the new revive is honoured again')
+    ok(h.run_until(function() return r2.done end, 300), 'trip 2 ends\n' .. h.tail())
+    eq(h.logged('in its revive phase for 60s: Rosie no longer waits on it'), 2, 'the new revive is logged too')
+    h.assert_clean('revive gap')
+end)
+
 case('a trip stuck on a load screen: the NAV_HOLD_MAX cap releases Navigator, logged once', function()
     local h = new({place = 'pit'})
     enable(h)
@@ -200,12 +223,13 @@ case('a trip stuck on a load screen: the NAV_HOLD_MAX cap releases Navigator, lo
     -- The player hangs on a load screen that never ends (alive, zone [sno none]).
     h.travel, h.casting, h.goal = nil, false, nil
     h.place, h.pos = h.P.limbo, h.P.limbo.spawn
-    h.run(250)
+    local cap = lifecycle(h).NAV_HOLD_MAX
+    h.run(cap - 50)
     eq(nav.held(), true, 'a load screen is the trip travelling: still held')
     ok(h.run_until(function() return not nav.held() end, 60), 'released by the cap\n' .. h.tail())
     local at = h.now - t0
-    ok(at >= 299 and at <= 301, 'released at the cap: ' .. at)
-    eq(h.logged('Navigator released: the town trip has held it for 300s'), 1, 'logged')
+    ok(at >= cap - 1 and at <= cap + 1, 'released at the cap: ' .. at)
+    eq(h.logged('Navigator released: the town trip has held it for ' .. cap .. 's'), 1, 'logged')
     h.run(20)
     eq(nav.held(), false, 'stays released')
     eq(h.logged('Navigator released'), 1, 'logged once')
@@ -316,6 +340,7 @@ case('a Butler trip reads as paused by Butler: an HR-like poller makes no reques
     eq(s.paused, true, 'paused while Butler is busy')
     eq(s.paused_by, 'Butler', 'paused_by names Butler')
     eq(s.state_text, 'Waiting: Butler is running a town trip.', 'the state line agrees')
+    eq(s.foreign_busy, 'Butler', 'foreign_busy names Butler (live work, not an idle pause)')
     eq(s.external_pause, false, 'not an external pause')
     eq(s.pause_caller, nil, 'no pause caller')
     eq(tracker(h).external_pause, false, 'tracker.external_pause untouched')
@@ -323,6 +348,7 @@ case('a Butler trip reads as paused by Butler: an HR-like poller makes no reques
     s = st(h)
     eq(s.paused, false, 'not paused once Butler is idle')
     eq(s.paused_by, nil, 'no paused_by once Butler is idle')
+    eq(s.foreign_busy, nil, 'no foreign_busy once Butler is idle')
     ok(h.run_until(function() return poll.accepted == 1 end, 10, poller), 'a request is accepted after Butler\n' .. h.tail())
     eq(poll.refused, 0, 'none refused')
     -- During Rosie's own trip a Butler trip does not read as a pause.

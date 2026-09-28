@@ -37,16 +37,21 @@ M.PAUSE_LIMIT=60
 -- (Batmobile and pickup stay held) and the automatic start without a bound
 -- (C6). One clock serves both (town/main.lua before the trip, M.tick during
 -- it), so a revive that spans the start is not waited on twice: it is honoured
--- for REVIVE_LIMIT s since first seen (wall clock, dead time included), then
--- ignored until a reading sees it end; logged once per revive.
-M.REVIVE_LIMIT=60
-local revive={since=nil,logged=false}
-function M.revive_holds(reviving,now)
-    if not reviving then revive.since,revive.logged=nil,false; return false end
-    if not revive.since or now<revive.since then revive.since=now end
+-- for REVIVE_LIMIT s since first seen, then ignored until a reading sees it
+-- end. No reading for REVIVE_GAP s (an idle bag, the keybind off, a dead
+-- player) starts a new count. Logged once per revive; `quiet` (the automatic
+-- start still deferred for another reason) defers the line to the release.
+M.REVIVE_LIMIT,M.REVIVE_GAP=60,5
+local revive={since=nil,seen=nil,logged=false}
+function M.revive_holds(reviving,now,quiet)
+    if not reviving then revive.since,revive.seen,revive.logged=nil,nil,false; return false end
+    if not revive.since or now<revive.since or not revive.seen or now-revive.seen>M.REVIVE_GAP then
+        revive.since,revive.logged=now,false
+    end
+    revive.seen=now
     local limit=tonumber(M.REVIVE_LIMIT) or 60
     if now-revive.since<limit then return true end
-    if not revive.logged then
+    if not revive.logged and not quiet then
         revive.logged=true
         console.print(string.format('[Rosie] Another activity has been in its revive phase for %ds: Rosie no longer waits on it',math.floor(limit)))
     end
@@ -123,7 +128,9 @@ end
 -- phase, a stopped Rosie pulse). It now also needs a trip tick within NAV_PULSE
 -- s that is not waiting for a dead player or a revive (M.tick sets
 -- nav_hold.pulse), and lets go NAV_HOLD_MAX s after the request (logged once).
-M.NAV_PULSE,M.NAV_HOLD_MAX=5,300
+-- NAV_HOLD_MAX covers the trip's own bounds (service 240 + mover 120 + Raven
+-- 100 + caller pause 60 + revive 60 s), so a slow but live trip keeps it.
+M.NAV_PULSE,M.NAV_HOLD_MAX=5,600
 local nav_hold={since=nil,pulse=nil,capped=false}
 local function trip_active()
     if retired or not M.busy() then return false end

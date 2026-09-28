@@ -61,6 +61,10 @@ external = {
         return {
             paused          = tracker.external_pause == true or butler == true,
             paused_by       = tracker.external_pause == true and tracker.pause_caller or (butler and 'Butler' or nil),
+            -- QQT_Warpigz_v3 1.0.22: a Butler trip is live town work, not an idle
+            -- pause (C1 reads a pause without a hard need as idle): readers that
+            -- must wait for it read this field.
+            foreign_busy    = foreign.butler_busy() and 'Butler' or nil,
             owner           = tracker.external_caller,
             pending         = requested and tracker.trigger_tasks ~= true,
             stuck           = is_stuck,

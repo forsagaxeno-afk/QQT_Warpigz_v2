@@ -162,6 +162,9 @@ case('L3 the wait is not published while Rosie is off or pickup is paused (stale
     h.run(1)
     eq(pending(h), true, 'resumed: pending again')
     eq(h.as(CONSUMER, function() return h.G.RosiePlugin.disable() end) ~= false, true, 'RosiePlugin.disable()')
+    -- The master switch gates the reads at once (before any frame runs).
+    eq(pending(h), false, 'Rosie off: not pending at once')
+    eq(status(h).loot_waiting, false, 'Rosie off: status().loot_waiting at once')
     h.run(1.2)
     eq(pending(h), false, 'Rosie off: not pending')
     eq(busy(h), false, 'Rosie off: not busy')

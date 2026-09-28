@@ -157,6 +157,63 @@ case('F4 (C6) an enemy that never dies plus a mover that keeps taking the player
     h.assert_clean('F4')
 end)
 
+-- A farm mover that pulls the player to `to` once Rosie has owned the native
+-- path for 0.4 s (the F4 model).
+local function pull_mover(to)
+    local m = {owned_since = nil, pull_until = -1, on = true}
+    function m.step(hh)
+        if not m.on then return end
+        if hh.native and hh.native.by == 'Rosie' then m.owned_since = m.owned_since or hh.now else m.owned_since = nil end
+        if m.owned_since and hh.now - m.owned_since >= 0.4 then m.pull_until = hh.now + 1.5 end
+        if hh.now < m.pull_until then
+            hh.as(CONSUMER, function() return hh.G.pathfinder.request_move(to) end)
+        end
+    end
+    return m
+end
+
+case('F5 a fight that ends during a yield rest ends the hold: the next fight a few seconds later is held again (not capped)', function()
+    local h = new()
+    local IM = h.mod('Rosie', 'rosie.private.pickup.src.item_manager')
+    local e1 = h.actor('pit', 'Dark_Conjurer', 6, 0, {enemy = true, elite = true, health = 1e9})
+    local d1 = h.drop('pit', -15, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_027'})
+    local m = pull_mover(h.v(4, 0))
+    local t0 = h.now
+    -- The cap fires at 45 s, then the mover makes Rosie yield (rests 4/8/16 s).
+    ok(h.run_until(function() return h.logged('(yield 2)', t0) >= 1 end, 120, m.step), 'yield 2 after the cap\n' .. h.tail(10))
+    eq(h.logged('A fight kept pickup waiting', t0), 1, 'fight A capped once')
+    -- Fight A ends inside the yield rest; the first drop goes too.
+    m.on = false
+    e1.health = 0; h.remove_actor(e1); remove(h, d1)
+    h.run(3)
+    local t1 = h.now
+    local px = h.pos:x()
+    local e2 = h.actor('pit', 'Dark_Conjurer', px + 5, 0, {enemy = true, elite = true, health = 1e9})
+    local d2 = h.drop('pit', px - 7, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_028'})
+    local waiting = 0
+    h.run(5, function() if IM.fight_waiting == true then waiting = waiting + 1 end end)
+    eq(rosie_moves(h, t1), 0, 'fight B: no walk out of the fight\n' .. h.tail(8))
+    ok(waiting >= 45, 'fight B: the drop waits for the fight (' .. waiting .. ' of 50 pulses)')
+    ok(d2.picked ~= true, 'fight B: the drop waits')
+    e2.health = 0; h.remove_actor(e2)
+    ok(h.run_until(function() return d2.picked == true end, 15), 'taken after fight B\n' .. h.tail(8))
+    h.assert_clean('F5')
+end)
+
+case('Y2 a drop whose rounds a fight\'s mover took gets one more round after the fight, and is taken', function()
+    local h = new()
+    local e1 = h.actor('pit', 'Dark_Conjurer', 6, 0, {enemy = true, elite = true, health = 1e9})
+    local d = h.drop('pit', -15, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_029'})
+    local m = pull_mover(h.v(4, 0))
+    local t0 = h.now
+    h.run(150, m.step)
+    ok(h.logged('Gave up on Helm_Legendary_Generic_029', t0) >= 1, 'the fight\'s mover used up its rounds\n' .. h.tail(10))
+    m.on = false
+    e1.health = 0; h.remove_actor(e1)
+    ok(h.run_until(function() return d.picked == true end, 40), 'taken after the fight\n' .. h.tail(10))
+    h.assert_clean('Y2')
+end)
+
 -- P: counters around one pickup pulse (ItemManager.get_item_based_on_priority).
 local function instrument(h)
     local IM = h.mod('Rosie', 'rosie.private.pickup.src.item_manager')

@@ -107,8 +107,9 @@ local function main_pulse()
                 and ('paused by '..tostring(tracker.pause_caller or 'another plugin')) or nil
             -- QQT_Warpigz_v3 1.0.22: "never during a revive" is now at most
             -- REVIVE_LIMIT s of revive (lifecycle.revive_holds: one clock with the trip).
-            local reviving=lifecycle.revive_holds(owner and owner.phase=='revive',now)
-            if held and (reviving or not (waited>=DEFER_ANY or waited>=DEFER_TOWN and lifecycle.in_any_town())) then
+            local deferring=not (waited>=DEFER_ANY or waited>=DEFER_TOWN and lifecycle.in_any_town())
+            local reviving=lifecycle.revive_holds(owner and owner.phase=='revive',now,held and deferring)
+            if held and (reviving or deferring) then
                 auto_wait(held)
                 return
             end
