@@ -34,6 +34,9 @@ local function main_pulse()
         {enabled = enabled, write_every = e.write_every:get(), reset = reset})
     if not ok then
         off = true
+        -- QQT_Warpigz_v3 3.3.3 (WarRoom 1.0.3): HelltideRevamped stops writing
+        -- hr_data.js for a collector that is off.
+        QQT_WarRoom.enabled = false
         console.print('[WarRoom] collector is off for this session: ' .. tostring(err))
     end
 end

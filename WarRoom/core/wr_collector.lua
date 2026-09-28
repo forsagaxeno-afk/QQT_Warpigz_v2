@@ -283,9 +283,17 @@ function M.render(now)
     return payload.encode(state, now, store.MAX_BYTES)
 end
 
+-- QQT_Warpigz_v3 3.3.3 (WarRoom 1.0.3): a payload that cannot be built is
+-- logged once per session (it was silent: the page just stopped updating).
 function M.write(now)
     local text, err = M.render(now)
-    if not text then return false, err end
+    if not text then
+        if not state.render_logged then
+            state.render_logged = true
+            log('dashboard/suite_data.js could not be built: ' .. tostring(err))
+        end
+        return false, err
+    end
     return store.write(M.FILE, {text})
 end
 

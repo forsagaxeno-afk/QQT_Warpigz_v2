@@ -42,14 +42,17 @@ local function n(v)
 end
 
 -- Copy the numbers of a loaded (untrusted) scope onto a fresh one.
+-- QQT_Warpigz_v3 3.3.3 (WarRoom 1.0.3): numbers only, and never over a
+-- field of another type (a string counter or a number in place of a table
+-- made every payload build raise, so suite_data.js silently stopped).
 local function copy_numbers(dst, src, depth)
     if type(src) ~= 'table' or depth > 4 then return end
     for k, v in pairs(src) do
         if type(k) == 'string' then
-            if type(v) == 'number' then dst[k] = n(v)
-            elseif type(v) == 'string' and #v <= 64 then dst[k] = v
-            elseif type(v) == 'table' then
-                if type(dst[k]) ~= 'table' then dst[k] = {} end
+            local cur = type(dst[k])
+            if type(v) == 'number' and (cur == 'nil' or cur == 'number') then dst[k] = n(v)
+            elseif type(v) == 'table' and (cur == 'nil' or cur == 'table') then
+                if cur == 'nil' then dst[k] = {} end
                 copy_numbers(dst[k], v, depth + 1)
             end
         end

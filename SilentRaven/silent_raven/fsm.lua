@@ -9,7 +9,9 @@ local coordination = require 'silent_raven.coordination'
 local sr_settings = require 'silent_raven.settings'
 local events = require 'silent_raven.qqt_events' -- QQT_Warpigz_v3
 local M = {}
-local MAX_ATTEMPTS, WALK_TIMEOUT, PANEL_TIMEOUT, RUN_TIMEOUT = 3, 20, 10, 100
+-- QQT_Warpigz_v3 3.3.3: RUN_TIMEOUT 90 s ends a run before Rosie's 100 s
+-- hand-off wait (RAVEN_WAIT) cancels it from outside.
+local MAX_ATTEMPTS, WALK_TIMEOUT, PANEL_TIMEOUT, RUN_TIMEOUT = 3, 20, 10, 90
 local TELEPORT_RETRY_SECONDS, TELEPORT_SPELL_ID = 6, 186139
 -- The host may apply select() a frame later: a mismatching read is final
 -- only after this settle time.
@@ -68,6 +70,13 @@ local function finish(result, preserve_path, keep_visit)
     events.emit('silentraven', 'whisper_claim', {result = result, reason = tracker.last_reason,
         name = pick and pick.name, slot = pick and pick.slot, legendary = pick and pick.legendary == true})
     tracker.finish(result)
+end
+-- QQT_Warpigz_v3 3.3.3: an end decided outside the FSM (an owner's cancel,
+-- the Enable toggle) goes through finish too: the suite event, and the visit
+-- latch once an accept was sent. preserve_path: never clear the path.
+function M.finish_external(result, preserve_path)
+    if not tracker.running and not tracker.external_trigger then return end
+    finish(result, preserve_path, not tracker.claim_sent)
 end
 -- Pause bookkeeping shared by own-run companion yields and an owner's
 -- 'yield:' guard answer. The companion owns movement: no more moves from

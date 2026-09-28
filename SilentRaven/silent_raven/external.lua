@@ -30,6 +30,9 @@ function external.get_status()
         -- Companion SilentRaven is waiting for (own-run yield or auto-fire
         -- admission), or nil. Informational; additive.
         hold_reason = tracker.current_hold((get_time_since_inject and get_time_since_inject()) or 0),
+        -- QQT_Warpigz_v3 3.3.3: the request is paused by its owner's 'yield:'
+        -- guard answer (it neither moves nor clicks). Additive.
+        yielding = tracker.yield_since ~= nil,
     }
 end
 function external.is_available() return settings.enabled == true end
@@ -114,7 +117,9 @@ function external.cancel(caller, preserve_navigation)
         end
         if tracker.movement_owned then whispers.stop_movement() end
     end
-    tracker.finish('cancelled')
+    -- QQT_Warpigz_v3 3.3.3: through the FSM's finish (event + latch after an
+    -- accept); the movement was handled above.
+    require('silent_raven.fsm').finish_external('cancelled', true)
     return true, 'cancelled'
 end
 function external.check_version(input)
