@@ -74,6 +74,12 @@ local C = {
     QUIET_PAD_S = 8,        -- tears seen, all closed: complete after linger + this quiet (walk to the centre included)
     SPENT_TTL = 900,        -- a finished site / a tear stood in without closing is not re-armed without strong evidence
     SPENT_TEAR_INSIDE_S = 20, -- a tear skipped after this long inside its circle is spent
+    -- QQT_Warpigz_v3 3.3.3 (live: "standing around"): a site or tear the bot
+    -- could not reach, and cultists it could not kill or reach, are left
+    -- for this long (the 120 s blacklist re-armed them while they lived).
+    UNREACHABLE_S = 300,
+    GUARD_STALL_S = 20,     -- no cultist hurt and none got closer for this long: leave them
+    GUARD_PROGRESS_M = 2,
 }
 M.C = C
 
@@ -293,10 +299,10 @@ local function blacklist_area(pos, skin, secs, why)
 end
 
 -- ── session ────────────────────────────────────────────────────────────────
-local function resume_patrol(self, states, msg, abandoned)
+local function resume_patrol(self, states, msg, abandoned, secs)
     local s = sess
     if s.anchor then
-        blacklist_area(s.anchor, actor_skin(s.starter), C.BLACKLIST_TTL,
+        blacklist_area(s.anchor, actor_skin(s.starter), secs or C.BLACKLIST_TTL,
             abandoned and "abandoned" or "completed")
     end
     if s.chamber_anchor and s.chamber_anchor ~= s.anchor then
@@ -508,15 +514,33 @@ local function ritual_context_near(pos, radius)
 end
 
 -- guards / bosses -----------------------------------------------------------
+-- Living cultists within radius of anchor, and their total health.
 local function guards_near(anchor, radius)
-    local count = 0
+    local count, total = 0, 0
     for _, actor in pairs(get_actors()) do
         if skin_matches(actor_skin(actor), skins.guards) then
             local hp = actor_hp(actor) or 0
-            if hp > 1 and pos_dist(anchor, actor_pos(actor)) <= radius then count = count + 1 end
+            if hp > 1 and pos_dist(anchor, actor_pos(actor)) <= radius then
+                count, total = count + 1, total + hp
+            end
         end
     end
-    return count
+    return count, total
+end
+
+-- QQT_Warpigz_v3 3.3.3: true once RIFT_KILL_GUARDS made no progress for
+-- GUARD_STALL_S (no cultist lost health, the targeted one got no closer).
+local function guards_stalled(s, r, guard)
+    local t = now()
+    local _, total = guards_near(s.anchor, r + 8)
+    local d = guard and dist(guard) or nil
+    if not s.guard_t or total < (s.guard_hp or total) - 0.5
+        or (d and d < (s.guard_d or math.huge) - C.GUARD_PROGRESS_M) then
+        s.guard_hp, s.guard_d, s.guard_t = total, d, t
+        return false
+    end
+    s.guard_hp = math.min(s.guard_hp or total, total)
+    return t - s.guard_t >= C.GUARD_STALL_S
 end
 
 local function find_enemy(patterns, max_dist, anchor, anchor_radius)
@@ -856,6 +880,12 @@ local function close_tears_at(self, states, anchor, r, pad)
         -- a spent (or leftover) tear, never re-engaged by the next session.
         if stand.inside_seconds(sess, key) >= C.SPENT_TEAR_INSIDE_S then
             spent_tears[key] = t + C.SPENT_TTL
+        elseif stand.inside_seconds(sess, key) <= 0 then
+            -- QQT_Warpigz_v3 3.3.3: never reached its circle: not live
+            -- evidence for this site (it re-armed the site every 120 s), and
+            -- a rupture whose tears were all out of reach is not completed.
+            spent_tears[key] = t + C.UNREACHABLE_S
+            sess.tear_unreached = true
         end
         release_focus()
         return false
@@ -918,7 +948,8 @@ H.MOVING_TO_RIFT = function(self, states, s, r)
         s.move_best, s.move_best_t = d, t
     elseif t - (s.move_best_t or t) > C.APPROACH_NO_PROGRESS_S then
         return resume_patrol(self, states, string.format(
-            "[RIFT] No progress towards rupture for %ds (dist=%.1f) — giving up", C.APPROACH_NO_PROGRESS_S, d), true)
+            "[RIFT] No progress towards rupture for %ds (dist=%.1f) — giving up", C.APPROACH_NO_PROGRESS_S, d), true,
+            C.UNREACHABLE_S) -- QQT_Warpigz_v3 3.3.3: its cultists re-armed it every 120 s
     end
     move_to(starter or s.anchor, d <= 6)
 end
@@ -952,8 +983,18 @@ H.RIFT_KILL_GUARDS = function(self, states, s, r)
     if guards_near(s.anchor, r + 8) > 0 then
         local guard = find_enemy(skins.guards, r + 35, s.anchor, r + 15)
         if guard then move_to(guard, dist(guard) <= 8) end
+        -- QQT_Warpigz_v3 3.3.3 (live: "standing around"): a cultist that
+        -- cannot be targeted or reached parked the bot here until the 300 s
+        -- rupture cap, then again every 120 s. Progress: a cultist lost
+        -- health or the nearest one got closer.
+        if guards_stalled(s, r, guard) then
+            return resume_patrol(self, states, string.format(
+                "[RIFT] Cultists not killed or reached for %ds — leaving this rupture", C.GUARD_STALL_S),
+                true, C.UNREACHABLE_S)
+        end
         return
     end
+    s.guard_hp, s.guard_d, s.guard_t = nil, nil, nil
     s.wait_started = now()
     self.current_state = states.RIFT_WAIT_OPEN
 end
@@ -1056,6 +1097,12 @@ H.RIFT_STAY_ACTIVE = function(self, states, s, r)
         if not s.live_seen then
             clear_movement()
             return
+        end
+        -- QQT_Warpigz_v3 3.3.3: its only tears were out of reach: not a
+        -- completed rupture (no stats, no Realmwalker wait).
+        if s.tear_unreached and (s.tears_closed or 0) == 0 then
+            return resume_patrol(self, states, "[RIFT] The rupture's tears were out of reach — leaving it",
+                true, C.UNREACHABLE_S)
         end
         -- QQT_Warpigz_v3: one completed tear event for the stats (main.lua sets the hook).
         if not s.completed_counted and type(M.on_complete) == "function" then
@@ -1504,6 +1551,7 @@ local CREDITED = {
     "rw_kill_done_at", "chamber_enter_started",
     "rw_chain_at", -- QQT_Warpigz_v3 (rc.2 review)
     "quiet_since", "grace_since", -- QQT_Warpigz_v3 3.3.2
+    "guard_t", -- QQT_Warpigz_v3 3.3.3
 }
 function M.credit_yield(gap)
     if type(gap) ~= "number" or gap <= 0 then return end

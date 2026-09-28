@@ -13,6 +13,7 @@ local loot_guard = require "core.loot_guard"
 tracker.hr_mode = require "core.hr_mode"
 tracker.tear_event = require "core.hr_tear_event"
 tracker.hr_cinder_run = require "core.hr_cinder_run" -- QQT_Warpigz_v3 (Q4): cinder run (Hell's Prize gate)
+tracker.hr_watch = require "core.hr_watch" -- QQT_Warpigz_v3 3.3.3: bounds for the target walks, kills and events
 
 local found_chest = nil
 local found_chest_position = nil -- cached position so we can navigate even when actor unloads
@@ -88,6 +89,12 @@ local RECALL = {
     FAIL_THRESHOLD   = 3,    -- consecutive long_path returns=false → blacklist
     NO_PROGRESS_SECS = 25,   -- best-dist not improved by DELTA in this long → blacklist
     PROGRESS_DELTA   = 2.0,  -- meters of improvement to count as progress
+    -- QQT_Warpigz_v3 3.3.3: within CHEST_INTERACT_RANGE but no closer than
+    -- 2 m for this long (Batmobile refuses the chest cell): interact from
+    -- here; the attempt limit then bounds it (the band had no bound).
+    BAND_STALL_S     = 3.0,
+    BAND_PROGRESS    = 0.5,
+    OVERRIDE_PARK_S  = 45,   -- zone-override entry reached, no buff: release to search
 }
 local _recall_long_path_target   = nil
 local _recall_path_issue_time    = -math.huge
@@ -1209,7 +1216,8 @@ local function get_kill_target()
     for _, enemy in pairs(enemies) do
         local enemy_pos = enemy:get_position()
         if math.abs(player_pos:z() - enemy_pos:z()) > 12 then goto continue end
-        if km_is_unreachable(enemy_pos) then goto continue end
+        -- QQT_Warpigz_v3 3.3.3: + a target hr_watch ignores (no damage, no progress)
+        if km_is_unreachable(enemy_pos) or tracker.hr_watch.km_ignored(enemy, now) then goto continue end
         local health = enemy:get_current_health()
         if health <= 1 then goto continue end
         local dist = utils.distance_to(enemy)
@@ -1519,7 +1527,7 @@ local function check_events(self)
 
     if settings.chaos_rift and tracker.hr_mode.allow_chaos_rift() then
         target = find_closest_target("S10_ChaosRiftChoiceGizmo")
-        if target and target:is_interactable() and utils.distance_to(target) < 16 then
+        if target and not self:hr_watch_skipped(target) and target:is_interactable() and utils.distance_to(target) < 16 then
             self.current_state = helltide_state.MOVING_TO_CHAOS_RIFT
             return
         end
@@ -1527,7 +1535,7 @@ local function check_events(self)
 
     if settings.silent_chest and utils.have_whispering_key() then
         target = find_closest_target("Hell_Prop_Chest_Rare_Locked")
-        if target and target:is_interactable() and utils.distance_to(target) < 12 then
+        if target and not self:hr_watch_skipped(target) and target:is_interactable() and utils.distance_to(target) < 12 then
             found_silent_chest_position = target:get_position()
             console.print(string.format("[SILENT CHEST] Detected at dist=%.1f pos=(%.1f,%.1f,%.1f)",
                 utils.distance_to(target), found_silent_chest_position:x(), found_silent_chest_position:y(), found_silent_chest_position:z()))
@@ -1538,7 +1546,7 @@ local function check_events(self)
 
     if settings.ore then
         target = find_closest_target("HarvestNode_Ore")
-        if target and target:is_interactable() and utils.distance_to(target) < 12 and utils.check_z_distance(target, 2.5) then
+        if target and not self:hr_watch_skipped(target) and target:is_interactable() and utils.distance_to(target) < 12 and utils.check_z_distance(target, 2.5) then
             found_ore = target
             self.current_state = helltide_state.MOVING_TO_ORE
             return
@@ -1547,7 +1555,7 @@ local function check_events(self)
 
     if settings.herb then
         target = find_closest_target("HarvestNode_Herb")
-        if target and target:is_interactable() and utils.distance_to(target) < 12 and utils.check_z_distance(target, 2.5) then
+        if target and not self:hr_watch_skipped(target) and target:is_interactable() and utils.distance_to(target) < 12 and utils.check_z_distance(target, 2.5) then
             found_herb = target
             self.current_state = helltide_state.MOVING_TO_HERB
             return
@@ -1556,7 +1564,7 @@ local function check_events(self)
 
     if settings.shrine then
         target = find_closest_target("Shrine_")
-        if target and target:is_interactable() and utils.distance_to(target) < 8 then
+        if target and not self:hr_watch_skipped(target) and target:is_interactable() and utils.distance_to(target) < 8 then
             self.current_state = helltide_state.MOVING_TO_SHRINE
             return
         end
@@ -1564,7 +1572,7 @@ local function check_events(self)
 
     if settings.goblin then
         target = find_closest_target("treasure_goblin")
-        if target and target:get_current_health() > 1 then
+        if target and not self:hr_watch_skipped(target) and target:get_current_health() > 1 then
             self.current_state = helltide_state.CHASE_GOBLIN
             return
         end
@@ -1737,6 +1745,17 @@ local helltide_task = {
             -- of wandering off — the buff usually appears within a second or
             -- two of standing in the right cell.
             self._override_walk_logged = false
+            -- QQT_Warpigz_v3 3.3.3: bounded. No buff after OVERRIDE_PARK_S at
+            -- the entry (no Helltide here this hour): the latch releases the
+            -- zone to search_helltide instead of parking until minute 55.
+            self._override_park_at = self._override_park_at or now
+            if now - self._override_park_at >= RECALL.OVERRIDE_PARK_S then
+                console.print(string.format("[HELLTIDE] Zone override entry reached but no Helltide buff for %ds — searching for a helltide",
+                    RECALL.OVERRIDE_PARK_S))
+                self._override_park_at = nil
+                override_buff_seen = true
+                return
+            end
             clear_movement()
             if BatmobilePlugin then
                 BatmobilePlugin.pause(plugin_label)
@@ -1876,6 +1895,8 @@ local helltide_task = {
         -- C5/L11: credit any time the state handlers did not run before they
         -- run again (the town hand-off branches below are yields themselves).
         if not tracker.has_salvaged and not needs_salvage then self:credit_yield(now) end
+        -- QQT_Warpigz_v3 3.3.3: the walk-to-a-target states are bounded.
+        if not tracker.has_salvaged and not needs_salvage and self:hr_watch_tick(now) then return end
         if tracker.has_salvaged then
             self:return_from_salvage()
         elseif needs_salvage then
@@ -2434,6 +2455,16 @@ local helltide_task = {
         if pyre and self:hr_event_timeout(tracker.hr_mode.EVENT_STAY_MAX, "[HELLTIDE] Event still running after %ds — moving on") then
             pyre = nil
         end
+        -- QQT_Warpigz_v3 3.3.3: a spent pyre / pillar stays listed after its
+        -- event; no monster near it for EVENT_QUIET_S ends the stay (it
+        -- parked the bot for the whole 240 s cap).
+        if pyre and not pyre:is_interactable()
+            and tracker.hr_watch.event_quiet(pyre:get_position(), get_time_since_inject()) then
+            console.print(string.format("[HELLTIDE] Event over (no monster near it for %ds) — moving on",
+                tracker.hr_watch.C.EVENT_QUIET_S))
+            self:hr_event_skip()
+            pyre = nil
+        end
         if pyre then
             if pyre:is_interactable() then
                 self.current_state = helltide_state.INTERACT_PYRE
@@ -2467,6 +2498,7 @@ local helltide_task = {
         local skip = self._event_skip and self._event_skip[key]
         if skip and skip > now then return false end
         self._event_skin, self._event_pos, self._event_at = skin, pos, now
+        tracker.hr_watch.event_reset() -- QQT_Warpigz_v3 3.3.3
         return true
     end,
 
@@ -2699,7 +2731,7 @@ local helltide_task = {
             found_silent_chest_position = chest:get_position()
             local chest_dist = utils.distance_to(chest)
 
-            if chest_dist <= 2 then
+            if self:hr_chest_reach("silent", chest_dist) then -- QQT_Warpigz_v3 3.3.3: was chest_dist <= 2
                 interact_object(chest)
                 mark_chest_opened()
                 self:hr_on_opened('silent', found_silent_chest_position) -- QQT_Warpigz_v3: stats
@@ -2921,7 +2953,7 @@ local helltide_task = {
             found_chest_position = chest:get_position()
             local chest_dist = utils.distance_to(chest)
 
-            if chest_dist <= 2 then
+            if self:hr_chest_reach(hkey, chest_dist) then -- QQT_Warpigz_v3 3.3.3: was chest_dist <= 2
                 -- Throttle interact calls so we don't restart the open animation timer.
                 -- Stay in MOVING_TO_HELLTIDE_CHEST until the chest becomes non-interactable
                 -- (opened) or disappears — handled by the paths below.
@@ -3232,7 +3264,7 @@ local helltide_task = {
                 end
 
                 local chest_dist = utils.distance_to(chest)
-                if chest_dist <= 2 then
+                if self:hr_chest_reach(remembered_chest_target, chest_dist) then -- QQT_Warpigz_v3 3.3.3: was <= 2
                     -- Throttled interact — same pattern as move_to_helltide_chest.
                     -- Stay in MOVING_TO_REMEMBERED_CHEST until the chest goes
                     -- non-interactable (handled above) so a monster-interrupted
@@ -3580,6 +3612,17 @@ local helltide_task = {
         local target_pos = target:get_position()
         local cur_dist = utils.distance_to(target)
 
+        -- QQT_Warpigz_v3 3.3.3: a target that takes no damage and gets no
+        -- closer (immune, out of reach, pacing behind a wall) is ignored for
+        -- a while; at <= 2 m it had no bound at all.
+        if tracker.hr_watch.km_no_effect(target, get_time_since_inject(), cur_dist) then
+            console.print(string.format("[KILL MONSTERS] No damage and no progress on the target for %ds — ignoring it for %ds",
+                tracker.hr_watch.C.KM_NO_EFFECT_S, tracker.hr_watch.C.KM_IGNORE_S))
+            if BatmobilePlugin then BatmobilePlugin.clear_target(plugin_label) end
+            self.current_state = helltide_state.EXPLORE_HELLTIDE
+            return
+        end
+
         -- Per-position progress tracking: timer persists across target switches
         -- so a monster that's intermittently targeted still accumulates time toward the unreachable timeout
         local nav_key = math.floor(target_pos:x()) .. ',' .. math.floor(target_pos:y())
@@ -3795,6 +3838,7 @@ local helltide_task = {
         for _, nav in pairs(km_nav_map) do nav.time = nav.time + gap end
         -- Rupture timers (cap, approach, wait-open, Realmwalker, ...) too.
         tracker.tear_event.credit_yield(gap)
+        tracker.hr_watch.credit(gap) -- QQT_Warpigz_v3 3.3.3
         for _, key in ipairs({"chest_drop_time", "remembered_chest_timeout", "farm_chest_gone"}) do
             if tracker[key] then tracker[key] = tracker[key] + gap end
         end
@@ -3961,6 +4005,8 @@ local helltide_task = {
         self._override_cache = nil
         self._override_cache_time = nil
         self._override_walk_logged = false
+        self._override_park_at = nil -- QQT_Warpigz_v3 3.3.3
+        self._band = nil
         tracker.waypoints = {}
         tracker.waypoints_zone = nil -- QQT_Warpigz_v3
         tracker.clear_key("remembered_chest_timeout")
@@ -3969,6 +4015,7 @@ local helltide_task = {
         maiden_reset_cycle()
         helltide_explorer.reset()
         tracker.tear_event.on_reset()
+        tracker.hr_watch.reset() -- QQT_Warpigz_v3 3.3.3
         if tracker.hr_chest_order then tracker.hr_chest_order.on_reset() end -- QQT_Warpigz_v3
         clear_movement()
     end,
@@ -3999,6 +4046,78 @@ local helltide_task = {
     -- move_to_remembered_chest (both near the LuaJIT margin) unchanged. The
     -- logic lives in core/hr_chest_order.lua, hr_roads.lua, hr_atlas.lua,
     -- hr_fence.lua and hr_stats.lua (reached through tracker).
+
+    -- QQT_Warpigz_v3 3.3.3: interact with chest `key` now? At 2 m, or
+    -- inside CHEST_INTERACT_RANGE once the bot stopped getting closer for
+    -- RECALL.BAND_STALL_S. The 2-6 m band refreshed the stuck window with
+    -- no bound of its own: a chest cell Batmobile refuses parked the bot.
+    hr_chest_reach = function(self, key, d)
+        if d <= 2 then
+            self._band = nil
+            return true
+        end
+        local band = self._band
+        if d > CHEST_INTERACT_RANGE then
+            if band and band.key == key then self._band = nil end
+            return false
+        end
+        local now = get_time_since_inject()
+        if not band or band.key ~= key or now < band.t then
+            self._band = {key = key, best = d, t = now}
+            return false
+        end
+        if d < band.best - RECALL.BAND_PROGRESS then
+            band.best, band.t = d, now
+            return false
+        end
+        if now - band.t < RECALL.BAND_STALL_S then return false end
+        if not band.logged then
+            band.logged = true
+            console.print(string.format("[HELLTIDE CHEST] Out of reach closer than %.1fm — interacting from here", d))
+        end
+        return true
+    end,
+
+    -- QQT_Warpigz_v3 3.3.3: a target given up by hr_watch_tick.
+    hr_watch_skipped = function(self, target)
+        local watch = tracker.hr_watch
+        return watch.skipped(watch.key(target), get_time_since_inject())
+    end,
+
+    -- QQT_Warpigz_v3 3.3.3: the ore / herb / shrine / goblin / silent chest /
+    -- chaos rift walks had no bound (a target Batmobile refuses, or an
+    -- interaction that never takes, held the state forever). true: given up.
+    hr_watch_tick = function(self, now)
+        local watch, st, S = tracker.hr_watch, self.current_state, helltide_state
+        if not watch.LIMITS[st] then
+            watch.clear()
+            return false
+        end
+        local target, what
+        if st == S.MOVING_TO_ORE then target, what = found_ore, "ore"
+        elseif st == S.MOVING_TO_HERB then target, what = found_herb, "herb"
+        elseif st == S.MOVING_TO_SHRINE then target, what = find_closest_target("Shrine_"), "shrine"
+        elseif st == S.CHASE_GOBLIN then target, what = find_closest_target("treasure_goblin"), "goblin"
+        elseif st == S.MOVING_TO_SILENT_CHEST then
+            target, what = find_closest_target("Hell_Prop_Chest_Rare_Locked"), "silent chest"
+        else target, what = find_closest_target("S10_ChaosRiftChoiceGizmo"), "chaos rift" end
+        local key = watch.key(target, what)
+        local hp
+        if st == S.CHASE_GOBLIN and target then
+            local ok, h = pcall(function() return target:get_current_health() end)
+            hp = ok and h or nil
+        end
+        local why = watch.watch(st, key, now, get_player_position(), hp)
+        if not why then return false end
+        console.print(string.format("[HELLTIDE] Giving up on the %s (%s) — skipping it for %ds",
+            what, why, watch.C.SKIP_S))
+        watch.skip(key, now)
+        watch.clear()
+        found_ore, found_herb, found_silent_chest_position = nil, nil, nil
+        clear_movement()
+        self.current_state = S.EXPLORE_HELLTIDE
+        return true
+    end,
 
     -- Inputs of core/hr_chest_order.lua pick().
     hr_smart_ctx = function(self, now)
