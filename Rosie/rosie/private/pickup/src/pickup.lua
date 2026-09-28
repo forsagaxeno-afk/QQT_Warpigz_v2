@@ -75,8 +75,9 @@ local episode={since=nil,last=nil,capped_until=0}
 --  * YIELD: while Rosie works a drop, a move destination that is neither
 --    Rosie's last move, the drop nor the player's spot (another mover) for
 --    YIELD.confirm s while the player moves YIELD.moved m makes Rosie step back without clearing that path; the
---    drop is not tried (nor woken) for YIELD.rest s, doubling per yield of
---    that drop up to YIELD.max s (its rounds still bound it, C6).
+--    drop is not walked to (nor woken) for YIELD.rest s, doubling per yield of
+--    that drop up to YIELD.max s (its rounds still bound it, C6). Within
+--    REACH it is still interacted with (QQT_Warpigz_v3 1.0.22).
 local G={nonbag_interacts=3,nonbag_clear=3.5,small_interacts=ROUND_INTERACTS,settle_ttl=180,settle_max=128,same_spot=1.0,
     away=REACH+2,settled={},count=0,world=nil,retried={},fight_radius=10,movement=require('rosie.movement')}
 M.limits={reach=REACH,round_interacts=ROUND_INTERACTS,round_stall=ROUND_STALL,rest=REST,max_rounds=MAX_ROUNDS,
@@ -172,7 +173,12 @@ function M.blocked(item)
             or 'pickup attempts exhausted ('..MAX_ROUNDS..' rounds)'
     end
     -- QQT_Warpigz_v3 3.3.2: stepped back for another mover (see the header).
-    if e.yield_until and get_time_since_inject()<e.yield_until then return true,'pickup yielded to another move' end
+    -- QQT_Warpigz_v3 1.0.22 (review): the yield holds walks only; a yielded
+    -- drop within REACH (another mover brought the player over it) is still
+    -- interacted with: an interaction sends no move, so no tug of war.
+    if e.yield_until and get_time_since_inject()<e.yield_until and Utils.distance_to(item)>REACH then
+        return true,'pickup yielded to another move'
+    end
     -- A stable reason: the rejection log prints once per drop and reason.
     if get_time_since_inject()<e.rest_until then return true,'pickup resting after round '..e.rounds..' ('..REST..'s)' end
     return false

@@ -134,7 +134,10 @@ function M.new(cached,conflict)
         end
         local loot_enabled=loot.get_enabled
         loot.get_enabled=function() return enabled() and loot_enabled() end
-        app.mimic.tick() -- QQT_Warpigz_v3 1.0.22: a reload replaces Rosie's own old Scavenger table at once
+        -- QQT_Warpigz_v3 1.0.22: a reload replaces Rosie's own old Scavenger table at
+        -- once (RosiePlugin is still the retired instance's API while this one loads).
+        local retired=rawget(_G,'RosiePlugin')
+        app.mimic.tick(type(retired)=='table' and rawget(retired,'_scavenger_handoff')==true)
     end
     Movement.configure(function(owner)
         if not enabled() or not life or life.cleanup_pending()>0 then return false end
@@ -159,6 +162,7 @@ function M.new(cached,conflict)
         if rawget(_G,'LooteerPlugin')~=loot or rawget(_G,'AlfredTheButlerPlugin')~=town or rawget(_G,'PLUGIN_alfred_the_butler')~=town then
             conflict='Another pickup or town addon loaded. Unload it, then reload Rosie.'
             app.conflict=conflict;app.elements.enabled:set(false)
+            if app.mimic then app.mimic.retire() end -- QQT_Warpigz_v3 1.0.22 (review): own Scavenger table and its pauses go
             Movement.yield('pickup');Movement.yield('town')
             town.shutdown();loot.shutdown()
             return false
@@ -362,6 +366,9 @@ function M.new(cached,conflict)
         shutdown=function()
             if not app.active then return true end
             installation_valid()
+            -- QQT_Warpigz_v3 1.0.22 (review): the retired instance removes its own
+            -- Scavenger table and releases its pauses; the next one republishes at once.
+            if app.mimic then app.api._scavenger_handoff=app.mimic.retire() end
             app.active=false
             if town then town.shutdown() end
             if loot then loot.shutdown() end

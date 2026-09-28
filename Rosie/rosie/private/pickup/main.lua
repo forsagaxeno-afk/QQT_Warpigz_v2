@@ -141,7 +141,8 @@ published={
     diagnose=ItemManager.diagnose,
 }
 LooteerPlugin=published
-Mimic.configure({acquire=acquire_pause,release=release_pause}) -- QQT_Warpigz_v3 1.0.22: Scavenger.pause/resume
+-- QQT_Warpigz_v3 1.0.22: Scavenger.pause/resume; owned: no wanted items while an activity owns the loot (review).
+Mimic.configure({acquire=acquire_pause,release=release_pause,owned=activity_owns_loot})
 callbacks.on_update(main_pulse)
 callbacks.on_render_menu(function()
     if not active then return end
