@@ -8,7 +8,9 @@ local QUIET_SECONDS = 3
 -- a busy Scavenger holds the same loot waits as a busy Looter.
 local function scavenger_busy()
     local s = Scavenger
-    if type(s) ~= 'table' or type(s.is_busy) ~= 'function' then return false end
+    -- QQT_Warpigz_v3 2.2.7: Rosie's Scavenger stand-in (`_rosie=true`, published
+    -- while Worldstone runs) is Rosie's pickup, already read through the Looter.
+    if type(s) ~= 'table' or rawget(s, '_rosie') == true or type(s.is_busy) ~= 'function' then return false end
     local ok, busy = pcall(s.is_busy)
     return ok and busy == true
 end

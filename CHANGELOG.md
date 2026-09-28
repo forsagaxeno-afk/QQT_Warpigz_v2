@@ -2,6 +2,16 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.6] — 2026-09-28
+
+### Fixed
+
+- **With Worldstone running, our plugins no longer treat Rosie's Scavenger stand-in as a separate looter.** Rosie's pickup was already covered through her Looter status; reading the stand-in too counted it twice.
+  - **WarPigs 1.1.8:** a Whisper claim is no longer cancelled on every Rosie pickup burst (after three bursts the visit's claim was dropped). The outgoing teleport no longer waits for "Scavenger collecting loot" on Rosie's account.
+  - **WarPug 1.0.17, SilentRaven 0.2.7, ArkhamAsylum 2.1.4, Reaper 1.10.6, HordeDev 2.2.7, WonderCity 2.2.5, Batmobile 2.2.3:** no double waits for Rosie's pickup in planning, Whisper claims, Pit, bosses, Hordes, Undercity and freeroam.
+  - A real third-party Scavenger still holds every wait as before.
+- WarRoom 1.0.6: shows suite version 3.3.6.
+
 ## [3.3.5] — 2026-09-28
 
 ### Fixed
