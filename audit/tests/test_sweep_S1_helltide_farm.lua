@@ -487,10 +487,10 @@ end
 local function summary(h, W)
     local s = W.stats
     return string.format('seed=%d start=%s hours=%d kills=%d drops=%d pickups=%d chests=%d (mystery %d, prize %d) ruptures=%d tears=%d rw=%d'
-        .. ' event_deaths=%d cinders=%d paid=%d trips=%d salvaged=%d stashed=%d rot(casts=%d dashes=%d interrupts=%d) chaos=%d errors=%d',
+        .. ' event_deaths=%d cinders=%d paid=%d trips=%d salvaged=%d stashed=%d rot(casts=%d dashes=%d interrupts=%d) chaos=%d errors=%d violations=%d',
         W.seed, os.date('!%M:%S', W.epoch0), s.hours, s.kills, s.drops, h.pickups or 0, s.chests, s.mystery, s.hells_prize,
         s.ruptures, s.tears, s.rw, s.event_deaths, h.cinders, s.cinders_paid, h.logged('[Rosie] completed'), #h.salvaged,
-        #h.stashed, h.rotation.casts, h.rotation.dashes, h.rotation.interrupts, #h.chaos.log, #h.errors)
+        #h.stashed, h.rotation.casts, h.rotation.dashes, h.rotation.interrupts, #h.chaos.log, #h.errors, #h.violations)
         .. hour_lines(W)
 end
 
