@@ -11,6 +11,26 @@ local published
 local fight_busy=false -- QQT_Warpigz_v3 3.3.2: busy set only by a drop waiting for the fight
 local foreign=require('rosie.private.foreign') -- QQT_Warpigz_v3 1.0.21
 local Mimic=require('rosie.private.scavenger_mimic') -- QQT_Warpigz_v3 1.0.23: Rosie as Scavenger
+local fight_only=false -- QQT_Warpigz_v3 1.0.25: looting=true only for the fight wait (status says so)
+-- QQT_Warpigz_v3 1.0.25 (Discord: pickup stopped with no line): a gate that
+-- keeps pickup off while a wanted drop lies in range is logged once per zone
+-- (orbwalker Clear mode, a busy Scavenger addon).
+local gate={clear=nil,scav=nil,check_at=nil}
+local function zone_key()
+    local w=get_current_world()
+    return tostring(Utils.call(w,'get_world_id'))..'|'..tostring(Utils.call(w,'get_current_zone_name'))
+end
+-- A wanted drop within the Distance slider (read at most every 0.5 s).
+local function wanted_in_range(now)
+    if gate.check_at and now>=gate.check_at and now-gate.check_at<0.5 then return false end
+    gate.check_at=now
+    local items=Utils.host_call(rawget(_G,'actors_manager') and actors_manager.get_all_items)
+    for _,item in pairs(type(items)=='table' and items or {}) do
+        local ok,want=pcall(ItemManager.check_want_item,item,false)
+        if ok and want==true then return true end
+    end
+    return false
+end
 local function activity_owns_loot()
     -- QQT_Warpigz_v3 1.0.21: Navigator's Scavenger owns the drops while busy.
     if foreign.scavenger_busy() then return true end
@@ -57,13 +77,22 @@ local function main_pulse()
     if not active then return end
     Settings.update()
     Settings.get().looting=false
+    fight_only=false -- QQT_Warpigz_v3 1.0.25
     if not Settings.get().enabled then release_pickup(true); return end
     local player=get_local_player()
     if not player or Utils.call(player,'is_dead')~=false or not Settings.get().enabled then release_pickup(); return end
     local world=get_current_world()
     local zone=Utils.call(world,'get_current_zone_name')
     if not world or not zone or zone=='[sno none]' or is_chat_open() or is_inventory_open() then release_pickup(); return end
-    if not Settings.should_execute() then release_pickup(); return end
+    if not Settings.should_execute() then
+        -- QQT_Warpigz_v3 1.0.25: Behavior = Orbwalk outside Clear mode, logged once per zone.
+        local key=zone_key()
+        if gate.clear~=key and not Settings.is_paused() and wanted_in_range(get_time_since_inject()) then
+            gate.clear=key
+            console.print('[Rosie pickup] Waiting for orbwalker Clear mode (Behavior = Orbwalk): a wanted drop is in range; set Behavior to Always to pick up at any time')
+        end
+        release_pickup(); return
+    end
     -- QQT_Warpigz_v2 local patch (Rosie 1.0.7, LooteerV3 main.lua): the host's own Auto Loot would walk
     -- to drops Rosie refuses and fight its movement; keep it off while pickup runs.
     local orb=rawget(_G,'orbwalker')
@@ -71,7 +100,18 @@ local function main_pulse()
     if Settings.is_paused() then release_pickup(); return end
     -- The activity uses our filter over its arena and owns the actual movement.
     -- Its recovery/party phases must not be interrupted by standalone pickup.
+    -- QQT_Warpigz_v3 1.0.25: a busy Scavenger addon while a wanted drop is in
+    -- range is logged once per zone.
+    local now=get_time_since_inject()
+    if foreign.scavenger_busy() then
+        local key=zone_key()
+        if gate.scav~=key and wanted_in_range(now) then
+            gate.scav=key
+            console.print('[Rosie pickup] Scavenger (Navigator\'s looter) is busy: Rosie leaves the drops in range to it while it is')
+        end
+    end
     if activity_owns_loot() then Pickup.reset(false); return end
+    Pickup.sample_cast(now) -- QQT_Warpigz_v3 1.0.25: the fight hold's engaged rule
     local wanted=ItemManager.get_item_based_on_priority()
     if wanted and Settings.get().loot_priority==1 then wanted=wanted.Item end
     if wanted then Settings.get().looting=Pickup.step(wanted,ItemManager.destination(wanted)) -- QQT_Warpigz_v3 (Q1): receipt bag
@@ -85,7 +125,12 @@ local function main_pulse()
     -- status().loot_waiting, for exit checks; bounded by the fight hold's 45 s
     -- cap. fight_busy is the time of the last pulse that saw the wait.
     fight_busy=ItemManager.fight_waiting==true and get_time_since_inject() or false
-    if fight_busy and not wanted and Pickup.fight_wait_busy then Settings.get().looting=true end -- transitional, see pickup.lua
+    -- QQT_Warpigz_v3 1.0.25 (Navigator review, calm tail): the last enemy is
+    -- gone but the hold waits its FIGHT.calm s; the Scavenger stand-in is busy
+    -- already, so Worldstone does not leave before Rosie's first step (never
+    -- while a counted enemy is within 14 m; a no-op without Worldstone).
+    if fight_busy and Pickup.calm_tail() then Mimic.note_work(fight_busy) end
+    if fight_busy and not wanted and Pickup.fight_wait_busy then Settings.get().looting=true;fight_only=true end -- transitional, see pickup.lua
 end
 -- QQT_Warpigz_v3 1.0.22: a wait no pulse has confirmed for 1 s is stale (Rosie
 -- off, pickup paused / owned by an activity, reloaded).
@@ -124,6 +169,8 @@ published={
             table.sort(owners)
             reason,detail='paused','Paused by '..(#owners>0 and table.concat(owners,', ') or 'an external caller')..'.'
         elseif owned then reason,detail='activity_owned','Tristram controls pickup and movement; these filters still apply.'
+            -- QQT_Warpigz_v3 1.0.25: name the Scavenger addon when it is the owner.
+            if foreign.scavenger_busy() then detail='Scavenger (Navigator\'s looter) is busy; Rosie leaves the drops to it.' end
         elseif not Settings.should_execute() then reason,detail='waiting_for_clear','Waiting for orbwalker Clear mode. Change Behavior to run at any time.'
         elseif Utils.call(get_local_player(),'is_dead')~=false then reason,detail='unavailable','Waiting for a living player.'
         else
@@ -131,6 +178,11 @@ published={
             if not zone or zone=='[sno none]' then reason,detail='loading','Waiting for the world to load.'
             elseif is_chat_open() or is_inventory_open() then reason,detail='menu_open','Waiting for chat or inventory to close.'
             elseif Settings.get().looting then reason,detail='picking_up','Picking up accepted items.'
+                -- QQT_Warpigz_v3 1.0.25: busy only for the fight wait: nothing moves, say so.
+                if fight_only then
+                    detail=Pickup.fight_waiting_n and string.format('Waiting for the fight to end (%d drop(s)).',tonumber(Pickup.fight_waiting_n) or 1)
+                        or 'Waiting while Navigator gets the path back (Scavenger stand-in cool-down).'
+                end
             elseif loot_waiting() then detail='Ready; a drop waits for the fight to end.' end -- QQT_Warpigz_v3 1.0.22
         end
         return {enabled=enabled,paused=paused,ready=reason=='ready' or reason=='picking_up',
@@ -153,7 +205,14 @@ published={
 }
 LooteerPlugin=published
 -- QQT_Warpigz_v3 1.0.23: Scavenger.pause/resume; owned: no wanted items while an activity owns the loot (review).
-Mimic.configure({acquire=acquire_pause,release=release_pause,owned=activity_owns_loot})
+-- QQT_Warpigz_v3 1.0.25: the mimic takes a pause only at the start of a
+-- caller's pause episode (Worldstone's Scavenger.pause); that start is logged.
+local function acquire_through_scavenger(caller)
+    local result=acquire_pause(caller)
+    if result then console.print('[Rosie pickup] Paused by '..tostring(caller)..' (through Scavenger); pickup waits until it resumes (at most 60 s)') end
+    return result
+end
+Mimic.configure({acquire=acquire_through_scavenger,release=release_pause,owned=activity_owns_loot})
 callbacks.on_update(main_pulse)
 callbacks.on_render_menu(function()
     if not active then return end
