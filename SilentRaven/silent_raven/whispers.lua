@@ -151,6 +151,17 @@ M.quest_snapshot = function ()
                         for _, hint in ipairs(TURN_IN_OBJECTIVE_HINTS) do
                             if text:find(hint, 1, true) then result.ready = true end
                         end
+                    elseif meta and type(objective) == 'table' then
+                        -- QQT_Warpigz_v3 0.2.8 (RC7): an objective without text
+                        -- (unreadable or empty): only the host's progress fields
+                        -- decide (review: no fields is no evidence, as in 0.2.7).
+                        -- A complete one is ready, inferred (one probe per visit).
+                        local progress = counter_state('', objective)
+                        if progress then
+                            if not result.detail then result.detail = name .. ': (no objective text)' end
+                            meta_read = true
+                            if progress == 'incomplete' then meta_incomplete, result.collecting = true, true end
+                        end
                     end
                 end
             end
@@ -194,6 +205,32 @@ M.cache_count = function(sno)
         end
     end
     return total
+end
+
+-- QQT_Warpigz_v3 0.2.8 (RC4 diagnostics): SNO -> item count across every bag
+-- list the host may expose (Rosie reads the same five). Unreadable lists and
+-- items are skipped; nil when no list was readable.
+M.BAG_LISTS = {'get_inventory_items', 'get_consumable_items', 'get_dungeon_key_items', 'get_socketable_items',
+    'get_talisman_items'}
+M.bag_snos = function()
+    if type(get_local_player) ~= 'function' then return nil end
+    local ok, player = pcall(get_local_player)
+    if not ok or not player then return nil end
+    local out, any = {}, false
+    for _, method in ipairs(M.BAG_LISTS) do
+        local items = safe_method(player, method)
+        if type(items) == 'table' then
+            any = true
+            for _, item in pairs(items) do
+                local sno = safe_method(item, 'get_sno_id')
+                if type(sno) == 'number' then
+                    local count = safe_method(item, 'get_stack_count')
+                    out[sno] = (out[sno] or 0) + (type(count) == 'number' and count > 0 and count or 1)
+                end
+            end
+        end
+    end
+    return any and out or nil
 end
 
 -- Closest interactable Tree/Raven/Crow NPC in the live ally stream.

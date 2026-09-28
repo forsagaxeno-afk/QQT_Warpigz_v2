@@ -93,11 +93,22 @@ local function blocker(now)
     if in_town() then return 'town', 'the player is in a town other than Temis' end
     -- QQT_Warpigz_v3 3.3.3: never teleport away from a third-party loop that
     -- owns the run (a claim is never urgent: a later Temis visit or trip claims).
+    -- QQT_Warpigz_v3 0.2.8 (RC1): bounded like Rosie's DEFER_ANY (600 s of readiness).
     local owner = coordination.activity_owner()
-    if owner then return 'activity', 'another activity owns the run (' .. owner .. ')' end
+    if owner then
+        if coordination.ready_for(now) < coordination.ACTIVITY_TRIP_S then
+            return 'activity', 'another activity owns the run (' .. owner .. ')'
+        end
+        coordination.say_once('activity_trip', string.format('claim trip waited %ds for %s; no longer waiting for it',
+            coordination.ACTIVITY_TRIP_S, owner))
+    end
+    -- QQT_Warpigz_v3 0.2.8: Rosie's Town Portal would replace a teleport the
+    -- player is channelling (WonderCity's cast to Kurast).
+    if coordination.teleport_channel(now) then return 'channel', 'the player is channelling a teleport' end
     -- QQT_Warpigz_v3 3.3.3: Butler's trip, Scavenger's pickup or a Navigator
-    -- walk (Worldstone) would interrupt the Town Portal cast.
-    local third = coordination.third_party_reason()
+    -- walk would interrupt the Town Portal cast (0.2.8: a town-priority walk,
+    -- each bounded per ready episode).
+    local third = coordination.third_party_reason(now)
     if third then return third:match('^[^:]+'), 'a third-party addon is busy (' .. third .. ')' end
     local _, st = coordination.town_provider()
     if not st then return 'provider', 'no town service is loaded' end
@@ -152,7 +163,9 @@ local function watch_trip(now)
         log.info('claim trip finished: the reward was claimed')
         return
     end
-    if trip.teleported then s.unclaimed = s.unclaimed + 1 end
+    -- QQT_Warpigz_v3 0.2.8 (RC5): only against the ready episode that asked
+    -- for it (a callback after the quest left must not starve the next reward).
+    if trip.teleported and s.ready_since and s.ready_since <= trip.t then s.unclaimed = s.unclaimed + 1 end
     log.info(string.format('claim trip ended without a claim (town service: %s; SilentRaven: %s, %s)%s',
         tostring(trip.done and (trip.result or 'completed') or 'no callback'),
         tostring(tracker.last_result_t and tracker.last_result_t >= trip.t and tracker.last_result or 'did not run'),
@@ -174,6 +187,14 @@ local function quest_line(now, snapshot)
     end
 end
 
+-- QQT_Warpigz_v3 0.2.8 (RC6): no promise the last Temis visit did not keep.
+local function next_visit()
+    if tracker.visit_hold then
+        return 'claimed at a Temis stop once auto-fire is clear (the last one waited: ' .. tostring(tracker.visit_hold) .. ')'
+    end
+    return 'claimed on the next Temis visit'
+end
+
 -- Called at the ready-check rate with this pulse's quest snapshot (nil when
 -- unreadable), never during a run.
 function M.observe(now, settings, snapshot)
@@ -186,6 +207,7 @@ function M.observe(now, settings, snapshot)
     end
     if not s.ready_since then
         s.ready_since, s.inferred = now, snapshot.inferred == true
+        s.unclaimed = 0 -- QQT_Warpigz_v3 0.2.8 (RC5): a new ready episode
         log.info('reward ready' .. (s.inferred and ' (inferred: one probe per Temis visit)' or ''))
     end
     if tracker.running or tracker.external_trigger or s.trip then return end
@@ -205,7 +227,7 @@ function M.observe(now, settings, snapshot)
     if not consent then say('consent:' .. tostring(why), 'reward ready but skipped because ' .. tostring(why)); return end
     local after = tonumber(settings.claim_trip_after) or 0
     if after <= 0 then
-        say('trip_off', 'reward ready: claimed on the next Temis visit (a Rosie trip hands it over on its return leg); claim trips are off')
+        say('trip_off', 'reward ready: ' .. next_visit() .. ' (a Rosie trip hands it over on its return leg); claim trips are off')
         return
     end
     local limit = s.inferred and 1 or TRIP_LIMIT
@@ -215,7 +237,7 @@ function M.observe(now, settings, snapshot)
     end
     local due = math.max(s.ready_since, s.last_trip_t) + after
     if now < due then
-        say('wait', string.format('reward ready: claimed on the next Temis visit, or by a claim trip in %.0fs', due - now))
+        say('wait', string.format('reward ready: %s, or by a claim trip in %.0fs', next_visit(), due - now))
         return
     end
     if now - s.check_t < CHECK_S then return end
