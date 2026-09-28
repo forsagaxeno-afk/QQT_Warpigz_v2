@@ -342,13 +342,22 @@ function M.third_party_reason(now)
 end
 -- QQT_Warpigz_v3 0.2.8: the player channels a teleport (a WonderCity / Rosie /
 -- War Plan cast: a claim walk or a claim trip would cut it). Bounded per cast.
-local channel = {since = nil}
+-- Review MED: the bound is per cast. A completed channel goes straight into
+-- Limbo and a new zone, so a loading screen, a zone change or a gap of more
+-- than 2 s between samples starts a new cast.
+local channel = {since = nil, zone = nil, seen = nil}
 function M.teleport_channel(now)
     now = now or clock()
+    local zone = whispers.current_zone()
     local ok, player = false, nil
     if type(get_local_player) == 'function' then ok, player = pcall(get_local_player) end
-    local casting = ok and player ~= nil and whispers.safe_method(player, 'get_active_spell_id') == TELEPORT_SPELL_ID
+    local casting = zone ~= nil and ok and player ~= nil
+        and whispers.safe_method(player, 'get_active_spell_id') == TELEPORT_SPELL_ID
     if not casting then channel.since = nil; return false end
+    if channel.zone ~= zone or not channel.seen or now < channel.seen or now - channel.seen > 2 then
+        channel.since = nil
+    end
+    channel.zone, channel.seen = zone, now
     channel.since = channel.since or now
     return now - channel.since < M.CHANNEL_CAP_S
 end

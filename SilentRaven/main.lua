@@ -69,14 +69,20 @@ local HOLD_LOG_S                 = 60
 local function refresh_ready(now)
     if (now - (tracker.last_ready_check_t or 0)) < READY_CHECK_INTERVAL_S then return end
     tracker.last_ready_check_t = now
+    -- QQT_Warpigz_v3 0.2.8 (review MED): no readiness from a loading screen: a
+    -- blank quest list in Limbo ended the ready episode, restarting every bound
+    -- (60 s / 180 s / 600 s), the per-episode lines and the trip counter.
+    if not whispers.current_zone() then return end
     -- QQT_Warpigz_v3 (Q8): one snapshot for readiness, the decision log and
     -- the claim trip; WarPigs' delegation is cached in main_pulse (never in get_status).
     local snapshot = whispers.quest_snapshot()
     tracker.ready = snapshot ~= nil and snapshot.ready == true
     -- QQT_Warpigz_v3 0.2.8: the ready episode's start (the bounded holds and the
     -- per-episode log lines key on it). An unreadable snapshot keeps it.
+    local episode = tracker.ready_since
     if tracker.ready then tracker.ready_since = tracker.ready_since or now
     elseif snapshot ~= nil then tracker.ready_since = nil end
+    if tracker.ready_since ~= episode then tracker.visit_hold = nil end -- review LOW: a new episode
     claims.observe(now, settings, snapshot)
 end
 

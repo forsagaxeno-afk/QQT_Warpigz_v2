@@ -113,7 +113,8 @@ for _, case in ipairs({{'quest_error','unconfirmed'},{'quest_empty','success'},{
     eq(c.result,want,failure);eq(c.accepts,1,'ambiguous claim is never retried');eq(c.callbacks,1)
     if want=='success' then eq(c.tracker.last_reason,'quest_turned_in',failure..' reason')
         eq(logged(c,'(quest turned in; cache not seen in the bags)'),1,failure..' line')
-    else eq(logged(c,'receipt not seen: pick sno=1087411'),1,failure..' diagnostic line') end
+    else eq(logged(c,'receipt not seen: pick sno=1087411'),1,failure..' diagnostic line')
+        if failure=='quest_still_ready' then eq(logged(c,'panel open=false'),1,'the closed panel is reported') end end
 end
 -- An objective without text (QQT_Warpigz_v3 0.2.8, RC7): the host's progress
 -- fields decide; complete (or no incomplete evidence) is ready, inferred, and

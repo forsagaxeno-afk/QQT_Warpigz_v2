@@ -575,6 +575,59 @@ case('Z the claim trip waits for a loop owning the run at most 600 s', function(
     eq(h.logged('claim trip waited 600s for TristramLoop, farm'), 1, 'one bound line')
 end)
 
+-- 0.2.8 review [MED]: a blank quest list on a loading screen does not end the
+-- ready episode (the 60 s TristramLoop bound would restart at every Temis
+-- arrival: 'manual now' again for Worldstone + TristramLoop).
+case('F a blank quest list in Limbo keeps the ready episode', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'helltide'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    h.mod(SR, 'silent_raven.gui').elements.claim_trip_slider:set(0)
+    h.G.TRISTRAM_LOOP_STATE = {status = function() return {running = true, owns_activity = true, phase = 'town'} end}
+    h.bounty_ready = true
+    h.run(120)
+    h.place, h.pos = h.P.limbo, h.P.limbo.spawn
+    h.bounty_ready = false -- the quest list reads empty while loading
+    h.run(2)
+    h.place, h.pos = h.P.temis, h.P.temis.spawn
+    h.bounty_ready = true
+    ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward (auto)') == 1 end, 40),
+        'claimed during a 40 s Temis stop (ready for 120 s)\n' .. h.tail(20))
+end)
+
+-- 0.2.8 review [MED]: the 15 s channel bound is per cast. A second cast right
+-- after a loading screen (the host may keep reporting the spell through Limbo)
+-- gets its own 15 s.
+case('K2 the channel bound restarts for a new cast after a loading screen', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    h.bounty_ready = true
+    h.casting = true
+    h.run(12)
+    h.place, h.pos = h.P.limbo, h.P.limbo.spawn
+    h.run(2)
+    h.place, h.pos = h.P.temis, h.P.temis.spawn
+    h.run(10)
+    h.assert_clean('K2')
+    eq(h.logged('[SilentRaven] claiming the Whisper reward'), 0, 'the second cast holds too\n' .. h.tail(20))
+    h.casting = false
+    ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward (auto)') == 1 end, 3),
+        'the claim starts once the cast ends\n' .. h.tail(20))
+end)
+
+-- 0.2.8 review [LOW]: the claim trip waits for a teleport channel (one line).
+case('S the claim trip waits for a teleport channel', function()
+    local h = host()
+    h.bounty_ready = true
+    h.run(55)
+    h.casting = true
+    h.run(12)
+    h.assert_clean('S')
+    eq(trips(h), 0, 'no trip during the channel\n' .. h.tail(20))
+    eq(h.logged('claim trip waits because the player is channelling a teleport'), 1, 'one wait line')
+    h.casting = false
+    ok(h.run_until(function() return trips(h) == 1 end, 3), 'the trip once the channel ends\n' .. h.tail(20))
+end)
+
 -- QQT_Warpigz_v3 0.2.8 (RC3): a Looter blip during the claim keeps Navigator
 -- paused (only a Butler / town-priority Navigator yield releases it), so the
 -- loop's walk never resumes and holds the yield until its 120 s timeout.

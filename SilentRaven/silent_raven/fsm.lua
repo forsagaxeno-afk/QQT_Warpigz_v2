@@ -54,6 +54,7 @@ end
 local function finish(result, preserve_path, keep_visit)
     if not preserve_path then stop_owned() end
     if not keep_visit and whispers.current_zone() == 'Skov_Temis' then tracker.last_zone_handled = 'Skov_Temis' end
+    if result == 'success' then tracker.visit_hold = nil end -- QQT_Warpigz_v3 0.2.8 (review LOW)
     if result == 'success' and tracker.last_pick_entry then
         local item = tracker.last_pick_entry
         stats.bump_success(item.slot, item.legendary, item.name, tracker.last_reason)
@@ -171,7 +172,7 @@ local function receipt_diagnostics(entry, count, snapshot)
     local open_ok, open = pcall(function() return quest_reward.is_open() end)
     log.info(string.format('receipt not seen: pick sno=%s, bag count %s -> %s, panel open=%s, quest %s',
         tostring(entry and entry.sno), tostring(tracker.claim_before), tostring(count),
-        tostring(open_ok and open or 'error'),
+        open_ok and tostring(open) or 'error',
         snapshot == nil and 'unreadable' or (snapshot.present and (snapshot.ready and 'still ready' or 'present, not ready')
             or 'gone')))
     if session.bag_diff_logged then return end
@@ -486,8 +487,9 @@ function M.tick(settings)
         -- cache may land in a list or SNO we do not count, or be no bag item):
         -- ready at START and no longer ready, or gone, in a readable snapshot,
         -- with the panel closed, held 1 s. A nil snapshot never counts.
-        local turned_in = snapshot ~= nil and closed
-            and ((tracker.claim_quest_ready and not snapshot.ready) or not snapshot.present)
+        -- (review LOW: both branches need the quest ready at START)
+        local turned_in = snapshot ~= nil and closed and tracker.claim_quest_ready
+            and (not snapshot.ready or not snapshot.present)
         if turned_in then
             tracker.turnin_since = tracker.turnin_since or now
             if now - tracker.turnin_since >= 1 then
