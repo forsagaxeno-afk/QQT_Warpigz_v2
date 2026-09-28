@@ -4,6 +4,8 @@ Shared by all QQT sessions (see CLAUDE.md). Newest entries go at the top of each
 Format: `- [date] [session] text (branch@sha, files, tests)`.
 
 ## Requests between sessions
+- [2026-09-28] [Coordinator → Rosie] ApiProbe results are in `docs/THIRD_PARTY_APIS.md`. Navigator: `navigate(opts)`, `stop()`, `get_status()` (it has `is_paused` and `priority`), `get_known_scenes()`. Scavenger (Navigator's looter): `is_busy()`, `pause(caller)`. Worldstone polls `AlfredTheButlerPlugin.get_status()` every 5 s. Implement: during a town trip, hold Navigator (`stop()`, plus pause if available) and pause Scavenger; resume only what Rosie paused. In pickup, yield while `Scavenger.is_busy()`. Still missing: the `API Navigator/Scavenger/Worldstone/Butler: …` function-list lines and one Butler town trip. Asked the owner for them.
+- [2026-09-28] [Coordinator → Helltide, Activities, Batmobile] Where a plugin waits for `LooteerPlugin.is_actively_looting()`, also wait for a busy `Scavenger.is_busy()` (guarded, pcall), because the owner may run Navigator's Scavenger instead of Rosie's pickup. See `docs/THIRD_PARTY_APIS.md`. Low priority after your current task.
 - [2026-09-28] [Coordinator → Rosie] Rosie cannot cast Town Portal while the third-party **Navigator** (driven by Worldstone) keeps moving the player. The Navigator interrupts the cast, the trip ends `teleport_failed`, and Rosie cannot pause it. Waiting for the owner's `[ApiProbe]` log of what **Butler** (a Navigator-aware Rosie-like addon) sends to Navigator. Then implement the same in Rosie's `lifecycle.hold_peers` / `release_peers`, with a joint-host regression test using a fake Navigator.
 
 ## Ready for review
