@@ -177,7 +177,7 @@ case('D7 a drop the fight holds before the cast is not left silently: taken on t
     ok(h.run_until(function() return h.place == h.P.temis end, 90, m.step), 'the trip goes to town\n' .. h.tail())
     enemy.health = 0; h.remove_actor(enemy) -- killed meanwhile
     ok(h.run_until(function() return r.done end, 300, m.step), 'trip ends\n' .. h.tail())
-    ok(h.logged('was not picked up before the cast: Rosie picks it up when it comes back') >= 1, 'remembered\n' .. h.tail(12))
+    ok(h.logged('pickup cannot take it now (a fight holds it): Rosie tries on the way back') >= 1, 'remembered\n' .. h.tail(12))
     eq(item.picked, true, 'taken on the way back\n' .. h.tail(12))
     eq(st(h).outcome, 'completed')
     h.assert_clean('D7')
@@ -232,6 +232,63 @@ case('C1 a 5 s Town Portal channel is cast exactly once (no re-cast while it run
     eq(h.logged('[Rosie] Town Portal cast 1'), 1, 'the cast is logged with its number')
     eq(h.logged('[Rosie] Town Portal cast 2'), 0)
     h.assert_clean('C1')
+end)
+
+-- QQT_Warpigz_v3 1.0.24 (Auditor 7aa276a): the trip waits only for a drop
+-- pickup would work now; a refused lend is not silent; the return compares
+-- the zone the cast went from.
+case('G1 pickup Behavior "Clear mode only" while not clearing: the cast is not held, the drop is tried on the way back', function()
+    local h = new()
+    fill_bag(h, 25)
+    local m = channel_model(h)
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.behavior_combo:set(1)
+    h.orb.mode = 0
+    local t0 = h.now
+    local r = start_trip(h)
+    ok(h.run_until(function() return h.casting == true end, 10, m.step), 'the cast starts\n' .. h.tail())
+    h.run(0.1, m.step)
+    mythic(h, 6, 0, 'Helm_Unique_Mythic_Gate')
+    ok(h.run_until(function() return r.done end, 200, m.step), 'trip ends\n' .. h.tail())
+    ok(h.now - t0 < 40, 'no 20 s hold nor 30 s return wait: ' .. (h.now - t0))
+    ok(h.logged('pickup cannot take it now (the pickup Behavior setting') >= 1, 'says why\n' .. h.tail(12))
+    eq(st(h).outcome, 'completed')
+    h.assert_clean('G1')
+end)
+
+case('G2 a drop during the cast while another plugin pauses pickup: logged with the owner, remembered for the way back', function()
+    local h = new()
+    fill_bag(h, 25)
+    local m = channel_model(h)
+    local r = start_trip(h)
+    ok(h.run_until(function() return h.casting == true end, 10, m.step), 'the cast starts\n' .. h.tail())
+    h.as(CONSUMER, function() return h.G.LooteerPlugin.acquire_pause('HordeDev') end)
+    h.run(0.1, m.step)
+    mythic(h, 6, 0, 'Helm_Unique_Mythic_Paused')
+    ok(h.run_until(function() return r.done end, 200, m.step), 'trip ends\n' .. h.tail())
+    ok(h.logged('but pickup is paused by HordeDev: Rosie tries on the way back') >= 1, 'not silent\n' .. h.tail(12))
+    eq(st(h).outcome, 'completed')
+    h.assert_clean('G2')
+end)
+
+case('G3 a pre-cast pickup walk into the next subzone: the trip still returns there and completes', function()
+    local h = new()
+    fill_bag(h, 25)
+    local m = channel_model(h)
+    local item = mythic(h, 8, 0, 'Helm_Unique_Mythic_Subzone')
+    local zone = h.P.pit.zone
+    local r = start_trip(h)
+    local moved = false
+    ok(h.run_until(function() return r.done end, 200, function(hh)
+        m.step(hh)
+        if item.picked and not moved then moved = true; hh.P.pit.zone = 'PIT_Subzone_Next' end
+    end), 'trip ends\n' .. h.tail())
+    h.P.pit.zone = zone
+    eq(item.picked, true, 'picked before the cast')
+    eq(st(h).outcome, 'completed', 'completed, not "return portal missing"\n' .. h.tail(10))
+    eq(h.logged('teleport_failed'), 0)
+    eq(h.logged('return portal missing'), 0, 'the return is recognised in the cast subzone\n' .. h.tail(10))
+    eq(h.place, h.P.pit, 'back where the cast went')
+    h.assert_clean('G3')
 end)
 
 print(string.format('trip drops 1.0.24: %d checks, %d failures', checks, #failures))
