@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- SilentRaven  --  magoogle  --  v0.2.7
+-- SilentRaven  --  magoogle  --  v0.2.8
 --
 -- Standalone Tree-of-Whispers turn-in plugin.  Two trigger paths:
 --
@@ -73,6 +73,10 @@ local function refresh_ready(now)
     -- the claim trip; WarPigs' delegation is cached in main_pulse (never in get_status).
     local snapshot = whispers.quest_snapshot()
     tracker.ready = snapshot ~= nil and snapshot.ready == true
+    -- QQT_Warpigz_v3 0.2.8: the ready episode's start (the bounded holds and the
+    -- per-episode log lines key on it). An unreadable snapshot keeps it.
+    if tracker.ready then tracker.ready_since = tracker.ready_since or now
+    elseif snapshot ~= nil then tracker.ready_since = nil end
     claims.observe(now, settings, snapshot)
 end
 
@@ -109,6 +113,11 @@ local function note_hold(reason, now)
     end
     -- QQT_Warpigz_v3: 'Debug logging' prints each change of the hold reason.
     if reason ~= tracker.hold_reason then log.debug(settings, 'auto-fire held: ' .. tostring(reason)) end
+    -- QQT_Warpigz_v3 0.2.8 (RC6): a held auto-fire is visible at normal
+    -- verbosity, once per reason and ready episode (a Temis stop is often
+    -- shorter than the 60 s line below).
+    coordination.say_once('hold:' .. tostring(reason), 'reward ready in Temis but auto-fire waits: ' .. tostring(reason))
+    tracker.visit_hold = reason
     tracker.hold_reason, tracker.hold_seen_t = reason, now
     if not tracker.hold_logged and now - tracker.hold_since >= HOLD_LOG_S then
         tracker.hold_logged = true
@@ -148,6 +157,7 @@ local function maybe_autofire(now, cur_zone)
     local clear, reason = coordination.companions(mode, now)
     if not clear then note_hold(reason, now); return end
     tracker.hold_reason, tracker.hold_since, tracker.hold_seen_t = nil, nil, nil
+    tracker.visit_hold = nil -- QQT_Warpigz_v3 0.2.8
     fsm.start(settings, mode, false, nil)
 end
 
@@ -283,7 +293,7 @@ end
 -- side, so anything faster is wasted work.
 local function register_d4remote()
     if d4remote_registered or not (D4Remote and D4Remote.register) then return end
-    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.2.7') end) == true
+    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.2.8') end) == true
 end
 
 local function report_to_d4remote(now)
@@ -397,4 +407,4 @@ SilentRavenPlugin   = external
 -- report_to_d4remote retries while D4Remote loads later or register fails.
 register_d4remote()
 
-log.info('loaded magoogle | SilentRaven | v0.2.7')
+log.info('loaded magoogle | SilentRaven | v0.2.8')

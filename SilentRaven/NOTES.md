@@ -1,4 +1,4 @@
-# SilentRaven (0.2.7): session notes (WarRoom archived in 3.3.6)
+# SilentRaven (0.2.8): session notes (WarRoom archived in 3.3.6)
 
 > 3.3.6 (Coordinator, owner request 2026-09-28): WarRoom is archived in `archive/WarRoom` (not shipped, not tested; see `archive/README.md`). This session owns SilentRaven only; the WarRoom notes below are kept for when it returns.
 
@@ -7,7 +7,9 @@
 - MOVING_TO_RIFT counts as busy (3.1.1). It works in any game language. Rosie hands off a ready reward on the return leg of a trip.
 - 0.2.6: a third-party loop owning the run (`TRISTRAM_LOOP_STATE.status().owns_activity`) holds the claim trip and auto-fire / delegated auto-fire (not the manual keybind, not an external request such as Rosie's hand-off).
 - 0.2.6 (auditor findings): Butler / Scavenger / Navigator (not paused, owner ≠ SilentRaven) hold every own-run admission, the mid-run yield and the claim trip; Navigator pause condition `SilentRaven` while a claim runs and does not yield; a trip counts against TRIP_LIMIT only once its teleport was tried; held auto-fire at 2 Hz; `yielding` published; cancel/disable through `fsm.finish_external`; RUN_TIMEOUT 90 s. With Worldstone the player is rarely idle in Temis: expect claims mostly from Rosie's hand-off (Rosie holds Navigator during its trip).
+- 0.2.8 (audit/reviews/silentraven_manual_2026-09-28.md RC1-RC7 + the Undercity channel cause): all third-party holds bounded per ready episode (`tracker.ready_since`, first-seen clocks): TristramLoop 60 s in Temis / 600 s claim trip, Butler / Scavenger / Navigator priority>=10 180 s; Navigator priority<10 never holds; pause condition kept through non-town yields; `quest_turned_in` receipt; RC5 unclaimed reset; RC6 hold line; RC7 textless objective; teleport channel hold (15 s). Tests: test_silentraven.lua (RC4, RC7), test_silentraven_q8_bounds.lua T/W/U/R/X/E (+G Navigator gate now a priority-10 walk).
 - Self-review 2026-09-28 (both modes, hand-off, any language): no other defect found. The owner plays a Russian client: readiness is always *inferred* there (no English turn-in text), so a Temis visit gets one NPC probe and a ready episode one claim trip (by design, C6). Selection uses SNOs / internal names only (language-independent).
+- Live checks after 0.2.8: `run finished: success (quest_turned_in)` instead of `unconfirmed`; an auto-claim at a Temis stop with Worldstone + TristramLoop running; one visible hold line when auto-fire waits; whether Navigator's `is_paused` reflects pause conditions.
 - Live checks still open: the inferred path end to end on the Russian client (`reward ready (inferred …)` → `run finished: success`), a claim trip under WarPigs + Helltide, the new hold lines if Worldstone/TristramLoop runs.
 
 ## WarRoom (archived in 3.3.6)

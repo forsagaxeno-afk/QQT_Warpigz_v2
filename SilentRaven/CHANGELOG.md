@@ -1,3 +1,13 @@
+# 0.2.8 — "SilentRaven is manual now" (QQT_Warpigz_v3, after 3.3.6)
+
+- **Auto-claims again next to Worldstone / TristramLoop / Butler.** A loop owning the run (`TRISTRAM_LOOP_STATE.owns_activity`) holds auto-fire at a Temis stop only until the reward has been ready 60 s (`auto-fire waited 60s for …; claiming at this Temis stop`), the claim trip at most 600 s. A Navigator request below priority 10 (Worldstone's walk) no longer holds; the claim's Navigator pause condition stops it. Butler, Scavenger and a town-priority Navigator walk hold at most 180 s per ready reward (one line).
+- A Looter / Alfred yield mid-claim keeps Navigator paused (only a Butler or town-priority Navigator yield releases it); the claim no longer ends `cancelled (yield_timeout:navigator_busy:Worldstone)`.
+- **Receipt:** a quest that was ready and is turned in (gone, panel closed, 1 s) is a claim, `run finished: success (quest_turned_in)`, even when the cache is not seen in the bags (it was `unconfirmed — not claimed`). A real timeout logs `receipt not seen: …` and once a bag diff across all five lists.
+- A held auto-fire logs `reward ready in Temis but auto-fire waits: <reason>` once per reason and reward; the outside-Temis lines no longer promise the next visit while the last one was held.
+- A claim-trip callback that arrives after the reward left no longer starves the next reward's claim trip.
+- A Whisper objective without text counts by the host's progress fields (ratio 1: ready, partial: collecting, none: ready, inferred).
+- No claim walk or claim trip starts while the player channels a teleport (spell 186139, at most 15 s), e.g. WonderCity's cast to Kurast.
+
 # 0.2.6 — QQT_Warpigz_v3 3.3.3
 
 - A third-party loop that owns the run (`TRISTRAM_LOOP_STATE.status().owns_activity`, TristramLoop driven by Worldstone) is never interrupted: the claim trip waits (`claim trip waits because another activity owns the run (TristramLoop, …)`) and auto-fire in Temis holds (`activity_owner:TristramLoop`). Rosie already deferred its own trips for it; SilentRaven asked Rosie to teleport away after 5 min of a ready reward. The reward stays ready for a later Temis visit or a Rosie trip's hand-off.

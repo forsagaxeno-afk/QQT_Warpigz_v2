@@ -12,7 +12,23 @@
 -- another plugin is required from here.
 local log = require 'silent_raven.log'
 local tracker = require 'silent_raven.tracker'
+local whispers = require 'silent_raven.whispers' -- QQT_Warpigz_v3 0.2.8
 local M = {}
+
+-- QQT_Warpigz_v3 0.2.8 ("SilentRaven is manual now"): every third-party hold
+-- is bounded per ready episode (tracker.ready_since, set by main.refresh_ready;
+-- a first-seen clock, so sampling gaps never restart it).
+-- ACTIVITY_DEFER_S: a loop owning the run (TristramLoop) holds auto-fire at a
+--   Temis stop until the reward has been ready this long (Rosie DEFER_TOWN).
+-- ACTIVITY_TRIP_S: the claim trip waits for it at most this long (DEFER_ANY).
+-- THIRD_HOLD_S: Butler / Scavenger / a town-priority Navigator walk hold at
+--   most this long (WarPug HOLD, WarPigs THIRD_PARTY).
+-- NAV_TOWN_PRIORITY: a Navigator request below it (Worldstone's walk sends
+--   none: 0) never holds; our pause condition stops it once the claim runs.
+-- CHANNEL_CAP_S: a teleport channel (spell 186139) holds a new walk or trip
+--   at most this long.
+M.ACTIVITY_DEFER_S, M.ACTIVITY_TRIP_S, M.THIRD_HOLD_S, M.NAV_TOWN_PRIORITY, M.CHANNEL_CAP_S = 60, 600, 180, 10, 15
+local TELEPORT_SPELL_ID = 186139
 
 -- Unreadable companion status: busy for at most UNKNOWN_LIMIT seconds, then
 -- treated as unavailable (not busy) with one log line.
@@ -268,18 +284,78 @@ local function third_call(name, fn)
     if ok then return v end
     return nil
 end
-function M.third_party_reason()
-    if third_call('Butler', 'is_busy') == true then return 'butler_busy' end
+-- Seconds the ready episode has lasted (0 when nothing is ready).
+local function ready_for(now)
+    local since = tracker.ready_since
+    if type(since) ~= 'number' or now < since then return 0 end
+    return now - since
+end
+M.ready_for = ready_for
+-- One info line per key and ready episode.
+local said = {ep = nil, keys = {}}
+local function say_once(key, message)
+    if said.ep ~= tracker.ready_since then said.ep, said.keys = tracker.ready_since, {} end
+    if said.keys[key] then return end
+    said.keys[key] = true
+    log.info(message)
+end
+M.say_once = say_once
+-- QQT_Warpigz_v3 0.2.8 (RC2): the first time each third-party hold was seen in
+-- this ready episode; past THIRD_HOLD_S it no longer holds (one line).
+local third = {ep = nil, first = {}}
+local function bounded(kind, reason, now)
+    if third.ep ~= tracker.ready_since then third.ep, third.first = tracker.ready_since, {} end
+    third.first[kind] = third.first[kind] or now
+    if now - third.first[kind] < M.THIRD_HOLD_S then return reason end
+    say_once('third:' .. kind, string.format('waited %ds for %s this ready episode; no longer holding for it',
+        M.THIRD_HOLD_S, reason))
+    return nil
+end
+function M.third_party_reason(now)
+    now = now or clock()
+    if third_call('Butler', 'is_busy') == true then
+        local r = bounded('butler', 'butler_busy', now)
+        if r then return r end
+    end
     -- QQT_Warpigz_v3 0.2.7: Rosie's Scavenger stand-in (`_rosie=true`) is
     -- Rosie's pickup, already held through the Looter; skip it.
     local scavenger = rawget(_G, 'Scavenger')
     if not (type(scavenger) == 'table' and rawget(scavenger, '_rosie') == true)
-        and third_call('Scavenger', 'is_busy') == true then return 'scavenger_busy' end
+        and third_call('Scavenger', 'is_busy') == true then
+        local r = bounded('scavenger', 'scavenger_busy', now)
+        if r then return r end
+    end
     local st = third_call('Navigator', 'get_status')
-    if type(st) == 'table' and st.is_busy == true and st.is_paused ~= true and st.owner ~= 'SilentRaven' then
-        return 'navigator_busy:' .. tostring(st.owner or '?')
+    if type(st) == 'table' and st.is_busy == true and st.is_paused ~= true and st.owner ~= 'SilentRaven'
+        and (tonumber(st.priority) or 0) >= M.NAV_TOWN_PRIORITY then -- QQT_Warpigz_v3 0.2.8 (RC2)
+        local r = bounded('navigator', 'navigator_busy:' .. tostring(st.owner or '?'), now)
+        if r then return r end
     end
     return nil
+end
+-- QQT_Warpigz_v3 0.2.8: the player channels a teleport (a WonderCity / Rosie /
+-- War Plan cast: a claim walk or a claim trip would cut it). Bounded per cast.
+local channel = {since = nil}
+function M.teleport_channel(now)
+    now = now or clock()
+    local ok, player = false, nil
+    if type(get_local_player) == 'function' then ok, player = pcall(get_local_player) end
+    local casting = ok and player ~= nil and whispers.safe_method(player, 'get_active_spell_id') == TELEPORT_SPELL_ID
+    if not casting then channel.since = nil; return false end
+    channel.since = channel.since or now
+    return now - channel.since < M.CHANNEL_CAP_S
+end
+-- QQT_Warpigz_v3 0.2.8 (RC1): a loop owning the run holds a new auto-fire,
+-- except at a Temis stop once the reward has been ready ACTIVITY_DEFER_S.
+function M.activity_hold(now)
+    local owner = M.activity_owner()
+    if not owner then return nil end
+    if whispers.in_whisper_town() and ready_for(now) >= M.ACTIVITY_DEFER_S then
+        say_once('activity_defer', string.format('auto-fire waited %ds for %s; claiming at this Temis stop',
+            M.ACTIVITY_DEFER_S, owner))
+        return nil
+    end
+    return 'activity_owner:' .. owner
 end
 -- Navigator pause condition 'SilentRaven': Navigator stands still while a
 -- claim of ours runs (not while it yields: Butler walks through Navigator).
@@ -289,8 +365,15 @@ function M.register_navigator()
     local nav = rawget(_G, 'Navigator')
     if type(nav) ~= 'table' or nav_registered == nav or type(nav.set_pause_condition) ~= 'function' then return end
     nav_registered = nav
+    -- QQT_Warpigz_v3 0.2.8 (RC3): Navigator stays held during a yield too,
+    -- except one for a town service that walks through Navigator (Butler, a
+    -- town-priority Navigator walk); releasing it for a Looter blip let the
+    -- loop's walk resume and hold the yield until its 120 s timeout.
     pcall(nav.set_pause_condition, 'SilentRaven', function()
-        return tracker.running == true and tracker.yield_since == nil
+        if tracker.running ~= true then return false end
+        if tracker.yield_since == nil then return true end
+        local why = tostring(tracker.yield_reason)
+        return not (why == 'butler_busy' or why:find('^navigator_busy:') ~= nil)
     end)
 end
 
@@ -299,19 +382,22 @@ end
 --                 without WarPigs, which owns no Temis movement then) -- QQT_Warpigz_v3 (Q8)
 -- mode 'manual' : explicit keybind (WarPug, Alfred live work, Looter)
 -- mode 'run'    : mid-run yield of our own run (Alfred live work, Looter)
--- Every mode also waits for Butler, Scavenger and a moving Navigator (3.3.3).
+-- Every mode also waits for Butler, Scavenger and a moving town-priority
+-- Navigator (3.3.3; 0.2.8: priority >= 10, each at most 180 s per ready
+-- episode); every mode but 'run' for a teleport channel (0.2.8, <= 15 s).
 -- Returns true, or false plus the hold reason.
 function M.companions(mode, now)
     now = now or clock()
     local reason
     if mode == 'auto' then reason = war_pigs_reason() end
-    if not reason and (mode == 'auto' or mode == 'delegated') then -- QQT_Warpigz_v3 3.3.3
-        local owner = M.activity_owner()
-        if owner then reason = 'activity_owner:' .. owner end
+    if not reason and (mode == 'auto' or mode == 'delegated') then -- QQT_Warpigz_v3 3.3.3 / 0.2.8 (RC1 bound)
+        reason = M.activity_hold(now)
     end
+    -- QQT_Warpigz_v3 0.2.8: never start a claim walk over a teleport channel.
+    if not reason and mode ~= 'run' and M.teleport_channel(now) then reason = 'teleport_channel' end
     if not reason and mode ~= 'run' then reason = war_pug_reason(now) end
     reason = reason or alfred_reason(now, mode ~= 'auto' and mode ~= 'delegated') or looter_reason(now) -- QQT_Warpigz_v3 (Q8)
-        or M.third_party_reason() -- QQT_Warpigz_v3 3.3.3: every mode (auto, delegated, manual, mid-run yield)
+        or M.third_party_reason(now) -- QQT_Warpigz_v3 3.3.3: every mode (auto, delegated, manual, mid-run yield)
     if reason then return false, reason end
     return true
 end

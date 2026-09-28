@@ -165,6 +165,29 @@ local function diagnose(reason, detail)
     log.info('reward diagnostics (' .. reason .. (detail and ('; ' .. detail) or '') .. '):')
     pcall(whispers.dump_rewards, rewards)
 end
+-- QQT_Warpigz_v3 0.2.8 (RC4): why a sent claim was not confirmed, one line per
+-- run, and once per session the bag SNOs that changed since the accept.
+local function receipt_diagnostics(entry, count, snapshot)
+    local open_ok, open = pcall(function() return quest_reward.is_open() end)
+    log.info(string.format('receipt not seen: pick sno=%s, bag count %s -> %s, panel open=%s, quest %s',
+        tostring(entry and entry.sno), tostring(tracker.claim_before), tostring(count),
+        tostring(open_ok and open or 'error'),
+        snapshot == nil and 'unreadable' or (snapshot.present and (snapshot.ready and 'still ready' or 'present, not ready')
+            or 'gone')))
+    if session.bag_diff_logged then return end
+    session.bag_diff_logged = true
+    local before, after = tracker.claim_bags, whispers.bag_snos()
+    if not before or not after then log.info('bag diff: bags unreadable'); return end
+    local changed = {}
+    for sno, n in pairs(after) do
+        if n ~= (before[sno] or 0) then changed[#changed + 1] = string.format('%d:%d->%d', sno, before[sno] or 0, n) end
+    end
+    for sno, n in pairs(before) do
+        if after[sno] == nil then changed[#changed + 1] = string.format('%d:%d->0', sno, n) end
+    end
+    table.sort(changed)
+    log.info('bag diff since accept (all lists): ' .. (#changed > 0 and table.concat(changed, ', ') or 'no change'))
+end
 local function retry(reason, now)
     tracker.last_reason = reason
     -- ESC only for a panel we can see: with nothing open, D4 opens the game menu.
@@ -348,6 +371,7 @@ local function verify_selection(now)
         slot = rewards.extract_slot(entry), legendary = rewards.is_legendary(entry),
     }
     tracker.claim_sent = true
+    tracker.claim_bags = whispers.bag_snos() -- QQT_Warpigz_v3 0.2.8 (RC4 diagnostics)
     pcall(quest_reward.accept)
     transition('API_CLAIMING', now)
 end
@@ -458,7 +482,22 @@ function M.tick(settings)
             tracker.confirm_since = tracker.confirm_since or now
             if now - tracker.confirm_since >= 0.5 then finish('success'); return end
         else tracker.confirm_since = nil end
+        -- QQT_Warpigz_v3 0.2.8 (RC4): the quest turning in is receipt too (the
+        -- cache may land in a list or SNO we do not count, or be no bag item):
+        -- ready at START and no longer ready, or gone, in a readable snapshot,
+        -- with the panel closed, held 1 s. A nil snapshot never counts.
+        local turned_in = snapshot ~= nil and closed
+            and ((tracker.claim_quest_ready and not snapshot.ready) or not snapshot.present)
+        if turned_in then
+            tracker.turnin_since = tracker.turnin_since or now
+            if now - tracker.turnin_since >= 1 then
+                tracker.last_reason = 'quest_turned_in'
+                log.info('claimed ' .. tostring(entry and entry.name) .. ' (quest turned in; cache not seen in the bags)')
+                finish('success'); return
+            end
+        else tracker.turnin_since = nil end
         if now - tracker.state_t >= 8 then
+            receipt_diagnostics(entry, count, snapshot)
             tracker.last_reason = 'receipt_unconfirmed'; finish('unconfirmed')
         end
         return
@@ -474,6 +513,7 @@ function M.tick(settings)
         if not snapshot.present or (snapshot.collecting and not snapshot.ready) then
             tracker.last_reason = 'no_completed_whispers'; finish('skipped_not_ready'); return
         end
+        tracker.claim_quest_ready = snapshot.ready == true -- QQT_Warpigz_v3 0.2.8 (RC4)
         -- Never consume a reward panel opened by another task or the player.
         if whispers.reward_panel_open() ~= false then
             tracker.last_reason = 'reward_panel_busy_or_unknown'; finish('skipped_busy'); return

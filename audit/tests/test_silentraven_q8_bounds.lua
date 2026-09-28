@@ -136,8 +136,10 @@ local GATES = {
         h.G.Scavenger = {is_busy = function() return busy end}
         return function() busy = false end
     end},
-    {'Navigator walking for Worldstone', 'a third-party addon is busy (navigator_busy:Worldstone)', function(h)
-        local st = {is_busy = true, owner = 'Worldstone', priority = 0}
+    -- 0.2.8: a town-priority walk (Butler, priority 10); Worldstone's priority-0
+    -- walk no longer holds (Rosie pauses Navigator for its trip; case W).
+    {'Navigator walking for Butler', 'a third-party addon is busy (navigator_busy:Butler)', function(h)
+        local st = {is_busy = true, owner = 'Butler', priority = 10}
         h.G.Navigator = {get_status = function() return st end}
         return function() st.is_busy = false end
     end},
@@ -310,27 +312,29 @@ end)
 -- QQT_Warpigz_v3 3.3.3: a third-party loop (TristramLoop, driven by
 -- Worldstone) that owns the run keeps SilentRaven's own auto-fire in Temis
 -- held (it would take movement away from it); the claim starts once it lets go.
-case('T auto-fire in Temis holds while TristramLoop owns the run', function()
+-- QQT_Warpigz_v3 0.2.8 (RC1, "SilentRaven is manual now"): a third-party loop
+-- (TristramLoop) owning the run holds auto-fire at a Temis stop only until the
+-- reward has been ready 60 s (Rosie's DEFER_TOWN), then claims; one visible
+-- hold line (RC6). 0.2.6/0.2.7 held it forever.
+case('T auto-fire in Temis waits for a loop owning the run at most 60 s of readiness', function()
     local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
     h.assert_clean('load')
     h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
-    local st = {running = true, owns_activity = true, phase = 'loop'}
+    local st = {running = true, owns_activity = true, phase = 'town'}
     h.G.TRISTRAM_LOOP_STATE = {status = function() return st end}
     h.bounty_ready = true
-    h.run(70)
+    h.run(59)
     h.assert_clean('held')
-    eq(h.logged('[SilentRaven] claiming the Whisper reward'), 0, 'no claim while the loop owns the run\n' .. h.tail(20))
-    eq(h.logged('[SilentRaven] auto-fire waiting'), 1, 'one hold line after 60 s\n' .. h.tail(20))
-    ok(h.logged('activity_owner:TristramLoop') >= 1, 'the hold names the owner\n' .. h.tail(20))
-    st.owns_activity = false
-    ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward') == 1 end, 5),
-        'the claim starts once the loop lets go\n' .. h.tail(20))
+    eq(h.logged('[SilentRaven] claiming the Whisper reward'), 0, 'no claim before 60 s of readiness\n' .. h.tail(20))
+    eq(h.logged('[SilentRaven] reward ready in Temis but auto-fire waits: activity_owner:TristramLoop'), 1,
+        'one visible hold line (RC6)\n' .. h.tail(20))
+    ok(h.run_until(function() return h.logged('[SilentRaven] run finished') > 0 end, 30),
+        'the claim runs at this Temis stop\n' .. h.tail(20))
+    eq(h.logged('[SilentRaven] claiming the Whisper reward (auto)'), 1, 'exactly one auto claim')
+    eq(h.logged('[SilentRaven] run finished: success'), 1, 'claimed\n' .. h.tail(20))
+    eq(h.logged('claiming at this Temis stop'), 1, 'the bound is logged once')
 end)
 
--- QQT_Warpigz_v3 3.3.3 (auditor HIGH): auto-fire in Temis waits for Butler's
--- trip, Scavenger's pickup and a moving Navigator of another owner; a paused
--- Navigator moves nobody. While our claim runs, the Navigator pause condition
--- 'SilentRaven' holds Navigator.
 case('N auto-fire in Temis waits for Butler / Scavenger / a moving Navigator; our claim pauses Navigator', function()
     local movers = {
         {'butler_busy', function(h, f) h.G.Butler = {is_busy = function() return f.on end} end},
@@ -462,6 +466,144 @@ case('K a claim trip ended before any teleport is not counted', function()
     h.assert_clean('K')
     ok(calls >= 2, 'a trip that never teleported does not use up the inferred limit (trips: ' .. calls .. ')\n' .. h.tail(20))
     ok(h.logged('no teleport, not counted') >= 1, 'logged as not counted')
+end)
+
+-- A Navigator mock that honours pause conditions (is_paused while any is true)
+-- with a permanent request of `owner` / `priority`.
+local function navigator(h, owner, priority)
+    local nav = {cond = {}, owner = owner, priority = priority}
+    local function paused()
+        for _, fn in pairs(nav.cond) do if fn() == true then return true end end
+        return false
+    end
+    nav.api = {
+        get_status = function()
+            return {is_busy = nav.owner ~= nil, is_paused = paused(), owner = nav.owner, priority = nav.priority}
+        end,
+        set_pause_condition = function(name, fn) nav.cond[name] = fn end,
+    }
+    h.G.Navigator = nav.api
+    return nav
+end
+
+-- QQT_Warpigz_v3 0.2.8 (RC2a): Worldstone's walk (a Navigator request with no
+-- priority) never holds auto-fire; once the claim runs our pause condition
+-- stops it. 0.2.6/0.2.7: never claimed while the request was pending.
+case('W a priority-0 Navigator request (Worldstone) does not hold; the claim pauses it', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    local nav = navigator(h, 'Worldstone', 0)
+    local t0 = h.now
+    h.bounty_ready = true
+    local held = false
+    ok(h.run_until(function()
+        local s = h.as(SR, function() return h.G.SilentRavenPlugin.get_status() end)
+        if s.running and nav.cond.SilentRaven and nav.cond.SilentRaven() == true then held = true end
+        return h.logged('[SilentRaven] run finished') > 0
+    end, 30), 'the claim ran\n' .. h.tail(20))
+    local t = log_time(h, '[SilentRaven] claiming the Whisper reward (auto)')
+    ok(t ~= nil and t - t0 <= 2.5, 'claimed within 2 s (' .. tostring(t and t - t0) .. ')\n' .. h.tail(20))
+    ok(held, 'Navigator is paused while the claim runs')
+    eq(h.logged('[SilentRaven] run finished: success'), 1, 'success\n' .. h.tail(20))
+end)
+
+-- QQT_Warpigz_v3 0.2.8 (RC2b): a Butler that reports busy forever holds for at
+-- most 180 s of this ready episode (one line), then the claim runs.
+case('U a Butler stuck busy holds auto-fire at most 180 s', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    h.G.Butler = {is_busy = function() return true end}
+    h.bounty_ready = true
+    h.run(170)
+    eq(h.logged('[SilentRaven] claiming the Whisper reward'), 0, 'held while Butler is busy\n' .. h.tail(20))
+    ok(h.run_until(function() return h.logged('[SilentRaven] run finished: success') == 1 end, 40),
+        'claimed after the bound\n' .. h.tail(20))
+    eq(h.logged('waited 180s for butler_busy this ready episode'), 1, 'one bound line')
+    eq(h.logged('[SilentRaven] reward ready in Temis but auto-fire waits: butler_busy'), 1, 'one hold line')
+end)
+
+-- QQT_Warpigz_v3 0.2.8 (RC3): a Looter blip during the claim keeps Navigator
+-- paused (only a Butler / town-priority Navigator yield releases it), so the
+-- loop's walk never resumes and holds the yield until its 120 s timeout.
+case('R a Looter blip mid-claim keeps Navigator paused; the claim finishes', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    local nav = navigator(h, nil, 0)
+    local looting = false
+    h.G.LooteerPlugin = {is_actively_looting = function() return looting end}
+    h.bounty_ready = true
+    ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward (auto)') == 1 end, 5), 'started')
+    local t0 = h.now
+    h.at(0.5, function() nav.owner = 'Worldstone' end)
+    h.at(1.0, function() looting = true end)
+    h.at(2.0, function() looting = false end)
+    local held_in_blip, blip_seen = true, false
+    ok(h.run_until(function()
+        if looting then
+            blip_seen = true
+            if not (nav.cond.SilentRaven and nav.cond.SilentRaven() == true) then held_in_blip = false end
+        end
+        return h.logged('[SilentRaven] run finished') > 0
+    end, 30), 'the claim finished\n' .. h.tail(20))
+    ok(blip_seen, 'the blip happened during the claim')
+    ok(held_in_blip, 'Navigator stayed paused during the Looter yield')
+    eq(h.logged('[SilentRaven] run finished: success'), 1, 'success\n' .. h.tail(20))
+    eq(h.logged('yield_timeout'), 0, 'no yield timeout')
+    ok(h.now - t0 < 12, 'within 12 s')
+end)
+
+-- QQT_Warpigz_v3 0.2.8 (Undercity storm): never start a claim walk while the
+-- player channels a teleport (WonderCity's cast to Kurast); bounded to 15 s.
+case('X a teleport channel holds a new claim; a channel stuck past 15 s does not', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    h.casting = true
+    h.bounty_ready = true
+    h.run(5)
+    eq(h.logged('[SilentRaven] claiming the Whisper reward'), 0, 'no claim during the channel\n' .. h.tail(20))
+    eq(h.logged('[SilentRaven] reward ready in Temis but auto-fire waits: teleport_channel'), 1, 'one hold line')
+    h.casting = false
+    ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward (auto)') == 1 end, 3),
+        'the claim starts once the channel ends\n' .. h.tail(20))
+    local h2 = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h2.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    h2.casting = true
+    h2.bounty_ready = true
+    h2.run(14)
+    eq(h2.logged('[SilentRaven] claiming the Whisper reward'), 0, 'held up to 15 s')
+    ok(h2.run_until(function() return h2.logged('[SilentRaven] claiming the Whisper reward (auto)') == 1 end, 4),
+        'a channel stuck past 15 s no longer holds\n' .. h2.tail(20))
+end)
+
+-- QQT_Warpigz_v3 0.2.8 (RC5): a claim trip whose callback arrives after the
+-- quest left does not count against the next ready episode (on an inferred
+-- client the next reward got no claim trip at all).
+case('E a late trip callback does not starve the next ready episode', function()
+    local h = host({rosie = false, dirs = {SR}})
+    local ST = {live = false, done = false}
+    local calls = {}
+    local api = {
+        get_status = function()
+            return {enabled = true, name = 'StubTown', raven_handoff = 'stub_town', allow_external = true,
+                trigger_tasks = ST.live, teleport_done = ST.done}
+        end,
+        trigger_tasks_with_teleport = function(caller, cb)
+            calls[#calls + 1] = h.now
+            ST.live, ST.done = true, true
+            h.at(3, function() h.set_quests({}) end) -- the claim turned the quest in
+            h.at(8, function() ST.live = false; cb('failed') end)
+            return true
+        end,
+    }
+    h.G.AlfredTheButlerPlugin, h.G.PLUGIN_alfred_the_butler = api, api
+    local RU = {{name = 'Bounty_Meta_Quest', objectives = {{text = 'Соберите Мрачную Благосклонность (10/10)'}}}}
+    h.set_quests(RU)
+    ok(h.run_until(function() return #calls == 1 end, 90), 'first trip\n' .. h.tail(20))
+    ok(h.run_until(function() return h.logged('claim trip ended without a claim') == 1 end, 20), 'first trip ended')
+    h.run(5)
+    h.set_quests(RU) -- the next reward
+    ok(h.run_until(function() return #calls == 2 end, 90), 'a trip for the next reward\n' .. h.tail(20))
+    eq(h.logged('no more claim trips'), 0, 'the next episode is not starved')
 end)
 
 if #failures > 0 then error(table.concat(failures, '\n')) end

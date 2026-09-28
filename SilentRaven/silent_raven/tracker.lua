@@ -89,6 +89,11 @@ M.reset_run = function ()
     M.walk_stalls       = 0
     M.walk_stall_logged = false
     M.claim_pick        = nil
+    -- QQT_Warpigz_v3 0.2.8 (RC4): the quest was ready at START; a turned-in
+    -- quest held since; the bags at accept (diagnostics).
+    M.claim_quest_ready = false
+    M.turnin_since      = nil
+    M.claim_bags        = nil
     M.reward_dumped     = false
     -- Own runs (auto/manual) yield to companions, and an owner's guard may
     -- pause a request (R15 'yield:'); paused time is not run time.
