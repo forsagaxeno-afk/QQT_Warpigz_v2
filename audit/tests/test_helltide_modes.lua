@@ -106,12 +106,16 @@ local function session(opts)
     env.attributes = {PLAYER_IN_TOWN_LEVEL_AREA = 1, CHARGEABLE_GIZMO_PROGRESS = 2, GIZMO_HAS_BEEN_OPERATED = 3}
     env.orbwalker = {set_clear_toggle = function(on) s.orb.clear = on end,
         set_block_movement = function(on) s.orb.block = on end}
-    env.os = setmetatable({date = function(fmt, ...)
+    -- QQT_Warpigz_v3 3.3.4: the whole clock is scripted (a fixed UTC hour at
+    -- s.minute): core/hr_clock.lua also reads os.time() and os.date('!*t'),
+    -- and the real wall clock made results depend on when the suite ran (:00).
+    local function pinned_epoch() return 1790002800 + s.minute * 60 end
+    env.os = setmetatable({date = function(fmt, t)
         -- QQT_Warpigz_v3: the Helltide hour is read in UTC (core/hr_clock.lua).
         if fmt == '%M' or fmt == '!%M' then return string.format('%02d', s.minute) end
         if fmt == '!%S' then return '00' end
-        return os.date(fmt, ...)
-    end}, {__index = os})
+        return os.date(fmt, t or pinned_epoch())
+    end, time = function(t) if t then return os.time(t) end return pinned_epoch() end}, {__index = os})
     env.BatmobilePlugin = {
         pause = function() end, resume = function() end,
         set_target = function(_, t) bm.target = t; bm.sets[#bm.sets + 1] = {at = s.now, target = t}; return true end,

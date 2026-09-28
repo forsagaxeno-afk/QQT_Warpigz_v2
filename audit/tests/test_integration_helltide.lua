@@ -136,11 +136,15 @@ local function session(opts)
         set_block_movement = function(on) s.orb.block = on end}
     -- utils.helltide_active()/do_events() read the minute; QQT_Warpigz_v3:
     -- in UTC (core/hr_clock.lua), so the scripted clock answers both forms.
-    env.os = setmetatable({date = function(fmt, ...)
+    -- QQT_Warpigz_v3 3.3.4: the whole clock is scripted (a fixed UTC hour at
+    -- s.minute): core/hr_clock.lua also reads os.time() and os.date('!*t'),
+    -- and the real wall clock made results depend on when the suite ran (:00).
+    local function pinned_epoch() return 1790002800 + s.minute * 60 end
+    env.os = setmetatable({date = function(fmt, t)
         if fmt == '%M' or fmt == '!%M' then return string.format('%02d', s.minute) end
         if fmt == '!%S' then return '00' end
-        return os.date(fmt, ...)
-    end}, {__index = os})
+        return os.date(fmt, t or pinned_epoch())
+    end, time = function(t) if t then return os.time(t) end return pinned_epoch() end}, {__index = os})
     env.BatmobilePlugin = batmobile
     env.LooteerPlugin = {get_enabled = function() return true end,
         is_actively_looting = function() return s.looting end}
