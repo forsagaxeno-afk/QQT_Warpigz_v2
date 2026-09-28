@@ -2,6 +2,16 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.9] — 2026-09-28
+
+### Fixed
+
+- **Rosie 1.0.25: the stash deposit from BetterAlfred** (owner request; live: the first item of every visit, often a Mythic, stayed in the bag, trip after trip).
+  - The stash counts as open only when it has finished loading (its item count stays the same for 0.5 s, or the game reports the stash screen), so no item is sent while the game would drop it.
+  - Every second Rosie sends every item that should be stashed; whatever did not move is simply sent again next pass. No item is skipped for the whole trip any more after one lost move.
+  - Rosie still decides what goes in (Mythics, keep lists, talismans, materials and socketables by your settings), still closes the panel it opened with Escape, and the stash pull is unchanged.
+  - "Stash full" now comes from the game: only when deposits are really refused, or at 350 items, and the log names what stayed in the bag.
+
 ## [3.3.8] — 2026-09-28
 
 Two live reports: "again about 5 teleports before entering the Undercity" and "SilentRaven is manual now???".
