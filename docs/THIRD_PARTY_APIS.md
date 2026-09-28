@@ -32,6 +32,7 @@ Full function list (seen, `API Navigator:` line): `explore, find_path, get_known
 Functions (seen): `get_status, get_wanted_items, is_busy, pause, resume`.
 - `Scavenger.is_busy() -> boolean` (seen). Worldstone polls it about every 5 s.
 - `Scavenger.pause(caller)` / `Scavenger.resume(caller)` (seen: `pause("Worldstone")`, `resume("Worldstone")`). The pause is keyed by the caller's name, so each plugin resumes only its own pause.
+- **Rosie's stand-in** (Rosie 1.0.23+, only while Worldstone runs and no real Scavenger is installed) is a `_G.Scavenger` table with `_rosie = true`. Our non-Rosie plugins must treat it as absent (`rawget(t, '_rosie') == true`): Rosie's pickup is already read through `LooteerPlugin` (3.3.6).
 
 ## Worldstone (`_G.Worldstone`, v0.1.4-public)
 An activity bot for the S15 Worldstone capstone (`S15_Triad_B_Worldstone_UberCapstone`). It exposes only `get_status`. It drives Navigator (no `priority`, so 0), pauses Scavenger and registers the Navigator pause condition `"Worldstone Looting"`.

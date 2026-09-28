@@ -23,19 +23,20 @@ SKIP = {".gitignore", "Thumbs.db", ".DS_Store", "NOTES.md"}  # NOTES.md: session
 # Placeholder files that keep otherwise empty runtime folders in the package.
 KEEP = ".keep"
 # QQT_Warpigz_v3: files the plugins generate on the user's machine never ship:
-# HelltideRevamped's learned chest spots / fence / stats, and WarRoom's
-# dashboard data, persisted totals and local server state (access token, stop flag).
+# HelltideRevamped's learned chest spots / fence / stats and dashboard data.
 GENERATED = ("HelltideRevamped/learned/*.txt", "HelltideRevamped/learned/*.tmp",
-             "HelltideRevamped/dashboard/hr_data.js", "HelltideRevamped/dashboard/*.tmp",
-             "WarRoom/dashboard/suite_data.js", "WarRoom/dashboard/hr_data.js",
-             "WarRoom/dashboard/*.tmp", "WarRoom/data/*",
-             "WarRoom/server/.dashboard-token", "WarRoom/server/stop.flag",
-             "WarRoom/*.tmp", "WarRoom/*.log")
+             "HelltideRevamped/dashboard/hr_data.js", "HelltideRevamped/dashboard/*.tmp")
+# QQT_Warpigz_v3 3.3.6: repository folders that are never part of the package:
+# parked plugins (archive/, e.g. WarRoom), developer tools (tools/ApiProbe),
+# the audit and test tooling, the documents (shipped only through DOCS) and CI.
+NEVER_SHIP = {"archive", "tools", "audit", "docs", "assets", ".github", "dist"}
 
 
 def ships(rel):
     """True when the repository file at `rel` (a POSIX path relative to the repo root) goes into the zip."""
     path = PurePosixPath(rel)
+    if path.parts and path.parts[0] in NEVER_SHIP:
+        return False
     if path.name in SKIP or "__pycache__" in path.parts:
         return False
     if path.name == KEEP:
@@ -53,6 +54,10 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     name = f"QQT_Warpigz_v3-v{version}"
     package = out / f"{name}.zip"
+    for folder in manifest["components"]:
+        # Only the plugin folders listed in versions.json ship, each a top-level folder.
+        if folder in NEVER_SHIP or "/" in folder or not (ROOT / folder / "main.lua").is_file():
+            raise SystemExit(f"versions.json component is not a shippable plugin folder: {folder}")
     with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
         for folder in manifest["components"]:
             for path in sorted((ROOT / folder).rglob("*")):

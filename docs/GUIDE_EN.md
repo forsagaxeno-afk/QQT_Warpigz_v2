@@ -19,13 +19,12 @@ All credits for the original foundation go to **@ZEWX — LONG LIVE LEGEND**.
 4. [Mode A: "War Plan" automation with WarPigs](#4-mode-a-war-plan-automation-with-warpigs)
 5. [Mode B: farm one activity by hand](#5-mode-b-farm-one-activity-by-hand)
 6. [Troubleshooting (FAQ)](#6-troubleshooting-faq)
-7. [WarRoom dashboard](#7-warroom-dashboard)
 
 ---
 
 ## 1. What is in the bundle
 
-There are 11 plugin folders:
+There are 10 plugin folders:
 
 | Folder | What it does |
 | --- | --- |
@@ -39,7 +38,6 @@ There are 11 plugin folders:
 | `WonderCity` | Farms the Kurast Undercity. |
 | `ArkhamAsylum` | Farms the Pit. |
 | `SilentRaven` | Claims your Whisper rewards in Temis. |
-| `WarRoom` | A web page with live stats for the whole bot (gold, XP, runs, loot, Helltide). It only watches. See [part 7](#7-warroom-dashboard). |
 
 Not included: **your combat script** (for example Orbwalker and your class rotation). You must install and keep your own. The bot walks and loots. Your combat script does the fighting.
 
@@ -54,8 +52,9 @@ Follow these steps every time you install or update.
 1. **Close QQT.**
 2. **Back up `WarPug/positions.txt`.** Copy it to a safe place **outside** the QQT `scripts` folder. This file holds your WarPug click positions. The new package ships it empty.
 3. Open the release zip. Go into its `scripts` folder.
-4. Copy **the 11 plugin folders** from there into your QQT `scripts` folder. Replace the old folders completely.
+4. Copy **the 10 plugin folders** from there into your QQT `scripts` folder. Replace the old folders completely.
    - Do **not** copy `audit`, `docs` or `assets` into `scripts`. QQT would try to load them and print `cannot open ...\main.lua`.
+   - **Updating from 3.3.5 or older?** The package has **no `WarRoom` folder** any more (the web dashboard is parked for now). **Delete the `WarRoom` folder** from your QQT `scripts` folder. The other plugins do not need it.
 5. **Coming from version 2.x?** Delete the old folders that have a version number in their name first. Otherwise QQT loads two copies:
    `WarPigs-1.0.0`, `WarPug-1.0.0`, `Batmobile-1.0.12`, `ArkhamAsylum-1.0.6`, `HelltideRevamped-0.4`, `HordeDev-1.3.9`, `Reaper-main`, `WonderCity-main`, `SilentRaven-0.1.3`.
    (Since 3.0 the folders have no version in their name.)
@@ -272,7 +271,7 @@ After a tear event, the bot collects the drops Rosie wants in the event area, th
 | Option | Default | What it means |
 | --- | --- | --- |
 | **Stats overlay** | ON | A panel on screen: time left, cinders per minute and hour, chests, deaths. Pick **Rows**; change its look under **Overlay appearance** (below). |
-| **Web dashboard** | OFF | Not needed with WarRoom: while WarRoom is enabled, HelltideRevamped writes the Helltide tab's data (live stats, map and history) by itself (see [part 7](#7-warroom-dashboard)), and **Update every (s)** (10, 5-60) sets how often. The option only matters without WarRoom: then the data file goes to `HelltideRevamped\dashboard\hr_data.js`, which has no page of its own any more. |
+| **Web dashboard** | OFF | Leave it off. It writes the Helltide map data to `HelltideRevamped\dashboard\hr_data.js` (**Update every (s)**: 10, 5-60), but no page to view it ships with the bundle at the moment. |
 | **Live Helltide zone (internet)** | OFF | Asks helltides.com (or diablo4.life) where the Helltide is this hour, so the bot goes there directly. Only the zone is read; nothing about you is sent. |
 | **Reset all-time stats** | button | Clears the all-time totals. |
 
@@ -473,77 +472,3 @@ Check WarPigs: **Hordes: enter via War Plan teleport (no compass)** ON and **All
   - HelltideRevamped: **Debug settings → Draw chest status**.
   - WarPigs: **Verbose logs**.
 - The list of important log lines is in `LIVE_CHECKLIST.md` (in the release zip).
-
----
-
-## 7. WarRoom dashboard
-
-WarRoom is a web page that shows what the bot is doing and what it earned. It only watches. It never presses keys, moves your character or changes the settings of other plugins. It works with WarPigs (Mode A) and without it (Mode B).
-
-### 7.1 What it shows
-
-- **Now:** the plugin and activity that run, the step (for example "Floor 3 of 4"), the time in it, and the next War Plan steps.
-- **Totals** for **Session**, **Today** and **All-time**: gold (and gold spent), XP (levels and Paragon), deaths, gold and XP per hour, how much of the session was spent in activities.
-- **Activities:** Pit, Helltide, Undercity, Hordes, bosses, Whispers: runs, finished, failed, average time, best result. A Helltide counts once per visit (the bot was in the Helltide for at least a minute); its chests and cinders are added when HelltideRevamped closes that Helltide hour. Whisper visits with nothing to claim are not runs.
-- **Items:** what was picked up by rarity (mythic, unique, legendary...), Greater Affixes, what was sold, salvaged and stashed.
-- **Helltide tab:** the HelltideRevamped live stats, map and history. Nothing to turn on: while WarRoom is enabled, HelltideRevamped feeds it by itself (its **Web dashboard** option is only for use without WarRoom, see 5.2).
-- **Charts:** gold, XP and runs per hour (per day for All-time).
-- **Timeline:** every run, notable drop, town trip, death, level-up and War Plan step, newest first.
-
-If a number cannot be read from the game, the page shows **n/a**. If the data file stops updating (QQT closed, plugin off), the page says the data is **stale** or **offline**.
-
-### 7.2 Open it on the gaming PC
-
-1. WarRoom is on by default. Its QQT menu (**Z | War Room | Dashboard**):
-
-   | Option | Default | What it means |
-   | --- | --- | --- |
-   | **Enable** | ON | Collect the statistics and write the dashboard data. Off: WarRoom writes nothing and counts nothing. |
-   | **Write every (s)** | 15 | How often `WarRoom\dashboard\suite_data.js` is rewritten (5-60 s). |
-   | **Reset session stats** | button | Clears this session: totals, timeline and the activity strip. |
-   | **Reset today stats** | button | Clears today's totals (they also reset by themselves at local midnight). |
-   | **Reset all-time stats** | button | Clears the all-time totals and the notable drops list. |
-
-2. Do one of these:
-   - **Simplest:** double-click `WarRoom\dashboard\index.html`. It opens in your browser straight from the disk. No internet needed.
-   - **With the local server:** double-click `WarRoom\server\serve.bat`. A black window opens. Then open **http://127.0.0.1:8765** in your browser. Keep the window open while you watch; close it (or press Ctrl+C) to stop.
-
-The page updates itself (the plugin rewrites the data every 15 s by default).
-
-### 7.3 Open it on your phone or tablet (home Wi-Fi)
-
-1. On the gaming PC, double-click `WarRoom\server\serve-lan.bat`.
-2. The window prints a link like `http://192.168.1.20:8765/t/ABCD...`. The last part is your **private access key**.
-3. **Windows firewall asks** whether to allow PowerShell: tick **only "Private networks"** and click **Allow**. Never tick "Public networks".
-4. Your Wi-Fi must be set to **Private** in Windows (Settings → Network & internet → Wi-Fi → your network → Network profile type: **Private**). Otherwise the phone cannot connect.
-5. On the phone, open the link (type it, or paste it into any QR code generator on the PC and scan it). After the first visit the phone remembers the key; the plain `http://192.168.1.20:8765/` link then works too.
-6. To lock out every device that has the key, start it once with a new key: open a command prompt in `WarRoom\server` and run `serve-lan.bat -NewToken`.
-
-Other options (after `serve.bat` or `serve-lan.bat`): `-Port 9000` (another port if 8765 is taken), `-Root "C:\path\to\dashboard"` (another folder).
-
-### 7.4 From outside your home (VPN)
-
-Do **not** forward the port on your router. Use a private VPN instead, for example **Tailscale** (free for personal use):
-
-1. Install Tailscale on the gaming PC and on your phone, and sign in to the same account on both.
-2. Run `serve-lan.bat` on the PC. The window also lists the Tailscale address (`100.x.y.z`). Open `http://100.x.y.z:8765/t/...` on the phone.
-3. If you want to use the Tailscale name instead of the address (for example `mypc.tailnet.ts.net`), start `serve-lan.bat -AllowHost mypc.tailnet.ts.net`.
-4. If Windows puts the Tailscale network in the "Public" profile, the firewall blocks it. Set that network to Private, or allow the port for it in the firewall yourself.
-
-### 7.5 Privacy and security
-
-- The data files hold **no** character name, account or BattleTag, realm, chat text or file paths. Only numbers, activity names and in-game item names.
-- Everything stays on your PC. WarRoom sends nothing to the internet. The page loads nothing from the internet.
-- `serve.bat` is reachable **only from this PC** (127.0.0.1). No firewall prompt, no admin rights.
-- `serve-lan.bat` needs the access key for every other device, and accepts only home-network and VPN addresses (192.168.x.x, 10.x.x.x, 172.16–31.x.x, 100.64–127.x.x).
-- The server is **read-only**: it answers only GET/HEAD requests, serves only the files inside `WarRoom\dashboard` with web-page file types (html, js, css, json, images, fonts), and never lists folders. It cannot reach your other files or change anything.
-- Keep your key link private. It is saved in `WarRoom\server\.dashboard-token` (not in the release zip).
-- The scripts use the PowerShell that comes with Windows. `serve.bat` starts it with `-ExecutionPolicy Bypass` for that window only; it does not change any system setting.
-
-### 7.6 Problems
-
-- *"Could not listen on port 8765."* Another program (or a second server window) uses it. Close it, or run `serve.bat -Port 8766`.
-- *The phone cannot open the link.* Check that the PC and the phone are on the same Wi-Fi, the Wi-Fi is **Private** in Windows, and you allowed the firewall prompt for Private networks.
-- *"Access link required"* on the phone: open the full `/t/...` link from the server window once.
-- *The page freezes when I click the black window.* Clicking selects text and pauses the window. Press **Esc**.
-- *The page says stale / offline.* QQT is closed or WarRoom is off. It comes back by itself when the data file is written again.

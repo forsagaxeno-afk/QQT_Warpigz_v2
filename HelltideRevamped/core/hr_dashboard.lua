@@ -4,7 +4,10 @@
 -- that re-load the script hr_data.js every 5 s. 3.3.0: the Helltide pages
 -- ship with the WarRoom plugin (WarRoom/dashboard/helltide/); with WarRoom
 -- loaded (_G.QQT_WarRoom.dashboard_dir) the file is written into WarRoom's
--- dashboard folder, else into HelltideRevamped/dashboard/ as before. This
+-- dashboard folder, else into HelltideRevamped/dashboard/ as before.
+-- QQT_Warpigz_v3 3.3.6: WarRoom is archived (archive/WarRoom, not shipped),
+-- so _G.QQT_WarRoom is normally absent: the optional path below is then a
+-- no-op and only the 'Web dashboard' option writes the file. This
 -- module rewrites that file every
 -- 'Dashboard update (s)' seconds (5-60, default 10) while 'Web dashboard' is
 -- on and the plugin is enabled:  window.HR_DATA = {...};

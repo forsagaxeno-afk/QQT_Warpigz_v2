@@ -232,7 +232,9 @@ local function third_party_busy(t)
     for _, entry in ipairs(THIRD_PARTY) do
         local key, p = entry[1], rawget and rawget(_G, entry[1]) or _G[entry[1]]
         local ok, busy = false, false
-        if type(p) == 'table' and type(p.is_busy) == 'function' then ok, busy = pcall(p.is_busy) end
+        -- QQT_Warpigz_v3 1.0.17: Rosie's Scavenger stand-in (`_rosie=true`) is
+        -- Rosie's pickup, already read through the Looter; skip it.
+        if type(p) == 'table' and rawget(p, '_rosie') ~= true and type(p.is_busy) == 'function' then ok, busy = pcall(p.is_busy) end
         if ok and busy == true then
             third_party.since[key] = third_party.since[key] or t
             if t - third_party.since[key] < third_party.HOLD then return entry[2] end

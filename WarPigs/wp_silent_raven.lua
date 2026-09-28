@@ -176,7 +176,12 @@ local function companions_clear(advisory_idle, admitted_alfred, gate)
     if looting == nil then return false, 'looter_status_unavailable' end
     if looting then return false, 'looter_busy:' .. source end
     -- QQT_Warpigz_v3 1.1.7: third-party loot / town owners (bounded by wait_live).
-    if call(_G.Scavenger, 'is_busy') == true then return false, 'scavenger_busy' end
+    -- QQT_Warpigz_v3 1.1.8: skip Rosie's Scavenger stand-in (`_rosie=true`):
+    -- her pickup is the Looter above, and 'scavenger_busy' is no pause reason
+    -- before accept, so every Rosie pickup burst cancelled the Whisper request.
+    local scavenger = _G.Scavenger
+    if not (type(scavenger) == 'table' and rawget(scavenger, '_rosie') == true)
+        and call(scavenger, 'is_busy') == true then return false, 'scavenger_busy' end
     if call(_G.Butler, 'is_busy') == true then return false, 'butler_busy' end
     local creator = _G.WarPugPlugin
     if creator then

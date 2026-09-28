@@ -270,7 +270,11 @@ local function third_call(name, fn)
 end
 function M.third_party_reason()
     if third_call('Butler', 'is_busy') == true then return 'butler_busy' end
-    if third_call('Scavenger', 'is_busy') == true then return 'scavenger_busy' end
+    -- QQT_Warpigz_v3 0.2.7: Rosie's Scavenger stand-in (`_rosie=true`) is
+    -- Rosie's pickup, already held through the Looter; skip it.
+    local scavenger = rawget(_G, 'Scavenger')
+    if not (type(scavenger) == 'table' and rawget(scavenger, '_rosie') == true)
+        and third_call('Scavenger', 'is_busy') == true then return 'scavenger_busy' end
     local st = third_call('Navigator', 'get_status')
     if type(st) == 'table' and st.is_busy == true and st.is_paused ~= true and st.owner ~= 'SilentRaven' then
         return 'navigator_busy:' .. tostring(st.owner or '?')

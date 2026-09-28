@@ -57,8 +57,16 @@ def check(state, result):
         raise RuntimeError(message.decode("utf-8", "replace") if message else "Lua error")
 
 
+# QQT_Warpigz_v3 3.3.6: archive/ holds parked code (WarRoom and its tests) that
+# is neither shipped nor tested; restoring it brings it back into these checks.
+# .claude/ holds local Claude Code state, including git worktrees of other
+# sessions (whole old checkouts) that must not be compiled as this tree.
+NOT_RUNTIME = {"audit", "archive", ".claude"}
+
+
 def runtime_sources():
-    return sorted(path for path in SUITE_ROOT.rglob("*.lua") if "audit" not in path.relative_to(SUITE_ROOT).parts)
+    return sorted(path for path in SUITE_ROOT.rglob("*.lua")
+                  if not NOT_RUNTIME.intersection(path.relative_to(SUITE_ROOT).parts))
 
 
 def compile_suite():

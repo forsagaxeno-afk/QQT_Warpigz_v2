@@ -1,5 +1,5 @@
 local plugin_label = 'batmobile'
-local plugin_version = '2.2.2'
+local plugin_version = '2.2.3'
 console.print("Lua Plugin - Batmobile - Leoric - v" .. plugin_version)
 
 local mrul    = require 'core.movement_rules'

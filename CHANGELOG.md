@@ -2,6 +2,28 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.6] — 2026-09-28
+
+### Fixed
+
+- **With Worldstone running, our plugins no longer treat Rosie's Scavenger stand-in as a separate looter.** Rosie's pickup was already covered through her Looter status; reading the stand-in too counted it twice.
+  - **WarPigs 1.1.8:** a Whisper claim is no longer cancelled on every Rosie pickup burst (after three bursts the visit's claim was dropped). The outgoing teleport no longer waits for "Scavenger collecting loot" on Rosie's account.
+  - **WarPug 1.0.17, SilentRaven 0.2.7, ArkhamAsylum 2.1.4, Reaper 1.10.6, HordeDev 2.2.7, WonderCity 2.2.5, Batmobile 2.2.3:** no double waits for Rosie's pickup in planning, Whisper claims, Pit, bosses, Hordes, Undercity and freeroam.
+  - A real third-party Scavenger still holds every wait as before.
+
+### Removed
+
+- **WarRoom is no longer part of the package** (parked for later). The package now has 10 plugin folders. **Delete the `WarRoom` folder from your QQT scripts folder.** No other plugin depends on it; the Helltide web map (WarRoom's Helltide tab) goes with it.
+  - **HelltideRevamped 2.6.3:** the *Web dashboard* tooltip no longer points to WarRoom. No viewer page ships for its data file now, so leave the option off (it is off by default).
+
+## [3.3.5] — 2026-09-28
+
+### Fixed
+
+- **Reaper 1.10.5, HordeDev 2.2.6:** a lair or Horde exit waits for a drop only while Rosie can actually pick it up. A paused Rosie, or one waiting for the orbwalker, no longer holds the exit for the full 75 s / 120 s.
+- **HordeDev 2.2.6:** the town salvage step no longer uses `goto`. The code works the same.
+- WarRoom 1.0.5: shows suite version 3.3.5.
+
 ## [3.3.4] — 2026-09-28
 
 **Rosie 1.0.23: Rosie acts as Scavenger for Worldstone.** Worldstone waits for its looter, Scavenger, before it moves on. Without Scavenger installed it never waited for Rosie's pickup.

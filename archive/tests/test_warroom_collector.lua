@@ -145,10 +145,10 @@ package.path = WR .. '?.lua;' .. package.path
 dofile(WR .. 'main.lua')
 ok(type(QQT_WarRoom) == 'table', 'QQT_WarRoom published')
 eq(QQT_WarRoom.dashboard_dir, WR .. 'dashboard/', 'dashboard_dir is the absolute WarRoom/dashboard/')
-eq(QQT_WarRoom.version, '1.0.4', 'version published')
+eq(QQT_WarRoom.version, '1.0.6', 'version published')
 ok(type(callbacks.update) == 'function' and type(callbacks.menu) == 'function', 'callbacks registered')
 local gui = require 'gui'
-eq(gui.version, 'v1.0.4', 'gui version string')
+eq(gui.version, 'v1.0.6', 'gui version string')
 eq(gui.elements.main_toggle:get(), true, 'Enable defaults to ON')
 eq(gui.elements.write_every:get(), 15, 'Write every defaults to 15 s')
 callbacks.menu()
