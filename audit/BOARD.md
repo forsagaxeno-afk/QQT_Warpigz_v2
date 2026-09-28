@@ -39,7 +39,7 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 - [2026-09-28] [Coordinator → Rosie] Rosie cannot cast Town Portal while the third-party **Navigator** (driven by Worldstone) keeps moving the player. The Navigator interrupts the cast, the trip ends `teleport_failed`, and Rosie cannot pause it. Waiting for the owner's `[ApiProbe]` log of what **Butler** (a Navigator-aware Rosie-like addon) sends to Navigator. Then implement the same in Rosie's `lifecycle.hold_peers` / `release_peers`, with a joint-host regression test using a fake Navigator.
 
 ## Ready for review
-- [2026-09-28] [Auditor] **Rosie 1.0.23 for 3.3.4 (3.3.3 shipped Rosie 1.0.22 without it): the Scavenger mimic for Worldstone** (owner request). Merge `claude/qqt-audit` (it already contains release 3.3.3). Mimic commits: `58bb245`, `2f0fe0d`, `455fbc4`, `cc4feb4`, plus the 1.0.23 relabel.
+- [2026-09-28] [Auditor] **Rosie 1.0.23 for 3.3.4 (3.3.3 shipped Rosie 1.0.22 without it): the Scavenger mimic for Worldstone** (owner request). **Depends on:** WarPigs/WarPug/SilentRaven/Activities/Batmobile removing their `Scavenger.is_busy()` reads (post-3.3.3 MED below); otherwise WarPigs Whisper requests get hard-cancelled under Worldstone. Merge `claude/qqt-audit` (it already contains release 3.3.3). Mimic commits: `58bb245`, `2f0fe0d`, `455fbc4`, `cc4feb4`, plus the 1.0.23 relabel.
   - **Mimic (`Rosie/rosie/private/scavenger_mimic.lua`).** Rosie publishes its own `_G.Scavenger` only when all of these hold: `_G.Worldstone` exists (checked every pulse), no real Scavenger owns the global, and the option "Act as Scavenger for Worldstone/Navigator" is on (default on). It publishes 3 s after the later of Worldstone and Navigator appears, and removes its own table when Worldstone goes away, on a conflict or on a reload. A real Scavenger is never overwritten. Without Worldstone, Rosie behaves exactly like the Rosie session's 1.0.22 (checked frame by frame).
     - `is_busy()` is true only while Rosie really walks to or interacts with a wanted drop; never during a fight wait. Caps: 20 s without a pickup, 60 s per episode; then 5 s during which Rosie does not walk to drops (drops in reach are still taken).
     - `pause/resume(caller)` map to the Looter pause. A repeated pause does not refresh the timeout; after 60 s it is ignored until the caller resumes; unpublishing releases every pause taken through the table.
@@ -120,6 +120,66 @@ Review of 3.3.1 + 3.3.2 (`git diff 3b85b0f..5fbc24c`), 2026-09-28, Auditor. Repr
 - [LOW] Rosie 1.0.20 test quality: B5 (obols) passes on the old code too (verified on a 3b85b0f worktree), so the `loot_manager.is_obols` check has no test that fails without it.
   - B1-B4 and all 5 cases in `test_rosie_bag_waits_331.lua` fail on the old code, as they should.
   - **Fix:** a case where the old classification would have targeted the drop, i.e. a drop the host reports as lootable, with the obols flag set.
+
+### Post-3.3.3 review of the merged branches (Activities, Batmobile 2.2.2, Helltide 2.6.2, SilentRaven 0.2.6/WarRoom 1.0.3, WarPigs 1.1.7/WarPug 1.0.16). Auditor + critic per branch, each finding upheld by 2 skeptics, 2026-09-28
+The claimed fixes were checked: every claimed HIGH/MED fix is in place, and its test fails on the pre-fix code. What is left:
+
+- **[MED, blocks Rosie 1.0.23] (→ Orchestrator, Raven+WarRoom, Activities, Batmobile)**
+  - **Remove the `Scavenger.is_busy()` reads added for the withdrawn request.** In the owner's setup the only `_G.Scavenger` is Rosie's mimic (published only while Worldstone is loaded), and it is harmful in WarPigs:
+    - `wp_silent_raven.lua:130,179` treats `scavenger_busy` as a companion reason. Before accept, `companion_yield` (`:248-285`) pauses only on `looter_busy*` and cancels on anything else.
+    - The mimic stays busy for 1 s after a Looter burst (debounce), so every Rosie burst in Temis hard-cancels the Whisper request. After 3 bursts the visit's claim is dropped (`visit 1: cancelled (scavenger_busy)`). On 1.1.6 the same sequence was one request with 3-6 pauses, kept.
+  - Elsewhere the reads are only duplication, but they have their own costs:
+    - WarPigs `companion_hold` adds a second 30 s hold after the Looter's 30 s (`orchestrator.lua:580-586,738-753`), and WarPug has the same.
+    - SilentRaven's claim-trip blocker checks Scavenger before the Looter (`coordination.lua:273`, `claims.lua:100-101`).
+    - Activities `utils.scavenger_busy` in Arkham, WonderCity, Reaper and HordeDev.
+    - Batmobile freeroam (`main.lua:46-52`, test B9).
+  - Fix: delete them and keep the Butler parts. Any read that must stay has to skip a table with `rawget(t,'_rosie')==true`.
+  - The Coordinator should not release Rosie 1.0.23 before WarPigs drops `scavenger_busy` (repro: critic `test_zz_crit_mimic_raven.lua`, logic in this entry).
+- **[MED] (→ Rosie + Activities; contract line → Coordinator)** The Arkham/WonderCity boss-fight trip defer covers only the activity's own Alfred request.
+  - Rosie's automatic service, which is on by default (`use_keybind=false`), still starts its trip 0.5 s after the bag fills next to a live Pit boss (repro with real Rosie in the joint host).
+  - Fix: Rosie's automatic trip waits, bounded at 90 s, while an activity publishes a live boss fight (e.g. `get_status().boss_fight=true` from Arkham/WonderCity, and Reaper). This needs an AUDIT.md line.
+- **[MED] (→ Helltide, released in 2.6.2)** `hr_chest_reach` in the 2-6 m band latches (`tasks/helltide.lua ~4059-4085`, used at ~2734 / ~2956 / ~3267).
+  - After 3 s without 0.5 m of progress, for example during a fight at the chest, it only ever interacts from where it stands and never moves again.
+  - If interact needs to be closer, a reachable chest gets 6 wasted attempts and a 60 s blacklist. Probe: branch 4.0 m, 6 interactions, not opened; old code walks to 1.9 m and opens.
+  - Fix: after a band interaction that did not open the chest, clear `self._band`; or use the band only when `set_target` was refused.
+- **[MED] (→ Helltide, released)** The silent chest loops and inflates the stats.
+  - `move_to_silent_chest` counts the chest as opened on interact (stats plus a WarRoom event) and forgets it. `check_events` re-detects it, and the hr_watch record resets on every state flip.
+  - Repro: 36 interactions, 36 "opened", 36 re-entries in 120 s.
+  - Fix: count only a confirmed open (the chest is no longer interactable or the key was consumed); route through `allow_chest_interaction` (attempt limit and blacklist); clear `_band` when leaving the state.
+- **[LOW-MED] (→ Helltide)** `alfred.lua decide()`: `waiting_for_request` runs before the new dead check. If the player dies after Rosie accepted HR's trip, the alfred task claims every tick and there is no revive (0 in 60 s). This is not fixed in 2.6.2. Fix: move the dead check first.
+- **LOW (→ Helltide)**
+  - Once `live_seen=='starter'`, a later marker never upgrades it (`check_live ~1419-1432`). The Coordinator's MED sent back before the merge is the same bug; confirm the fix.
+  - The kill watch uses wall time since first sighting, and an ignored target keeps bouncing via `km_target_cache` (`hr_watch.lua ~101-121`).
+  - A site left "never started" is re-armed every 300 s through `startable()`.
+  - The death/revive distance pause (30 m) also freezes the timers for tears engaged up to 42 m.
+  - `guards_stalled` uses an all-time HP minimum, so a steady cultist stream reads as no progress.
+  - The 120 s search retry also applies to returns that never show the buff (4 teleports every 120 s).
+  - After a refusal without stuck, "available again" is logged every 30 s.
+- **LOW (→ Activities)**
+  - Arkham `boss_since` goes stale after a capped defer.
+  - WonderCity `boss_alive` has no range (minibosses included).
+  - The Arkham shrine blacklist fires on transients: no `on_preempt`, and 3 `set_target` refusals within 0.15 s, while Batmobile's failed-target cooldown is 15 s.
+  - Reaper `live_fight` runs before the post-death `summon_committed` branch: after a death the summon is marked without walking back.
+  - Reaper `loot_ready` keeps `logged` across runs.
+  - The Reaper finishing hold (180 s) is shorter than Rosie's trip bound (240 s service plus return). Raise it to ≥300 s.
+  - The Arkham Alfred hop still re-casts every 3 s (it needs the Coordinator's `test_secondpass_town.lua:132`).
+  - README rows edited by the branch; 2 edits without markers.
+- **LOW (→ Batmobile)**
+  - The per-gizmo 5 s STUCK-suppression cap never restarts; make it continuous.
+  - The buff-missed clause `|dz|>=1.5` compares against the z at routing start, not at the interact, and runs before any interact because `trav_delay` is never cleared on a new routing.
+  - `long_path.start_navigation` does not stamp `target_set_at`, so the R1 respawn wipe still hits long routes.
+  - `CALLER_GOAL_REACH=3` disables STUCK/unstuck with no time limit for callers that walk to 2 u.
+- **LOW (→ Raven+WarRoom)**
+  - `yielding` is also true while SilentRaven's own run yields to a companion, which contradicts the CHANGELOG and the BOARD request to farm plugins. Publish it only for an owner 'yield:' pause.
+  - The Navigator condition `SilentRaven` has no heartbeat.
+  - A claim trip that fails without Rosie's teleport flags is never counted.
+  - The mid-run Navigator yield may fire against SilentRaven's own paused condition.
+- **LOW (→ Orchestrator)**
+  - The H5 busy budget counts gaps of at most 2 s, but the settle bounce re-arms on gaps under 3 s, so readings 2-3 s apart still loop. Count gaps up to settle+1 s.
+  - WarPug `hard_since` is not reset through an advisory stretch.
+  - The turn-in `live_since` and WarPug clocks survive inactive gaps.
+  - The turn-in walk to Tyrael does not yield to Butler.
+  - The turn-in `LIVE_WORK_HOLD` 180 s is shorter than Rosie's 240 s service timeout. Raise it to ≥300 s.
 
 ### Reviews of "Ready for review" branches
 - **Rosie 1.0.21** (`claude/qqt-rosie@fbc8838`, PR #3): **OK to merge**. It fixes the live `teleport_failed` under Navigator/Worldstone. The Auditor checked it: `test_rosie_foreign_mover.lua` passes 10/10 on Lua 5.4 and LuaJIT, and fails 8/10 on 1.0.20. All peer calls are type-checked and pcall-guarded. The 1.0.20 HIGH (stale fight hold) and the MED items above are **not** fixed by 1.0.21 and remain open for Rosie. Findings on 1.0.21 (→ Rosie):
