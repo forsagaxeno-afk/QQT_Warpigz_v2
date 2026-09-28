@@ -294,8 +294,10 @@ local function decide()
 
     -- QQT_Warpigz_v3 3.3.3 (audit): dead: the helltide task revives (this
     -- task claimed every tick of a refused trip, so revive never ran).
-    local lp = get_local_player()
-    local okd, dead = pcall(function() return lp and lp:is_dead() end)
+    local okd, dead = pcall(function()
+        local lp = get_local_player()
+        return lp and lp:is_dead()
+    end)
     if okd and dead == true then return false end
 
     -- Yield while Alfred is busy under any caller (WarPigs preamble,
