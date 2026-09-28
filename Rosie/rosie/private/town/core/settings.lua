@@ -53,6 +53,8 @@ local settings = {
     stash_sigis = false,
     salvage_sigils = false,
     max_inventory = 25,
+    -- QQT_Warpigz_v3 1.0.24: the game's stash maximum, not a setting (a stale
+    -- saved slider value of 300 stopped stashing at a miscounted 300).
     max_stash_items = 350,
     failed_action = utils.failed_action_enum['LOG'],
     skip_cache = false,
@@ -234,7 +236,6 @@ function settings:update_settings(force)
     settings.stash_sigils = gui.elements.stash_sigils:get()
     settings.salvage_sigils = gui.elements.salvage_sigils:get()
     settings.max_inventory = gui.elements.max_inventory:get()
-    settings.max_stash_items = gui.elements.max_stash_items:get()
     settings.failed_action = gui.elements.failed_action:get()
     settings.skip_cache       = gui.elements.skip_cache:get()
     settings.skip_favorite    = gui.elements.skip_favorite:get()

@@ -437,6 +437,31 @@ local function choose(best_first)
     selected_key=selected and Pickup.key(selected) or nil
     return selected,score
 end
+-- QQT_Warpigz_v3 1.0.24 (owner, live 3.3.5: a Mythic that dropped during the
+-- Town Portal cast was left on the ground): the wanted drops a town trip must
+-- not leave behind. `fits`: the nearest wanted drop pickup can take now;
+-- `room`: the nearest one it would take if the bag had room (a full-bag trip).
+function M.trip_drops()
+    local items=Utils.host_call(actors_manager.get_all_items)
+    if type(items)~='table' then return nil,nil end
+    local bags={}
+    local roomy=setmetatable({},{__index=function(t,bag)
+        local list=Utils.bag_state(bag)
+        local hit={items=list,full=false}; rawset(t,bag,hit); return hit
+    end})
+    local fits,fits_d,room,room_d
+    for _,item in pairs(items) do
+        if not Pickup.blocked(item) then
+            local d=Utils.distance_to(item)
+            if check_want(item,false,bags) then
+                if not fits or d<fits_d then fits,fits_d=item,d end
+            elseif check_want(item,false,roomy) then
+                if not room or d<room_d then room,room_d=item,d end
+            end
+        end
+    end
+    return fits,room
+end
 function M.get_nearby_item() return (choose(false)) end
 function M.get_best_item()
     local item,score=choose(true)

@@ -99,7 +99,7 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.23';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.24';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
         -- QQT_Warpigz_v3 1.0.23: Rosie as Scavenger for Worldstone/Navigator
@@ -144,7 +144,8 @@ function M.new(cached,conflict)
     Movement.configure(function(owner)
         if not enabled() or not life or life.cleanup_pending()>0 then return false end
         if owner=='town' then return life.busy() and not tracker.external_pause end
-        return owner=='pickup' and not life.busy() and not peer_owns_loot()
+        -- QQT_Warpigz_v3 1.0.24: a trip may lend the player to pickup (lifecycle.lend_pickup).
+        return owner=='pickup' and (not life.busy() or life.pickup_lent()) and not peer_owns_loot()
     end,function() return app.elements.pace:get()==1 and 0.12 or 0.20 end,
     -- QQT_Warpigz_v2 local patch: the planner answers for owner 'pickup' only.
     function(owner,here,goal) if owner=='pickup' then return Route.plan(here,goal) end end)
@@ -196,7 +197,9 @@ function M.new(cached,conflict)
             local detail=tostring(why)
             app.preview_fail_since=app.preview_fail_since or now
             if now-app.preview_fail_since>=2 then
-                if app.preview_failure~=detail then console.print('[Rosie] Item preview failed: '..detail) end
+                -- QQT_Warpigz_v3 1.0.24: no player or world yet (loading) is a wait, not an error.
+                local waiting=detail:find('waiting for',1,true)~=nil
+                if app.preview_failure~=detail and not waiting then console.print('[Rosie] Item preview failed: '..detail) end
                 app.preview_failure=detail
                 app.preview_error='Item preview unavailable: wait for a living character and loaded bags, then reopen this menu.'
             end

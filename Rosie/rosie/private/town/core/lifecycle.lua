@@ -245,7 +245,37 @@ function M.hold_peers()
         console.print('[Rosie] Batmobile refused the town trip pause: '..tostring(ok and 'refused' or result))
     end
 end
+-- QQT_Warpigz_v3 1.0.24: a wanted drop near the Town Portal cast (or at the
+-- return spot) is taken before the trip goes on: the trip lends the player to
+-- pickup by lifting Rosie's own Looter pause (tasks/teleport.lua bounds it).
+-- Refused (false) when another caller also pauses pickup or pickup is off.
+local lent=false
+function M.pickup_lent() return lent end
+function M.lend_pickup(on)
+    local looter=held_looter
+    if on then
+        if lent then return true end
+        if type(looter)~='table' or type(looter.release_pause)~='function' or type(looter.acquire_pause)~='function' then return false end
+        local okr=pcall(looter.release_pause,'Rosie')
+        if not okr then return false end
+        local oks,st=pcall(looter.status)
+        local oke,en=pcall(looter.get_enabled)
+        if not oks or type(st)~='table' or st.paused==true or not oke or en~=true then
+            pcall(looter.acquire_pause,'Rosie')
+            return false
+        end
+        lent=true
+        return true
+    end
+    if lent then
+        lent=false
+        if type(looter)=='table' and type(looter.acquire_pause)=='function' then pcall(looter.acquire_pause,'Rosie') end
+    end
+    return false
+end
 function M.release_peers()
+    -- QQT_Warpigz_v3 1.0.24: a lent pause is not held: nothing to release.
+    if lent then lent=false; held_looter=nil end
     local looter,resume=held_looter,legacy_resume
     held_looter,legacy_resume=nil,false
     -- QQT_Warpigz_v3 1.0.22: only a pause that is still Rosie's is resumed.
@@ -336,6 +366,7 @@ function M.request(caller,callback,teleport,manual)
     tracker.visited_town=utils.is_in_town()
     tracker.service_elapsed=0; tracker.pause_elapsed=0; last_tick=nil
     tracker.raven_wait=nil -- QQT_Warpigz_v3
+    tracker.return_pickup=nil -- QQT_Warpigz_v3 1.0.24
     tracker.mover_elapsed=0; motion.x,motion.y,motion.moved_at=nil,nil,nil -- QQT_Warpigz_v3 1.0.21
     -- QQT_Warpigz_v3 1.0.22: per-trip Navigator hold bounds and revive bound.
     local t0=get_time_since_inject()
@@ -370,6 +401,7 @@ function M.finish(success,reason,kind)
     tracker.external_trigger,tracker.manual_trigger,tracker.trigger_tasks=false,false,false
     tracker.teleport=false
     tracker.raven_wait=nil -- QQT_Warpigz_v3
+    tracker.return_pickup=nil -- QQT_Warpigz_v3 1.0.24
     -- Only the trip's own caller can hold a pause during a trip (M.pause).
     if tracker.external_pause and (tracker.pause_caller==nil or tracker.pause_caller==tracker.external_caller) then
         tracker.external_pause=false; tracker.pause_caller=nil
@@ -514,7 +546,10 @@ function M.tick()
     if M.revive_holds(reviving,now) then return false end -- QQT_Warpigz_v3 1.0.22: bounded (REVIVE_LIMIT, C6)
     nav_hold.pulse=now -- QQT_Warpigz_v3 1.0.22: this tick drives the trip
     M.hold_peers()
-    if utils.is_in_town() then tracker.visited_town=true end
+    if utils.is_in_town() then
+        tracker.visited_town=true
+        if lent then M.lend_pickup(false) end -- QQT_Warpigz_v3 1.0.24: a lend never outlives the outbound leg
+    end
     -- QQT_Warpigz_v3: waiting for the SilentRaven hand-off (teleport.lua,
     -- bounded there) is not service time.
     -- QQT_Warpigz_v3 1.0.21: on the outbound leg, time the player is being
@@ -527,7 +562,9 @@ function M.tick()
             M.finish(false,string.format('teleport_failed: another addon kept moving the player during the Town Portal cast (%ds)',M.MOVER_WAIT))
             return false
         end
-    elseif not tracker.raven_wait then tracker.service_elapsed=(tracker.service_elapsed or 0)+elapsed end
+    -- QQT_Warpigz_v3 1.0.24: the return-leg pickup (teleport.lua, bounded by
+    -- RETURN_WAIT) is not service time either.
+    elseif not tracker.raven_wait and not tracker.return_pickup then tracker.service_elapsed=(tracker.service_elapsed or 0)+elapsed end
     if tracker.service_elapsed>=240 then M.finish(false,'Town service or return timed out (240s)'); return false end
     -- QQT_Warpigz_v3 (Q6): hold the next step while a panel closes (bounded:
     -- 3 Escape presses 0.5 s apart, 8 s at most; counted as service time).
