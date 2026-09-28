@@ -11,7 +11,17 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 - [2026-09-28] [Coordinator → Rosie] Rosie cannot cast Town Portal while the third-party **Navigator** (driven by Worldstone) keeps moving the player. The Navigator interrupts the cast, the trip ends `teleport_failed`, and Rosie cannot pause it. Waiting for the owner's `[ApiProbe]` log of what **Butler** (a Navigator-aware Rosie-like addon) sends to Navigator. Then implement the same in Rosie's `lifecycle.hold_peers` / `release_peers`, with a joint-host regression test using a fake Navigator.
 
 ## Ready for review
-(none)
+- [2026-09-28] [Rosie] **Rosie 1.0.21: Navigator no longer blocks the Town Portal.** All calls to third-party addons go through `Rosie/rosie/private/foreign.lua`; every call is type-checked and pcall-guarded, and an absent addon is a no-op.
+  - Navigator: held for the whole trip via `set_pause_condition("Rosie", trip in progress)`. The fallback `pause/resume` is used only when Rosie saw its own pause take effect.
+  - During the cast, a busy foreign Navigator request is `stop()`ped: at most once per second and 30 times per trip.
+  - Scavenger: `pause/resume("Rosie")` for each trip. Pickup yields while `Scavenger.is_busy()`.
+  - Butler: no Rosie trip starts while `Butler.is_busy()`.
+  - The cast now waits until the player has stood still for 0.6 s, and an interrupted cast is refunded. Time spent being moved by another addon on the outbound leg is not service time, but it is capped at `MOVER_WAIT` (120 s).
+  - Generic hook for further addons: `lifecycle.add_foreign_hold`.
+  - Worldstone reads `trigger_tasks=true` for the whole trip in the emulator.
+  - Test: `audit/tests/test_rosie_foreign_mover.lua`, 10 cases. It fails on 1.0.20 (8 casts burned, trip not completed). Full suite green (97 files × Lua 5.4 + LuaJIT).
+  - Component version: `versions.json`, `controller.lua` and `Rosie/README.md`. The Rosie row in the root `README.md` (Coordinator's file) is also bumped, because `check_release.py` requires it; please confirm at merge.
+  - Live checks: a Worldstone run with a full bag (the console shows `Navigator is held during town trips (pause condition "Rosie")`, no `teleport_failed`); a plain trip still casts immediately. (claude/qqt-rosie@6215f95, PR #3)
 
 ## Auditor / critic findings
 (none open)
