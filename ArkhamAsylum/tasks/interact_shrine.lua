@@ -19,6 +19,18 @@ local stuck_since = nil
 local last_interact_time = nil
 local active_key = nil
 local skipped_shrines = {} -- key: "x,y" string of shrine position
+-- QQT_Warpigz_v3 Arkham 2.1.3: bounded walk. An unreachable shrine (ledge,
+-- other floor level, refused target) was walked to forever: the task ranks
+-- above kill/explore, so the run was lost to the reset timeout. Mirrors
+-- pickup_heart_of_stone's WALK_TIMEOUT, but counts only time without progress.
+local WALK_NO_PROGRESS = 30.0  -- seconds without getting PROGRESS_DELTA closer
+local PROGRESS_DELTA = 1.0
+local MAX_TARGET_REFUSALS = 3  -- consecutive set_target == false
+local MAX_Z_DELTA = 5          -- utils.distance is XY only; skip other levels
+local walk = {best = nil, progress_at = nil, refusals = 0}
+local function reset_walk()
+    walk.best, walk.progress_at, walk.refusals = nil, nil, 0
+end
 
 local function shrine_key(actor)
     local pos = actor:get_position()
@@ -32,10 +44,15 @@ local get_closest_shrine = function ()
     local closest_shrine, closest_dist
     for _, actor in pairs(actors) do
         local name = actor:get_skin_name()
-        if name and ((name:match('Shrine_DRLG') and actor:is_interactable()) or
-            name:match('BetrayersEyeSwitch'))
+        -- QQT_Warpigz_v3 Arkham 2.1.3: BetrayersEyeSwitch needs is_interactable
+        -- too (a used switch kept the task walking), and a shrine on another
+        -- floor level (> MAX_Z_DELTA) is not a target.
+        if name and (name:match('Shrine_DRLG') or name:match('BetrayersEyeSwitch'))
+            and actor:is_interactable()
         then
-            if not skipped_shrines[shrine_key(actor)] then
+            local ppos, spos = local_player:get_position(), actor:get_position()
+            local z_ok = not (ppos and spos) or math.abs(ppos:z() - spos:z()) <= MAX_Z_DELTA
+            if z_ok and not skipped_shrines[shrine_key(actor)] then
                 local dist = utils.distance(local_player, actor)
                 if dist < settings.check_distance and (closest_dist == nil or dist < closest_dist) then
                     closest_dist = dist
@@ -66,18 +83,43 @@ task.Execute = function ()
             stuck_since = nil
             last_interact_time = nil
             active_key = key
+            reset_walk()
         end
-        if utils.distance(local_player, shrine) > 2 then
+        local dist = utils.distance(local_player, shrine)
+        if dist > 2 then
             stuck_since = nil
             last_interact_time = nil
             local disable_spell = false
-            if utils.distance(local_player, shrine) <= 4 then
+            if dist <= 4 then
                 disable_spell = true
             end
-            BatmobilePlugin.set_target(plugin_label, shrine, disable_spell)
+            -- QQT_Warpigz_v3 Arkham 2.1.3: no-progress window and refused targets.
+            local now = get_time_since_inject()
+            if walk.best == nil or dist < walk.best - PROGRESS_DELTA then
+                walk.best, walk.progress_at = dist, now
+            elseif now - walk.progress_at > WALK_NO_PROGRESS then
+                console.print('[interact_shrine] no progress toward shrine for ' .. WALK_NO_PROGRESS ..
+                    's, blacklisting ' .. key)
+                skipped_shrines[key] = true
+                reset_walk()
+                return
+            end
+            if BatmobilePlugin.set_target(plugin_label, shrine, disable_spell) == false then
+                walk.refusals = walk.refusals + 1
+                if walk.refusals >= MAX_TARGET_REFUSALS then
+                    console.print('[interact_shrine] Batmobile refused the shrine target ' .. walk.refusals ..
+                        ' times, blacklisting ' .. key)
+                    skipped_shrines[key] = true
+                    reset_walk()
+                    return
+                end
+            else
+                walk.refusals = 0
+            end
             BatmobilePlugin.move(plugin_label)
             task.status = status_enum['WALKING']
         else
+            walk.best, walk.progress_at = dist, get_time_since_inject() -- QQT_Warpigz_v3 Arkham 2.1.3
             utils.stop_movement()
             task.status = status_enum['WALKING']
             -- timeout: if shrine refuses to interact after INTERACT_TIMEOUT seconds, blacklist it
@@ -100,6 +142,7 @@ task.Execute = function ()
     else
         stuck_since = nil
         last_interact_time = nil
+        reset_walk() -- QQT_Warpigz_v3 Arkham 2.1.3
     end
 end
 
@@ -108,11 +151,13 @@ task.reset = function ()
     stuck_since = nil
     last_interact_time = nil
     skipped_shrines = {}
+    reset_walk() -- QQT_Warpigz_v3 Arkham 2.1.3
 end
 
 -- C5: time spent yielding to Alfred is not a stuck shrine interaction.
 task.on_yield = function (seconds)
     if stuck_since then stuck_since = stuck_since + seconds end
+    if walk.progress_at then walk.progress_at = walk.progress_at + seconds end -- QQT_Warpigz_v3 Arkham 2.1.3
 end
 
 return task

@@ -235,6 +235,9 @@ external.clear_target = function (caller)
     tracker.external_caller = caller
     utils.log(2, 'clear_target called by ' .. tostring(caller))
     navigator.clear_target()
+    -- QQT_Warpigz_v3 2.2.2: no goal left, no owner (Rosie's
+    -- peer_drives_movement read a stale one).
+    if not holds_caller_goal() and navigator.last_trav == nil then set_goal_owner(nil) end
 end
 external.get_backtrack = function(caller)
     if caller == nil then
@@ -370,6 +373,7 @@ external.stop_long_path = function(caller)
     tracker.external_caller = caller
     utils.log(2, 'stop_long_path called by ' .. tostring(caller))
     long_path.stop_navigation()
+    if not holds_caller_goal() and navigator.last_trav == nil then set_goal_owner(nil) end   -- QQT_Warpigz_v3 2.2.2
 end
 
 -- Returns the navigator's current target (vec3 or nil).
@@ -498,6 +502,11 @@ end
 external.get_owner = function ()
     sync_world()
     if long_path.navigating and long_path.owner ~= nil then return long_path.owner end
+    -- QQT_Warpigz_v3 2.2.2: a goal the navigator dropped by itself (reached
+    -- by a long route, abandoned as unreachable) has no owner either.
+    if own.target ~= nil and not holds_caller_goal() and navigator.last_trav == nil then
+        set_goal_owner(nil)
+    end
     return own.target
 end
 

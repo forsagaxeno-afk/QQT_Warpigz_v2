@@ -139,6 +139,12 @@ local navigator = {
     trav_escape_started_at    = -1,
     trav_escape_fails         = 0,
     partial_progress_pos      = nil,   -- long-route consumption anchor (stall-escape)
+    side_step_node            = nil,   -- 2.2.2: unstuck-injected node, walked to until reached
+    trav_approach_key         = nil,   -- 2.2.2: gizmo whose interact approach suppresses STUCK
+    trav_approach_since       = -1,
+    trav_interact_pos         = nil,   -- 2.2.2: {key, pos} where the last non-Jump interact fired
+    trav_reapproach_count     = 0,
+    explorer_updated_at       = nil,   -- 2.2.2: time of the last navigator.update explorer scan
 }
 
 -- Tunables (kept as locals so they're visible in code but not part of the
@@ -158,6 +164,9 @@ local TRAV_TRAP_BL_DURATION = 300   -- seconds to long-blacklist trap re-entry g
 local TRAP_POST_ESCAPE_GRACE = 15   -- seconds to keep trap active after escape routes
 local TRAV_INTERACT_MAX     = 3     -- non-Jump interacts without a buff before giving up
 local INERT_TRAV_BL_DURATION = 60   -- seconds an inert traversal stays blacklisted
+local TRAV_APPROACH_MAX     = 5     -- 2.2.2: max seconds of STUCK suppression next to one gizmo
+local TRAV_REAPPROACH_MAX   = 3     -- 2.2.2: walks back to a gizmo after being displaced from it
+local CALLER_GOAL_REACH     = 3     -- 2.2.2: a caller's goal this close counts as reached for STUCK
 local MOVE_GAP_GRACE        = 0.75  -- move() gap treated as a caller yield
 local WORLD_JUMP_DIST       = 100   -- zone change + jump beyond this = teleport
 local SCAN_GRACE_SECS       = 3     -- no negative walkability cache after load/world change
@@ -710,6 +719,27 @@ local get_unstuck_node = function ()
     end
     return nil, nil
 end
+-- QQT_Warpigz_v3 2.2.2: the path look-ahead skips a node only when the
+-- next one can be walked to in a straight line from the player (the first
+-- REACH_CHECK_MAX u of it, sampled every settings.step like the
+-- pathfinder's string-pull).  Otherwise it cut a hairpin corner into the
+-- wall and swung between the corner and the goal.
+local REACH_CHECK_MAX = 6
+local function in_straight_reach(from, to)
+    local dx, dy = to:x() - from:x(), to:y() - from:y()
+    local len = math.sqrt(dx * dx + dy * dy)
+    local step = settings.step or 0.5
+    if len <= step then return true end
+    local span = math.min(len, REACH_CHECK_MAX)
+    local ux, uy = dx / len, dy / len
+    local t = step
+    while t <= span + 1e-6 do
+        local p = vec3:new(from:x() + ux * t, from:y() + uy * t, from:z())
+        if utils.get_valid_node(p, to:z()) == nil then return false end
+        t = t + step
+    end
+    return true
+end
 -- A paused navigator or a custom target belongs to the calling plugin.
 -- unstuck() must never swap it for an explorer frontier or blacklist
 -- explorer.visited around it (HordeDev sets a waypoint once and drifted away;
@@ -784,6 +814,7 @@ local unstuck = function (local_player)
             utils.log(1, 'unstuck by injecting path')
             navigator.unstuck_nodes[unstuck_node_str] = 'injected'
             table.insert(navigator.path, 1, unstuck_node)
+            navigator.side_step_node = unstuck_node   -- QQT_Warpigz_v3 2.2.2: walked to until reached
             return
         end
     end
@@ -825,18 +856,30 @@ navigator.update = function ()
     -- doing so creates a spurious backtrack entry that doubles up the exploration route.
     -- Setting backtracking=true prevents set_current_pos from adding the checkpoint,
     -- so the next select_target call directly pops the real last-explored point.
+    -- QQT_Warpigz_v3 2.2.2: a caller goal set after the last explorer scan
+    -- was set for the new position and is kept.  The jump is measured
+    -- against the cur_pos of that scan, which is stale when the caller did
+    -- not update Batmobile for a while (native walk, HordeDev's same-zone
+    -- re-teleport): its pause + set_target + update lost the goal.
+    local last_scan = navigator.explorer_updated_at
+    navigator.explorer_updated_at = get_time_since_inject()
     if explorer.cur_pos ~= nil and
         (navigator.trav_delay == nil or get_time_since_inject() > navigator.trav_delay)
     then
         local jump_dist = utils.distance(local_player:get_position(), explorer.cur_pos)
         if jump_dist > 50 then
-            console.print('[nav] respawn detected (jumped ' .. string.format('%.1f', jump_dist) .. ' units), resuming from last backtrack point')
+            local keep_goal = navigator.is_custom_target and navigator.target ~= nil
+                and last_scan ~= nil and navigator.target_set_at > last_scan
+            console.print('[nav] respawn detected (jumped ' .. string.format('%.1f', jump_dist) .. ' units), resuming from last backtrack point'
+                .. (keep_goal and ' — goal set since the jump kept' or ''))
             explorer.backtracking = true
-            navigator.target = nil
-            navigator.is_custom_target = false
-            navigator.path = {}
-            navigator.trav_final_target = nil
-            navigator.failed_target = nil
+            if not keep_goal then
+                navigator.target = nil
+                navigator.is_custom_target = false
+                navigator.path = {}
+                navigator.trav_final_target = nil
+                navigator.failed_target = nil
+            end
         end
     end
     tracker.bench_start("nav_explorer_update")
@@ -886,6 +929,10 @@ navigator.reset_movement = function ()
     navigator.trav_interact_count = 0
     navigator.trav_escape_for = nil        -- QQT_Warpigz_v3
     navigator.partial_progress_pos = nil   -- QQT_Warpigz_v3
+    navigator.side_step_node = nil         -- QQT_Warpigz_v3 2.2.2
+    navigator.trav_approach_key = nil      -- QQT_Warpigz_v3 2.2.2
+    navigator.trav_interact_pos = nil
+    navigator.trav_reapproach_count = 0
     _trav_cache, _buff_cache = nil, nil
     _trav_cache_time, _buff_cache_time = -1, -1
 end
@@ -911,6 +958,9 @@ navigator.release_movement = function (takeover)
     navigator.pre_trav_z = nil
     navigator.trav_interact_key = nil
     navigator.trav_interact_count = 0
+    navigator.trav_approach_key = nil   -- QQT_Warpigz_v3 2.2.2
+    navigator.trav_interact_pos = nil
+    navigator.trav_reapproach_count = 0
     navigator.is_partial_path = false
     navigator.partial_target_ref = nil
     navigator.partial_target_best_dist = math.huge
@@ -1154,6 +1204,36 @@ navigator.clear_target = function ()
     navigator.post_trav_target = nil
     navigator.trav_escape_for = nil
 end
+-- Drops the traversal being routed to: short and 60 s trap blacklist, the
+-- routing state, and the routed-for destination given back.  With
+-- trav_pos, an approach-node target next to the gizmo is dropped too.
+local function abandon_traversal(key, now, trav_pos)
+    navigator.blacklisted_trav[key] = now
+    navigator.trap_blacklisted_trav[key] = now + INERT_TRAV_BL_DURATION
+    navigator.last_trav = nil
+    navigator.trav_delay = nil
+    navigator.pre_trav_z = nil
+    navigator.trav_interact_key = nil
+    navigator.trav_interact_count = 0
+    navigator.trav_approach_key = nil   -- QQT_Warpigz_v3 2.2.2
+    navigator.trav_interact_pos = nil
+    navigator.trav_reapproach_count = 0
+    navigator.path = {}
+    -- Give the routed-for destination back instead of leaving target=nil.
+    if navigator.trav_final_target ~= nil then
+        navigator.target = navigator.trav_final_target
+        navigator.is_custom_target = true
+        navigator.pathfind_fail_count = 0
+        navigator.trav_final_target = nil
+    elseif trav_pos ~= nil and navigator.target ~= nil
+        and utils.distance(navigator.target, trav_pos) <= 6
+    then
+        -- QQT_Warpigz_v3 2.2.2: never keep walking to the dropped gizmo's
+        -- approach node; a caller's own goal elsewhere is kept.
+        navigator.target = nil
+        navigator.is_custom_target = false
+    end
+end
 -- Non-Jump traversal interacts are bounded.  A gizmo that never yields the
 -- Player_Traversal buff (not interactable, blocked, interact rejected in
 -- combat) was re-interacted every 2 s forever with target=nil and last_trav
@@ -1182,21 +1262,7 @@ navigator.give_up_inert_traversal = function (trav, player_pos)
     console.print(string.format(
         '[nav] traversal %s @(%.1f,%.1f,%.2f) produced no traversal buff after %d interacts — blacklisting %ds and resuming',
         name, tpos:x(), tpos:y(), tpos:z(), navigator.trav_interact_count, INERT_TRAV_BL_DURATION))
-    navigator.blacklisted_trav[key] = now
-    navigator.trap_blacklisted_trav[key] = now + INERT_TRAV_BL_DURATION
-    navigator.last_trav = nil
-    navigator.trav_delay = nil
-    navigator.pre_trav_z = nil
-    navigator.trav_interact_key = nil
-    navigator.trav_interact_count = 0
-    navigator.path = {}
-    -- Give the routed-for destination back instead of leaving target=nil.
-    if navigator.trav_final_target ~= nil then
-        navigator.target = navigator.trav_final_target
-        navigator.is_custom_target = true
-        navigator.pathfind_fail_count = 0
-        navigator.trav_final_target = nil
-    end
+    abandon_traversal(key, now)
     return true
 end
 navigator.move = function ()
@@ -1212,7 +1278,12 @@ navigator.move = function ()
     local move_gap = navigator.last_move_call and (navigator.move_time - navigator.last_move_call) or 0
     navigator.last_move_call = navigator.move_time
     if move_gap > MOVE_GAP_GRACE then
-        if navigator.last_update ~= nil then navigator.last_update = navigator.last_update + move_gap end
+        -- QQT_Warpigz_v3 2.2.2: never past now.  A loading screen already
+        -- pushed last_update 5 s ahead (main.lua); adding the load's gap on
+        -- top kept STUCK detection off for the load time + 6 s.
+        if navigator.last_update ~= nil and navigator.last_update < navigator.move_time then
+            navigator.last_update = math.min(navigator.last_update + move_gap, navigator.move_time)
+        end
         if navigator.partial_target_ref ~= nil then
             navigator.partial_target_last_progress_time = navigator.partial_target_last_progress_time + move_gap
         end
@@ -1221,6 +1292,9 @@ navigator.move = function ()
         if navigator.trap_bbox_since ~= nil then navigator.trap_bbox_since = navigator.trap_bbox_since + move_gap end
         if navigator.trav_escape_for ~= nil then
             navigator.trav_escape_started_at = navigator.trav_escape_started_at + move_gap
+        end
+        if navigator.trav_approach_key ~= nil then   -- QQT_Warpigz_v3 2.2.2
+            navigator.trav_approach_since = navigator.trav_approach_since + move_gap
         end
     end
     local local_player = get_local_player()
@@ -1282,6 +1356,13 @@ navigator.move = function ()
                 navigator.pre_trav_z = player_pos:z()
             end
             interact_object(trav)
+            navigator.trav_approach_key = nil   -- QQT_Warpigz_v3 2.2.2: in range, the approach worked
+            -- QQT_Warpigz_v3 2.2.2: re-approach point of this gizmo
+            local ikey = trav:get_skin_name() .. utils.vec_to_string(trav:get_position())
+            if navigator.trav_interact_pos == nil or navigator.trav_interact_pos.key ~= ikey then
+                navigator.trav_reapproach_count = 0
+            end
+            navigator.trav_interact_pos = {key = ikey, pos = cur_node}
             local name = trav:get_skin_name()
             if not name:match('Jump') then
                 -- Non-jump traversals (ladders, FreeClimb, etc.) have a traversal buff
@@ -1327,6 +1408,7 @@ navigator.move = function ()
             navigator.path = {}
             navigator.trav_interact_key = nil
             navigator.trav_interact_count = 0
+            navigator.trav_interact_pos = nil   -- QQT_Warpigz_v3 2.2.2
             local trav_pos_for_escape = navigator.last_trav and navigator.last_trav:get_position() or nil
             -- Record the crossing's direction (from gizmo NAME) so trap-escape
             -- can detect ping-pong and prefer the opposite direction.
@@ -1496,10 +1578,16 @@ navigator.move = function ()
     -- is still set after the 2s interact cooldown has expired AND the player has physically
     -- moved > 8 units from the gizmo, the crossing happened but the buff was never seen.
     -- Treat it the same as a buff-detected crossing: blacklist + escape.
+    -- QQT_Warpigz_v3 2.2.2: or it stands on another floor (|dz| >= 1.5 from
+    -- the interact) more than 3 u away: the displaced-player re-approach
+    -- below must not walk a player who did climb back to the old floor.
+    local missed_dist = navigator.last_trav ~= nil
+        and utils.distance(player_pos, navigator.last_trav:get_position()) or 0
     if navigator.last_trav ~= nil and
         navigator.trav_delay ~= nil and
         get_time_since_inject() > navigator.trav_delay and
-        utils.distance(player_pos, navigator.last_trav:get_position()) > 8
+        (missed_dist > 8 or (missed_dist > 3 and navigator.pre_trav_z ~= nil
+            and math.abs(player_pos:z() - navigator.pre_trav_z) >= 1.5))
     then
         local missed_trav = navigator.last_trav
         local missed_pos  = missed_trav:get_position()
@@ -1521,6 +1609,7 @@ navigator.move = function ()
         navigator.last_trav      = nil
         navigator.trav_interact_key = nil
         navigator.trav_interact_count = 0
+        navigator.trav_interact_pos = nil   -- QQT_Warpigz_v3 2.2.2
         navigator.trav_delay     = get_time_since_inject() + 4
         navigator.failed_target  = nil
         navigator.failed_target_radius = 15
@@ -1753,10 +1842,40 @@ navigator.move = function ()
         -- cast an evade or inject a perpendicular path node, both of which
         -- can pull the player away from the gizmo just as the proximity
         -- interact (within 3u) is about to fire on the next tick.
-        if navigator.last_trav ~= nil
+        -- QQT_Warpigz_v3 2.2.2: at most TRAV_APPROACH_MAX s per gizmo.  A
+        -- player held 3-5 u from it (a blocker the walk grid does not know)
+        -- was suppressed forever, and trap escape routed back to the same
+        -- gizmo; it is now dropped like an inert one.
+        local near_trav = navigator.last_trav ~= nil
             and utils.distance(player_pos, navigator.last_trav:get_position()) <= 5
-        then
-            console.print(string.format(
+        -- QQT_Warpigz_v3 2.2.2: pressed against a caller's goal (a boss's
+        -- hitbox keeps the player 1-3 u off it): arrived, not stuck.  Every
+        -- STUCK here cast Evade or side-stepped away from the fight.
+        local at_caller_goal = not near_trav and navigator.last_trav == nil
+            and (navigator.paused or navigator.is_custom_target)
+            and dist_to_target <= CALLER_GOAL_REACH
+        local approach_expired = false
+        if near_trav then
+            local tpos = navigator.last_trav:get_position()
+            local key = navigator.last_trav:get_skin_name() .. utils.vec_to_string(tpos)
+            local now_ap = get_time_since_inject()
+            if navigator.trav_approach_key ~= key then
+                navigator.trav_approach_key = key
+                navigator.trav_approach_since = now_ap
+            elseif now_ap - navigator.trav_approach_since >= TRAV_APPROACH_MAX then
+                approach_expired = true
+                console.print(string.format(
+                    '[nav] traversal %s @(%.1f,%.1f,%.2f) not reachable for interact after %ds (dist=%.1f) — blacklisting %ds and resuming',
+                    navigator.last_trav:get_skin_name(), tpos:x(), tpos:y(), tpos:z(), TRAV_APPROACH_MAX,
+                    utils.distance(player_pos, tpos), INERT_TRAV_BL_DURATION))
+                abandon_traversal(key, now_ap, tpos)
+            end
+        end
+        if approach_expired or at_caller_goal then
+            navigator.last_update = get_time_since_inject()
+            navigator.unstuck_count = 0
+        elseif near_trav then
+            nav_log('stuck_suppressed', navigator.trav_approach_key, string.format(
                 '[nav] STUCK suppressed: positioning for traversal %s (dist=%.1f) — giving interact a chance',
                 navigator.last_trav:get_skin_name(),
                 utils.distance(player_pos, navigator.last_trav:get_position())))
@@ -1829,6 +1948,46 @@ navigator.move = function ()
     then
         console.print('[nav] deadlock: last_trav set but target nil and player far from traversal — clearing last_trav')
         navigator.last_trav = nil
+    elseif navigator.last_trav ~= nil and navigator.target == nil
+        and navigator.trav_interact_pos ~= nil
+        and navigator.trav_interact_pos.key == navigator.last_trav:get_skin_name()
+            .. utils.vec_to_string(navigator.last_trav:get_position())
+        and utils.distance(player_pos, navigator.last_trav:get_position()) > 3
+        and (navigator.trav_delay == nil or get_time_since_inject() > navigator.trav_delay)
+    then
+        -- QQT_Warpigz_v3 2.2.2: displaced 3-5 u after a non-Jump interact
+        -- (knockback, orbwalker): nothing drove the player back into interact
+        -- range and every set_target was deferred, forever.  Walk back to
+        -- where the interact fired; after TRAV_REAPPROACH_MAX returns the
+        -- gizmo is dropped like an inert one.
+        local tpos = navigator.last_trav:get_position()
+        local key = navigator.last_trav:get_skin_name() .. utils.vec_to_string(tpos)
+        navigator.trav_reapproach_count = navigator.trav_reapproach_count + 1
+        if navigator.trav_reapproach_count > TRAV_REAPPROACH_MAX then
+            console.print(string.format(
+                '[nav] traversal %s @(%.1f,%.1f,%.2f): displaced from it %d times without crossing — blacklisting %ds and resuming',
+                navigator.last_trav:get_skin_name(), tpos:x(), tpos:y(), tpos:z(), TRAV_REAPPROACH_MAX,
+                INERT_TRAV_BL_DURATION))
+            abandon_traversal(key, get_time_since_inject())
+            return
+        end
+        console.print(string.format('[nav] displaced %.1f u from traversal %s after interacting — walking back (%d/%d)',
+            utils.distance(player_pos, tpos), navigator.last_trav:get_skin_name(),
+            navigator.trav_reapproach_count, TRAV_REAPPROACH_MAX))
+        -- 1 u nearer the gizmo than the interact spot: arrival counts within
+        -- 1 u, and the interact needs <= 3 u.
+        local back = navigator.trav_interact_pos.pos
+        local gx, gy = tpos:x() - back:x(), tpos:y() - back:y()
+        local glen = math.sqrt(gx * gx + gy * gy)
+        if glen > 1 then
+            local nearer = utils.get_valid_node(vec3:new(back:x() + gx / glen, back:y() + gy / glen, back:z()), back:z())
+            if nearer ~= nil then back = utils.normalize_node(nearer) end
+        end
+        navigator.target = back
+        navigator.is_custom_target = false
+        navigator.path = {}
+        navigator.pathfind_fail_count = 0
+        navigator.pathfind_replan_cooldown = -1
     end
 
     -- QQT_Warpigz_v3: a partial route injected by long_path.navigate_to is
@@ -2240,20 +2399,49 @@ navigator.move = function ()
         end
     end
 
+    -- QQT_Warpigz_v3 2.2.2: nodes closer than movement_step are skipped
+    -- (look-ahead), but a skipped node used to stay path[1]: walking on to the
+    -- next node took the player back beyond movement_step of it (a node
+    -- behind the player after a Looter/fight detour, an unstuck side-step, a
+    -- hairpin corner), so the next tick walked back to it -- an endless back
+    -- and forth at the 4 u ring that never read as STUCK.  Now skipped nodes
+    -- are dropped once a later node is walked to, the look-ahead only skips
+    -- when that later node is in straight reach (else the path is followed
+    -- node by node), and the unstuck side-step node is walked to until
+    -- reached.
     local moved = false
     local new_path = {}
+    local side_step = navigator.side_step_node
     for i = last_consumed + 1, #navigator.path do
         local node = navigator.path[i]
-        if not moved and
+        if moved then
+            new_path[#new_path+1] = node
+        else
+            local d = utils.distance(node, cur_node)
             -- move to nodes that is >= movement step
-            (utils.distance(node, cur_node) >= navigator.movement_step or
-            -- or if it is close to target
-            (navigator.target ~= nil and utils.distance(node, navigator.target) == 0))
-        then
-            pathfinder.request_move(node)
-            moved = true
+            if d >= navigator.movement_step or
+                -- or if it is close to target
+                (navigator.target ~= nil and utils.distance(node, navigator.target) == 0) or
+                (node == side_step and d >= 1)
+            then
+                local first = new_path[1]
+                if first ~= nil and utils.distance(first, cur_node) >= 1
+                    and not in_straight_reach(player_pos, node)
+                then
+                    -- no short cut: follow the path node by node
+                    pathfinder.request_move(first)
+                    for j = i, #navigator.path do new_path[#new_path+1] = navigator.path[j] end
+                else
+                    pathfinder.request_move(node)
+                    new_path = {node}
+                    for j = i + 1, #navigator.path do new_path[#new_path+1] = navigator.path[j] end
+                end
+                moved = true
+                break
+            else
+                new_path[#new_path+1] = node
+            end
         end
-        new_path[#new_path+1] = node
     end
     -- Fallback: short partial paths (all remaining nodes < movement_step away)
     -- otherwise produce zero movement and the bot sits there spamming
@@ -2263,9 +2451,24 @@ navigator.move = function ()
     if not moved and #new_path > 0 then
         local last_node = new_path[#new_path]
         if utils.distance(last_node, cur_node) > 1 then
+            local first = new_path[1]
+            if #new_path > 1 and utils.distance(first, cur_node) >= 1
+                and not in_straight_reach(player_pos, last_node)
+            then
+                last_node = first   -- 2.2.2: node by node, not across a wall end
+            else
+                new_path = {last_node}
+            end
             pathfinder.request_move(last_node)
             moved = true
         end
+    end
+    if side_step ~= nil then
+        local kept = false
+        for _, node in ipairs(new_path) do
+            if node == side_step then kept = true; break end
+        end
+        if not kept then navigator.side_step_node = nil end
     end
     if not moved and #navigator.path > 0 then
         nav_log('no_move', navigator.target, '[nav] has path (#' .. #navigator.path .. ') but no move, remaining=#' .. #new_path .. ' target=' .. (navigator.target and utils.vec_to_string(navigator.target) or 'nil'))

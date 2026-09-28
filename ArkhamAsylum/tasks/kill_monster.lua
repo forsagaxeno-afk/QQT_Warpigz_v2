@@ -55,48 +55,50 @@ local get_closest_enemies = function ()
     local closest_champ, closest_champ_dist
     local closest_goblin, closest_goblin_dist
     for _, enemy in pairs(enemies) do
-        local skin = enemy:get_skin_name()
-        if ignore_list[skin] then goto continue end
-        if is_enemy_unreachable(enemy:get_position()) then goto continue end
-        -- Skip enemies on a different floor level (different Z) — they're only reachable
-        -- via a traversal, which the pathfinder can't model. Targeting them causes pathfind
-        -- failures that corrupt the unreachable cache.
-        local enemy_pos = enemy:get_position()
-        if math.abs(player_pos:z() - enemy_pos:z()) > 5 then goto continue end
-        -- Boss is owned by kill_boss task; never target it from here.
-        if enemy:is_boss() then goto continue end
-        local health = enemy:get_current_health()
-        local dist = utils.distance(player_pos, enemy)
-        if health > 1 then
-            -- Goblins lock at the full scan range when chase_goblin is on.
-            -- They run away, so the normal effective_distance gate (~12) lets
-            -- them escape — we want to commit the moment one is visible.
-            if settings.chase_goblin and skin and string.find(skin, "Goblin") and
-                (closest_goblin_dist == nil or dist < closest_goblin_dist)
-            then
-                closest_goblin = enemy
-                closest_goblin_dist = dist
-            end
-            if dist <= effective_distance then
-                if closest_enemy_dist == nil or dist < closest_enemy_dist then
-                    closest_enemy = enemy
-                    closest_enemy_dist = dist
-                end
-                if enemy:is_elite() and
-                    (closest_elite_dist == nil or dist < closest_elite_dist)
+        -- QQT_Warpigz_v3 Arkham 2.1.3: Lua 5.1 host rule (no jump labels); `break` leaves this one-pass block (= continue).
+        repeat
+            local skin = enemy:get_skin_name()
+            if ignore_list[skin] then break end
+            if is_enemy_unreachable(enemy:get_position()) then break end
+            -- Skip enemies on a different floor level (different Z) — they're only reachable
+            -- via a traversal, which the pathfinder can't model. Targeting them causes pathfind
+            -- failures that corrupt the unreachable cache.
+            local enemy_pos = enemy:get_position()
+            if math.abs(player_pos:z() - enemy_pos:z()) > 5 then break end
+            -- Boss is owned by kill_boss task; never target it from here.
+            if enemy:is_boss() then break end
+            local health = enemy:get_current_health()
+            local dist = utils.distance(player_pos, enemy)
+            if health > 1 then
+                -- Goblins lock at the full scan range when chase_goblin is on.
+                -- They run away, so the normal effective_distance gate (~12) lets
+                -- them escape — we want to commit the moment one is visible.
+                if settings.chase_goblin and skin and string.find(skin, "Goblin") and
+                    (closest_goblin_dist == nil or dist < closest_goblin_dist)
                 then
-                    closest_elite = enemy
-                    closest_elite_dist = dist
+                    closest_goblin = enemy
+                    closest_goblin_dist = dist
                 end
-                if enemy:is_champion() and
-                    (closest_champ_dist == nil or dist < closest_champ_dist)
-                then
-                    closest_champ = enemy
-                    closest_champ_dist = dist
+                if dist <= effective_distance then
+                    if closest_enemy_dist == nil or dist < closest_enemy_dist then
+                        closest_enemy = enemy
+                        closest_enemy_dist = dist
+                    end
+                    if enemy:is_elite() and
+                        (closest_elite_dist == nil or dist < closest_elite_dist)
+                    then
+                        closest_elite = enemy
+                        closest_elite_dist = dist
+                    end
+                    if enemy:is_champion() and
+                        (closest_champ_dist == nil or dist < closest_champ_dist)
+                    then
+                        closest_champ = enemy
+                        closest_champ_dist = dist
+                    end
                 end
             end
-        end
-        ::continue::
+        until true
     end
     return closest_enemy, closest_elite, closest_champ, closest_goblin
 end

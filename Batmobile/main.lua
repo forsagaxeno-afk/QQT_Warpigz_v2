@@ -43,6 +43,13 @@ local function freeroam_yields_to_looter()
         local ok, active = pcall(looter.is_actively_looting)
         busy = ok and active == true
     end
+    -- QQT_Warpigz_v3 2.2.2: Navigator's own looter (docs/THIRD_PARTY_APIS.md)
+    -- when the owner runs it instead of Rosie's pickup.
+    local scavenger = rawget(_G, 'Scavenger')
+    if not busy and type(scavenger) == 'table' and type(scavenger.is_busy) == 'function' then
+        local ok, active = pcall(scavenger.is_busy)
+        busy = ok and active == true
+    end
     if not busy then freeroam_yield.since, freeroam_yield.drive_until = nil, nil; return false end
     local now = get_time_since_inject()
     if freeroam_yield.drive_until then

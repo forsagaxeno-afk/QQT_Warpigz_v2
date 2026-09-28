@@ -193,28 +193,30 @@ local function find_pull_target(player_pos)
     local best_centroid = nil
     local best_info = nil
     for _, cluster in ipairs(clusters) do
-        -- Skip clusters too small to be worth pulling toward
-        if cluster.weighted < min_weight then goto next_cluster end
-        local centroid = vec3:new(cluster.cx, cluster.cy, cluster.cz)
-        -- Skip clusters that were recently abandoned due to nav timeout
-        if is_cluster_on_cooldown(centroid) then goto next_cluster end
-        local dist = utils.distance(player_pos, centroid)
-        if dist < PUSH_MIN_PULL_DIST then goto next_cluster end
+        -- QQT_Warpigz_v3 Arkham 2.1.3: Lua 5.1 host rule (no jump labels); `break` leaves this one-pass block (= continue).
+        repeat
+            -- Skip clusters too small to be worth pulling toward
+            if cluster.weighted < min_weight then break end
+            local centroid = vec3:new(cluster.cx, cluster.cy, cluster.cz)
+            -- Skip clusters that were recently abandoned due to nav timeout
+            if is_cluster_on_cooldown(centroid) then break end
+            local dist = utils.distance(player_pos, centroid)
+            if dist < PUSH_MIN_PULL_DIST then break end
 
-        local score
-        if cluster.weighted >= threshold then
-            -- Big pack: always prefer these, closer is better
-            score = TIER_BONUS + cluster.weighted - dist
-        else
-            -- Small pack: weighted / distance
-            score = cluster.weighted / dist
-        end
-        if score > best_score then
-            best_score = score
-            best_centroid = centroid
-            best_info = cluster
-        end
-        ::next_cluster::
+            local score
+            if cluster.weighted >= threshold then
+                -- Big pack: always prefer these, closer is better
+                score = TIER_BONUS + cluster.weighted - dist
+            else
+                -- Small pack: weighted / distance
+                score = cluster.weighted / dist
+            end
+            if score > best_score then
+                best_score = score
+                best_centroid = centroid
+                best_info = cluster
+            end
+        until true
     end
 
     return best_centroid, best_info

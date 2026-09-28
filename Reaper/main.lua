@@ -1,5 +1,5 @@
 -- ============================================================
---  Reaper  v1.10.3
+--  Reaper  v1.10.4
 --  by Magoogle
 --
 --  Flow per run:
@@ -39,6 +39,32 @@ local enable_time        = 0   -- time when toggle was first turned on
 local startup_done       = false
 local finishing          = false
 local finish_tp_time     = 0
+-- QQT_Warpigz_v3 Reaper 1.10.4: the finishing town teleport waits while
+-- Alfred/Rosie has live work, at most FINISH_HOLD_MAX seconds per finishing
+-- phase in total (a never-clearing status cannot stall the run); logged once.
+local FINISH_HOLD_MAX = 180
+local finish_hold = { since = nil, logged = false, expired = false }
+
+local function finish_held()
+    if finish_hold.expired then return false end
+    local why = alfred_task.live_hold()
+    if not why then return false end
+    local now = get_time_since_inject()
+    if not finish_hold.since then
+        finish_hold.since = now
+        console.print("[Reaper] Rotation finished — waiting for Alfred (" .. why .. ") before the town teleport.")
+    end
+    if now - finish_hold.since < FINISH_HOLD_MAX then
+        settings.orb_set_block(false)
+        return true
+    end
+    finish_hold.expired = true
+    if not finish_hold.logged then
+        finish_hold.logged = true
+        console.print(string.format("[Reaper] Alfred still busy after %ds — returning to town anyway.", FINISH_HOLD_MAX))
+    end
+    return false
+end
 
 -- Callback registered by ReaperPlugin.run_once(). C2: called exactly once
 -- per run with 'success' (after Reaper returns to town and disables),
@@ -187,6 +213,7 @@ local function stop(result, reason)
     enabled_last_frame = false
     startup_done = false
     finishing = false
+    finish_hold.since, finish_hold.logged, finish_hold.expired = nil, false, false -- QQT_Warpigz_v3 Reaper 1.10.4
     -- Cleanup before invoking the callback: it may immediately queue
     -- another run, which must start with clean task/rotation state.
     report(cb, result)
@@ -263,6 +290,7 @@ on_update(function()
     -- When rotation is done, return to home town then disable
     if rotation.is_done() or finishing then
         if not finishing then
+            if finish_held() then return end -- QQT_Warpigz_v3 Reaper 1.10.4
             -- RPR-6: let the Looter collect the boss drops before the town
             -- teleport (bounded in utils.loot_ready).
             if enums.is_boss_zone(utils.get_zone()) and not utils.loot_ready() then return end
@@ -285,6 +313,10 @@ on_update(function()
             else
                 stop("success")
             end
+        elseif finish_held() then
+            -- QQT_Warpigz_v3 Reaper 1.10.4: no re-teleport into a live Alfred trip;
+            -- the 30 s retry counts from the end of the hold.
+            finish_tp_time = get_time_since_inject()
         elseif elapsed > 30.0 then
             console.print("[Reaper] Town teleport not confirmed — retrying.")
             teleport_to_waypoint(settings.town_waypoint)
@@ -315,7 +347,7 @@ on_render(function()
     end
 
     local x, y = 20, 60
-    graphics.text_2d("=== REAPER  v1.10.3  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
+    graphics.text_2d("=== REAPER  v1.10.4  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
     y = y + 20
     if activity_lease.reason then -- QQT_Warpigz_v3
         graphics.text_2d(activity_lease.reason, vec2:new(x, y), 13, color_yellow(255))
@@ -495,6 +527,6 @@ ReaperPlugin = {
 }
 
 console.print("=============================================")
-console.print("  Reaper  v1.10.3  by Magoogle  - Loaded")
+console.print("  Reaper  v1.10.4  by Magoogle  - Loaded")
 console.print("  Enable in menu to start reaping")
 console.print("=============================================")

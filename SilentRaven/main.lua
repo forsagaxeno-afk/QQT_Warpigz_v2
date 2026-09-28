@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- SilentRaven  --  magoogle  --  v0.2.5
+-- SilentRaven  --  magoogle  --  v0.2.6
 --
 -- Standalone Tree-of-Whispers turn-in plugin.  Two trigger paths:
 --
@@ -125,11 +125,14 @@ local function maybe_autofire(now, cur_zone)
     if not delegated and (not settings.auto_fire or tracker.managed_by) then return end
     -- A queued external request (possibly paused by its guard) owns the slot.
     if tracker.running or tracker.paused or tracker.external_trigger then return end
+    -- QQT_Warpigz_v3 3.3.3: cheap checks first, and the rest (WarPigs status,
+    -- an ally-actor scan, companion statuses) at the ready-check rate, not
+    -- on every frame while a companion holds the auto-fire.
+    if cur_zone ~= 'Skov_Temis' or tracker.last_zone_handled == cur_zone or not tracker.ready then return end
+    if now - (tracker.autofire_check_t or -math.huge) < READY_CHECK_INTERVAL_S and now >= (tracker.autofire_check_t or 0) then return end
+    tracker.autofire_check_t = now
     if not whispers.player_ready() then return end
     if not delegated and not coordination.can_start(nil) then return end
-    if not whispers.in_whisper_town() then return end
-    if tracker.last_zone_handled == cur_zone then return end
-    if not tracker.ready then return end
     -- Pre-flight: we must be able to either SEE the NPC right now, OR
     -- have hard-coded fallback coords for this zone (so WALK_NPC's
     -- static walk can bring the NPC into stream).  Without one of
@@ -280,7 +283,7 @@ end
 -- side, so anything faster is wasted work.
 local function register_d4remote()
     if d4remote_registered or not (D4Remote and D4Remote.register) then return end
-    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.2.5') end) == true
+    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.2.6') end) == true
 end
 
 local function report_to_d4remote(now)
@@ -350,12 +353,14 @@ local function main_pulse()
             -- pause already dropped our movement ownership.
             local allowed, paused = fsm.check_guard(now)
             if not allowed and not paused then return end
-            if tracker.movement_owned then whispers.stop_movement() end
-            tracker.finish('disabled')
+            -- QQT_Warpigz_v3 3.3.3: through the FSM's finish (its event, and the
+            -- visit latch once an accept was sent).
+            fsm.finish_external('disabled', false)
         end
         return
     end
 
+    coordination.register_navigator() -- QQT_Warpigz_v3 3.3.3 (Navigator loads after us)
     handle_manual_keybind(now)
     -- QQT_Warpigz_v3 (Q8 review): WarPigs' delegation also while a run is in
     -- flight (its own Whisper request ends it; get_status reads the cache).
@@ -392,4 +397,4 @@ SilentRavenPlugin   = external
 -- report_to_d4remote retries while D4Remote loads later or register fails.
 register_d4remote()
 
-log.info('loaded magoogle | SilentRaven | v0.2.5')
+log.info('loaded magoogle | SilentRaven | v0.2.6')

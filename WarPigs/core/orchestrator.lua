@@ -76,6 +76,14 @@ local alfred_gate = {
     stuck_since = nil, stuck_logged = false, refusal_logged = nil,
     visit_trigger_at = nil, visit_alfred = nil,  -- WarPigs trigger in this Temis visit
     kick_deferred_logged = false,
+    -- QQT_Warpigz_v3 1.1.7: the teleport sequence waits for a busy Alfred in
+    -- Temis at most VISIT_BUDGET per Temis visit, counting only busy time
+    -- (consecutive busy readings while something is incoming). A hard need an Alfred cycle
+    -- cannot clear (stash full, no stuck flag) held the IDLE gate forever and
+    -- re-triggered Alfred every ~10 s; a latched live-work flag bounced
+    -- TEMIS_ALFRED <-> POST_ALFRED_SETTLE with a fresh 180 s window forever.
+    VISIT_BUDGET = 180.0,  -- same cap as ALFRED_MAX_SECONDS
+    budget_used = 0, budget_seen = nil, budget_logged = false,
 }
 
 -- C1 canonical live-work predicate (copied verbatim across the suite).
@@ -147,6 +155,26 @@ function alfred_gate.stuck_hold(s)
             tostring(s.stuck_reason or '?'), now - G.stuck_since))
     end
     return false
+end
+
+-- QQT_Warpigz_v3 1.1.7: true once this Temis visit's Alfred budget is spent
+-- (logged once). `busy` marks a busy reading with something incoming: the
+-- time since the previous busy reading (at most 2 s apart) is added. Idle
+-- time (a Whisper turn-in, WarPug planning) is not counted. Without `busy`
+-- the call only reads the budget.
+function alfred_gate.budget_spent(now, busy)
+    local G = alfred_gate
+    if busy then
+        if G.budget_seen and now - G.budget_seen <= 2 then G.budget_used = G.budget_used + (now - G.budget_seen) end
+        G.budget_seen = now
+    end
+    if G.budget_used < G.VISIT_BUDGET then return false end
+    if not G.budget_logged then
+        G.budget_logged = true
+        log(string.format('Alfred budget of this Temis visit spent (%.0fs busy or with work it cannot finish) — no longer waiting for Alfred before the teleport (bounded)',
+            G.budget_used))
+    end
+    return true
 end
 
 -- A WarPigs trigger (kick, preamble or a joined live cycle) in this visit.
@@ -276,6 +304,8 @@ local function alfred_kick_if_needed()
     -- Completed-cycle grace / advisory already handled this visit / a
     -- foreign pause past its bounded hold.
     if alfred_idle() then return end
+    -- QQT_Warpigz_v3 1.1.7: no more Temis cycles once the visit's budget is spent.
+    if alfred_gate.budget_spent(get_time_since_inject()) then return end
     -- WPT-3: an advisory-only flag gets one WarPigs trigger per Temis visit.
     if not hard and alfred_gate.visit_trigger_at and alfred_gate.visit_alfred == alfred then return end
     -- WPT-3 / WPG-4: never start Alfred's stash walk under an active WarPug
@@ -549,6 +579,11 @@ end
 -- upvalue for all of them (LuaJIT: 60 upvalues per function; keep tick <= 50).
 local dispatch = {
     LOOTER_HOLD_MAX        = 30.0,   -- bounded Looter hold before an outgoing teleport
+    -- QQT_Warpigz_v3 1.1.7: third-party owners of loot / town movement
+    -- (docs/THIRD_PARTY_APIS.md): {global, reason, bound}. Scavenger shares the
+    -- Looter bound, a Butler town trip the Alfred bound.
+    THIRD_PARTY = {{'Scavenger', 'Scavenger collecting loot', 30.0},
+        {'Butler', 'Butler town trip in progress', 180.0}},
     PROVIDER_HOLD_MAX      = 180.0,  -- plugin Alfred round trip / live Alfred work in town
     ENTRY_HOLD_MAX         = 60.0,   -- plugin-reported committed entry (tribute/portal)
     HORDE_FAULT_GRACE      = 60.0,   -- let a faulted HordeDev leave BSK on its own first
@@ -587,6 +622,7 @@ local dispatch = {
     unmapped_logged = {}, -- quest name -> true (logged once)
     paused         = {},  -- W5-4: plugin -> {since} while paused by the user (owned, in_run)
     reaper_foreign = {},  -- QQT_Warpigz_v3: {since, seen} hold of a manual Reaper run (in_run)
+    exports        = {},  -- QQT_Warpigz_v3 1.1.7: plugin -> `_G` export seen while owned
 }
 
 -- Log `message` once per change for `key`.
@@ -627,10 +663,13 @@ dispatch.alfred_live = alfred_gate.live
 -- WPT-3: the advisory-once-per-visit latch belongs to one Temis visit. Called
 -- every tick with a loaded world; leaving Temis ends the visit.
 function dispatch.observe_alfred_visit()
-    if alfred_gate.visit_trigger_at and not in_temis() then
+    if (alfred_gate.visit_trigger_at or alfred_gate.budget_seen) and not in_temis() then
         alfred_gate.visit_trigger_at, alfred_gate.visit_alfred = nil, nil
+        alfred_gate.budget_used, alfred_gate.budget_seen, alfred_gate.budget_logged = 0, nil, false -- QQT_Warpigz_v3 1.1.7
     end
 end
+-- QQT_Warpigz_v3 1.1.7: see alfred_gate.budget_spent.
+dispatch.alfred_budget_spent = alfred_gate.budget_spent
 
 -- busy, reason. enabled == false is never busy. An unreadable status counts
 -- as busy for at most alfred_gate.UNREADABLE_HOLD, then as "Alfred
@@ -669,7 +708,9 @@ function dispatch.companion_hold(now, gate)
     local tolerance = (dispatch.GATE_CADENCE[gate] or 0.5) + dispatch.GATE_MARGIN
     if H.checked_at and now - H.checked_at > tolerance then
         H.alfred_since, H.alfred_expired, H.looter_since, H.looter_expired = nil, false, nil, false
+        H.tp_since, H.tp_expired = {}, {}
     end
+    H.tp_since, H.tp_expired = H.tp_since or {}, H.tp_expired or {}
     H.checked_at = now
     local busy, why = dispatch.alfred_busy(now)
     if busy then
@@ -694,7 +735,31 @@ function dispatch.companion_hold(now, gate)
     else
         H.looter_since, H.looter_expired = nil, false
     end
+    -- QQT_Warpigz_v3 1.1.7: a busy third-party Scavenger / Butler holds the
+    -- teleport too (guarded, pcall), each within its own bound.
+    for _, tp in ipairs(dispatch.THIRD_PARTY) do
+        local key, busy = tp[1], dispatch.third_party_busy(tp[1])
+        if busy then
+            H.tp_since[key] = H.tp_since[key] or now
+            if now - H.tp_since[key] < tp[3] then return tp[2] end
+            if not H.tp_expired[key] then
+                H.tp_expired[key] = true
+                log(string.format('%s for %.0fs — proceeding with the teleport anyway (bounded hold, %s)',
+                    tp[2], now - H.tp_since[key], gate))
+            end
+        else
+            H.tp_since[key], H.tp_expired[key] = nil, nil
+        end
+    end
     return nil
+end
+
+-- QQT_Warpigz_v3 1.1.7: `_G[name].is_busy()` of a third-party addon is true.
+function dispatch.third_party_busy(name)
+    local p = _G[name]
+    if type(p) ~= 'table' or type(p.is_busy) ~= 'function' then return false end
+    local ok, busy = pcall(p.is_busy)
+    return ok and busy == true
 end
 
 -- True only when the town attribute is readable and says "not in a town".
@@ -1482,6 +1547,7 @@ local function plugin_enable(entry, reason)
         dispatch.gate_denials[entry.plugin] = nil
         dispatch.unconfirmed[entry.plugin] = nil
         last_enabled_reason[entry.plugin] = reason
+        dispatch.exports[entry.plugin] = p -- QQT_Warpigz_v3 1.1.7: see dispatch.watch_export
         log('enabled ' .. entry.plugin .. ' (' .. (reason or '?') .. ')')
         events.emit('warpigs', 'plugin_enabled', {plugin = entry.plugin, reason = reason}) -- QQT_Warpigz_v3
         return
@@ -2146,6 +2212,18 @@ end
 -- Adoption without enable() (cold-start adopt, unconfirmed-enable adopt):
 -- HelltideRevamped must still know WarPigs drives it, so its effective mode
 -- is Warplan (no ruptures / maiden / chaos rift) whatever its GUI says.
+-- QQT_Warpigz_v3 1.1.7: an owned plugin whose `_G` export was replaced (QQT
+-- reloaded it) lost its module state; HR's War Plan mode is re-asserted.
+function dispatch.watch_export(plugin_name, is_owned)
+    local p = is_owned and rawget(_G, plugin_name) or nil
+    local seen = dispatch.exports[plugin_name]
+    dispatch.exports[plugin_name] = p
+    if p ~= nil and seen ~= nil and seen ~= p then
+        log(plugin_name .. ' was reloaded while WarPigs owns it — re-asserting War Plan mode')
+        dispatch.mark_adopted(plugin_name)
+    end
+end
+
 function dispatch.mark_adopted(plugin_name)
     if plugin_name ~= 'HelltideRevampedPlugin' then return end
     local p = rawget(_G, plugin_name)
@@ -2423,6 +2501,7 @@ function dispatch.reset()
     dispatch.unmapped, dispatch.hold_reasons, dispatch.unconfirmed = {}, {}, {}
     dispatch.paused = {}
     dispatch.reaper_foreign = {}   -- QQT_Warpigz_v3
+    dispatch.exports = {}          -- QQT_Warpigz_v3 1.1.7
     dispatch.delivered = false
     dispatch.hwe = dispatch.hwe_new(dispatch.hwe.fired_at)
     -- C1 / WPT-3: the next session starts without Alfred holds or latches.
@@ -2431,6 +2510,7 @@ function dispatch.reset()
     alfred_gate.unreadable_since, alfred_gate.unreadable_logged = nil, false
     alfred_gate.stuck_since, alfred_gate.stuck_logged, alfred_gate.refusal_logged = nil, false, nil
     alfred_gate.kick_deferred_logged = false
+    alfred_gate.budget_used, alfred_gate.budget_seen, alfred_gate.budget_logged = 0, nil, false -- QQT_Warpigz_v3 1.1.7
 end
 
 -- QQT runs LuaJIT (Lua 5.1 rules): a function may capture at most 60
@@ -2630,6 +2710,7 @@ function orchestrator.tick()
             if is_plugin_on(plugin_name) and dispatch.adoptable(plugin_name) then
                 owned[plugin_name] = true
                 dispatch.mark_adopted(plugin_name)
+                dispatch.exports[plugin_name] = rawget(_G, plugin_name) -- QQT_Warpigz_v3 1.1.7
                 last_enabled_reason[plugin_name] = matched_reason[plugin_name]
                 last_wanted[plugin_name] = true
                 had_active_session = true
@@ -2783,6 +2864,7 @@ function orchestrator.tick()
         local changed = owned[plugin_name] and wants[plugin_name]
             and matched_reason[plugin_name] ~= last_enabled_reason[plugin_name]
         local running = is_plugin_on(plugin_name)
+        dispatch.watch_export(plugin_name, owned[plugin_name] == true) -- QQT_Warpigz_v3 1.1.7
         -- Reconcile self-disable even while the same quest is still visible.
         -- W5-4: a user (hotkey) pause with C2 in_run is not a self-disable.
         if owned[plugin_name] and not dispatch.user_paused(plugin_name, running, now) and not running then
@@ -3068,7 +3150,9 @@ function orchestrator.tick()
         -- Gating on it here would deadlock us in the activity zone (e.g.
         -- helltide ends with inventory_full set → Alfred can't run outside
         -- town → gate never clears → no TP to town → forever).
+        -- QQT_Warpigz_v3 1.1.7: bounded per Temis visit (alfred_gate.budget_spent).
         local alfred_done = (not in_temis()) or alfred_idle()
+            or (has_incoming and dispatch.alfred_budget_spent(now, true))
         -- WPD-1 / C1: live Alfred work (a cycle that is running, queued or
         -- teleporting) and an active Looter pickup hold the outgoing teleport
         -- in ANY zone; both holds are bounded (companion_hold). R1: the
@@ -3157,7 +3241,8 @@ function orchestrator.tick()
                 local can_temis_detour = type(teleport_to_waypoint) == 'function'
                 if can_temis_detour and in_temis() then
                     -- Already in Temis: skip the waypoint hop and trigger Alfred now.
-                    local alfred_step = alfred_trigger_now()
+                    -- QQT_Warpigz_v3 1.1.7: a spent visit budget skips the Alfred step.
+                    local alfred_step = dispatch.alfred_budget_spent(now) and 'serviced' or alfred_trigger_now()
                     if alfred_step == 'serviced' then
                         -- WPT-3: this visit's WarPigs Alfred cycle completed
                         -- and no hard need came back: settle checks only.
@@ -3250,6 +3335,8 @@ function orchestrator.tick()
         local elapsed   = now - teleport_transition.alfred_fired_at
         local busy_now  = not alfred_idle()
         if busy_now then teleport_transition.alfred_was_busy = true end
+        -- QQT_Warpigz_v3 1.1.7: the visit's Alfred budget bounds every bounce.
+        local budget_spent = busy_now and dispatch.alfred_budget_spent(now, true)
         -- Track external_trigger pickup edge: alfred_trigger_now() set
         -- external_trigger=true; Alfred's status task clears it after the
         -- cycle completes. Observing the clear means Alfred actually picked
@@ -3295,6 +3382,8 @@ function orchestrator.tick()
             done = true
             log(string.format(
                 'via-Temis preamble: Alfred max wait (%.0fs) exceeded — proceeding anyway', elapsed))
+        elseif budget_spent then
+            done = true
         end
         if done then
             -- Bounce into POST_ALFRED_SETTLE rather than firing teleport
@@ -3309,7 +3398,8 @@ function orchestrator.tick()
     end
     if teleport_transition.state == 'POST_ALFRED_SETTLE' then
         local settled = now - teleport_transition.settle_started_at
-        local busy_now = not alfred_idle()
+        -- QQT_Warpigz_v3 1.1.7: no bounce once the visit's Alfred budget is spent.
+        local busy_now = not alfred_idle() and not dispatch.alfred_budget_spent(now, true)
         if busy_now then
             -- Alfred re-armed (e.g. inventory scan re-detected something).
             -- Bounce back to TEMIS_ALFRED with a fresh dwell window.

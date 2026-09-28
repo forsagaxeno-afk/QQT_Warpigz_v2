@@ -4,7 +4,41 @@ local quiet_since = nil
 local exit_committed = false
 local QUIET_SECONDS = 3
 
+-- QQT_Warpigz_v3 2.2.5: the third-party Navigator looter (docs/THIRD_PARTY_APIS.md):
+-- a busy Scavenger holds the same loot waits as a busy Looter.
+local function scavenger_busy()
+    local s = Scavenger
+    if type(s) ~= 'table' or type(s.is_busy) ~= 'function' then return false end
+    local ok, busy = pcall(s.is_busy)
+    return ok and busy == true
+end
+-- QQT_Warpigz_v3 2.2.5 (audit MED, Rosie yield rest <-> exit guards): a drop
+-- Rosie stepped back from (yield, 4-30 s) or rests between rounds reads as
+-- "not busy", yet Rosie still means to take it. A drop Rosie wants within
+-- its own pickup range and has not given up on (evaluate_item: wanted by
+-- distance, and not settled/exhausted) keeps the exit waiting, inside the
+-- same bound. Sampled at most every PENDING_EVERY s.
+local PENDING_EVERY = 0.5
+local pending = {at = nil, value = false}
+local function loot_pending()
+    local looter = LooteerPlugin
+    if type(looter) ~= 'table' or type(looter.evaluate_item) ~= 'function' then return false end
+    local now = get_time_since_inject()
+    if pending.at and now >= pending.at and now - pending.at < PENDING_EVERY then return pending.value end
+    pending.at = now
+    local ok, found = pcall(function()
+        if type(looter.get_enabled) == 'function' and looter.get_enabled() ~= true then return false end
+        for _, item in pairs(actors_manager.get_all_items() or {}) do
+            if looter.evaluate_item(item, false) and looter.evaluate_item(item, true) then return true end
+        end
+        return false
+    end)
+    pending.value = ok and found == true
+    return pending.value
+end
+
 function M.busy()
+    if scavenger_busy() then return true end -- QQT_Warpigz_v3 2.2.5
     local looter = LooteerPlugin
     if not looter then return false end
     local function read(fn, ...)
@@ -54,9 +88,9 @@ local busy_since, busy_logged = nil, false
 
 function M.ready()
     if exit_committed then return true end
-    if not LooteerPlugin then return true end
+    if not LooteerPlugin and not scavenger_busy() then return true end -- QQT_Warpigz_v3 2.2.5
     local now = get_time_since_inject()
-    if M.busy() then
+    if M.busy() or loot_pending() then -- QQT_Warpigz_v3 2.2.5: a yielded/resting drop
         quiet_since = nil
         busy_since = busy_since or now
         if now - busy_since < LOOTER_MAX_HOLD then return false end
@@ -66,14 +100,18 @@ function M.ready()
         end
         return true
     end
-    busy_since, busy_logged = nil, false
+    -- QQT_Warpigz_v3 2.2.5: a quiet gap shorter than QUIET_SECONDS does not
+    -- end the busy episode. A Looter busy 2 s / idle 1 s over and over
+    -- re-armed LOOTER_MAX_HOLD on every quiet sample and held forever.
     quiet_since = quiet_since or now
-    return now - quiet_since >= QUIET_SECONDS
+    if now - quiet_since < QUIET_SECONDS then return busy_logged end -- a spent bound stays released
+    busy_since, busy_logged = nil, false
+    return true
 end
 
 -- Reason text while the Looter is holding HordeDev (nil when not holding).
 function M.hold_reason()
-    if exit_committed or not LooteerPlugin or not busy_since then return nil end
+    if exit_committed or not busy_since then return nil end
     return string.format("waiting for Looter (%ds)", math.floor(get_time_since_inject() - busy_since))
 end
 

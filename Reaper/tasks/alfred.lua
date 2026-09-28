@@ -307,6 +307,27 @@ local function evaluate()
     return false
 end
 
+-- QQT_Warpigz_v3 Reaper 1.10.4: the finishing path in main.lua runs before the
+-- task manager, so it never saw the Alfred hold and teleported into a live
+-- Rosie trip. Returns the hold reason while Alfred/Rosie has live work (or
+-- Reaper's own request is pending, or the status is unreadable inside
+-- UNKNOWN_HOLD); nil otherwise. Never starts a trip.
+function task.live_hold()
+    local status = get_alfred_status()
+    local hold
+    if not status then
+        hold = "Alfred status unreadable"
+    elseif status.enabled then
+        if waiting_for_request(status) then
+            hold = "waiting for Reaper's Alfred trip"
+        elseif live_work(status) then
+            hold = "Alfred busy"
+        end
+    end
+    note_hold(hold)
+    return hold
+end
+
 function task.shouldExecute()
     local run, hold = evaluate()
     note_hold(hold)
@@ -321,7 +342,7 @@ function task.Execute()
     -- QQT_Warpigz_v3: once per yield, not every tick (console flood).
     if not continuing then
         navigate_to_boss.reset()
-        interact_altar.reset()
+        interact_altar.reset(true) -- QQT_Warpigz_v3 Reaper 1.10.4: a yield keeps the altar approach deadline
     end
     settings.orb_set_block(false)
     -- C5: account the yield so chest timeouts exclude it.

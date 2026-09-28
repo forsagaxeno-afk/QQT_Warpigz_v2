@@ -14,8 +14,8 @@
 --     chest or maiden), with the town service, the Looter and WarPug idle, no
 --     enemy close, and only while SilentRaven takes a hand-off (auto-fire when
 --     standalone, WarPigs' delegation when WarPigs manages Whispers).
---     Bounded (C6): at most one trip per interval; a trip that ends without a
---     claim counts, and TRIP_LIMIT such trips (1 for an inferred readiness)
+--     Bounded (C6): at most one trip per interval; a trip that teleported and
+--     ended without a claim counts, and TRIP_LIMIT such trips (1 for an inferred readiness)
 --     end the claim trips of this ready episode. The trip itself is Rosie's
 --     (bounded by its service time and its 100 s SilentRaven wait).
 local log = require 'silent_raven.log'
@@ -91,6 +91,14 @@ local function blocker(now)
     local world = world_name()
     if world ~= OPEN_WORLD then return 'world', 'the player is not in the open world (' .. tostring(world) .. ')' end
     if in_town() then return 'town', 'the player is in a town other than Temis' end
+    -- QQT_Warpigz_v3 3.3.3: never teleport away from a third-party loop that
+    -- owns the run (a claim is never urgent: a later Temis visit or trip claims).
+    local owner = coordination.activity_owner()
+    if owner then return 'activity', 'another activity owns the run (' .. owner .. ')' end
+    -- QQT_Warpigz_v3 3.3.3: Butler's trip, Scavenger's pickup or a Navigator
+    -- walk (Worldstone) would interrupt the Town Portal cast.
+    local third = coordination.third_party_reason()
+    if third then return third:match('^[^:]+'), 'a third-party addon is busy (' .. third .. ')' end
     local _, st = coordination.town_provider()
     if not st then return 'provider', 'no town service is loaded' end
     if type(st.raven_handoff) ~= 'string' then return 'provider', 'the town service has no SilentRaven hand-off (Rosie required)' end
@@ -132,17 +140,23 @@ local function watch_trip(now)
     local trip = s.trip
     local _, st = coordination.town_provider()
     local live = st ~= nil and coordination.alfred_live_work(st)
+    -- QQT_Warpigz_v3 3.3.3: the trip's teleport was tried (Temis reached, or
+    -- the cast ended done / failed). A trip that ended before any cast is not
+    -- counted against TRIP_LIMIT; a failed cast is (no loop of failing casts).
+    if whispers.in_whisper_town() or (st ~= nil and (st.teleport_done == true or st.teleport_failed == true)) then
+        trip.teleported = true
+    end
     if not trip.done and now - trip.t < TRIP_BOUND and (live or now - trip.t < 5) then return end
     s.trip, s.last_trip_t = nil, now
     if tracker.last_result == 'success' and (tracker.last_result_t or 0) >= trip.t then
         log.info('claim trip finished: the reward was claimed')
         return
     end
-    s.unclaimed = s.unclaimed + 1
-    log.info(string.format('claim trip ended without a claim (town service: %s; SilentRaven: %s, %s)',
+    if trip.teleported then s.unclaimed = s.unclaimed + 1 end
+    log.info(string.format('claim trip ended without a claim (town service: %s; SilentRaven: %s, %s)%s',
         tostring(trip.done and (trip.result or 'completed') or 'no callback'),
         tostring(tracker.last_result_t and tracker.last_result_t >= trip.t and tracker.last_result or 'did not run'),
-        tostring(tracker.last_reason)))
+        tostring(tracker.last_reason), trip.teleported and '' or '; no teleport, not counted'))
 end
 
 local function quest_line(now, snapshot)
