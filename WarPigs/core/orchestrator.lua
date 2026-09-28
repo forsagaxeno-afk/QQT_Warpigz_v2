@@ -755,9 +755,12 @@ function dispatch.companion_hold(now, gate)
 end
 
 -- QQT_Warpigz_v3 1.1.7: `_G[name].is_busy()` of a third-party addon is true.
+-- QQT_Warpigz_v3 1.1.8: Rosie's own Scavenger stand-in (`_rosie=true`, published
+-- while Worldstone runs) is Rosie's pickup, already held through the Looter
+-- check; reading it too would double the hold. Treat it as absent.
 function dispatch.third_party_busy(name)
     local p = _G[name]
-    if type(p) ~= 'table' or type(p.is_busy) ~= 'function' then return false end
+    if type(p) ~= 'table' or rawget(p, '_rosie') == true or type(p.is_busy) ~= 'function' then return false end
     local ok, busy = pcall(p.is_busy)
     return ok and busy == true
 end

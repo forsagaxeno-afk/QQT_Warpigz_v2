@@ -1,4 +1,6 @@
-# SilentRaven (0.2.6) + WarRoom (1.0.3): session notes
+# SilentRaven (0.2.7): session notes (WarRoom archived in 3.3.6)
+
+> 3.3.6 (Coordinator, owner request 2026-09-28): WarRoom is archived in `archive/WarRoom` (not shipped, not tested; see `archive/README.md`). This session owns SilentRaven only; the WarRoom notes below are kept for when it returns.
 
 ## SilentRaven
 - Claims Tree of Whispers rewards both under WarPigs and when a farm plugin runs standalone; auto-fire in Temis; call API `SilentRavenPlugin.trigger_tasks[_with_teleport]`, `get_status`, `pause` / `resume`.
@@ -8,7 +10,7 @@
 - Self-review 2026-09-28 (both modes, hand-off, any language): no other defect found. The owner plays a Russian client: readiness is always *inferred* there (no English turn-in text), so a Temis visit gets one NPC probe and a ready episode one claim trip (by design, C6). Selection uses SNOs / internal names only (language-independent).
 - Live checks still open: the inferred path end to end on the Russian client (`reward ready (inferred …)` → `run finished: success`), a claim trip under WarPigs + Helltide, the new hold lines if Worldstone/TristramLoop runs.
 
-## WarRoom
+## WarRoom (archived in 3.3.6)
 - Suite-wide dashboard. The `core/wr_*` collector writes `dashboard/suite_data.js` (`window.SUITE_DATA`) and persists to `data/`. Three themes (Forge / Daylight / Console); Helltide tab (`dashboard/helltide/`, which reads `../hr_data.js`).
 - LAN server: `server/serve.ps1` (+ `serve.bat`, `serve-lan.bat`). It binds 127.0.0.1 by default; `-Lan` requires a token; GET/HEAD only. The scripts must keep CRLF line endings (`.gitattributes`).
 - `wr_payload.lua` has `M.SUITE`: the Coordinator bumps it with each release.

@@ -35,16 +35,18 @@ Gaps marked **(F)** have a finding on the BOARD.
 | WarPigs ↔ activities (Arkham, WonderCity, HordeDev, Reaper, HR) | enable/disable, C2 status fields, C6 holds, user pause, advisory policy, War Plan Horde | test_integration_warpigs_dispatch, test_joint_suite, test_warpigs_user_pause, test_warpigs_joint_r4, test_warplan_horde_*, test_horde_warplan_r5 | a reload while owned (HR Warplan mode lost) (F); one-tick quest flicker disables HR (F, uncertain) |
 | WarPigs ↔ WarPug | `busy` handshake, planner hold | test_warpug, test_integration_warpug | WarPug holds with no bound on a stuck Rosie (F); WarPug reload mid-selection |
 | WarPigs ↔ SilentRaven | bridge guard `yield:<reason>`, `manages_whispers`, `whisper_handoff`, `activity_on` | test_warpigs_whispers, test_warpigs_raven_yield, test_silentraven_q8 | yield pause not published to farm plugins (F) |
-| WarPigs ↔ WarRoom | `peek()` is read-only | test_warroom_joint | `status()` has side effects; every plugin calls it every pulse (F) |
+| WarPigs ↔ WarRoom (archived 3.3.6) | `peek()` is read-only | archive/tests/test_warroom_joint (not run) | `status()` has side effects; every plugin calls it every pulse (F) |
 | WarPigs ↔ activity lease | WarPigs on = no lease | test_activity_lease_joint | none found |
 
 ## SilentRaven and WarRoom
 
+3.3.6: WarRoom is archived (`archive/WarRoom`, not shipped); its rows are kept for when it returns. No shipped plugin creates the event bus now.
+
 | Pair | Contract | Tests | Gaps |
 |---|---|---|---|
 | SilentRaven ↔ Arkham/HR/Reaper/WonderCity | `raven_claim_active()` holds Temis steps (100 s run, 120 s pause) | test_silentraven_standalone S2-S5, test_joint_suite | WonderCity `walk_kurast` has no hold (F); yield-paused request still holds (F) |
-| WarRoom ↔ all | owns the bus; `qqt_events.lua` byte-identical copies; `_G.QQT_WarRoom` | test_qqt_events_bus, test_qqt_events_joint, test_warroom_collector, test_warroom_joint | bus test hard-codes 10 copies (F); `enabled` stays true after a collector error (F) |
-| WarRoom ↔ HelltideRevamped | HR writes `hr_data.js` into `dashboard_dir` | test_helltide_dashboard | see the `enabled` flag above |
+| WarRoom ↔ all (archived) | owned the bus; `qqt_events.lua` byte-identical copies; `_G.QQT_WarRoom` | test_qqt_events_bus (10 shipped copies, no creator), test_qqt_events_joint; archived: test_warroom_collector, test_warroom_joint | `enabled` stays true after a collector error (F, archived) |
+| WarRoom ↔ HelltideRevamped (archived) | HR writes `hr_data.js` into `dashboard_dir` only while `_G.QQT_WarRoom` exists: not in the 3.3.6 package, only if a user keeps an old WarRoom folder (then HR still feeds it, pcall-guarded) | test_helltide_dashboard | see the `enabled` flag above |
 
 ## Third-party (closed `.pak`) ↔ suite
 

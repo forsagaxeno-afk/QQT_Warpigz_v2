@@ -188,8 +188,8 @@ end)
 -- QQT_Warpigz_v3: three theme pages share hr_data.js; index.html redirects to
 -- the last chosen one (localStorage 'hr_dash_theme', Forge by default).
 -- QQT_Warpigz_v3 (3.3.0): the pages moved to WarRoom/dashboard/helltide/
--- (checked there by the WarRoom tests); the page checks below run only when
--- a copy still ships in HelltideRevamped/dashboard/.
+-- (3.3.6: WarRoom is archived with its tests in archive/, not shipped); the
+-- page checks below run only when a copy ships in HelltideRevamped/dashboard/.
 local THEMES = {'forge.html', 'daylight.html', 'console.html'}
 local function read_page(name)
     local f = io.open(SUITE_ROOT .. '/HelltideRevamped/dashboard/' .. name, 'r')
@@ -198,7 +198,7 @@ local function read_page(name)
     return page
 end
 local PAGES_MOVED = read_page('index.html') == nil
-if PAGES_MOVED then print('NOTE: HelltideRevamped/dashboard pages moved to WarRoom — HR page checks skipped') end
+if PAGES_MOVED then print('NOTE: no HelltideRevamped/dashboard pages ship (moved to the archived WarRoom) — HR page checks skipped') end
 
 local function no_external(page, name)
     for _, bad in ipairs({'src="http', "src='http", 'href="http', "href='http", '<link', '@import', 'url(', '<img',
@@ -458,6 +458,8 @@ end)
 
 -- QQT_Warpigz_v3 (3.3.0): with WarRoom loaded (_G.QQT_WarRoom.dashboard_dir)
 -- hr_data.js is written into WarRoom's dashboard folder, not HR's own.
+-- 3.3.6: WarRoom is archived (not shipped); HR keeps this optional path so
+-- it works again if WarRoom returns, and the cases below still cover it.
 R.case('WarRoom present: hr_data.js goes to its dashboard_dir; absent: HR folder as before', function()
     local s = session({cinders = 180})
     s.set('dashboard', true)
@@ -502,6 +504,46 @@ R.case('option off: hr_data.js only while WarRoom is enabled', function()
     s.advance(30)
     eq(s.dash.tick(s.now, s.pos, true), true, 'WarRoom enabled: written automatically')
     ok(s.files['/mem/WarRoom/dashboard/hr_data.js'] ~= nil, 'hr_data.js in WarRoom/dashboard')
+end)
+
+-- QQT_Warpigz_v3 3.3.6: WarRoom is archived, so the package never publishes
+-- _G.QQT_WarRoom. With the 'Web dashboard' option off (the default) nothing
+-- is built or written and nothing raises or logs a failure; the menu option's
+-- tooltip does not point to WarRoom (it did up to 2.6.2) and the refresh
+-- slider shows only with the option on. With the option on the file goes to
+-- HelltideRevamped/dashboard/ as before.
+R.case('3.3.6 package without WarRoom: nothing written, no error; the menu does not point to WarRoom', function()
+    local s = session({cinders = 180})
+    eq(rawget(s.env, 'QQT_WarRoom'), nil, 'no WarRoom in the package')
+    eq(s.settings.dashboard, false, 'Web dashboard is off by default')
+    eq(s.dash.warroom_on(), false, 'warroom_on() without WarRoom')
+    eq(s.dash.warroom_path(), nil, 'warroom_path() without WarRoom')
+    s.at_minute(12)
+    for i = 1, 900 do
+        s.advance(0.1)
+        s.pos = v(i, 0)
+        local passed, res = pcall(s.dash.tick, s.now, s.pos, i % 2 == 0)
+        ok(passed, 'tick raised: ' .. tostring(res))
+        eq(res, false, 'nothing written at tick ' .. i)
+    end
+    eq(#s.writes, 0, 'no file opened for writing')
+    for path in pairs(s.files) do ok(not path:find('hr_data', 1, true), 'no data file: ' .. path) end
+    eq(s.logged('dashboard data failed'), 0, 'no build error logged')
+    local e = s.gui.elements
+    local tip, slider = nil, 0
+    e.dashboard.render = function(_, _, text) tip = text end
+    e.dashboard_sec.render = function() slider = slider + 1 end
+    s.gui.render()
+    ok(type(tip) == 'string' and #tip > 0, 'the Web dashboard option is in the menu')
+    ok(not tip:find('WarRoom', 1, true), 'its tooltip does not point to WarRoom: ' .. tostring(tip))
+    eq(slider, 0, 'no refresh slider while the option is off')
+    s.set('dashboard', true)
+    s.gui.render()
+    eq(slider, 1, 'the refresh slider with the option on')
+    s.advance(30)
+    eq(s.dash.tick(s.now, s.pos, true), true, 'option on: written')
+    ok(s.file('dashboard/hr_data.js') ~= nil, 'into HelltideRevamped/dashboard/ (no WarRoom)')
+    eq(rawget(s.env, 'QQT_WarRoom'), nil, 'HR never creates the WarRoom global')
 end)
 
 R.finish()

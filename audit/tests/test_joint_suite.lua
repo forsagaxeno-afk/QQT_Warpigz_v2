@@ -165,9 +165,13 @@ local EXPORT_API = {
 }
 
 -- Every `Export.member` / `Export:member` a runtime file references.
+-- QQT_Warpigz_v3 3.3.6: archive/ (the parked WarRoom) is not shipped and
+-- ROOT/.claude/ holds local worktrees of other sessions; neither is scanned
+-- (only ROOT's own .claude is pruned: a run inside a worktree still works).
 local function referenced_members()
     local refs = {}
-    local list = io.popen and io.popen('find "' .. ROOT .. '" -name "*.lua" -not -path "*/audit/*"')
+    local list = io.popen and io.popen('find "' .. ROOT .. '" -path "' .. ROOT .. '/.claude" -prune -o -name "*.lua"'
+        .. ' -not -path "*/audit/*" -not -path "*/archive/*" -print')
     local files = {}
     if list then
         for path in list:lines() do files[#files + 1] = path end

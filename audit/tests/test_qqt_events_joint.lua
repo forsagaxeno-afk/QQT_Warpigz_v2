@@ -1,5 +1,6 @@
 -- QQT_Warpigz_v3 (3.3.0): the suite event bus in the joint host. A test
--- collector creates _G.QQT_Warpigz_events (as WarRoom does at load) and
+-- collector creates _G.QQT_Warpigz_events (as the archived WarRoom did at
+-- load; since 3.3.6 no shipped plugin creates it, so the test does) and
 -- records every event through on_emit; the real plugins emit at their own
 -- code points:
 --   E1 Temis: Whisper claim -> WarPug plan -> WarPigs step/enable -> Arkham
@@ -13,7 +14,8 @@
 --      a with-teleport town trip (trip_start census, trip_end sold/salvaged)
 --   E4 HelltideRevamped farm: chest_opened with the cost, helltide_done when
 --      the Helltide hour ends
---   E5 without a collector nothing is emitted and no global appears.
+--   E5 without a collector (the 3.3.6 package: WarRoom archived) nothing is
+--      emitted and no global appears.
 -- Runs under Lua 5.4 and LuaJIT.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
@@ -50,7 +52,8 @@ local function status(h, export)
 end
 local function enabled(h, export) return status(h, export).enabled == true end
 
--- The collector side: the bus WarRoom creates, plus a full log via on_emit.
+-- The collector side: the bus the test creates (the archived WarRoom created
+-- it at load), plus a full log via on_emit.
 local function collect(h)
     local log = {}
     local bus = {seq = 0, ring = {}, max = 512, on_emit = function(e) log[#log + 1] = e end}
@@ -416,8 +419,9 @@ case('E6 step edges once across a raven_bridge hold', function()
     eq(n_of('step_start', 'WarPlans_QST_ThePit'), 1, 'step_start(ThePit) once')
 end)
 
--- 3.3.0 review B3: without a bus (no WarRoom) Rosie's pickup does not build
--- the event description (host getters, mythic scan, GA count) per drop.
+-- 3.3.0 review B3: without a bus (no collector; the 3.3.6 package has none)
+-- Rosie's pickup does not build the event description (host getters, mythic
+-- scan, GA count) per drop.
 case('E7 Rosie without a collector: no pickup description is built', function()
     local h = J.new({place = 'pit', rosie = true, dirs = {}})
     h.assert_clean('load')
