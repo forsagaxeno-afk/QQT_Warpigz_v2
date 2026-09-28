@@ -8,6 +8,13 @@
 --      on the 4 u ring forever and never read as STUCK)
 --   B3 STUCK next to a traversal gizmo is suppressed at most 5 s; a gizmo
 --      that cannot be reached for interact is dropped (was waited on forever)
+-- Auditor findings on 2.2.1 (audit/reviews/repro_batmobile_full.lua R1-R6):
+--   B4 displaced 3-5 u after a non-Jump interact: walk back, bounded (R6)
+--   B5 a goal set after a jump survives the respawn detector (R1)
+--   B6 get_owner() is nil once the goal is gone (R2)
+--   B7 STUCK detection returns ~6 s after a loading screen, not load + 6 s (R3)
+--   B8 a paused caller pressed against a big target: no STUCK/Evade spam (R5)
+--   B9 freeroam also yields to a busy Scavenger (Navigator's looter)
 -- Runs under Lua 5.4 and LuaJIT.
 local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/Batmobile/'
 local checks, cases, failures = 0, 0, {}
@@ -35,7 +42,7 @@ local function v(x, y, z) return Vec:new(x, y, z) end
 local function dist(a, b) local dx, dy = a:x() - b:x(), a:y() - b:y(); return math.sqrt(dx * dx + dy * dy) end
 
 -- opts: walkable(x, y), blocked(x, y), find_path(a, b, custom), speed, seed, actors,
---       main (load main.lua)
+--       real_explorer, explorer_target, main (load main.lua), freeroam
 local function harness(opts)
     opts = opts or {}
     local h = {now = 100, logs = {}, moves = {}, rng = opts.seed or 1}
@@ -50,7 +57,8 @@ local function harness(opts)
     h.player = player
     local world = {}
     function world:get_name() return 'Sanctuary_Eastern_Continent' end
-    function world:get_current_zone_name() return 'Scos_Coast' end
+    h.zone = 'Scos_Coast'
+    function world:get_current_zone_name() return h.zone end
     function world:get_world_id() return 1 end
     local settings = {step = 0.5, normalizer = 2, path_smooth_step = 0, log_level = 1, plugin_label = 't',
         use_movement = false, use_evade = false, spell_interval = 0.15, min_spell_dist = 3,
@@ -110,10 +118,12 @@ local function harness(opts)
     modules['core.pathfinder'] = {find_path = function(a, b, custom) return find_path(a, b, custom) end,
         find_path_debug = opts.find_path_debug or function(a, b) return {a, b}, 2, 0.001, 'found' end,
         clear_wall_penalty_cache = function() end, last_pathfind = {}}
-    modules['core.explorer'] = {backtracking = false, frontier_count = 5, backtrack = {}, visited = {},
-        priority = 'direction', default_priority = 'direction', update = function() end,
-        select_node = function() return nil end, set_priority = function() end,
-        reset = function() end, clear_frontiers_in_box = function() return 0 end}
+    if not opts.real_explorer then
+        modules['core.explorer'] = {backtracking = false, frontier_count = 5, backtrack = {}, visited = {},
+            priority = 'direction', default_priority = 'direction', update = function() end,
+            select_node = function() return opts.explorer_target end, set_priority = function() end,
+            reset = function() end, clear_frontiers_in_box = function() return 0 end}
+    end
     env.require = function(name)
         if modules[name] ~= nil then return modules[name] end
         local chunk = assert(loadfile(root .. name:gsub('%.', '/') .. '.lua', 't', env))
@@ -280,6 +290,139 @@ case('B3 a gizmo the player cannot get within interact range of is dropped, not 
     h2.ext.try_traversal_route('arkham_asylum')
     for _ = 1, 60 do h2.tick('arkham_asylum') end
     ok(n2 >= 1, 'a reachable gizmo is interacted with')
+end)
+
+-- ── B4 (R6) ─────────────────────────────────────────────────────────────
+local function freeclimb() return {get_position = function() return v(10, 0, 0) end,
+    get_skin_name = function() return 'Traversal_Gizmo_FreeClimb_Up' end} end
+
+case('B4 displaced 3-5 u after a non-Jump interact: the player walks back and interacts again', function()
+    local h = harness({actors = {freeclimb()}, start = v(3, 0)})
+    local interacts = 0
+    h.env.interact_object = function() interacts = interacts + 1 end
+    h.ext.pause('arkham_asylum')
+    h.ext.set_target('arkham_asylum', v(40, 0))
+    ok(h.ext.try_traversal_route('arkham_asylum') == true, 'routed via the climb')
+    for _ = 1, 60 do
+        h.tick('arkham_asylum'); h.ext.set_target('arkham_asylum', v(40, 1))
+        if interacts > 0 then break end
+    end
+    ok(interacts == 1, 'first interact')
+    h.player.pos = v(6, 0)                                    -- knockback: 4 u from the gizmo
+    for _ = 1, 100 do                                          -- 5 s
+        h.tick('arkham_asylum'); h.ext.set_target('arkham_asylum', v(40, 1))
+        if interacts > 1 then break end
+    end
+    ok(interacts == 2, 'walked back into range and interacted again (was frozen, interacts=' .. interacts .. ')')
+end)
+
+case('B4 a player kept out of interact range drops the gizmo instead of waiting forever', function()
+    local h = harness({actors = {freeclimb()}, start = v(3, 0)})
+    local interacts = 0
+    h.env.interact_object = function() interacts = interacts + 1 end
+    h.ext.pause('arkham_asylum')
+    h.ext.set_target('arkham_asylum', v(40, 0))
+    h.ext.try_traversal_route('arkham_asylum')
+    for _ = 1, 60 do
+        h.tick('arkham_asylum'); h.ext.set_target('arkham_asylum', v(40, 1))
+        if interacts > 0 then break end
+    end
+    h.player.pos = v(6, 0)
+    local blocked = true                                      -- a mob pack holds the player there
+    h.env.pathfinder.request_move = function() end
+    local dropped_at = nil
+    for i = 1, 20 * 60 do
+        h.tick('arkham_asylum'); h.ext.set_target('arkham_asylum', v(40, 1))
+        if not h.ext.is_traversal_routing() then dropped_at = i / 20; break end
+    end
+    ok(blocked and dropped_at ~= nil and dropped_at <= 20, 'routing dropped within 20 s (was still routing after 60 s)')
+    local t = h.ext.get_target()
+    ok(t ~= nil and dist(t, v(40, 1)) < 2, 'the caller goal is accepted again')
+end)
+
+-- ── B5 (R1) ─────────────────────────────────────────────────────────────
+case('B5 a goal set after a same-zone jump survives the respawn detector; a real respawn still resets', function()
+    local h = harness({real_explorer = true})
+    h.ext.pause('infernal_horde'); h.ext.set_target('infernal_horde', v(5, 0))
+    h.tick('infernal_horde')
+    -- same-zone re-teleport with no Batmobile update meanwhile
+    h.now = h.now + 3; h.player.pos = v(60, 0)
+    h.ext.pause('infernal_horde'); h.ext.set_target('infernal_horde', v(80, 0))
+    h.tick('infernal_horde')
+    local t = h.ext.get_target()
+    ok(t ~= nil and dist(t, v(80, 0)) < 1, 'the new waypoint is kept (was wiped: player stood still)')
+    ok(h.logged('respawn detected') == 1, 'the jump is still noticed')
+    -- control: death + checkpoint revive, the goal is from before the jump
+    h.now = h.now + 5; h.player.pos = v(200, 0)
+    h.tick('infernal_horde')
+    ok(h.ext.get_target() == nil, 'a goal from before a respawn is dropped as before')
+end)
+
+-- ── B6 (R2) ─────────────────────────────────────────────────────────────
+case('B6 get_owner() is nil after stop_long_path and after clear_target', function()
+    local h = harness()
+    ok(h.ext.navigate_long_path('reaper', v(40, 0)) == true, 'route started')
+    ok(h.ext.get_owner() == 'reaper', 'route owner')
+    h.ext.stop_long_path('reaper')
+    ok(h.ext.get_owner() == nil, 'owner after stop_long_path: ' .. tostring(h.ext.get_owner()))
+    h.ext.resume('helltide_revamped'); h.ext.set_target('helltide_revamped', v(10, 0))
+    ok(h.ext.get_owner() == 'helltide_revamped', 'goal owner')
+    h.ext.clear_target('helltide_revamped')
+    ok(h.ext.get_owner() == nil, 'owner after clear_target: ' .. tostring(h.ext.get_owner()))
+end)
+
+-- ── B7 (R3) ─────────────────────────────────────────────────────────────
+case('B7 STUCK detection is back ~6 s after a loading screen, not load time + 6 s', function()
+    local h = harness({main = true, blocked = function() return true end})
+    local function drive()
+        h.now = h.now + 0.1; h.update()
+        h.ext.pause('helltide_revamped'); h.ext.set_target('helltide_revamped', v(40, 0))
+        h.ext.move('helltide_revamped')
+    end
+    for _ = 1, 5 do drive() end
+    h.zone = '[sno none]'                                      -- 8 s same-world loading screen
+    for _ = 1, 80 do drive() end
+    h.zone = 'Scos_Coast'
+    local t0, first = h.now, nil
+    for _ = 1, 200 do
+        drive()
+        if not first and h.logged('[nav] STUCK') > 0 then first = h.now - t0 end
+    end
+    ok(first ~= nil and first <= 7, 'first STUCK ' .. tostring(first) .. ' s after the load (was 14 s)')
+end)
+
+-- ── B8 (R5) ─────────────────────────────────────────────────────────────
+case('B8 a paused caller pressed against a big target: no STUCK, no Evade', function()
+    local function run(goal_x)
+        local h = harness({blocked = function() return true end})
+        h.env.utility.can_cast_spell = function() return true end
+        local casts = 0
+        h.env.cast_spell.position = function() casts = casts + 1; return true end
+        h.env.require('core.settings').use_evade = true
+        for _ = 1, 100 do                                      -- 10 s
+            h.now = h.now + 0.1
+            h.ext.pause('arkham_asylum'); h.ext.update('arkham_asylum')
+            h.ext.set_target('arkham_asylum', v(goal_x, 0)); h.ext.move('arkham_asylum')
+        end
+        return h.logged('[nav] STUCK'), casts
+    end
+    local stuck, casts = run(2.5)
+    ok(stuck == 0 and casts == 0, string.format('boss hitbox at 2.5 u: STUCK=%d casts=%d (was 36/25)', stuck, casts))
+    stuck, casts = run(8)
+    ok(stuck >= 1 and casts >= 1, 'control: a goal 8 u away still gets STUCK handling')
+end)
+
+-- ── B9 ──────────────────────────────────────────────────────────────────
+case('B9 freeroam holds for a busy Scavenger like for a busy Looter', function()
+    local function moves_with(busy)
+        local h = harness({main = true, freeroam = true, explorer_target = v(30, 0)})
+        h.env.Scavenger = {is_busy = function() return busy end}
+        local n0 = #h.moves
+        for _ = 1, 100 do h.now = h.now + 0.05; h.update() end  -- 5 s
+        return #h.moves - n0
+    end
+    ok(moves_with(false) > 0, 'freeroam drives')
+    ok(moves_with(true) == 0, 'freeroam waits while Scavenger is busy')
 end)
 
 if #failures > 0 then
