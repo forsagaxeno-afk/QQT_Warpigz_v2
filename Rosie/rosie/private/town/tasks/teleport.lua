@@ -13,6 +13,7 @@ local pathfinder = require('rosie.movement').for_owner('town') -- QQT_Warpigz_v3
 local foreign = require 'rosie.private.foreign' -- QQT_Warpigz_v3 1.0.21
 local ItemManager = require 'rosie.private.pickup.src.item_manager' -- QQT_Warpigz_v3 1.0.24
 local PickupSettings = require 'rosie.private.pickup.src.settings' -- QQT_Warpigz_v3 1.0.24
+local Pickup = require 'rosie.private.pickup.src.pickup' -- QQT_Warpigz_v3 1.0.24 (read-only: fight_deferred)
 
 local task = base_task.new_task()
 local status_enum = {
@@ -98,6 +99,10 @@ local function teleport_with_debounce()
     cast.refunded=false
     debounce_time = get_time_since_inject()
     console.print(string.format('[Rosie] Town Portal cast %d', outbound_attempts)) -- QQT_Warpigz_v3 1.0.24
+    -- QQT_Warpigz_v3 1.0.24 (Auditor 7aa276a): the return portal leads back to
+    -- where the cast went; a pre-cast pickup walk may have crossed a subzone.
+    local cw = get_current_world()
+    if cw then tracker.request_world, tracker.request_name, tracker.request_zone = cw:get_world_id(), cw:get_name(), cw:get_current_zone_name() end
     teleport_to_waypoint(utils.get_town().waypoint_sno)
     task.set_status(status_enum['EXECUTE'])
 end
@@ -125,6 +130,35 @@ local function tp_scan(now)
     if ok then tp.fits, tp.room = fits, room else tp.fits, tp.room = nil, nil end
 end
 local function pickup_busy() return PickupSettings.get().looting == true end
+-- QQT_Warpigz_v3 1.0.24 (Auditor 7aa276a): why pickup would not work a drop
+-- right now, whatever the trip lends it (nil: it would). The trip holds the
+-- cast or waits on the way back only for a drop pickup can take now.
+local function pickup_gate(item)
+    local ok_e, run = pcall(PickupSettings.should_execute)
+    if not ok_e or run ~= true then return 'the pickup Behavior setting (Clear mode only)' end
+    local ok_i, inv = pcall(function() return is_inventory_open() or is_chat_open() end)
+    if ok_i and inv then return 'chat or inventory open' end
+    local loop = rawget(_G, 'TRISTRAM_LOOP_STATE')
+    if type(loop) == 'table' and type(loop.status) == 'function' then
+        local ok_s, st = pcall(loop.status)
+        if ok_s and type(st) == 'table' and st.running == true and st.owns_activity == true and st.controls_loot == true then
+            return 'another activity owns the loot'
+        end
+    end
+    if foreign.scavenger_busy() then return 'the Scavenger addon is looting' end
+    local ok_f, held = pcall(Pickup.fight_deferred, item)
+    if ok_f and held then return 'a fight holds it' end
+    return nil
+end
+local function pause_owners()
+    local ok, st = pcall(PickupSettings.pause_state)
+    local names = {}
+    if ok and type(st) == 'table' and type(st.owners) == 'table' then
+        for who in pairs(st.owners) do if who ~= 'Rosie' then names[#names + 1] = tostring(who) end end
+    end
+    table.sort(names)
+    return #names > 0 and table.concat(names, ', ') or 'another plugin'
+end
 local function tp_session()
     if tp.request ~= tracker.request_id then
         tp.request, tp.spent, tp.since, tp.last, tp.capped = tracker.request_id, 0, nil, nil, false
@@ -164,9 +198,31 @@ local function outbound_pickup()
     if tp.since then tp.spent = tp.spent + math.max(0, now - tp.last); tp.last = now end
     tp_scan(now)
     if tp.room and not tp.left and tracker.return_required then tp_remember(tp.room) end
+    -- A drop pickup cannot work now holds nothing: it is tried on the way back.
+    if tp.fits and not tp.since then
+        local why = pickup_gate(tp.fits)
+        if why then
+            if not tp.left and tracker.return_required then
+                tp.left = tp_spot(tp.fits)
+                if tp.left then
+                    console.print('[Rosie] '..tp.left.label..' lies near the Town Portal but pickup cannot take it now ('..why..'): Rosie tries on the way back')
+                end
+            end
+            tp.fits = nil
+        end
+    end
     local want = not tp.capped and tp.spent < PICK_BUDGET and (tp.fits ~= nil or tp.since ~= nil and pickup_busy())
     if want and not tp.since then
-        if not lifecycle.lend_pickup(true) then tp.capped = true; return false end
+        if not lifecycle.lend_pickup(true) then
+            tp.capped = true
+            if tp.fits and not tp.left and tracker.return_required then
+                tp.left = tp_spot(tp.fits)
+                if tp.left then
+                    console.print('[Rosie] '..tp.left.label..' lies near the Town Portal but pickup is paused by '..pause_owners()..': Rosie tries on the way back')
+                end
+            end
+            return false
+        end
         tp.since, tp.last = now, now
         tp.spot = tp.fits and tp_spot(tp.fits) or nil
         -- A cast still in flight is interrupted by the pickup walk: refunded
@@ -212,11 +268,21 @@ local function return_pickup()
             console.print('[Rosie] '..tp.left.label..' was left in another world; not going back for it')
             tp.left = nil; return false
         end
-        if not lifecycle.lend_pickup(true) then tp.left = nil; return false end
+        tp_scan(now)
+        local why = tp.fits and pickup_gate(tp.fits) or nil
+        if why then
+            console.print('[Rosie] '..tp.left.label..' is left: pickup cannot take it now ('..why..')')
+            tp.left = nil; return false
+        end
+        if not lifecycle.lend_pickup(true) then
+            console.print('[Rosie] '..tp.left.label..' is left: pickup is paused by '..pause_owners())
+            tp.left = nil; return false
+        end
         tp.back = now; tracker.return_pickup = true
         console.print(string.format('[Rosie] Back from town: picking up %s (at most %ds)', tp.left.label, RETURN_WAIT))
     end
     tp_scan(now)
+    if tp.fits and pickup_gate(tp.fits) then tp.fits = nil end
     local waiting = now - tp.back < RETURN_WAIT and (now - tp.back < RETURN_GRACE or tp.fits ~= nil or pickup_busy())
     if waiting then task.set_status('Picking up the drop left at the Town Portal'); return true end
     lifecycle.lend_pickup(false); tracker.return_pickup = nil
