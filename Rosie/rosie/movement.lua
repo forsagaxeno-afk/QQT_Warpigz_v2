@@ -46,7 +46,11 @@ end
 function M.status()
     return {owner=state.owner,detail=state.detail,requests=state.requests,repaths=state.repaths,
         cleanup_pending=state.releasing==true or #inherited_cleanup>0,
-        target=state.goal and {x=state.goal.x,y=state.goal.y,z=state.goal.z} or nil}
+        target=state.goal and {x=state.goal.x,y=state.goal.y,z=state.goal.z} or nil,
+        -- QQT_Warpigz_v3 3.3.2: the point last sent to request_move for the
+        -- owner (a waypoint or the goal); pickup tells its own move apart
+        -- from another mover's by it (rosie/private/pickup/src/pickup.lua).
+        sent=state.owner and state.sent and {x=state.sent.x,y=state.sent.y,z=state.sent.z} or nil}
 end
 function M.yield(owner)
     -- A cooperating activity has already taken the path. Drop our claim without
@@ -108,6 +112,7 @@ function M.move(owner,target)
         if state.owner and not M.release(owner) then return false end
         state.owner=owner;state.goal=goal;state.context=context;state.next=0
         state.anchor=here;state.progress_at=now;state.route=nil;state.recovery=0;state.overrides=0
+        state.sent=nil -- QQT_Warpigz_v3 3.3.2
     end
     if distance(here,goal)<=1.5 then M.release(owner);return true end
     if distance(here,state.anchor)>=0.4 then state.anchor=here;state.progress_at=now;state.recovery=0 end
@@ -144,6 +149,7 @@ function M.move(owner,target)
     while state.index<#state.route and distance(here,state.route[state.index])<=0.6 do state.index=state.index+1 end
     local ok,result=pcall(native.request_move,vector(state.route[state.index]))
     state.requests=state.requests+1
+    state.sent=state.route[state.index] -- QQT_Warpigz_v3 3.3.2: see M.status
     if not ok then state.detail='Movement request refused';return false end
     if result==false and (state.overrides or 0)<2 then
         -- The host skipped the command because the player is still walking

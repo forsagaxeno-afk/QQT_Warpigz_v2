@@ -2,6 +2,24 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.2] — 2026-09-28
+
+Two live reports from Discord: the bot "goes back and forth" (Pit, Helltide) and Helltide "stands around, activity Pandemonium Rupture, but there is no rupture".
+
+### Fixed
+
+- **Rosie 1.0.20: no more back and forth.**
+  - **No walking out of a fight to a drop:** while a live enemy is within 10 m, Rosie does not walk to a drop more than 3 m away. She waits until nothing is within 14 m for 1 s (at most 45 s), then picks the drop up. Drops at your feet are still taken. While a drop waits, pickup stays *busy* without moving, so a Pit or boss exit still waits for the loot.
+  - **No tug of war with the farm plugin:** when another plugin takes the character somewhere else while Rosie walks to a drop, Rosie steps back without clearing that plugin's path. She leaves that drop for 4 s, doubling each time up to 30 s, and logs `Another move took the player off …`. A drop that just failed is no longer retried at once.
+  - Murmuring Obols (collected by the game) are never a pickup target.
+- **HelltideRevamped 2.6.1: no more standing at a rupture that is not there.**
+  - A leftover ring, boundary, starter, closed tear, chest or goblin no longer counts as a live Pandemonium Rupture. Only an open tear, a living cultist or a living Realmwalker does. A site with nothing live is left within about 6 s, is not counted as a completed rupture, and causes no Realmwalker wait.
+  - A spent rupture site is not engaged again for 15 minutes unless something live appears there. A tear that never closes is stood in once, not again every session.
+  - A live rupture that goes quiet ends within the linger + 8 s (30 s if no tear ever opened), even when the ring centre cannot be reached.
+  - A starter that despawned on the way is no longer walked to.
+  - The activity reads "Pandemonium rupture" only while one is live; otherwise e.g. "Checking a rupture site (nothing live yet)", "Rupture done: waiting for the Realmwalker", "Collecting the rupture loot".
+- WarRoom 1.0.2: shows suite version 3.3.2.
+
 ## [3.3.1] — 2026-09-28
 
 **Rosie 1.0.19: a full bag no longer waits forever.** Live report: a Worldstone loop farmed for hours with a full bag and a half-empty stash, with no town trip and nothing in the log.

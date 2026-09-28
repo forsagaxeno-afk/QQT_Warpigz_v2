@@ -30,7 +30,9 @@ local cinder_run = require "core.hr_cinder_run" -- QQT_Warpigz_v3 (rc.2): the sa
 local M = { skins = skins }
 local helpers = {}      -- bound by tasks/helltide.lua (move_to, clear_movement, get_actors, get_kill_target)
 local sess = {}         -- per-rupture session
-local area_blacklist = {} -- { pos, until_t, skin } — survives session resets
+local live_evidence     -- QQT_Warpigz_v3 3.3.2: defined with the scans below
+local area_blacklist = {} -- { pos, until_t, skin, spent_until } — survives session resets
+local spent_tears = {}    -- QQT_Warpigz_v3 3.3.2: tear key -> until (survives session resets)
 
 local C = {
     CHEST_INTERACT_DIST = 2.5,
@@ -60,6 +62,18 @@ local C = {
     CHAMBER_MAX_S = 480,
     POLL_TTL = 0.5,
     KILL_SCAN_TTL = 2.0,
+    -- QQT_Warpigz_v3 3.3.2 (live: "standing around, activity Pandemonium
+    -- rupture, but there is no rupture"): a rupture state needs a live
+    -- rupture actor. Strong evidence: an open tear, a living cultist or
+    -- Realmwalker near the anchor. Marker evidence (an active-event marker
+    -- or wave proxy) only proves the site was live, it never keeps it alive.
+    LIVE_SCAN_M = 30,       -- the grace starts once the anchor is this close (its actors are listed)
+    LIVE_GRACE_S = 6,       -- at the site with no live rupture actor at all: leave (abandoned)
+    LIVE_TTL = 0.25,        -- evidence scan interval
+    QUIET_OPEN_MAX_S = 30,  -- live (cultists / markers) but no tear ever opened: complete after this quiet
+    QUIET_PAD_S = 8,        -- tears seen, all closed: complete after linger + this quiet (walk to the centre included)
+    SPENT_TTL = 900,        -- a finished site / a tear stood in without closing is not re-armed without strong evidence
+    SPENT_TEAR_INSIDE_S = 20, -- a tear skipped after this long inside its circle is spent
 }
 M.C = C
 
@@ -241,9 +255,10 @@ local function is_blacklisted(pos)
     local t = now()
     for i = #area_blacklist, 1, -1 do
         local e = area_blacklist[i]
-        if t >= e.until_t then
+        -- QQT_Warpigz_v3 3.3.2: kept as a spent site after the blacklist TTL.
+        if t >= (e.spent_until or e.until_t) then
             table.remove(area_blacklist, i)
-        elseif pos_dist(e.pos, pos) <= C.BLACKLIST_RADIUS then
+        elseif t < e.until_t and pos_dist(e.pos, pos) <= C.BLACKLIST_RADIUS then
             return true
         end
     end
@@ -251,10 +266,27 @@ local function is_blacklisted(pos)
 end
 M.is_blacklisted = is_blacklisted
 
+-- QQT_Warpigz_v3 3.3.2: a site this machine already finished or abandoned.
+-- Its leftover gizmos (ring, boundary, starter) are re-engaged only with
+-- strong live evidence (the blacklist TTL alone re-armed the same spent
+-- rupture every 120 s).
+local function is_spent(pos)
+    if not pos then return false end
+    local t = now()
+    for _, e in ipairs(area_blacklist) do
+        if t < (e.spent_until or e.until_t) and pos_dist(e.pos, pos) <= C.BLACKLIST_RADIUS then
+            return true
+        end
+    end
+    return false
+end
+M.is_spent = is_spent
+
 local function blacklist_area(pos, skin, secs, why)
     if not pos then return end
     secs = secs or C.BLACKLIST_TTL
-    area_blacklist[#area_blacklist + 1] = { pos = pos, until_t = now() + secs, skin = skin }
+    area_blacklist[#area_blacklist + 1] = { pos = pos, until_t = now() + secs, skin = skin,
+        spent_until = now() + math.max(secs, C.SPENT_TTL) } -- QQT_Warpigz_v3 3.3.2
     local ok, x, y = pcall(function() return pos:x(), pos:y() end)
     log(string.format("[RIFT] Skipping rupture area (%s) at (%.0f,%.0f) for %ds — %s",
         tostring(skin or "?"), ok and x or 0, ok and y or 0, secs, why or "done"))
@@ -293,6 +325,16 @@ local function find_closest_actor(patterns, max_dist, predicate)
     return best, best_d
 end
 
+-- QQT_Warpigz_v3 3.3.2: a remembered actor still in the actor list (a
+-- stale handle can keep reporting its last position after it despawned).
+local function listed(target)
+    if target == nil then return false end
+    for _, actor in pairs(get_actors()) do
+        if actor == target then return true end
+    end
+    return false
+end
+
 local function find_closest_interactable(patterns, max_dist)
     return find_closest_actor(patterns, max_dist, actor_interactable)
 end
@@ -304,8 +346,11 @@ local function find_best_starter(max_dist, skip_blacklisted)
         if skin_matches(skin, skins.starter) and is_rupture_marker_skin(skin) then
             local label = rupture_type_label(skin)
             local d = dist(actor)
+            -- QQT_Warpigz_v3 3.3.2: a spent site's starter needs strong live evidence.
+            local apos = skip_blacklisted and actor_pos(actor)
             if type_allowed(label) and d <= max_dist
-                and not (skip_blacklisted and is_blacklisted(actor_pos(actor))) then
+                and not (skip_blacklisted and (is_blacklisted(apos)
+                    or (is_spent(apos) and not live_evidence(apos, true)))) then
                 local rank = TYPE_RANK[label] or 0
                 if settings.rupture_prioritize_surging ~= false then
                     if rank > best_rank or (rank == best_rank and d < best_d) then
@@ -327,7 +372,9 @@ local function starter_label_near(pos, radius)
     local best, best_d = nil, math.huge
     for _, actor in pairs(get_actors()) do
         local skin = actor_skin(actor)
-        if skin_matches(skin, skins.starter) and is_rupture_marker_skin(skin) then
+        -- QQT_Warpigz_v3 3.3.2: a boundary gizmo (no type) never masks the real starter.
+        if skin_matches(skin, skins.starter) and is_rupture_marker_skin(skin)
+            and rupture_type_label(skin) ~= "Unknown" then
             local d = pos_dist(pos, actor_pos(actor))
             if d <= radius and d < best_d then best, best_d = skin, d end
         end
@@ -361,7 +408,15 @@ local function tear_key(actor, skin)
 end
 
 local function tear_is_skipped(actor, skin)
-    local t = sess.tear_skip and sess.tear_skip[tear_key(actor, skin)]
+    local key = tear_key(actor, skin)
+    -- QQT_Warpigz_v3 3.3.2: a tear stood in without closing stays spent
+    -- across sessions (a new session re-engaged it at once, another 90 s).
+    local spent = spent_tears[key]
+    if spent then
+        if now() < spent then return true end
+        spent_tears[key] = nil
+    end
+    local t = sess.tear_skip and sess.tear_skip[key]
     return t ~= nil and now() - t < C.TEAR_SKIP_TTL_S
 end
 
@@ -482,6 +537,38 @@ local function find_realmwalker(max_dist)
             return (actor_hp(a) or 100) > 1
         end)
 end
+
+-- QQT_Warpigz_v3 3.3.2: what proves a rupture is running at `anchor`.
+-- 'tear' (an open tear within the tear reach), 'cultists', 'Realmwalker'
+-- (alive) are strong; 'marker' (an active-event marker or wave proxy) only
+-- counts when strong_only is not set. nil: nothing live there - a leftover
+-- ring, boundary, starter, closed tear, chest or goblin is not a rupture.
+live_evidence = function(anchor, strong_only)
+    if not anchor then return nil end
+    local r = settings.tear_event_radius or 12
+    local marker = nil
+    for _, actor in pairs(get_actors()) do
+        local skin = actor_skin(actor)
+        if skin then
+            local kind
+            if skin_matches(skin, skins.tears) then
+                if is_active_tear(actor, skin) then kind = "tear" end
+            elseif skin_matches(skin, skins.guards) then
+                if (actor_hp(actor) or 0) > 1 then kind = "cultists" end
+            elseif skin_matches(skin, skins.realmwalker_boss) then
+                if (actor_hp(actor) or 100) > 1 then kind = "Realmwalker" end
+            elseif not strong_only and not marker and skin_matches(skin, skins.live_markers) then
+                if pos_dist(anchor, actor_pos(actor)) <= r + 15 then marker = "marker" end
+            end
+            if kind then
+                local reach = (kind == "tear" and r + 30) or (kind == "cultists" and r + 15) or r + 70
+                if pos_dist(anchor, actor_pos(actor)) <= reach then return kind end
+            end
+        end
+    end
+    return marker
+end
+M.live_evidence = live_evidence
 
 -- chamber portal ------------------------------------------------------------
 local function find_chamber_portal(max_dist, anchor)
@@ -663,7 +750,11 @@ end
 local function scan(self, states, max_dist, require_ritual_for_tear)
     local r = settings.tear_event_radius or 12
     local hold = find_closest_actor(skins.hold_area, max_dist, function(a, skin)
-        return is_rupture_marker_skin(skin) and not is_blacklisted(actor_pos(a))
+        -- QQT_Warpigz_v3 3.3.2: a ring left over from a rupture this machine
+        -- already finished is engaged again only with strong live evidence.
+        local ap = actor_pos(a)
+        return is_rupture_marker_skin(skin) and not is_blacklisted(ap)
+            and not (is_spent(ap) and not live_evidence(ap, true))
     end)
     if hold then
         -- Without a visible starter the type is unknown (never assume
@@ -761,10 +852,15 @@ local function close_tears_at(self, states, anchor, r, pad)
     local why = stand.work(sess, key, d, tear_signal(tear), t, charge and stand.C.STAND_OUT or C.TEAR_ATTACK_DIST)
     if why then
         skip_tear(tear, skin, why)
+        -- QQT_Warpigz_v3 3.3.2: stood in it this long and it never closed:
+        -- a spent (or leftover) tear, never re-engaged by the next session.
+        if stand.inside_seconds(sess, key) >= C.SPENT_TEAR_INSIDE_S then
+            spent_tears[key] = t + C.SPENT_TTL
+        end
         release_focus()
         return false
     end
-    sess.focus_tear = tear
+    sess.focus_tear, sess.tears_seen = tear, true -- QQT_Warpigz_v3 3.3.2: tears_seen
     combat_on()
     if charge then
         -- Stop on the glint, walk back only when pushed out of the circle
@@ -803,7 +899,8 @@ H.MOVING_TO_RIFT = function(self, states, s, r)
     if starter and s.anchor and pos_dist(actor_pos(starter), s.anchor) > r * 2 then
         starter = nil -- a different rupture: keep the one we engaged
     end
-    if not starter and s.starter and actor_pos(s.starter) then starter = s.starter end
+    -- QQT_Warpigz_v3 3.3.2: only while the remembered starter is still listed.
+    if not starter and s.starter and listed(s.starter) and actor_pos(s.starter) then starter = s.starter end
     local spos = starter and actor_pos(starter)
     if spos then
         s.anchor = spos
@@ -900,7 +997,9 @@ H.RIFT_STAY_ACTIVE = function(self, states, s, r)
     end
     -- QQT_Warpigz_v3 (rc.2 review): a finished loot window never walks back
     -- to the ring first (loot.done below resumes patrol, or reroutes).
-    if leash.enforce(s, s.anchor, get_actors(), move_to,
+    -- QQT_Warpigz_v3 3.3.2: nor once the quiet cap ended the rupture (an
+    -- unreachable bubble centre walked us around until RUPTURE_MAX_S).
+    if not s.quiet_over and leash.enforce(s, s.anchor, get_actors(), move_to,
         { busy = s.focus_tear ~= nil or kill_target() ~= nil or loot.done(s) }) then
         return
     end
@@ -920,6 +1019,8 @@ H.RIFT_STAY_ACTIVE = function(self, states, s, r)
                 -- The new rupture gets its own time cap and its own leash
                 -- (the old leash centre would pull us back to the old ring).
                 s.started_at, s.hold_since = now(), nil
+                -- QQT_Warpigz_v3 3.3.2: the new site proves itself live on its own.
+                s.live_seen, s.tears_seen, s.quiet_since, s.quiet_over, s.grace_since = nil, nil, nil, nil, nil
                 leash.reset(s)
                 log(string.format("[RIFT] New %s rupture elsewhere — rerouting", new_type))
                 self.current_state = states.MOVING_TO_RIFT
@@ -935,16 +1036,27 @@ H.RIFT_STAY_ACTIVE = function(self, states, s, r)
             s.rupture_type or "Pandemonium"))
     end
     if route_to_chamber_portal(self, states, s.anchor, r + 70) then return end
-    local hold = find_closest_actor(skins.hold_area, r + 10)
+    -- QQT_Warpigz_v3 3.3.2: this rupture's ring (any ring within r + 10 of
+    -- the player could be another, finished one).
+    local hold = find_closest_actor(skins.hold_area, r + 10, function(a)
+        return pos_dist(s.anchor, actor_pos(a)) <= r + 10
+    end)
     local center = (hold and actor_pos(hold)) or s.anchor
     local tol = math.max((settings.tear_circle_radius or 2) + 2, 4)
     if settings.tear_use_charge_ring ~= false then tol = math.max(tol, r * 0.35) end
-    if dist(center) > tol then
+    if not s.quiet_over and dist(center) > tol then
         s.no_tear_since = nil
         move_to(hold or center, true)
         return
     end
-    if now() - s.no_tear_since >= (settings.rupture_linger_sec or 5) then
+    if s.quiet_over or now() - s.no_tear_since >= (settings.rupture_linger_sec or 5) then
+        -- QQT_Warpigz_v3 3.3.2: nothing live was ever seen here: not a
+        -- completed rupture (no stats, no Realmwalker wait); M.execute's
+        -- grace leaves it.
+        if not s.live_seen then
+            clear_movement()
+            return
+        end
         -- QQT_Warpigz_v3: one completed tear event for the stats (main.lua sets the hook).
         if not s.completed_counted and type(M.on_complete) == "function" then
             s.completed_counted = true
@@ -1190,6 +1302,62 @@ H.CHAMBER_EXIT = function(self, states, s)
     end
 end
 
+-- QQT_Warpigz_v3 3.3.2 (live: "standing around, activity Pandemonium
+-- rupture, but there is no rupture"). Every tear-event state needs a live
+-- rupture actor (live_evidence):
+--   * never seen one at the site (a leftover ring / boundary / starter /
+--     chest, or a rupture someone else finished): leave after LIVE_GRACE_S
+--     at the site, abandoned (area spent: not re-armed without strong
+--     evidence), no completion, no Realmwalker wait;
+--   * seen, then quiet (no open tear, cultist or Realmwalker): the rupture
+--     completes (linger, Realmwalker chain, loot) at the latest after
+--     linger + QUIET_PAD_S once tears were seen, QUIET_OPEN_MAX_S before
+--     any tear opened, whatever the walk to the ring centre, the leash or
+--     the hold-area / open waits would still do.
+-- Returns true when it ended the rupture this tick.
+local LIVE_STATES = {
+    MOVING_TO_RIFT = true, RIFT_KILL_GUARDS = true, RIFT_WAIT_OPEN = true,
+    RIFT_CLOSE_TEARS = true, RIFT_STAY_ACTIVE = true,
+}
+local function check_live(self, states, s, r, t)
+    if not LIVE_STATES[self.current_state] or loot.collecting(s) or loot.done(s) then return false end
+    if s.live_t and t >= s.live_t and t - s.live_t < C.LIVE_TTL then return false end
+    s.live_t = t
+    local ev = s.tear_focus_key and "tear" or live_evidence(s.anchor)
+    if ev and ev ~= "marker" then
+        if not s.live_seen or s.live_seen == "marker" then
+            log(string.format("[RIFT] Live rupture confirmed (%s)", ev))
+        end
+        s.live_seen, s.quiet_since, s.quiet_over, s.grace_since = ev, nil, nil, nil
+        if ev == "tear" then s.tears_seen = true end
+        return false
+    end
+    if ev == "marker" and not s.live_seen then
+        s.live_seen = "marker"
+        log("[RIFT] Live rupture confirmed (event marker)")
+    end
+    if not s.live_seen then
+        if self.current_state == states.MOVING_TO_RIFT and dist(s.anchor) > C.LIVE_SCAN_M then return false end
+        s.grace_since = s.grace_since or t
+        if t - s.grace_since >= C.LIVE_GRACE_S then
+            resume_patrol(self, states, string.format(
+                "[RIFT] No live rupture here (no open tear, cultist or Realmwalker for %ds) — leaving",
+                C.LIVE_GRACE_S), true)
+            return true
+        end
+        return false
+    end
+    s.quiet_since = s.quiet_since or t
+    local cap = s.tears_seen and ((settings.rupture_linger_sec or 5) + C.QUIET_PAD_S) or C.QUIET_OPEN_MAX_S
+    if not s.quiet_over and t - s.quiet_since >= cap then
+        s.quiet_over = true
+        log(string.format("[RIFT] Rupture quiet for %ds (no open tear, cultist or Realmwalker) — finishing it", cap))
+        clear_movement()
+        self.current_state = states.RIFT_STAY_ACTIVE
+    end
+    return false
+end
+
 -- ── public API ─────────────────────────────────────────────────────────────
 function M.bind(h)
     for k, v in pairs(h or {}) do helpers[k] = v end
@@ -1200,6 +1368,33 @@ function M.is_rift_state(state)
 end
 
 function M.session() return sess end
+
+-- QQT_Warpigz_v3 3.3.2: the dashboard / overlay activity line. It says
+-- "Pandemonium rupture" only while a live rupture actor was seen and the
+-- site has not gone quiet; every other rupture state names what the bot
+-- is actually doing (nil: not a rupture state).
+local ACTIVITY = {
+    RIFT_OPEN_CHEST = "Opening a rupture chest",
+    RIFT_WAIT_REALMWALKER = "Rupture done: waiting for the Realmwalker",
+    RIFT_ENTER_CHAMBER = "Entering the Deathtoll Chamber",
+    CHAMBER_START_RITUAL = "Deathtoll Chamber", CHAMBER_CLOSE_TEARS = "Deathtoll Chamber",
+    CHAMBER_STAY_ACTIVE = "Deathtoll Chamber", CHAMBER_EXIT = "Leaving the Deathtoll Chamber",
+}
+function M.activity_label(state)
+    if not M.is_rift_state(state) then return nil end
+    local s = sess
+    if loot.collecting(s) then return "Collecting the rupture loot" end
+    if ACTIVITY[state] then return ACTIVITY[state] end
+    if state == "RIFT_KILL_REALMWALKER" then
+        return s.rw_kill_done_at and "Realmwalker down: finishing up" or "Fighting the Realmwalker"
+    end
+    if not s.live_seen then
+        return state == "MOVING_TO_RIFT" and "Walking to a rupture site" or "Checking a rupture site (nothing live yet)"
+    end
+    if s.quiet_since or s.quiet_over then return "Rupture ending: no open tear" end
+    if state == "MOVING_TO_RIFT" then return "Walking to a Pandemonium rupture" end
+    return "Pandemonium rupture"
+end
 
 -- True while a chamber run owns the player outside the helltide zone.
 -- Also true right after the chamber portal was clicked: the helltide buff can
@@ -1284,6 +1479,8 @@ function M.execute(self, states)
             "[RIFT] %s took longer than %ds — resuming patrol", what, cap), true)
     end
     local r = settings.tear_event_radius or 12
+    -- QQT_Warpigz_v3 3.3.2: no rupture state without a live rupture actor.
+    if s.anchor and check_live(self, states, s, r, now()) then return end
     -- QQT_Warpigz_v3 (Q2): never leave an engaged tear for a chest; the
     -- chest is opened once the tear is closed (or skipped).
     if state ~= states.RIFT_OPEN_CHEST and CHEST_SCAN_STATES[state] and not s.tear_focus_key
@@ -1306,6 +1503,7 @@ local CREDITED = {
     "tear_focus_since", "hold_since", "chest_best_t", "chest_loot_started",
     "rw_kill_done_at", "chamber_enter_started",
     "rw_chain_at", -- QQT_Warpigz_v3 (rc.2 review)
+    "quiet_since", "grace_since", -- QQT_Warpigz_v3 3.3.2
 }
 function M.credit_yield(gap)
     if type(gap) ~= "number" or gap <= 0 then return end
@@ -1324,6 +1522,7 @@ end
 function M.on_reset()
     sess = {}
     area_blacklist = {}
+    spent_tears = {} -- QQT_Warpigz_v3 3.3.2
     stand.sync_pause(false, now(), "reset") -- QQT_Warpigz_v3 (Q2)
     stand.reset_scale_probe()
 end

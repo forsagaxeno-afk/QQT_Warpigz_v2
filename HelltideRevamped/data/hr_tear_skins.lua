@@ -33,6 +33,15 @@ return {
         "PandemoniumRift_gizmo_Boundry",
     },
 
+    -- QQT_Warpigz_v3 3.3.2: markers that exist while a rupture event runs.
+    -- They prove a site was live (no 6 s "nothing here" exit) but never keep
+    -- a rupture state alive on their own: the ring (holdArea), boundary,
+    -- starter, closed tears and chests can all outlive the event.
+    live_markers = {
+        "S14_Rupture_.-ActiveUIMarker",
+        "S14_Rupture_.-Wave_Proxy",
+    },
+
     -- Cultists guarding a Death's Head Idol before the rupture opens.
     guards = {
         "S14_cultist_",

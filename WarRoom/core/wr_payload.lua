@@ -7,7 +7,7 @@ local feed = require 'core.wr_feed'
 local plugins = require 'core.wr_plugins'
 local ingest = require 'core.wr_ingest'
 
-local M = {SCHEMA = 1, SUITE = '3.3.1', PREFIX = 'window.SUITE_DATA = ', NULL = json.raw('null')}
+local M = {SCHEMA = 1, SUITE = '3.3.2', PREFIX = 'window.SUITE_DATA = ', NULL = json.raw('null')}
 
 local comma = ingest.comma
 

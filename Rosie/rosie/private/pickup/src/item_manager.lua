@@ -77,6 +77,10 @@ function M.check_want_item(item, ignore_distance)
     local s=Settings.get()
     if not ignore_distance and Utils.distance_to(item)>s.distance then return false,'outside pickup distance '..s.distance end
     if Utils.host_call(loot_manager.is_gold,item) or Utils.host_call(loot_manager.is_potion,item) then return false,'gold or potion' end
+    -- QQT_Warpigz_v3 3.3.2 (live report, Pit: "Murmuring Obols" beside the
+    -- fight): obols, like gold, are taken by the game on proximity; interact
+    -- never takes them and they go to no bag. Never a pickup target.
+    if Utils.host_call(loot_manager.is_obols,item)==true then return false,'obols (the game collects them)' end
     local lootable=Utils.host_call(loot_manager.is_lootable_item,item,true,true)
     if lootable~=true then return false,'host says not lootable or unavailable',lootable~=false and 'deferred' or nil end
     local kind,slot,max_stack,bag=ItemLogic.classify(info)
@@ -231,6 +235,7 @@ function M.report_rejection(item, reason)
     if rarity<6 and Utils.get_ga_count(info)==0 then return end
     if type(reason)=='string' and reason:find('already carrying',1,true) then return end -- QQT_Warpigz_v3 (Q9): logged at the decision
     if type(reason)=='string' and reason:sub(1,15)=='pickup settled:' then return end -- QQT_Warpigz_v3 (Q1 review): settle() logged it once
+    if reason=='pickup yielded to another move' then return end -- QQT_Warpigz_v3 3.3.2: stand_down() logged it
     if Utils.distance_to(item)>60 then return end
     local id=Pickup.key(item)
     if id and reported[id]~=reason then
@@ -375,6 +380,7 @@ function M.calculate_item_score(item)
 end
 local selected_key
 local function choose(best_first)
+    M.fight_waiting=false -- QQT_Warpigz_v3 3.3.2: a wanted drop waits for the fight
     local items=Utils.host_call(actors_manager.get_all_items)
     M.observe(items)
     if type(items)~='table' then return nil end
@@ -386,11 +392,14 @@ local function choose(best_first)
         local blocked,why=Pickup.blocked(item)
         -- QQT_Warpigz_v2 local patch (review rc.10): the nearest wanted drop
         -- resting between rounds (woken below when nothing else is wanted).
-        if wanted and blocked and Pickup.resting(item) then
+        if wanted and blocked and Pickup.resting(item,true) and not Pickup.fight_deferred(item) then -- QQT_Warpigz_v3 3.3.2: never a yielded drop, nor one the fight holds
             local d=Utils.distance_to(item)
             if not rested or d<rested_distance then rested,rested_distance=item,d end
         end
         if wanted and blocked then wanted,reason=false,why end
+        -- QQT_Warpigz_v3 3.3.2: a drop off the feet waits for the fight (pickup.lua header).
+        local deferred=wanted and Pickup.fight_deferred(item)
+        if deferred then wanted=false;M.fight_waiting=true end
         if wanted then
             -- QQT_Warpigz_v2 local patch (Rosie 1.0.8): a Unique taken by "Pick up
             -- every Unique" logs its ground reading too (LIVE_CHECKLIST R1/S1).
@@ -401,10 +410,9 @@ local function choose(best_first)
             if not selected or value>score or value==score and d<distance then
                 selected,score,distance=item,value,d
             end
-        elseif item~=rested then M.report_rejection(item,reason) end
+        elseif item~=rested and not deferred then M.report_rejection(item,reason) end
     end
-    if not selected and rested then
-        Pickup.wake(rested)
+    if not selected and rested and Pickup.wake(rested)~=false then -- QQT_Warpigz_v3 3.3.2: false = not woken
         selected,score,distance=rested,best_first and M.calculate_item_score(rested) or 0,rested_distance
     end
     -- Keep equally valuable nearby targets stable; a better item still wins.

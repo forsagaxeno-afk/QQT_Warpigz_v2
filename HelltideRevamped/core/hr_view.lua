@@ -230,6 +230,12 @@ function M.activity(state)
     local text = ACTIVITY[state]
     if text then return text end
     local tear = tracker.tear_event
+    -- QQT_Warpigz_v3 3.3.2: never claim a rupture that is not there (the
+    -- tear machine knows whether a live rupture actor was seen).
+    if tear and tear.activity_label then
+        local ok, label = pcall(tear.activity_label, state)
+        if ok and type(label) == 'string' then return label end
+    end
     if tear and tear.is_rift_state then
         local ok, rift = pcall(tear.is_rift_state, state)
         if ok and rift then return 'Pandemonium rupture' end

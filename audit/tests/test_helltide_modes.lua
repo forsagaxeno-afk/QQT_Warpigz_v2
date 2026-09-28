@@ -464,29 +464,53 @@ case('Deathtoll Chamber: buff drops before the zone name changes; the chamber ru
 end)
 
 case('ring gizmo without a tear: KILL_GUARDS stay is bounded, the rupture completes', function()
+    -- QQT_Warpigz_v3 3.3.2: a live rupture (a cultist at the ring) whose
+    -- tears never open is finished by the quiet cap; a ring with nothing
+    -- live at all is left within the live grace and not counted complete.
     local s = session({enabled = true, mode = 1})
     normal_rupture(s, 30)
     s.actors[#s.actors + 1] = actor(SKIN.hold, 31, 0)
+    local cultist = actor('S14_cultist_Melee', 33, 0, {hp = 100})
+    s.actors[#s.actors + 1] = cultist
     s.tick(1.2) -- past the task's 1 s actor cache
     s.pos = v(29, 0, 0)
     s.tick(0.5)
     eq(s.helltide.current_state, 'RIFT_KILL_GUARDS')
-    s.tick(29)
+    s.tick(3)
+    cultist.hp = 0
+    s.tick(20)
     eq(s.helltide.current_state, 'RIFT_KILL_GUARDS', 'waits at the ring for a while')
     s.tick(20)
     ok(s.logged('No tear at the ritual ring') >= 1, 'bounded wait logged')
+    ok(s.logged('Rupture quiet for 30s') == 1, 'quiet cap logged once')
     ok(s.logged('Normal rupture complete') >= 1, 'linger/completion ran\n' .. table.concat(s.logs, '\n'))
     eq(s.tear.is_rift_state(s.helltide.current_state), false, 'back to patrol long before RUPTURE_MAX_S')
+    local d = session({enabled = true, mode = 1})
+    normal_rupture(d, 30)
+    d.actors[#d.actors + 1] = actor(SKIN.hold, 31, 0)
+    d.tick(1.2)
+    d.pos = v(29, 0, 0)
+    d.tick(0.5)
+    eq(d.helltide.current_state, 'RIFT_KILL_GUARDS')
+    d.tick(7)
+    eq(d.logged('No live rupture here'), 1, 'a ring with nothing live is left')
+    eq(d.logged('rupture complete'), 0, 'and not counted complete')
+    eq(d.tear.is_rift_state(d.helltide.current_state), false, 'back to patrol')
 end)
 
 case('ring-only rupture is Unknown (no Realmwalker wait) until a starter confirms its type', function()
     local s = session({enabled = true, mode = 1})
-    s.actors = {actor(SKIN.hold, 10, 0)}
+    -- QQT_Warpigz_v3 3.3.2: a live ring (an open tear); a ring alone is
+    -- not a rupture any more.
+    local tear = actor(SKIN.tear, 12, 0, {hp = 40})
+    s.actors = {actor(SKIN.hold, 10, 0), tear}
     s.tick(1)
     ok(s.tear.is_rift_state(s.helltide.current_state), 'ring engaged')
     eq(s.tear.session().rupture_type, 'Unknown', 'not assumed Surging')
     s.pos = v(10, 0, 0)
-    s.tick(45)
+    s.tick(3)
+    tear.hp = 1
+    s.tick(42)
     eq(s.states.RIFT_WAIT_REALMWALKER, nil, 'no Realmwalker wait for an unconfirmed type')
     ok(s.logged('Unknown rupture complete') >= 1, 'completed as Unknown')
     -- Surging toggle off: a ring next to a Surging starter is not engaged.

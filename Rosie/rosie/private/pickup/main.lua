@@ -8,6 +8,7 @@ local GUI=require('rosie.private.pickup.gui')
 local Utils=require('rosie.private.pickup.utils.utils')
 local active=true
 local published
+local fight_busy=false -- QQT_Warpigz_v3 3.3.2: busy set only by a drop waiting for the fight
 local function activity_owns_loot()
     local peer=rawget(_G,'TRISTRAM_LOOP_STATE')
     if type(peer)~='table' or type(peer.status)~='function' then return false end
@@ -69,8 +70,15 @@ local function main_pulse()
     if activity_owns_loot() then Pickup.reset(false); return end
     local wanted=ItemManager.get_item_based_on_priority()
     if wanted and Settings.get().loot_priority==1 then wanted=wanted.Item end
-    if wanted then Settings.get().looting=Pickup.step(wanted,ItemManager.destination(wanted)) -- QQT_Warpigz_v3 (Q1): receipt bag
-    else Pickup.release_movement() end
+    if wanted then fight_busy=false;Settings.get().looting=Pickup.step(wanted,ItemManager.destination(wanted)) -- QQT_Warpigz_v3 (Q1): receipt bag
+    else
+        Pickup.release_movement()
+        -- QQT_Warpigz_v3 3.3.2: a drop that waits for the fight keeps pickup
+        -- busy without moving, so a Pit / boss exit still waits for the loot
+        -- (bounded by the fight hold's 45 s cap).
+        if ItemManager.fight_waiting then Settings.get().looting=true;fight_busy=true
+        elseif fight_busy then Settings.get().looting=false;fight_busy=false end
+    end
 end
 published={
     _elements=GUI.elements,
