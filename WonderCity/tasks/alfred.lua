@@ -2,6 +2,7 @@ local plugin_label = 'wonder_city' -- change to your plugin name
 
 local utils = require "core.utils"
 local settings = require 'core.settings'
+local tracker = require 'core.tracker' -- QQT_Warpigz_v3 WonderCity 2.2.4: boss-fight defer
 
 local status_enum = {
     IDLE = 'idle',
@@ -265,6 +266,31 @@ local function return_pending()
     return true
 end
 
+-- QQT_Warpigz_v3 WonderCity 2.2.4: a hard need (full bag) no longer starts a
+-- NEW town trip in the middle of a live boss fight (tracker.boss_alive from
+-- the reward-phase scan, or kill_monster saw a live boss within its gate).
+-- Bounded: after BOSS_DEFER_MAX seconds of one fight the trip starts anyway
+-- (one log line). A trip already in flight is never interrupted.
+local BOSS_DEFER_MAX = 90
+local boss_defer = {since = nil, logged = false}
+local function boss_fight_defer()
+    local fight = utils.player_in_undercity() and (tracker.boss_alive == true
+        or (type(tracker.boss_gate_active) == 'function' and tracker.boss_gate_active() == true))
+    if not fight then boss_defer.since, boss_defer.logged = nil, false; return false end
+    local now = get_time_since_inject()
+    boss_defer.since = boss_defer.since or now
+    if now - boss_defer.since < BOSS_DEFER_MAX then
+        task.note = 'boss fight: Alfred trip deferred'
+        return true
+    end
+    if not boss_defer.logged then
+        boss_defer.logged = true
+        console.print(string.format('[WonderCity:alfred] boss fight for %.0fs with an Alfred need — starting the trip anyway',
+            now - boss_defer.since))
+    end
+    return false
+end
+
 -- Should a NEW request start now (no own request, no live work)?
 -- need_trigger is the documented Steroid signal AND the unified
 -- AlfredTheButler-main signal. WonderCity has zone-specific gating AND a
@@ -313,9 +339,11 @@ task.shouldExecute = function ()
 
     if not wants_trigger(status) then
         trip.paused_since, trip.paused_logged = nil, false
+        boss_defer.since, boss_defer.logged = nil, false -- QQT_Warpigz_v3 WonderCity 2.2.4: per need episode
         return false
     end
     if status.paused then return paused_hold(status) end
+    if boss_fight_defer() then return false end -- QQT_Warpigz_v3 WonderCity 2.2.4
     return true
 end
 
@@ -355,6 +383,8 @@ task.Execute = function ()
     note_hold(nil)
 
     if task.status == status_enum['IDLE'] then
+        -- QQT_Warpigz_v3 WonderCity 2.2.4: forced paths reach here too.
+        if boss_fight_defer() then return end
         if BatmobilePlugin and type(BatmobilePlugin.pause) == 'function' then
             BatmobilePlugin.pause(plugin_label)
         end

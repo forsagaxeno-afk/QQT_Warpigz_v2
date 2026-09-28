@@ -163,10 +163,44 @@ function utils.reset_boss_quest_tracking()
     boss_quest_seen = false
 end
 
+-- QQT_Warpigz_v3 1.10.4: the third-party Navigator looter (docs/THIRD_PARTY_APIS.md):
+-- a busy Scavenger holds the same loot waits as a busy Looter.
+local function scavenger_busy()
+    local s = Scavenger
+    if type(s) ~= 'table' or type(s.is_busy) ~= 'function' then return false end
+    local ok, busy = pcall(s.is_busy)
+    return ok and busy == true
+end
+-- QQT_Warpigz_v3 1.10.4 (audit MED, Rosie yield rest <-> exit guards): a drop
+-- Rosie stepped back from (yield, 4-30 s) or rests between rounds reads as
+-- "not busy", yet Rosie still means to take it. A drop Rosie wants within
+-- its own pickup range and has not given up on (evaluate_item: wanted by
+-- distance, and not settled/exhausted) keeps the exit waiting, inside the
+-- same bound. Sampled at most every PENDING_EVERY s.
+local PENDING_EVERY = 0.5
+local pending = {at = nil, value = false}
+local function loot_pending()
+    local looter = LooteerPlugin
+    if type(looter) ~= 'table' or type(looter.evaluate_item) ~= 'function' then return false end
+    local now = get_time_since_inject()
+    if pending.at and now >= pending.at and now - pending.at < PENDING_EVERY then return pending.value end
+    pending.at = now
+    local ok, found = pcall(function()
+        if type(looter.get_enabled) == 'function' and looter.get_enabled() ~= true then return false end
+        for _, item in pairs(actors_manager.get_all_items() or {}) do
+            if looter.evaluate_item(item, false) and looter.evaluate_item(item, true) then return true end
+        end
+        return false
+    end)
+    pending.value = ok and found == true
+    return pending.value
+end
+
 -- RPR-6: read-only Looter coordination (same contract reading as HordeDev's
 -- loot_guard; the Looter's settings are never changed). A failed/invalid
 -- read is not idle.
 function utils.looter_busy()
+    if scavenger_busy() then return true end -- QQT_Warpigz_v3 1.10.4
     local looter = LooteerPlugin
     if not looter then return false end
     local function read(fn, ...)
@@ -214,9 +248,9 @@ local LOOT_QUIET, LOOT_HOLD_MAX = 3, 75
 local loot = { quiet_since = nil, busy_since = nil, logged = false }
 
 function utils.loot_ready()
-    if not LooteerPlugin then return true end
+    if not LooteerPlugin and not scavenger_busy() then return true end -- QQT_Warpigz_v3 1.10.4
     local now = get_time_since_inject()
-    if utils.looter_busy() then
+    if utils.looter_busy() or loot_pending() then -- QQT_Warpigz_v3 1.10.4: a yielded/resting drop
         loot.quiet_since = nil
         loot.busy_since = loot.busy_since or now
         if now - loot.busy_since < LOOT_HOLD_MAX then return false end
@@ -236,7 +270,7 @@ end
 
 -- Reason text while the Looter holds a lair exit (nil when not holding).
 function utils.loot_hold_reason()
-    if not LooteerPlugin or not loot.busy_since or loot.logged then return nil end
+    if not loot.busy_since or loot.logged then return nil end
     return string.format("waiting for Looter (%ds)", math.floor(get_time_since_inject() - loot.busy_since))
 end
 

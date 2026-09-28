@@ -6,7 +6,8 @@ local path     = require 'data.path'
 
 local status_enum = {
     IDLE = 'idle',
-    WALKING = 'walking to spirit brazier'
+    WALKING = 'walking to spirit brazier',
+    WAITING_RAVEN = 'waiting for SilentRaven', -- QQT_Warpigz_v3 WonderCity 2.2.4
 }
 local task = {
     name = 'walk_kurast', -- change to your choice of task name
@@ -117,6 +118,24 @@ task.Execute = function ()
     local local_player = get_local_player()
     if not local_player then return end
     local player_pos = local_player:get_position()
+
+    -- QQT_Warpigz_v3 WonderCity 2.2.4: hold while SilentRaven claims (the same
+    -- hold as teleport_kurast / enter_undercity): no own long path or waypoint
+    -- walk, a running own route is stopped, and the stuck watchdog does not
+    -- count the claim. The claim itself is bounded by SilentRaven.
+    if utils.raven_claim_active and utils.raven_claim_active() then
+        if utils.own_long_path then
+            utils.own_long_path = false
+            BatmobilePlugin.stop_long_path(plugin_label)
+        end
+        if task.status ~= status_enum['WAITING_RAVEN'] then
+            BatmobilePlugin.clear_target(plugin_label)
+            task.status = status_enum['WAITING_RAVEN']
+        end
+        reset_progress()
+        return
+    end
+    if task.status == status_enum['WAITING_RAVEN'] then task.status = status_enum['IDLE'] end
 
     -- Temis (or any town with a long_path_target): hand navigation off to
     -- BatmobilePlugin's uncapped A* and let it drive. No recorded waypoints.
