@@ -94,6 +94,7 @@ task_manager.release_control = function ()
     utils.release_movement((active_task and active_task.name == 'alfred_running') or alfred_owns_control())
     for _, task in ipairs(tasks) do
         if task.on_cancel then task.on_cancel() end
+        if task.on_release then task.on_release() end -- QQT_Warpigz_v3 WonderCity 2.2.6
     end
     settings.orb_set_block(false)
     settings.orb_set_clear(true)
