@@ -25,7 +25,10 @@ local status_enum = {
     FAILED = 'Failed to teleport'
 }
 local debounce_time = -1
-local debounce_timeout = 3
+-- QQT_Warpigz_v3 1.0.24: 3 -> 8 s between casts; a channel younger than
+-- CHANNEL_MAX s is never re-cast (see teleport_with_debounce).
+local debounce_timeout = 8
+local CHANNEL_MAX = 15
 local outbound_attempts = 0
 local outbound = false
 local cast = {refunded = false, logged = false, request = nil} -- QQT_Warpigz_v3 1.0.21
@@ -48,6 +51,19 @@ local function teleport_with_debounce()
     if cast.request ~= tracker.request_id then cast.request, cast.logged = tracker.request_id, false end
     -- QQT_Warpigz_v3 1.0.21: Worldstone re-issues Navigator requests on its own.
     foreign.quiet_navigator(tracker.request_id)
+    -- QQT_Warpigz_v3 1.0.24 (Undercity "~5 teleports", cause 3; the WonderCity
+    -- 2.1.1 / Arkham 3.3.3 rule): a running channel is never re-cast (it was
+    -- re-cast every 3 s: a channel over 3 s cost up to 8 casts), and a load
+    -- screen restarts the debounce.
+    local now = get_time_since_inject()
+    local world = get_current_world()
+    local wname = world and world:get_name() or ''
+    if type(wname) == 'string' and (wname:find('Limbo', 1, true) or wname:find('Loading', 1, true)) then
+        debounce_time = now; return
+    end
+    if local_player:get_active_spell_id() == 186139 and debounce_time >= 0 and now - debounce_time < CHANNEL_MAX then
+        task.set_status(status_enum['EXECUTE']); return
+    end
     if local_player:get_active_spell_id() == 186139 then
         task.set_status(status_enum['EXECUTE'])
     else
@@ -81,6 +97,7 @@ local function teleport_with_debounce()
     outbound_attempts=outbound_attempts+1
     cast.refunded=false
     debounce_time = get_time_since_inject()
+    console.print(string.format('[Rosie] Town Portal cast %d', outbound_attempts)) -- QQT_Warpigz_v3 1.0.24
     teleport_to_waypoint(utils.get_town().waypoint_sno)
     task.set_status(status_enum['EXECUTE'])
 end

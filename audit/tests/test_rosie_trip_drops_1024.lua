@@ -214,5 +214,25 @@ case('D5 no drop: the cast is immediate (one cast, nothing logged)', function()
     h.assert_clean('D5')
 end)
 
+-- QQT_Warpigz_v3 1.0.24 (Undercity "~5 teleports", cause 3): the outbound
+-- cast was re-cast every 3 s while the channel ran.
+case('C1 a 5 s Town Portal channel is cast exactly once (no re-cast while it runs)', function()
+    local h = new()
+    fill_bag(h, 25)
+    local real = h.G.teleport_to_waypoint
+    h.G.teleport_to_waypoint = function(...)
+        local r = real(...)
+        if h.travel and h.travel.phase == 'channel' then h.travel.at = h.now + 5 end -- a 5 s channel
+        return r
+    end
+    local r = start_trip(h)
+    ok(h.run_until(function() return r.done end, 200), 'trip ends\n' .. h.tail())
+    eq(#h.waypoints, 1, 'one cast for one channel\n' .. h.tail(10))
+    eq(st(h).outcome, 'completed')
+    eq(h.logged('[Rosie] Town Portal cast 1'), 1, 'the cast is logged with its number')
+    eq(h.logged('[Rosie] Town Portal cast 2'), 0)
+    h.assert_clean('C1')
+end)
+
 print(string.format('trip drops 1.0.24: %d checks, %d failures', checks, #failures))
 if #failures > 0 then error(table.concat(failures, '\n')) end
