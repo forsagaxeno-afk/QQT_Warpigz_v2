@@ -336,8 +336,10 @@ local function fight_hold(now)
     -- QQT_Warpigz_v3 1.0.23: only a waiting drop evaluates the hold. Unread
     -- for longer than FIGHT.calm (+ the 0.25 s cache), the last fight's hold is
     -- stale: a later fight starts its own FIGHT.max instead of being capped at once.
-    if FIGHT.at and (now<FIGHT.at or now-FIGHT.at>=FIGHT.calm+0.25) then
-        FIGHT.on,FIGHT.since,FIGHT.last,FIGHT.capped=false,nil,nil,nil
+    -- A drop resting after a yield is not read either: its rest keeps the
+    -- hold fresh (FIGHT.keep), so each yield does not restart FIGHT.max.
+    if FIGHT.at and (now<FIGHT.at or now-math.max(FIGHT.at,FIGHT.keep or -math.huge)>=FIGHT.calm+0.25) then
+        FIGHT.on,FIGHT.since,FIGHT.last,FIGHT.capped,FIGHT.keep=false,nil,nil,nil,nil
     end
     FIGHT.at=now
     if Utils.enemy_near(FIGHT.on and G.fight_radius+FIGHT.margin or G.fight_radius) then
@@ -374,6 +376,7 @@ local function stand_down(e,item,now)
     e.yields=(e.yields or 0)+1
     local rest=math.min(YIELD.rest*2^(e.yields-1),YIELD.max)
     e.yield_until=now+rest;e.working=false;e.next=0;e.foreign=nil;e.best=nil;e.best_at=nil
+    FIGHT.keep=math.max(FIGHT.keep or -math.huge,e.yield_until) -- QQT_Warpigz_v3 1.0.22: see fight_hold
     if movement_owned then pcall(G.movement.yield,'pickup') end -- never clears the other mover's path
     movement_owned=false;movement_key=nil
     if e.yields<=3 then
@@ -495,6 +498,6 @@ function M.reset(clear_movement)
     G.settled,G.count,G.retried,G.last=({}),0,({}),nil -- QQT_Warpigz_v3 (Q1)
     G.fight_at,G.fight=nil,nil -- QQT_Warpigz_v3 (Q1 review)
     episode.since,episode.last,episode.capped_until=nil,nil,0 -- QQT_Warpigz_v3
-    FIGHT.on,FIGHT.at,FIGHT.since,FIGHT.last,FIGHT.capped=false,nil,nil,nil,nil -- QQT_Warpigz_v3 3.3.2
+    FIGHT.on,FIGHT.at,FIGHT.since,FIGHT.last,FIGHT.capped,FIGHT.keep=false,nil,nil,nil,nil,nil -- QQT_Warpigz_v3 3.3.2 (keep: 1.0.22)
 end
 return M

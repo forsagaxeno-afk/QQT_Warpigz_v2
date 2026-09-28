@@ -135,6 +135,28 @@ case('Y1 (C6) a drop that keeps losing the path to another mover is given up wit
     h.assert_clean('Y1')
 end)
 
+case('F4 (C6) an enemy that never dies plus a mover that keeps taking the player off the drop: one 45 s cap, not one per yield', function()
+    local h = new()
+    h.actor('pit', 'Dark_Conjurer', 6, 0, {enemy = true, elite = true, health = 1e9})
+    local t0 = h.now
+    local d = h.drop('pit', -15, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_026'})
+    -- A farm plugin that pulls the player to (4,0) once Rosie has owned the
+    -- native path for 0.4 s (Rosie never reaches the drop).
+    local owned_since, pull_until = nil, -1
+    local function mover(hh)
+        if hh.native and hh.native.by == 'Rosie' then owned_since = owned_since or hh.now else owned_since = nil end
+        if owned_since and hh.now - owned_since >= 0.4 then pull_until = hh.now + 1.5 end
+        if hh.now < pull_until then
+            hh.as(CONSUMER, function() return hh.G.pathfinder.request_move(hh.v(4, 0)) end)
+        end
+    end
+    h.run(300, mover)
+    ok(h.logged('Another move took the player off Helm_Legendary_Generic_026', t0) >= 1, 'the mover took the player off the drop\n' .. h.tail(10))
+    eq(h.logged('A fight kept pickup waiting', t0), 1, 'one cap line for one never-ending fight\n' .. h.tail(12))
+    ok(d.picked ~= true, 'never reached')
+    h.assert_clean('F4')
+end)
+
 -- P: counters around one pickup pulse (ItemManager.get_item_based_on_priority).
 local function instrument(h)
     local IM = h.mod('Rosie', 'rosie.private.pickup.src.item_manager')
