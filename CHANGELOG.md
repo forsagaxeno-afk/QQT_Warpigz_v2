@@ -2,6 +2,29 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.3] — 2026-09-28
+
+Live report: with Worldstone driving the third-party **Navigator**, Rosie's Town Portal cast was interrupted over and over and the trip failed (`teleport_failed`). This release makes Rosie work next to Navigator, Worldstone and Butler, and closes every finding of a full review of all 11 plugins (every fix has a test that fails on the old code).
+
+### Fixed
+
+- **Rosie 1.0.21 / 1.0.22: town trips next to Navigator, Worldstone and Butler.**
+  - During a trip Rosie holds Navigator (a pause condition while the trip runs, bounded to 600 s, released while the player is dead or reviving) and stops a Navigator walk that is not hers right before the Town Portal cast. She pauses Scavenger under her own name and resumes only her own pause.
+  - The cast waits until the player has stood still for 0.6 s. A cast another addon moved the player out of does not count as one of the 8 attempts (at most 4 such refunds per trip). Being moved by another addon for more than 120 s fails the trip with a clear reason.
+  - Rosie's status shows the trip as running for the whole trip, so plugins that read it (Worldstone) wait. No automatic trip starts while Butler runs one ("Butler is running a town trip.").
+  - Pickup: a fight hold from an earlier fight no longer carries over, so a new fight gets its full 45 s and Rosie no longer walks out of it to a drop. A drop waiting for the fight is also published as `LooteerPlugin.has_pending_loot()`.
+  - Batmobile stays paused for the whole trip. `Bag needs a town trip … starting it now` is logged once, only when a trip really starts. A drop that keeps losing to another mover is given up after a few rounds.
+- **HelltideRevamped 2.6.2:** no wait or walk without a bound (stall audit); a death during a rupture no longer ends or abandons it; a started rupture that shows only its event marker is kept; an un-started rupture with an interactable starter is not marked spent; no request loop when Rosie refuses a trip; no search reset or stale teleport right after a trip.
+- **Batmobile 2.2.2:** no back-and-forth jitter on the path look-ahead; a player pushed 3-5 m off a gizmo walks back (at most 3 times, then the gizmo is skipped); a goal set right after a jump is kept; no STUCK/evade spam when pressed against a big target.
+- **WarPigs 1.1.7 / WarPug 1.0.16:** no endless loop between Temis steps (a Temis visit spends at most 180 s of busy time on Alfred); WarPug no longer waits forever on a full bag or a stuck Rosie; waits for a busy Butler (bounded); War Plan mode is restored after a Helltide reload.
+- **ArkhamAsylum 2.1.3, Reaper 1.10.4, HordeDev 2.2.5, WonderCity 2.2.4:** every wait is bounded: shrine walk, altar approach, boss-fight trip defer (90 s), a single Cerrigar cast; Reaper joins a boss fight already running; exits wait for a drop Rosie deferred.
+- **SilentRaven 0.2.6:** no Whisper claim or claim trip while Butler, Navigator or another loop plugin is busy; a paused claim is published so other plugins don't wait on it.
+- **WarRoom 1.0.3:** lighter; item rarity "set"; a collector error disables it instead of spamming; shows suite version 3.3.3.
+
+### Live checks
+
+A Rosie trip with Worldstone running (`Navigator is held…`, `stopped for the Town Portal cast`, Worldstone resumes after the trip); a Butler trip while Rosie is idle; back-to-back Pit elite fights (no `A fight kept pickup waiting` at the start of a fight); a Helltide chaos rift event in Farm mode finishes within its 180 s bound.
+
 ## [3.3.2] — 2026-09-28
 
 Two live reports from Discord: the bot "goes back and forth" (Pit, Helltide) and Helltide "stands around, activity Pandemonium Rupture, but there is no rupture".
