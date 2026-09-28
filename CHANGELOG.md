@@ -2,6 +2,30 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.4] — 2026-09-28
+
+**Rosie 1.0.23: Rosie acts as Scavenger for Worldstone.** Worldstone waits for its looter, Scavenger, before it moves on. Without Scavenger installed it never waited for Rosie's pickup.
+
+### Added
+
+- **Rosie 1.0.23: a Scavenger stand-in, only while Worldstone runs** (option *Act as Scavenger for Worldstone/Navigator*).
+  - While the Worldstone plugin is loaded and no real Scavenger is installed, Rosie publishes a Scavenger-compatible API. Worldstone then waits while Rosie really picks up a drop, and Navigator pauses for it (`Rosie Looting`).
+  - Without Worldstone, nothing is published. A real Scavenger is never replaced. When Worldstone goes away the stand-in is removed.
+  - Every wait is bounded. One pickup episode reads busy for at most 60 s (20 s without progress), then 5 s free. A `pause("Worldstone")` lasts at most 60 s. Rosie never waits for her own stand-in.
+
+### Fixed
+
+- Rosie: a drop she stepped back from is picked up when another plugin walks the player over it.
+- Helltide tests no longer depend on the real clock: they failed when the suite ran at minute :00. Tests only.
+- WarRoom 1.0.4: shows suite version 3.3.4.
+
+### Live checks
+
+With Worldstone + Navigator and no Scavenger:
+- Worldstone waits while Rosie picks up (`Rosie Looting`).
+- A `pause("Worldstone")` is released.
+- Does `_G.Worldstone` stay set when Worldstone is switched off in its own menu? ApiProbe logs it.
+
 ## [3.3.3] — 2026-09-28
 
 Live report: with Worldstone driving the third-party **Navigator**, Rosie's Town Portal cast was interrupted over and over and the trip failed (`teleport_failed`). This release makes Rosie work next to Navigator, Worldstone and Butler, and closes every finding of a full review of all 11 plugins (every fix has a test that fails on the old code).
