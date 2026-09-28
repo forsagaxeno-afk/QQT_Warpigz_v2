@@ -250,7 +250,6 @@ local element_makers = {
     town_choice = function() return combo_box:new(0, get_hash(plugin_label .. '_town_choice_v2')) end,
     explorer_path_angle_slider = function() return slider_int:new(0, 360, 10, get_hash(plugin_label .. '_explorer_path_angle_slider')) end,
     max_inventory = function() return slider_int:new(20,33, 25, get_hash(plugin_label .. '_max_inventory')) end,
-    max_stash_items = function() return slider_int:new(1, 350, 350, get_hash(plugin_label .. '_max_stash_items')) end,
     failed_action = function() return combo_box:new(0, get_hash(plugin_label .. '_failed_action')) end,
     skip_cache = function() return create_checkbox(false, 'skip_cache') end,
     skip_favorite = function() return create_checkbox(false, 'skip_favorite') end,
@@ -575,7 +574,6 @@ local function render_settings()
             render_menu_header('If retained caches leave the bag full, Rosie reports the unresolved need and waits for Run town service.')
         end
         e.skip_favorite:render('Leave locked items in the bag', 'Locked (favourite) items are never sold or salvaged; with this on they are not stashed either.')
-        e.max_stash_items:render("Max stash items", "Rosie stops stashing when the observed stash reaches this configured limit")
         pop_tree(e.storage_tree)
     end
     if push_tree(gui.elements.general_tree, '9. Town trips') then

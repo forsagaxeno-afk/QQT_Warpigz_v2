@@ -100,9 +100,9 @@ end)
 case('N2 standalone HordeDev with a stuck Rosie (stash full) opens the chests instead of asking forever', function()
     local h = new({dirs = {'Batmobile', 'HordeDev'}, place = 'temis'})
     h.instrument_exports()
-    h.mod('Rosie', 'rosie.private.town.gui').elements.max_stash_items:set(10)
+    -- QQT_Warpigz_v3 1.0.24: the stash is full at the game maximum (350, no setting).
     h.stash = {}
-    for _ = 1, 10 do h.stash[#h.stash + 1] = h.gear({locked = true}) end
+    for _ = 1, 350 do h.stash[#h.stash + 1] = h.gear({locked = true}) end
     h.inventory = {}
     for _ = 1, 25 do h.inventory[#h.inventory + 1] = h.gear({locked = true}) end
     ok(h.run_until(function() return h.logged('[Rosie] failed') > 0 end, 120), 'the stash-full trip failed\n' .. h.tail())
