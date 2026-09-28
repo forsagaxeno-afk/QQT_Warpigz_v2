@@ -152,9 +152,11 @@ local function outbound_pickup()
         if not lifecycle.lend_pickup(true) then tp.capped = true; return false end
         tp.since, tp.last = now, now
         tp.spot = tp.fits and tp_spot(tp.fits) or nil
-        -- A cast in flight is interrupted by the pickup walk: never an attempt.
-        if debounce_time >= 0 and not cast.refunded and outbound_attempts > 0 then
-            cast.refunded = true; outbound_attempts = outbound_attempts - 1
+        -- A cast still in flight is interrupted by the pickup walk: refunded
+        -- like any interrupted cast (counted under MAX_REFUNDS).
+        if debounce_time >= 0 and not cast.refunded and outbound_attempts > 0
+            and now - debounce_time < debounce_timeout and cast.refunds < MAX_REFUNDS then
+            cast.refunded = true; outbound_attempts = outbound_attempts - 1; cast.refunds = cast.refunds + 1
         end
         local label = tp.fits and item_label(tp.fits) or 'a drop'
         if tp.named ~= label then
@@ -169,6 +171,14 @@ local function outbound_pickup()
         if tp.spent >= PICK_BUDGET and not tp.capped then
             tp.capped = true
             console.print(string.format('[Rosie] Pickup before the Town Portal took %ds; casting now', PICK_BUDGET))
+        end
+        -- A drop pickup did not take (a fight holds it, the game refused it):
+        -- one bounded try on the way back, never left silently.
+        if tp.fits and not tp.left and tracker.return_required then
+            tp.left = tp_spot(tp.fits)
+            if tp.left then
+                console.print('[Rosie] '..tp.left.label..' was not picked up before the cast: Rosie picks it up when it comes back')
+            end
         end
     end
     return false
@@ -186,13 +196,13 @@ local function return_pickup()
             tp.left = nil; return false
         end
         if not lifecycle.lend_pickup(true) then tp.left = nil; return false end
-        tp.back = now
+        tp.back = now; tracker.return_pickup = true
         console.print(string.format('[Rosie] Back from town: picking up %s (at most %ds)', tp.left.label, RETURN_WAIT))
     end
     tp_scan(now)
     local waiting = now - tp.back < RETURN_WAIT and (now - tp.back < RETURN_GRACE or tp.fits ~= nil or pickup_busy())
     if waiting then task.set_status('Picking up the drop left at the Town Portal'); return true end
-    lifecycle.lend_pickup(false)
+    lifecycle.lend_pickup(false); tracker.return_pickup = nil
     if now - tp.back >= RETURN_WAIT then
         console.print(string.format('[Rosie] %s was not picked up within %ds; the trip completes', tp.left.label, RETURN_WAIT))
     end
@@ -375,8 +385,11 @@ task.Execute = function ()
     if not player or player:is_dead() or tracker.external_pause then return end
     if tracker.visited_town and not utils.is_in_town() then
         if not tracker.return_required then return end -- QQT_Warpigz_v3: no return leg
-        if lifecycle.returned() then
-            if return_pickup() then return end -- QQT_Warpigz_v3 1.0.24
+        -- QQT_Warpigz_v3 1.0.24: a return pickup that walks across a zone
+        -- border still ends as a return (the trip did come back).
+        local picking = tp.back ~= nil and tp.left ~= nil and tp.request == tracker.request_id
+        if picking or lifecycle.returned() then
+            if return_pickup() then return end
             extension.done()
         elseif not utils.player_in_zone('[sno none]') then extension.failed() end
         return

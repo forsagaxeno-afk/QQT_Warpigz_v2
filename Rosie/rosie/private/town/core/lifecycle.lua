@@ -366,6 +366,7 @@ function M.request(caller,callback,teleport,manual)
     tracker.visited_town=utils.is_in_town()
     tracker.service_elapsed=0; tracker.pause_elapsed=0; last_tick=nil
     tracker.raven_wait=nil -- QQT_Warpigz_v3
+    tracker.return_pickup=nil -- QQT_Warpigz_v3 1.0.24
     tracker.mover_elapsed=0; motion.x,motion.y,motion.moved_at=nil,nil,nil -- QQT_Warpigz_v3 1.0.21
     -- QQT_Warpigz_v3 1.0.22: per-trip Navigator hold bounds and revive bound.
     local t0=get_time_since_inject()
@@ -400,6 +401,7 @@ function M.finish(success,reason,kind)
     tracker.external_trigger,tracker.manual_trigger,tracker.trigger_tasks=false,false,false
     tracker.teleport=false
     tracker.raven_wait=nil -- QQT_Warpigz_v3
+    tracker.return_pickup=nil -- QQT_Warpigz_v3 1.0.24
     -- Only the trip's own caller can hold a pause during a trip (M.pause).
     if tracker.external_pause and (tracker.pause_caller==nil or tracker.pause_caller==tracker.external_caller) then
         tracker.external_pause=false; tracker.pause_caller=nil
@@ -544,7 +546,10 @@ function M.tick()
     if M.revive_holds(reviving,now) then return false end -- QQT_Warpigz_v3 1.0.22: bounded (REVIVE_LIMIT, C6)
     nav_hold.pulse=now -- QQT_Warpigz_v3 1.0.22: this tick drives the trip
     M.hold_peers()
-    if utils.is_in_town() then tracker.visited_town=true end
+    if utils.is_in_town() then
+        tracker.visited_town=true
+        if lent then M.lend_pickup(false) end -- QQT_Warpigz_v3 1.0.24: a lend never outlives the outbound leg
+    end
     -- QQT_Warpigz_v3: waiting for the SilentRaven hand-off (teleport.lua,
     -- bounded there) is not service time.
     -- QQT_Warpigz_v3 1.0.21: on the outbound leg, time the player is being
@@ -557,7 +562,9 @@ function M.tick()
             M.finish(false,string.format('teleport_failed: another addon kept moving the player during the Town Portal cast (%ds)',M.MOVER_WAIT))
             return false
         end
-    elseif not tracker.raven_wait then tracker.service_elapsed=(tracker.service_elapsed or 0)+elapsed end
+    -- QQT_Warpigz_v3 1.0.24: the return-leg pickup (teleport.lua, bounded by
+    -- RETURN_WAIT) is not service time either.
+    elseif not tracker.raven_wait and not tracker.return_pickup then tracker.service_elapsed=(tracker.service_elapsed or 0)+elapsed end
     if tracker.service_elapsed>=240 then M.finish(false,'Town service or return timed out (240s)'); return false end
     -- QQT_Warpigz_v3 (Q6): hold the next step while a panel closes (bounded:
     -- 3 Escape presses 0.5 s apart, 8 s at most; counted as service time).
