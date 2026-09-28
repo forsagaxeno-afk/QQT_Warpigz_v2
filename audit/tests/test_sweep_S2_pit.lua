@@ -687,6 +687,15 @@ rule('LOOP-fight-explore', 'expected', 'LOOP', function(hit)
     return has(hit, 'ArkhamAsylum.task') and (has(hit, 'kill_monster <-> explore_pit') or has(hit, 'explore_pit <-> kill_monster'))
         and mean_dwell(hit) >= 3
 end, 'fight / explore alternation (mean dwell >= 3 s), not a thrash')
+-- Arkham's pickup yield ('Idle') against a task, several seconds each: Rosie's
+-- fight hold stays on while a static chaos elite pack stands 12-14 m away
+-- (inside Rosie's 14 m hysteresis, outside the rotation's 12 m; the host's
+-- enemies never walk in), so the yield comes back every 15 s episode.
+rule('LOOP-yield-alternation', 'expected', 'LOOP', function(hit)
+    local idle = has(hit, 'ArkhamAsylum.task switches Idle <-> ')
+        or (has(hit, 'ArkhamAsylum.task switches') and has(hit, ' <-> Idle '))
+    return idle and mean_dwell(hit) >= 3
+end, 'emulator: static enemies at 12-14 m keep the pickup yield coming back (mean dwell >= 3 s)')
 
 -- ── the sweep ─────────────────────────────────────────────────────────────
 local function parse_seeds(text)
