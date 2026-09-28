@@ -8,7 +8,7 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 - [2026-09-28] [Coordinator → Rosie] Rosie cannot cast Town Portal while the third-party **Navigator** (driven by Worldstone) keeps moving the player. The Navigator interrupts the cast, the trip ends `teleport_failed`, and Rosie cannot pause it. Waiting for the owner's `[ApiProbe]` log of what **Butler** (a Navigator-aware Rosie-like addon) sends to Navigator. Then implement the same in Rosie's `lifecycle.hold_peers` / `release_peers`, with a joint-host regression test using a fake Navigator.
 
 ## Ready for review
-- [2026-09-28] [Batmobile] Batmobile 2.2.2: no back-and-forth jitter on the path look-ahead (skipped close nodes dropped; skip only with straight reach; unstuck side-step walked to the end); STUCK next to an unreachable traversal gizmo is suppressed at most 5 s, then the gizmo is dropped (claude/qqt-batmobile@SHA, Batmobile/core/navigator.lua, Batmobile/gui.lua, versions.json, Batmobile/NOTES.md; new audit/tests/test_batmobile_oscillation.lua: 5 cases, all fail on 2.2.1)
+- [2026-09-28] [Batmobile] Batmobile 2.2.2: no back-and-forth jitter on the path look-ahead (skipped close nodes dropped; skip only with straight reach; unstuck side-step walked to the end); STUCK next to an unreachable traversal gizmo is suppressed at most 5 s, then the gizmo is dropped (claude/qqt-batmobile@27ba537, Batmobile/core/navigator.lua, Batmobile/gui.lua, versions.json, Batmobile/NOTES.md; new audit/tests/test_batmobile_oscillation.lua: 5 cases, all fail on 2.2.1)
 
 ## Auditor / critic findings
 (none open)
