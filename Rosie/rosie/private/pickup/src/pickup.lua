@@ -75,8 +75,12 @@ local episode={since=nil,last=nil,capped_until=0}
 --  * YIELD: while Rosie works a drop, a move destination that is neither
 --    Rosie's last move, the drop nor the player's spot (another mover) for
 --    YIELD.confirm s while the player moves YIELD.moved m makes Rosie step back without clearing that path; the
---    drop is not tried (nor woken) for YIELD.rest s, doubling per yield of
---    that drop up to YIELD.max s (its rounds still bound it, C6).
+--    drop is not walked to (nor woken) for YIELD.rest s, doubling per yield of
+--    that drop up to YIELD.max s (its rounds still bound it, C6). Within
+--    REACH it is still interacted with and no foreign move is counted
+--    meanwhile (QQT_Warpigz_v3 1.0.22).
+--    QQT_Warpigz_v3 1.0.22: every YIELD.per_round yields of a drop fail one
+--    of its rounds.
 local G={nonbag_interacts=3,nonbag_clear=3.5,small_interacts=ROUND_INTERACTS,settle_ttl=180,settle_max=128,same_spot=1.0,
     away=REACH+2,settled={},count=0,world=nil,retried={},fight_radius=10,movement=require('rosie.movement')}
 M.limits={reach=REACH,round_interacts=ROUND_INTERACTS,round_stall=ROUND_STALL,rest=REST,max_rounds=MAX_ROUNDS,
@@ -147,6 +151,7 @@ function M.observe(items)
                 if gone and gone.touched and gone.world==world then announce(gone) end
                 entries[id]=nil;G.retried[id]=nil -- QQT_Warpigz_v3 (Q1)
                 if episode.since then episode.since=get_time_since_inject() end -- QQT_Warpigz_v3: progress
+                M.progress_at=now -- QQT_Warpigz_v3 1.0.22 (review): progress for the Scavenger mimic's cap
             end
         end
     end
@@ -167,16 +172,32 @@ function M.blocked(item)
     local e=entries[id]
     if not e then return false end
     if e.rounds>=MAX_ROUNDS then
-        return true,e.why=='stall' and 'pickup approach failed '..MAX_ROUNDS..' times'
-            or 'pickup attempts exhausted ('..MAX_ROUNDS..' rounds)'
+        -- QQT_Warpigz_v3 1.0.22: rounds that a fight's mover took (yields while
+        -- an enemy was near) get ONE more round once no enemy is near: a good
+        -- drop that fell early in a long fight is still taken after it.
+        if e.why=='yield' and e.fight_yield and not e.after_fight and not Utils.enemy_near(G.fight_radius) then
+            e.after_fight=true;e.rounds=MAX_ROUNDS-1;e.yields=0;e.yield_until=nil;e.rest_until=0
+        else
+            return true,e.why=='stall' and 'pickup approach failed '..MAX_ROUNDS..' times'
+                or 'pickup attempts exhausted ('..MAX_ROUNDS..' rounds)'
+        end
     end
     -- QQT_Warpigz_v3 3.3.2: stepped back for another mover (see the header).
-    if e.yield_until and get_time_since_inject()<e.yield_until then return true,'pickup yielded to another move' end
+    -- QQT_Warpigz_v3 1.0.22 (review): the yield holds walks only; a yielded
+    -- drop within REACH (another mover brought the player over it) is still
+    -- interacted with: an interaction sends no move, so no tug of war.
+    if e.yield_until and get_time_since_inject()<e.yield_until and Utils.distance_to(item)>REACH then
+        return true,'pickup yielded to another move'
+    end
     -- A stable reason: the rejection log prints once per drop and reason.
     if get_time_since_inject()<e.rest_until then return true,'pickup resting after round '..e.rounds..' ('..REST..'s)' end
     return false
 end
 M.key=key
+-- QQT_Warpigz_v3 1.0.22 (perf): M.blocked changes state only for a settled
+-- drop (its away/retry mark). With none settled, a caller that does not use
+-- its answer may skip it.
+function M.tracking() return next(G.settled)~=nil end
 -- QQT_Warpigz_v2 local patch (review rc.10): a drop resting between rounds
 -- with rounds left. When no other wanted drop is waiting, the rest ends at
 -- once (wake): the busy flag never drops while Rosie still means to take it,
@@ -227,7 +248,8 @@ local function fail_round(e,now,why,item,d)
     -- QQT_Warpigz_v2 (live rc.13): name the drop Rosie could not take.
     console.print(string.format('[Rosie pickup] %s %s: round %d/%d failed (%s, distance %.1f)',
         e.rounds>=MAX_ROUNDS and 'Gave up on' or 'Retrying',item and item_name(item) or 'item',e.rounds,MAX_ROUNDS,
-        why=='stall' and 'no progress toward it' or 'interactions did not pick it up',d or -1))
+        why=='stall' and 'no progress toward it' or why=='yield' and 'another move kept taking the player off it' -- QQT_Warpigz_v3 1.0.22
+            or 'interactions did not pick it up',d or -1))
     e.interacts=0;e.best=nil;e.best_at=nil;e.working=false;e.next=0
 end
 -- QQT_Warpigz_v3 (Q1): settle a drop (see the header); one line per drop and outcome.
@@ -244,6 +266,7 @@ local function settle(id,item,why,line,retry,d)
     if why=='taken' and entries[id] then announce(entries[id]) end -- QQT_Warpigz_v3: suite event
     entries[id]=nil
     if episode.since and why=='taken' then episode.since=now end -- only a pickup is progress (20 s budget)
+    if why=='taken' then M.progress_at=now end -- QQT_Warpigz_v3 1.0.22 (review): the Scavenger mimic's cap
     if before==why then return end
     local ok,interactable=pcall(function() return item:is_interactable() end)
     console.print(string.format('[Rosie pickup] %s %s%s [interactable=%s]',why=='taken' and 'Took' or 'Leaving',
@@ -314,9 +337,16 @@ local function fighting(now)
 end
 -- QQT_Warpigz_v3 3.3.2: FIGHT hold and YIELD to another mover (see the header).
 local FIGHT={feet=REACH+1,margin=4,calm=1.0,max=45,on=false}
-local YIELD={confirm=0.3,rest=4,max=30,far=REACH+0.5,sent=1.5,moved=0.5}
+local YIELD={confirm=0.3,rest=4,max=30,far=REACH+0.5,sent=1.5,moved=0.5,per_round=2}
 M.limits.fight_feet,M.limits.fight_calm,M.limits.fight_max=FIGHT.feet,FIGHT.calm,FIGHT.max
 M.limits.yield_rest,M.limits.yield_max=YIELD.rest,YIELD.max
+M.limits.yield_per_round=YIELD.per_round -- QQT_Warpigz_v3 1.0.22
+-- QQT_Warpigz_v3 1.0.22: a drop that waits for the fight is published as
+-- LooteerPlugin.has_pending_loot(). Until every exit guard (Arkham, Reaper,
+-- HordeDev, WonderCity, HelltideRevamped, SilentRaven, WarPigs) also reads
+-- it, the wait still reports busy too, or those exits would leave the drop.
+-- Set to false once they do (audit/BOARD.md): the farm plugin then fights.
+M.fight_wait_busy=true
 local function xy(v)
     local x,y=Utils.call(v,'x'),Utils.call(v,'y')
     if type(x)~='number' or type(y)~='number' then return nil end
@@ -325,6 +355,15 @@ end
 local function flat(a,b) return math.sqrt((a.x-b.x)^2+(a.y-b.y)^2) end
 local function fight_hold(now)
     if FIGHT.at and now>=FIGHT.at and now-FIGHT.at<0.25 then return FIGHT.on and not FIGHT.capped end
+    -- QQT_Warpigz_v3 1.0.22: only a waiting drop evaluates the hold. Unread
+    -- for longer than FIGHT.calm (+ the 0.25 s cache), the last fight's hold is
+    -- stale: a later fight starts its own FIGHT.max instead of being capped at once.
+    -- A drop resting after a yield keeps it read (M.fight_refresh from
+    -- choose), so each yield does not restart FIGHT.max, and a fight that ends
+    -- during the rest still ends the hold.
+    if FIGHT.at and (now<FIGHT.at or now-FIGHT.at>=FIGHT.calm+0.25) then
+        FIGHT.on,FIGHT.since,FIGHT.last,FIGHT.capped=false,nil,nil,nil
+    end
     FIGHT.at=now
     if Utils.enemy_near(FIGHT.on and G.fight_radius+FIGHT.margin or G.fight_radius) then
         FIGHT.last=now
@@ -338,16 +377,30 @@ local function fight_hold(now)
     end
     return FIGHT.on and not FIGHT.capped
 end
+-- QQT_Warpigz_v3 1.0.22: keep the hold observed while a wanted drop rests.
+function M.fight_refresh(now) fight_hold(now or get_time_since_inject()) end
 -- True while a drop farther than FIGHT.feet m waits for the fight to end.
+-- QQT_Warpigz_v3 1.0.22 (review): or a drop farther than REACH m while
+-- M.walk_hold(now) (scavenger_mimic.lua: the cool-down after its cap) gives
+-- Navigator the path back without a tug of war; drops in reach are still taken.
 function M.fight_deferred(item,now)
     local d=Utils.distance_to(item)
-    return d>FIGHT.feet and d~=math.huge and fight_hold(now or get_time_since_inject())
+    if d==math.huge then return false end
+    now=now or get_time_since_inject()
+    if d>FIGHT.feet and fight_hold(now) then return true end
+    if d<=REACH or type(M.walk_hold)~='function' then return false end
+    local ok,hold=pcall(M.walk_hold,now)
+    return ok and hold==true
 end
 local function foreign_move(e,item,now)
     if not e.working then e.foreign=nil;return false end
     local player=Utils.host_call(rawget(_G,'get_local_player'))
     local dest,here,spot=xy(Utils.call(player,'get_move_destination')),xy(Utils.call(player,'get_position')),xy(Utils.call(item,'get_position'))
     if not dest or not here or not spot or flat(dest,here)<=YIELD.far or flat(dest,spot)<=YIELD.far then e.foreign=nil;return false end
+    -- QQT_Warpigz_v3 1.0.22 (review): a yielded drop in REACH is only
+    -- interacted with (no move): the mover carrying the player over it is no
+    -- new yield (a second one failed a round mid-pass, YIELD.per_round).
+    if e.yield_until and now<e.yield_until and flat(here,spot)<=REACH then e.foreign=nil;return false end
     local st=movement_owned and Utils.host_call(G.movement.status)
     local sent=type(st)=='table' and st.owner=='pickup' and st.sent
     if sent and flat(dest,sent)<=YIELD.sent then e.foreign=nil;return false end
@@ -360,12 +413,17 @@ local function stand_down(e,item,now)
     e.yields=(e.yields or 0)+1
     local rest=math.min(YIELD.rest*2^(e.yields-1),YIELD.max)
     e.yield_until=now+rest;e.working=false;e.next=0;e.foreign=nil;e.best=nil;e.best_at=nil
+    if Utils.enemy_near(G.fight_radius) then e.fight_yield=true end -- QQT_Warpigz_v3 1.0.22: see M.blocked
     if movement_owned then pcall(G.movement.yield,'pickup') end -- never clears the other mover's path
     movement_owned=false;movement_key=nil
     if e.yields<=3 then
         console.print(string.format('[Rosie pickup] Another move took the player off %s; leaving it for %ds (yield %d)',
             item_name(item),rest,e.yields))
     end
+    -- QQT_Warpigz_v3 1.0.22: a yield counted no round, so a drop that kept
+    -- losing the path came back every YIELD.max s forever. Every
+    -- YIELD.per_round yields of a drop fail a round; its rounds bound it (C6).
+    if e.yields%YIELD.per_round==0 then fail_round(e,now,'yield',item,Utils.distance_to(item)) end
 end
 function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemManager.destination
     if M.blocked(item) then M.release_movement(); return false end

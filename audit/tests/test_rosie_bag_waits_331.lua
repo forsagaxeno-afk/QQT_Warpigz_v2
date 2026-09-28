@@ -60,13 +60,17 @@ case('an activity owning the run: served after 60 s while the player stands in t
     h.assert_clean('owner in town')
 end)
 
-case('an activity owning the run outside town: served after 600 s, never during a revive', function()
+-- QQT_Warpigz_v3 1.0.22: a revive phase is honoured for REVIVE_LIMIT s at
+-- most (it was waited on without a bound, C6; test_rosie_town_main_1022.lua).
+case('an activity owning the run outside town: served after 600 s, not during a revive under its bound', function()
     local h = new({place = 'pit'})
     enable(h)
-    owner(h, 'revive')
+    owner(h, 'fight')
     fill_bag(h, 25)
-    h.run(700)
-    eq(st(h).running, false, 'never during a revive')
+    h.run(590)
+    owner(h, 'revive')
+    h.run(55)
+    eq(st(h).running, false, 'a revive under REVIVE_LIMIT holds the start past the 600 s deferral')
     owner(h, 'fight')
     h.run(1)
     ok(h.run_until(function() return st(h).running == true end, 5), 'trip once the revive ended (waited > 600 s)')
