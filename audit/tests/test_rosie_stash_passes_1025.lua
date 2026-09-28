@@ -1,4 +1,4 @@
--- QQT_Warpigz_v3 1.0.24 (stash port from SteroidAlfred): pass-based deposit.
+-- QQT_Warpigz_v3 1.0.25 (stash passes): pass-based deposit (SteroidAlfred).
 -- Live 3.3.6 (owner, the same every trip):
 --   Open stash: attempt=1 distance=1.6 host=true ... sdk=false inv=false vendor=nil stash_n=0
 --   Stash reads open: signal=inv attempt=1 sdk=false inv=true vendor=nil stash_n=16
@@ -16,10 +16,21 @@
 -- usable count; then one pass per second sends EVERY stashable item; the bag
 -- decides what moved; the rest is simply sent again.
 -- The live stash is modelled here only (live_stash below); joint_host.lua is
--- unchanged. On 3.3.6 SP1-SP8, SP10 and SP11 fail (SP1: both Furnaces stay
--- in the bag, the owner's log lines reproduced); SP9 and SP12 pass on both
--- (they guard the port). SP11 (a flapping bag read) and SP12 (cached list +
--- inventory panel) pin two rules the port adds to the spec prototype.
+-- unchanged. On 3.3.6 SP1-SP8, SP10, SP14 and SP15 fail (SP1: both Furnaces
+-- stay in the bag, the owner's log lines reproduced); SP9 and SP11-SP13 pass
+-- on 3.3.6 too (they guard the port). SP11 (a flapping bag read) and SP12
+-- (cached list + inventory panel) pin two rules the port adds to the spec
+-- prototype.
+-- Review of the port (1.0.25): the first build (9ab6060) latched a permanent
+-- "The stash is full" whenever gear stayed in the bag at a stall with a
+-- readable count (one refused item, a stale bag entry, a list still loading):
+-- Rosie reported stuck and refused the next trips for 600 s. The stash now
+-- reads full only at settings.max_stash_items (SteroidAlfred, 3.3.6). SP4-SP6
+-- and SP11 were changed to that rule; SP6 (the next bag need starts a trip),
+-- SP13 (empty stash + one refused item; a stale bag entry), SP14 (a list that
+-- stays partial past the first window; a re-interaction that restarts the
+-- load) and SP15 (a panel only a receipt proved open closes) were added.
+-- SP4-SP6, SP11 and SP13-SP15 fail on 9ab6060.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
 local checks, failures = 0, {}
@@ -72,15 +83,21 @@ end
 -- the whole stash. The game ignores a move sent before the stash loaded (the
 -- host returns true, nothing moves). `cap`: the game refuses every move once
 -- the stash holds `cap` items. `refuse(item)`: the game never takes that item.
+-- `reload`: an interaction with the open stash restarts its load (untested
+-- live). `stale(item)`: that item lands in the stash, the bag list keeps it.
 local function live_stash(h, o)
     o = o or {}
     local player, lm = h.G.get_local_player(), h.G.loot_manager
     local orig_move, orig_interact = lm.move_item_to_stash, h.G.interact_vendor
     local opened_at
-    h.dropped, h.cmds, h.refused = 0, {}, 0
+    h.dropped, h.cmds, h.refused, h.reloads = 0, {}, 0, 0
     local function open() return h.vendor_screen == true and h.vendor_actor == h.temis_stash end
     local function loaded() return opened_at ~= nil and h.now - opened_at >= (o.load or 0) end
     h.G.interact_vendor = function(a)
+        if a == h.temis_stash and open() and o.reload then
+            opened_at = h.now; h.reloads = h.reloads + 1
+            return true
+        end
         if a == h.temis_stash and not open() then
             h.at(0.2, function()
                 local was = open(); orig_interact(a)
@@ -103,6 +120,10 @@ local function live_stash(h, o)
         if not open() then return false end
         if not loaded() then h.dropped = h.dropped + 1; return true end
         if (o.cap and #h.stash >= o.cap) or (o.refuse and o.refuse(item)) then h.refused = h.refused + 1; return true end
+        if o.stale and o.stale(item) then
+            if not item.gone then item.gone = true; h.stash[#h.stash + 1] = item; h.stashed[#h.stashed + 1] = item end
+            return true
+        end
         for i = #(h.talismans or {}), 1, -1 do
             if h.talismans[i] == item then
                 table.remove(h.talismans, i)
@@ -137,8 +158,10 @@ case('SP1 live: the stash list loads for a while and the game ignores early move
         for _, it in ipairs({f1, f2, m, l1, l2, seal}) do ok(stashed(h, it), label .. ': ' .. it.name .. ' stashed\n' .. h.tail(24)) end
         eq(h.logged('Skipped'), 0, label .. ': nothing skipped (3.3.6: Skipped 2HMace_Unique_Generic_001)')
         eq(tracker(h).stash_done, true, label .. ': the stash step completed')
-        eq(h.logged('Deposited 2HMace_Unique_Generic_001 (sno=223465); 2 of 2 unit(s) left the bag (stash list +2).'), 1,
+        eq(h.logged('Deposited 2HMace_Unique_Generic_001 (sno=223465); 2 of 2 unit(s) left the bag (stash list +2); last sent on pass '), 1,
             label .. ': one receipt for both Furnaces\n' .. h.tail(24))
+        eq(h.logged('host=true.'), h.logged('Deposited '), label .. ': each receipt names the host value of the move that worked')
+        eq(h.logged('Open stash: attempt=2'), 0, label .. ': the open stash is never interacted with again')
         ok(h.dropped > 0, label .. ': the early passes were ignored by the game (model check)')
         ok(h.cmds[1].t >= h.opened_at + 0.5 - 1e-6, string.format('%s: first move %.2fs after the panel opened',
             label, h.cmds[1].t - h.opened_at))
@@ -187,7 +210,11 @@ case('SP3 empty stash: the inventory panel held 1.5 s opens it; a late-loading e
     end
 end)
 
-case('SP4 a really full stash: nothing moves; stash_full latch naming every item left, bounded, panel closed', function()
+-- Review (1.0.25): a stash that takes nothing below the game maximum is not
+-- latched as full on one trip: each trip fails retryably, naming what is
+-- left, and MAX_FAIL_STREAK (3) latches it; then nothing is sent until the
+-- latch retry (no loop).
+case('SP4 a stash that takes nothing below the maximum: retryable, named, bounded; three trips latch, no loop', function()
     local h = new(LIVE)
     seed_stash(h, 300)
     local names = {}
@@ -198,20 +225,44 @@ case('SP4 a really full stash: nothing moves; stash_full latch naming every item
     local done = trip(h)
     print(string.format('   SP4 result: %s moves=%d seconds=%.0f', reason(done), #h.cmds, h.now - t0))
     ok(done[1] ~= nil, 'the trip failed')
-    eq(tracker(h).stash_full, true, 'stash_full')
-    eq(st(h).stuck, true, 'Rosie reports stuck (latched)')
-    ok(reason(done):find('The stash is full', 1, true), reason(done))
+    ok(reason(done):find('The stash took nothing in', 1, true), reason(done))
+    ok(reason(done):find('its list read up to 300 item(s)', 1, true), 'the count read is quoted: ' .. reason(done))
     for i = 1, 10 do ok(reason(done):find(names[i] .. ',', 1, true), 'the reason names ' .. names[i]) end
     ok(reason(done):find('(+15 more)', 1, true), 'the rest is counted: ' .. reason(done))
-    eq(tracker(h).fail_permanent, true, 'a permanent latch')
-    ok(#h.cmds <= 25 * 17, 'bounded moves: ' .. #h.cmds)
+    eq(tracker(h).stash_full, false, 'not the stash_full latch below the game maximum')
+    eq(tracker(h).fail_permanent, false, 'not a permanent latch after one trip')
+    local s = st(h)
+    eq(s.stuck, true, 'the retry cooldown applies')
+    ok(type(s.stuck_retry_in) == 'number', 'a retry is scheduled: ' .. tostring(s.stuck_retry_in))
+    eq(h.logged('the stash still reads open (signal=count, stash_n=300)'), 1, 'the loaded stash waits as it is\n' .. h.tail(20))
+    eq(h.logged('Open stash: attempt=2'), 0, 'the open stash is not interacted with again')
+    ok(#h.cmds <= 25 * 18, 'bounded moves: ' .. #h.cmds)
     eq(h.logged('No stash progress'), 0, 'not the 45 s bound')
     eq(h.logged('did not open'), 0, 'not "did not open"')
     h.run(3)
     eq(h.vendor_screen == true and h.vendor_actor == h.temis_stash, false, 'the stash panel is closed')
+    -- Two more trips after the cooldown: the fail streak latches (no loop).
+    local lc = h.mod('Rosie', 'rosie.private.town.core.lifecycle')
+    for n = 2, 3 do
+        h.run(lc.RETRY_COOLDOWN + 1)
+        local d
+        local acc = h.as(CONSUMER, function()
+            return h.G.AlfredTheButlerPlugin.trigger_tasks('WarPigs', function(r, x) d = {r, x} end)
+        end)
+        if acc == true then ok(h.run_until(function() return d ~= nil end, 200), 'trip ' .. n .. ' finished\n' .. h.tail())
+        else ok(h.run_until(function() return (tracker(h).fail_streak or 0) >= n end, 200), 'automatic trip ' .. n .. '\n' .. h.tail()) end
+    end
+    eq(tracker(h).fail_streak, 3, 'three failed trips')
+    s = st(h)
+    eq(s.stuck, true, 'latched')
+    eq(s.stuck_retry_in, nil, 'waits for Run town service or the latch retry')
+    local moves = #h.cmds
+    ok(moves <= 3 * 25 * 18, 'bounded over three trips: ' .. moves)
+    h.run(120)
+    eq(#h.cmds, moves, 'latched: no more deposits')
 end)
 
-case('SP5 three free slots: the Mythics take them first; the rest is named in the stash-full latch', function()
+case('SP5 three free slots: the Mythics take them first; the rest is left for this trip, named, no latch', function()
     local h = new(LIVE)
     seed_stash(h, 297)
     local l1, l2, l3 = h.gear({name = 'Kept_1', locked = true}), h.gear({name = 'Kept_2', locked = true}), h.gear({name = 'Kept_3', locked = true})
@@ -223,12 +274,17 @@ case('SP5 three free slots: the Mythics take them first; the rest is named in th
     ok(stashed(h, f) and stashed(h, m), 'both Mythics stashed')
     ok(stashed(h, l1), 'the first kept item in bag order took the last slot')
     ok(not stashed(h, l2) and not stashed(h, l3), 'no room for the rest')
-    eq(tracker(h).stash_full, true, 'stash_full')
-    ok(reason(done):find('Kept_2', 1, true) and reason(done):find('Kept_3', 1, true), reason(done))
-    ok(not reason(done):find('Kept_1', 1, true), 'only what is left is named')
+    eq(done[1], nil, 'two items left are no bag need: the trip completes: ' .. reason(done))
+    eq(tracker(h).stash_full, false, 'no stash_full latch below the game maximum')
+    eq(tracker(h).stash_done, true, 'the stash step ended')
+    eq(h.logged('Skipped Kept_2 (sno='), 1, 'Kept_2 named\n' .. h.tail(12))
+    eq(h.logged('Skipped Kept_3 (sno='), 1, 'Kept_3 named')
+    eq(h.logged('Skipped Kept_1'), 0, 'only what is left is named')
+    eq(h.logged('its list read up to 300 item(s)'), 2, 'the count read is quoted')
+    eq(h.logged('Skipped for this trip: Kept_2, Kept_3.'), 1, 'the step end names both')
 end)
 
-case('SP6 one item the game refuses never holds up the rest: every other item goes in on the first pass after the load', function()
+case('SP6 one item the game refuses never holds up the rest; it is left for this trip and the next bag need starts a trip', function()
     local h = new(LIVE)
     seed_stash(h, 100)
     local bad = furnace(h)
@@ -247,9 +303,27 @@ case('SP6 one item the game refuses never holds up the rest: every other item go
     end
     ok(ok_first, 'every other item was sent in the same pass as the refused one')
     eq(h.logged('transfer not confirmed'), 0, 'no per-item wait')
-    ok(reason(done):find('2HMace_Unique_Generic_001', 1, true), 'the refused item is named: ' .. reason(done))
-    eq(tracker(h).stash_full, true, 'gear the stash stops taking reads as a full stash')
-    eq(st(h).stuck, false, 'one leftover item is no bag need: Rosie is not stuck')
+    eq(done[1], nil, 'the trip completes: ' .. reason(done))
+    eq(h.logged('Skipped 2HMace_Unique_Generic_001 (sno=223465) for this trip: the stash did not take it'), 1,
+        'the refused item is named\n' .. h.tail(12))
+    eq(tracker(h).stash_full, false, 'one refused item is not a full stash')
+    eq(tracker(h).fail_permanent, false, 'no latch')
+    eq(st(h).stuck, false, 'Rosie is not stuck')
+    -- The bag fills again: the next trip is accepted (the first port build
+    -- latched "The stash is full" here: stuck, trips refused for 600 s).
+    for i = 1, 31 do h.inventory[#h.inventory + 1] = h.gear({name = 'Fill_' .. i, locked = true}) end
+    -- Rosie's own automatic service or WarPigs' request: either starts it.
+    local started = h.run_until(function() return st(h).running == true end, 5)
+    local done2
+    if not started then
+        eq(h.as(CONSUMER, function()
+            return h.G.AlfredTheButlerPlugin.trigger_tasks('WarPigs', function(r, d) done2 = {r, d} end)
+        end), true, 'the next trip is accepted (stuck: ' .. tostring(st(h).stuck_reason) .. ')')
+    end
+    ok(h.run_until(function() return st(h).running ~= true end, 200), 'the next trip ended\n' .. h.tail())
+    eq(tracker(h).outcome, 'completed', 'the next trip is serviced: ' .. tostring(tracker(h).failure_reason) .. '\n' .. h.tail(12))
+    eq(#h.inventory, 1, 'only the refused Furnace stays')
+    eq(tracker(h).stash_full, false, 'still no stash_full')
 end)
 
 case('SP7 socketable and material stacks (loading stash): each stack stashed once it loads, one request line per stack', function()
@@ -368,10 +442,12 @@ case('SP11 a bag read that flaps never keeps the step alive: one false receipt a
     local t0 = h.now
     local done = trip(h, 150)
     print(string.format('   SP11 result: %s seconds=%.0f', reason(done), h.now - t0))
-    ok(done[1] ~= nil, 'the step ends (the stash never took the pair)')
+    eq(tracker(h).stash_done, true, 'the step ends (the stash never took the pair)\n' .. h.tail(20))
     ok(h.logged('Deposited Refused_Pair') <= 1, 'at most one false receipt\n' .. h.tail(20))
     eq(h.logged('No stash progress'), 0, 'ended by the stall bound, not by the 45 s guard')
-    ok(reason(done):find('Refused_Pair', 1, true), 'the pair is named: ' .. reason(done))
+    eq(h.logged('Skipped Refused_Pair (sno=990123) for this trip'), 1, 'the pair is named\n' .. h.tail(12))
+    eq(tracker(h).stash_full, false, 'no stash_full latch')
+    eq(done[1], nil, 'two items left are no bag need: ' .. reason(done))
 end)
 
 case('SP12 cached stash list + inventory panel, flag silent: the inventory held 1.5 s opens it (no deadlock while "opening")', function()
@@ -383,6 +459,84 @@ case('SP12 cached stash list + inventory panel, flag silent: the inventory held 
     eq(done[1], nil, 'serviced: ' .. reason(done) .. '\n' .. h.tail(16))
     for _, it in ipairs(items) do ok(stashed(h, it), 'stashed\n' .. h.tail(16)) end
     eq(h.logged('No stash progress'), 0, 'no 45 s wait on a panel that reads "opening"')
+end)
+
+case('SP13 an empty stash with one refused item, and a stale bag entry: the rest is stashed, the leftover named, no stash_full', function()
+    for _, v in ipairs({'refused', 'stale'}) do
+        local h = new(LIVE)
+        h.stash = {}
+        if v == 'stale' then seed_stash(h, 100) end
+        local odd = h.gear({name = 'Odd_One', locked = true})
+        local k1, k2 = h.gear({name = 'Kept_1', locked = true}), h.gear({name = 'Kept_2', locked = true})
+        h.inventory = {odd, k1, k2}
+        local o = {load = 0}
+        if v == 'refused' then o.refuse = function(item) return item == odd end
+        else o.stale = function(item) return item == odd end end
+        live_stash(h, o)
+        local done = trip(h)
+        print('   SP13 ' .. v .. ' result: ' .. reason(done))
+        eq(done[1], nil, v .. ': serviced: ' .. reason(done) .. '\n' .. h.tail(16))
+        ok(stashed(h, k1) and stashed(h, k2), v .. ': the rest stashed')
+        eq(h.logged('Skipped Odd_One'), 1, v .. ': the leftover is named\n' .. h.tail(12))
+        eq(tracker(h).stash_full, false, v .. ': no stash_full')
+        eq(tracker(h).fail_permanent, false, v .. ': no latch')
+        eq(st(h).stuck, false, v .. ': not stuck')
+    end
+end)
+
+case('SP14 a stash list partial past the first window: the open stash is never interacted with again; a load that never ends is retryable, never "full"', function()
+    for _, load in ipairs({14, 30}) do
+        local h = new(LIVE)
+        seed_stash(h, 292)
+        table.insert(h.stash, 200, furnace(h))
+        local f1, f2 = furnace(h), furnace(h)
+        local k1, k2 = h.gear({name = 'Kept_1', locked = true}), h.gear({name = 'Kept_2', locked = true})
+        h.inventory = {f1, f2, k1, k2}
+        -- reload: interacting with the open stash restarts its load (not
+        -- verified live; the first port build re-interacted at its first stall).
+        live_stash(h, {load = load, partial = 16, reload = true})
+        local done = trip(h, 250)
+        local label = 'load ' .. load .. ' s'
+        print(string.format('   SP14 %s result: %s moves=%d reloads=%d', label, reason(done), #h.cmds, h.reloads))
+        eq(h.reloads, 0, label .. ': no interaction with the open stash\n' .. h.tail(16))
+        eq(h.logged('the stash still reads open (signal=count, stash_n=16)'), 1, label .. ': the first stall waits\n' .. h.tail(16))
+        eq(tracker(h).stash_full, false, label .. ': never stash_full')
+        eq(tracker(h).fail_permanent, false, label .. ': never a permanent latch')
+        ok(h.logged('nothing has left the bag in') >= 3, label .. ': the waiting passes are logged')
+        if load == 14 then
+            eq(done[1], nil, label .. ': serviced: ' .. reason(done) .. '\n' .. h.tail(16))
+            for _, it in ipairs({f1, f2, k1, k2}) do ok(stashed(h, it), label .. ': ' .. it.name .. ' stashed') end
+        else
+            ok(done[1] ~= nil, label .. ': the trip failed')
+            ok(reason(done):find('The stash took nothing in 17 passes', 1, true), label .. ': ' .. reason(done))
+            ok(reason(done):find('its list read up to 16 item(s)', 1, true), label .. ': the count as read: ' .. reason(done))
+            ok(reason(done):find('2HMace_Unique_Generic_001 x2', 1, true), label .. ': the Furnaces are named')
+            eq(tracker(h).fail_streak, 1, label .. ': one retryable failure')
+            ok(#h.cmds <= 4 * 17, label .. ': bounded moves ' .. #h.cmds)
+        end
+    end
+end)
+
+case('SP15 a panel only a receipt proved open (no signal at all) closes mid-way: Rosie opens it again, nothing is left behind', function()
+    local h = new({stash_screen_flag = false})
+    h.stash = {}
+    local items = {}
+    for i = 1, 4 do items[i] = h.gear({name = 'Kept_' .. i, locked = true}) end
+    h.inventory = {items[1], items[2], items[3], items[4]}
+    local lm = h.G.loot_manager
+    local move = lm.move_item_to_stash
+    local closed = false
+    lm.move_item_to_stash = function(item)
+        local r = move(item)
+        if not closed and #h.stashed >= 2 then closed = true; h.vendor_screen, h.vendor_actor = false, nil end -- another addon's Escape
+        return r
+    end
+    local done = trip(h)
+    eq(done[1], nil, 'serviced: ' .. reason(done) .. '\n' .. h.tail(16))
+    for _, it in ipairs(items) do ok(stashed(h, it), it.name .. ' stashed\n' .. h.tail(16)) end
+    eq(h.logged('Stash reads open: signal=receipt'), 1, 'the probe receipt opened it\n' .. h.tail(16))
+    eq(h.logged('on a panel only a receipt proved open'), 1, 'the idle panel reads closed\n' .. h.tail(16))
+    eq(h.logged('Skipped'), 0, 'nothing left behind')
 end)
 
 print('Rosie stash passes: ' .. checks .. ' checks')
