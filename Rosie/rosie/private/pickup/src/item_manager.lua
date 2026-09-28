@@ -69,7 +69,16 @@ local function equipment_threshold(s,rarity,sno,slot,info)
     end
     return required,source,overridden
 end
-function M.check_want_item(item, ignore_distance)
+-- QQT_Warpigz_v3 1.0.22 (perf): choose() passes a table of its own for one
+-- pulse, so each bag is read once per pulse, not once per ground candidate
+-- (nothing is picked up while choose runs). Every other caller reads live.
+local function bag_state(bag,bags)
+    if not bags then return Utils.bag_state(bag) end
+    local hit=bags[bag]
+    if not hit then local items,full=Utils.bag_state(bag);hit={items=items,full=full};bags[bag]=hit end
+    return hit.items,hit.full
+end
+local function check_want(item, ignore_distance, bags) -- QQT_Warpigz_v3 1.0.22: bags (see bag_state)
     local player=get_local_player()
     if not player or Utils.call(player,'is_dead')~=false then return false,'character unavailable or dead','deferred' end
     local info=Utils.call(item,'get_item_info')
@@ -97,7 +106,7 @@ function M.check_want_item(item, ignore_distance)
         local once,once_sno=ItemLogic.carry_once(info)
         bag=once and once.bag or bag or policy[2]
         if not bag or bag=='currency' or bag=='materials' then return true,'accepted '..kind end -- QQT_Warpigz_v3 (Q1)
-        local inventory,full=Utils.bag_state(bag)
+        local inventory,full=bag_state(bag,bags) -- QQT_Warpigz_v3 1.0.22 (perf)
         if not inventory then return false,'bag unavailable: '..bag,'deferred' end
         if once then -- QQT_Warpigz_v3 (Q9)
             local held,readable=Utils.list_has_sno(inventory,once_sno)
@@ -139,7 +148,7 @@ function M.check_want_item(item, ignore_distance)
         local listed,dropped,dropped_reason=pcall(Blacklist.match,item,info)
         if listed and dropped then return false,dropped_reason end
     end
-    local inventory,full=Utils.bag_state('equipment')
+    local inventory,full=bag_state('equipment',bags) -- QQT_Warpigz_v3 1.0.22 (perf)
     if not inventory then return false,'equipment bag unavailable','deferred' end
     if full then return false,'equipment bag full or unreadable' end
     if keep_list then return true,'accepted: selected in '..keep_list end
@@ -191,6 +200,7 @@ function M.check_want_item(item, ignore_distance)
     return ga>=required, string.format('%s: GA %d, required %d%s [threshold=%s]',ga>=required and 'accepted' or 'below GA minimum',
         ga,required,overridden and ' (slot override enabled)' or '',threshold)
 end
+function M.check_want_item(item, ignore_distance) return check_want(item, ignore_distance) end -- QQT_Warpigz_v3 1.0.22: live bag reads
 -- QQT_Warpigz_v3 (Q1): where an accepted drop lands (pickup receipt): its
 -- kind and bag ('equipment', 'consumable', 'socketable', 'talisman',
 -- 'sigil'), or no bag for Materials, currency and anything no bag lists.
@@ -229,14 +239,16 @@ function M.describe(item, reason)
         tostring(readable),tostring(observations.conflict),threshold,extra,Utils.distance_to(item),reason or 'unknown decision')
 end
 function M.report_rejection(item, reason)
-    local info=Utils.call(item,'get_item_info')
-    local rarity=Utils.call(info,'get_rarity')
-    if type(rarity)~='number' or rarity~=rarity then rarity=0 end
-    if rarity<6 and Utils.get_ga_count(info)==0 then return end
+    -- QQT_Warpigz_v3 1.0.22 (perf): the cheap early returns (reason, then
+    -- distance) before the item's GA reading; all are pure, so the order is free.
     if type(reason)=='string' and reason:find('already carrying',1,true) then return end -- QQT_Warpigz_v3 (Q9): logged at the decision
     if type(reason)=='string' and reason:sub(1,15)=='pickup settled:' then return end -- QQT_Warpigz_v3 (Q1 review): settle() logged it once
     if reason=='pickup yielded to another move' then return end -- QQT_Warpigz_v3 3.3.2: stand_down() logged it
     if Utils.distance_to(item)>60 then return end
+    local info=Utils.call(item,'get_item_info')
+    local rarity=Utils.call(info,'get_rarity')
+    if type(rarity)~='number' or rarity~=rarity then rarity=0 end
+    if rarity<6 and Utils.get_ga_count(info)==0 then return end
     local id=Pickup.key(item)
     if id and reported[id]~=reason then
         reported[id]=reason
@@ -387,9 +399,13 @@ local function choose(best_first)
     local selected,score,distance
     local previous,previous_score,previous_distance
     local rested,rested_distance
+    -- QQT_Warpigz_v3 1.0.22 (perf): each bag read once this pulse; Pickup.blocked
+    -- only when its answer is used or a settled drop needs its away mark.
+    local bags,tracking={},Pickup.tracking()
     for _,item in pairs(items) do
-        local wanted,reason=M.check_want_item(item,false)
-        local blocked,why=Pickup.blocked(item)
+        local wanted,reason=check_want(item,false,bags)
+        local blocked,why
+        if wanted or tracking then blocked,why=Pickup.blocked(item) end
         -- QQT_Warpigz_v2 local patch (review rc.10): the nearest wanted drop
         -- resting between rounds (woken below when nothing else is wanted).
         if wanted and blocked and Pickup.resting(item,true) and not Pickup.fight_deferred(item) then -- QQT_Warpigz_v3 3.3.2: never a yielded drop, nor one the fight holds

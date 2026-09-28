@@ -92,14 +92,17 @@ case('B2 Pit, a drop that falls 7 m off during an elite fight waits for the figh
     elite.t0 = h.now + 0.5
     local item = h.drop('pit', h.pos:x() - 7, ey, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_010'})
     local w = watcher(h)
-    local busy_in_fight, closest = false, math.huge
+    local busy_in_fight, pending_in_fight, closest = false, false, math.huge
     h.run(15, function(hh)
         w.each(hh)
         if busy(hh) then busy_in_fight = true end
+        if hh.as(CONSUMER, function() return hh.G.LooteerPlugin.has_pending_loot() end) then pending_in_fight = true end
         closest = math.min(closest, hh.pos:dist_to_ignore_z(item.pos))
     end)
-    -- 3.3.2 review: busy (a Pit / boss exit waits for the loot) but no walk to the drop.
-    eq(busy_in_fight, true, 'pickup stays busy while the drop waits for the fight')
+    -- QQT_Warpigz_v3 1.0.22: the wait is published as has_pending_loot(); it
+    -- still reports busy until the exit guards read it (Pickup.fight_wait_busy).
+    eq(busy_in_fight, true, 'pickup stays busy while the drop waits for the fight (transitional)')
+    eq(pending_in_fight, true, 'the wait is published (has_pending_loot)')
     eq(h.count(h.moves, function(m) return m.owner == 'Rosie' and m.t > elite.t0 end), 0, 'no Rosie move during the fight')
     ok(closest > 5, 'the player stayed at the fight: closest ' .. string.format('%.1f', closest))
     elite.health = 0
@@ -153,11 +156,27 @@ case('B4 a yielded drop is not woken while its yield lasts, is taken once the ot
     eq(P.limits.yield_rest, 4, 'first yield rest'); eq(P.limits.yield_max, 30, 'yield cap')
 end)
 
-case('B5 Murmuring Obols (loot_manager.is_obols) are never a pickup target (pre-fix too: an unrecognized type; now also the host flag)', function()
+case('B5 Murmuring Obols (loot_manager.is_obols) are never a pickup target, even when the host lists them as lootable and the classification accepts them', function()
+    -- QQT_Warpigz_v3 1.0.22 (Auditor, test quality): the old B5 drop was an
+    -- unrecognized type, refused without the host flag too. This drop is
+    -- lootable and classified as an accepted crafting material, so only the
+    -- is_obols check keeps Rosie off it; the control twin without the flag is
+    -- taken, which proves the classification alone would target it.
+    local function obols_drop(h, flagged)
+        h.G.loot_manager.is_obols = function(item) return item and item.obols == true end
+        h.frame() -- the pickup distance slider (30 m) is read on a pulse
+        local obols = h.drop('pit', 6, 0, {rarity = 0, name = 'CraftingMaterial_Obols', display = 'Murmuring Obols'})
+        obols.obols = flagged
+        local wanted, why = h.as(CONSUMER, function() return h.G.LooteerPlugin.evaluate_item(obols, false) end)
+        return obols, wanted, why
+    end
+    local c = new()
+    local twin, twin_wanted, twin_why = obols_drop(c, false)
+    eq(twin_wanted, true, 'control: without the obols flag the classification accepts the drop (' .. tostring(twin_why) .. ')')
+    ok(c.run_until(function() return twin.picked == true end, 10), 'control: the unflagged twin is taken\n' .. c.tail(6))
     local h = new()
-    local obols = h.drop('pit', 6, 0, {rarity = 0, name = 'Item_Gold_Obols', display = 'Murmuring Obols'})
-    obols.obols = true
-    h.G.loot_manager.is_obols = function(item) return item and item.obols == true end
+    local obols, wanted, why = obols_drop(h, true)
+    eq(wanted, false, 'the obols flag refuses it (' .. tostring(why) .. ')')
     local busy_seen = false
     h.run(10, function(hh) if busy(hh) then busy_seen = true end end)
     eq(busy_seen, false, 'Rosie never busy for obols')

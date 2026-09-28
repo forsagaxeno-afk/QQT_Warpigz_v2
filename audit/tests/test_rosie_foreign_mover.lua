@@ -75,6 +75,25 @@ local function start_trip(h)
     return result
 end
 local function casts(h) return #h.waypoints end
+-- QQT_Warpigz_v3 1.0.22: a mover that walks the player on `delay` s into each
+-- Town Portal channel (the move interrupts it, as in the game), `dist` m back
+-- and forth, for the first `limit` casts (nil: every cast). With `leg` set it
+-- also walks a leg every `leg` s between casts (a stop-and-go Navigator).
+local function interrupter(h, opts)
+    local m = {interrupts = 0, dir = 1, last = h.now}
+    function m.step()
+        if h.place ~= h.P.pit or (opts.limit and m.interrupts >= opts.limit) then return end
+        local rec = h.waypoints[#h.waypoints]
+        local channel = h.travel and h.travel.phase == 'channel' and rec ~= nil
+        local walk = (channel and h.now - rec.t >= (opts.delay or 0.3))
+            or (not channel and opts.leg and h.now - m.last >= opts.leg)
+        if not walk then return end
+        m.last, m.dir = h.now, -m.dir
+        h.goal = h.v(h.pos:x() - m.dir * (opts.dist or 1), h.pos:y())
+        if channel then h.travel, h.casting = nil, false; m.interrupts = m.interrupts + 1 end
+    end
+    return m
+end
 
 case('a Navigator that moves the player for 50 s: Rosie waits and casts once it stands still', function()
     local h = new({place = 'pit', pos = nil})
@@ -96,7 +115,9 @@ case('a Navigator that moves the player for 50 s: Rosie waits and casts once it 
     h.assert_clean('50 s navigator')
 end)
 
-case('a Navigator that stops every 7 s for 2 s: interrupted casts are not attempts', function()
+-- QQT_Warpigz_v3 1.0.22: renamed; it passes on 1.0.20 too (one cast of two is
+-- interrupted). The refund is proven by the stop-and-go case at the end.
+case('a Navigator that stops every 7 s for 2 s: Rosie casts in an idle window, the trip completes', function()
     local h = new({place = 'pit'})
     enable(h)
     fill_bag(h, 3)
@@ -362,6 +383,50 @@ case('Butler running a town trip: Rosie does not start one', function()
     local r2 = start_trip(h)
     ok(h.run_until(function() return r2.done end, 200), 'a throwing Butler never blocks Rosie')
     h.assert_clean('butler')
+end)
+
+-- QQT_Warpigz_v3 1.0.22 (Auditor, Rosie 1.0.21 LOW): the refund had no test that
+-- fails without it, and it made the 8-cast cap moot.
+case('a stop-and-go Navigator that walks on during each of the first 10 casts: interrupted casts are not attempts', function()
+    local h = new({place = 'pit'})
+    enable(h)
+    fill_bag(h, 3)
+    local m = interrupter(h, {delay = 0.3, dist = 3, leg = 2, limit = 10})
+    local t0 = h.now
+    local result = start_trip(h)
+    ok(h.run_until(function() return result.done end, 300, m.step), 'trip ends\n' .. h.tail())
+    eq(st(h).outcome, 'completed', 'the trip completes after 10 interrupted casts\n' .. h.tail())
+    eq(m.interrupts, 10, 'ten casts were interrupted')
+    eq(casts(h), 11, 'ten interrupted casts, then the one that lands')
+    eq(h.logged('teleport_failed'), 0, 'no teleport_failed')
+    eq(h.place, h.P.pit, 'back in the Pit')
+    ok(h.now - t0 < 90, 'finished: ' .. (h.now - t0))
+    -- The refunds are per trip: the next trip gets them again.
+    m.interrupts = 0
+    fill_bag(h, 3)
+    local r2 = start_trip(h)
+    ok(h.run_until(function() return r2.done end, 300, m.step), 'second trip ends\n' .. h.tail())
+    eq(st(h).outcome, 'completed', 'the second trip completes too\n' .. h.tail())
+    eq(casts(h), 22, 'again ten interrupted casts, then the one that lands')
+    h.assert_clean('stop-and-go navigator')
+end)
+
+case('a fight nudge (orbwalker) 0.3 s into every cast: the refunds are capped, at most 12 casts', function()
+    local h = new({place = 'pit'})
+    enable(h)
+    fill_bag(h, 3)
+    local m = interrupter(h, {delay = 0.3, dist = 1})
+    local t0 = h.now
+    local result = start_trip(h)
+    ok(h.run_until(function() return result.done end, 400, m.step), 'trip ends\n' .. h.tail())
+    eq(result.err, 'failed', 'the trip fails\n' .. h.tail())
+    ok(m.interrupts >= casts(h) - 1, 'every cast was interrupted: ' .. m.interrupts .. '/' .. casts(h))
+    local refunds = h.mod('Rosie', 'rosie.private.town.tasks.teleport').MAX_REFUNDS or 4
+    ok(casts(h) <= 8 + refunds, 'casts are bounded by the refund cap (1.0.21: 27): ' .. casts(h))
+    eq(casts(h), 8 + refunds, '8 attempts + the refunded casts')
+    eq(h.logged(refunds .. ' interrupted casts were not counted'), 1, 'the cap is logged once')
+    ok(h.now - t0 < 90, 'bounded (fails at the 60 s outbound service bound): ' .. (h.now - t0))
+    h.assert_clean('nudge')
 end)
 
 print(string.format('foreign mover: %d checks, %d failures', checks, #failures))

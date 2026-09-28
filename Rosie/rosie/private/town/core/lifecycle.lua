@@ -12,8 +12,19 @@ local events=require 'rosie.private.qqt_events' -- QQT_Warpigz_v3
 local foreign=require 'rosie.private.foreign' -- QQT_Warpigz_v3 1.0.21
 local M={}
 local retired=false
-local held_looter,legacy_resume,held_bat=nil,false,nil
+local held_looter,legacy_resume=nil,false
 local bat_checked=false
+-- QQT_Warpigz_v3 1.0.22: Batmobile keeps one shared pause flag. HR's
+-- patrol_move, an activity or Batmobile's own 1 s kept-pause fallback lifted
+-- Rosie's once-per-trip pause and Batmobile drove against Rosie's walks for
+-- the rest of the trip. While a trip holds its peers, Rosie now pauses a
+-- Batmobile that is not paused (at most every REPAUSE_EVERY s; the lift of
+-- Rosie's own pause is logged once per trip). `mine` is true while Rosie's
+-- pause is the last one it knows of: a pause that shows up after Rosie saw its
+-- own lifted is another caller's, and the trip end resumes only Rosie's.
+M.REPAUSE_EVERY=0.5
+local requesting=false -- QQT_Warpigz_v3 1.0.22: M.request's own hold_peers call
+local bat_hold={api=nil,mine=false,next_at=-math.huge,lift_logged=false,fail_logged=false}
 -- QQT_Warpigz_v2: a failed trip whose need remains latches the compatibility
 -- API for RETRY_COOLDOWN seconds, then allows another attempt; after
 -- MAX_FAIL_STREAK consecutive failures, or a non-transient failure (stash
@@ -22,6 +33,25 @@ local bat_checked=false
 M.RETRY_COOLDOWN=120
 M.MAX_FAIL_STREAK=3
 M.PAUSE_LIMIT=60
+-- QQT_Warpigz_v3 1.0.22: a TristramLoop revive phase that sticks held a trip
+-- (Batmobile and pickup stay held) and the automatic start without a bound
+-- (C6). One clock serves both (town/main.lua before the trip, M.tick during
+-- it), so a revive that spans the start is not waited on twice: it is honoured
+-- for REVIVE_LIMIT s since first seen (wall clock, dead time included), then
+-- ignored until a reading sees it end; logged once per revive.
+M.REVIVE_LIMIT=60
+local revive={since=nil,logged=false}
+function M.revive_holds(reviving,now)
+    if not reviving then revive.since,revive.logged=nil,false; return false end
+    if not revive.since or now<revive.since then revive.since=now end
+    local limit=tonumber(M.REVIVE_LIMIT) or 60
+    if now-revive.since<limit then return true end
+    if not revive.logged then
+        revive.logged=true
+        console.print(string.format('[Rosie] Another activity has been in its revive phase for %ds: Rosie no longer waits on it',math.floor(limit)))
+    end
+    return false
+end
 local last_tick=nil
 local pending_cleanup,cleanup_next={},0
 local finished=false
@@ -88,7 +118,25 @@ end
 -- The observed peers (docs/THIRD_PARTY_APIS.md): Navigator is held through
 -- its pause condition while a trip is in progress, Scavenger is paused and
 -- resumed under Rosie's own name.
-local function trip_active() return not retired and M.busy() and true or false end
+-- QQT_Warpigz_v3 1.0.22: the condition held Navigator (and so Worldstone) for
+-- every busy state tick() does not bound (a dead player, a TristramLoop revive
+-- phase, a stopped Rosie pulse). It now also needs a trip tick within NAV_PULSE
+-- s that is not waiting for a dead player or a revive (M.tick sets
+-- nav_hold.pulse), and lets go NAV_HOLD_MAX s after the request (logged once).
+M.NAV_PULSE,M.NAV_HOLD_MAX=5,300
+local nav_hold={since=nil,pulse=nil,capped=false}
+local function trip_active()
+    if retired or not M.busy() then return false end
+    local now=get_time_since_inject()
+    if now-(nav_hold.since or now)>=M.NAV_HOLD_MAX then
+        if not nav_hold.capped then
+            nav_hold.capped=true
+            console.print(string.format('[Rosie] Navigator released: the town trip has held it for %ds',M.NAV_HOLD_MAX))
+        end
+        return false
+    end
+    return now-(nav_hold.pulse or -math.huge)<M.NAV_PULSE
+end
 M.add_foreign_hold({name='Navigator',global='Navigator',
     hold=function() return foreign.navigator_hold(trip_active) end,
     release=function(_,_,how) foreign.navigator_release(how) end})
@@ -153,16 +201,50 @@ function M.hold_peers()
             bat.stop_long_path(settings.plugin_label)
         end
     end
-    if not held_bat and type(bat.is_paused)=='function' and type(bat.pause)=='function'
-        and bat.is_paused()==false then
-        held_bat=bat
-        if bat.pause(settings.plugin_label)==false then error('Movement peer refused the service pause') end
+    -- QQT_Warpigz_v3 1.0.22: re-pause whenever the shared flag is down (was once per trip).
+    if type(bat.is_paused)~='function' or type(bat.pause)~='function' then return end
+    local okp,paused=pcall(bat.is_paused)
+    if not okp or paused~=false then return end
+    if bat_hold.mine and bat_hold.api==bat then
+        bat_hold.mine=false
+        if not bat_hold.lift_logged then
+            bat_hold.lift_logged=true
+            local ok,owner=false,nil
+            if type(bat.get_owner)=='function' then ok,owner=pcall(bat.get_owner) end
+            console.print('[Rosie] Batmobile\'s pause was lifted during the town trip'
+                ..(ok and owner~=nil and ' (movement owner: '..tostring(owner)..')' or '')..': Rosie pauses it again')
+        end
+    end
+    local now=get_time_since_inject()
+    if now<bat_hold.next_at then return end
+    bat_hold.next_at=now+M.REPAUSE_EVERY
+    -- Record the claim before the call: a peer may throw after acquiring it.
+    bat_hold.api,bat_hold.mine=bat,true
+    -- Only the request's own claim raises (it refuses the trip); every other
+    -- call runs inside a trip tick, where a raise would switch Rosie off.
+    if requesting then
+        if bat.pause(settings.plugin_label)==false then bat_hold.mine=false; error('Movement peer refused the service pause') end
+        return
+    end
+    -- A re-pause runs inside the trip tick: a refusal is logged, never raised.
+    local ok,result=pcall(bat.pause,settings.plugin_label)
+    if ok and result==false then bat_hold.mine=false
+    elseif not ok then
+        local okq,now_paused=pcall(bat.is_paused)
+        bat_hold.mine=okq and now_paused==true
+    end
+    if (not ok or result==false) and not bat_hold.fail_logged then
+        bat_hold.fail_logged=true
+        console.print('[Rosie] Batmobile refused the town trip pause: '..tostring(ok and 'refused' or result))
     end
 end
 function M.release_peers()
-    local looter,resume,bat=held_looter,legacy_resume,held_bat
+    local looter,resume=held_looter,legacy_resume
     held_looter,legacy_resume=nil,false
-    held_bat=nil
+    -- QQT_Warpigz_v3 1.0.22: only a pause that is still Rosie's is resumed.
+    local bat=bat_hold.mine and bat_hold.api or nil
+    bat_hold.api,bat_hold.mine,bat_hold.next_at=nil,false,-math.huge
+    bat_hold.lift_logged,bat_hold.fail_logged=false,false
     bat_checked=false
     local function release(label,fn)
         pending_cleanup[#pending_cleanup+1]={label=label,run=fn}
@@ -248,7 +330,12 @@ function M.request(caller,callback,teleport,manual)
     tracker.service_elapsed=0; tracker.pause_elapsed=0; last_tick=nil
     tracker.raven_wait=nil -- QQT_Warpigz_v3
     tracker.mover_elapsed=0; motion.x,motion.y,motion.moved_at=nil,nil,nil -- QQT_Warpigz_v3 1.0.21
+    -- QQT_Warpigz_v3 1.0.22: per-trip Navigator hold bounds and revive bound.
+    local t0=get_time_since_inject()
+    nav_hold.since,nav_hold.pulse,nav_hold.capped=t0,t0,false
+    requesting=true -- QQT_Warpigz_v3 1.0.22: see hold_peers
     local held,why=pcall(M.hold_peers)
+    requesting=false
     if not held then
         local reason='Cannot acquire service ownership: '..tostring(why)
         M.finish(false,reason)
@@ -341,6 +428,8 @@ function M.status_text()
     if #pending_cleanup>0 then return 'Cleanup pending: retrying release of '..#pending_cleanup..' owned resource(s).' end
     if settings.enabled~=true then return 'Off. Settings remain editable.' end
     if tracker.external_pause then return 'Paused by '..tostring(tracker.pause_caller or 'external caller') end
+    -- QQT_Warpigz_v3 1.0.22: matches get_status().paused_by='Butler'.
+    if not M.busy() and foreign.butler_busy() then return 'Waiting: Butler is running a town trip.' end
     if tracker.failure_reason and not M.busy() then
         local stuck,left=M.stuck()
         if stuck and left then
@@ -393,6 +482,7 @@ function M.tick()
     if settings.enabled~=true then M.cancel('Rosie town service disabled during service'); return false end
     local player=get_local_player(); local world=get_current_world()
     if tracker.external_pause then
+        nav_hold.pulse=now -- QQT_Warpigz_v3 1.0.22: the caller's pause is bounded here (PAUSE_LIMIT)
         -- A pause inside a running trip still counts as live work (C1): bound it.
         tracker.pause_elapsed=(tracker.pause_elapsed or 0)+elapsed
         if tracker.pause_elapsed>=M.PAUSE_LIMIT then
@@ -400,14 +490,22 @@ function M.tick()
         end
         return false
     end
+    -- QQT_Warpigz_v3 1.0.22: a load screen (the trip's own Town Portal
+    -- travel; the host may return no world or no player there) or open chat
+    -- keeps the Navigator hold alive; a dead player or a revive wait does not.
+    if not player or not world or player:is_dead()==false
+        and (world:get_current_zone_name()=='[sno none]' or is_chat_open()) then nav_hold.pulse=now end
     if not player or player:is_dead()~=false or not world
         or world:get_current_zone_name()=='[sno none]' or is_chat_open() then return false end
     local activity=rawget(_G,'TRISTRAM_LOOP_STATE')
+    local reviving=false
     if type(activity)=='table' and type(activity.status)=='function' then
         local ok,status=pcall(activity.status)
-        if ok and type(status)=='table' and status.running and status.owns_activity
-            and status.phase=='revive' then return false end
+        reviving=ok and type(status)=='table' and status.running and status.owns_activity
+            and status.phase=='revive' and true or false
     end
+    if M.revive_holds(reviving,now) then return false end -- QQT_Warpigz_v3 1.0.22: bounded (REVIVE_LIMIT, C6)
+    nav_hold.pulse=now -- QQT_Warpigz_v3 1.0.22: this tick drives the trip
     M.hold_peers()
     if utils.is_in_town() then tracker.visited_town=true end
     -- QQT_Warpigz_v3: waiting for the SilentRaven hand-off (teleport.lua,
