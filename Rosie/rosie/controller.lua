@@ -18,7 +18,9 @@ local function peer_drives_movement()
     local ok2,owner=pcall(bat.get_owner)
     return ok2 and owner~=nil
 end
+local foreign=require('rosie.private.foreign') -- QQT_Warpigz_v3 1.0.21
 local function peer_owns_loot()
+    if foreign.scavenger_busy() then return true end -- QQT_Warpigz_v3 1.0.21: Scavenger's drops
     local peer=rawget(_G,'TRISTRAM_LOOP_STATE')
     if type(peer)~='table' or type(peer.status)~='function' then return false end
     local ok,s=pcall(peer.status)
@@ -97,7 +99,7 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.20';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.22';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
         for _,key in ipairs({'trigger_tasks','trigger_tasks_with_teleport'}) do
@@ -113,7 +115,7 @@ function M.new(cached,conflict)
         local loot_status,get_setting=loot.status,loot.getSettings
         loot.status=function()
             local s=loot_status()
-            if not enabled() then s.enabled=false;s.ready=false;s.running=false;s.reason='disabled';s.detail='Rosie is off.' end
+            if not enabled() then s.enabled=false;s.ready=false;s.running=false;s.reason='disabled';s.detail='Rosie is off.';s.loot_waiting=false end -- loot_waiting: QQT_Warpigz_v3 1.0.22
             return s
         end
         loot.getSettings=function(key)
@@ -121,6 +123,8 @@ function M.new(cached,conflict)
             return get_setting(key)
         end
         local loot_enabled=loot.get_enabled
+        local loot_pending=loot.has_pending_loot -- QQT_Warpigz_v3 1.0.22: gated by the master switch like the other reads
+        if type(loot_pending)=='function' then loot.has_pending_loot=function() return enabled() and loot_pending()==true end end
         loot.get_enabled=function() return enabled() and loot_enabled() end
     end
     Movement.configure(function(owner)

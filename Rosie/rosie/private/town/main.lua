@@ -82,7 +82,9 @@ local function main_pulse()
     end
 
     if not (settings.get_keybind_state() or tracker.external_trigger or tracker.manual_trigger) then
-        auto_wait('automatic service is off (keybind toggle)')
+        -- QQT_Warpigz_v3 1.0.22: only a bag that needs town logs this wait (a
+        -- bag 3/30 logged it and latched it, so the real need later logged nothing).
+        if tracker.need_trigger then auto_wait('automatic service is off (keybind toggle)') else auto_wait(nil) end
         return
     end
 
@@ -103,18 +105,31 @@ local function main_pulse()
             local owner=ok and type(state)=='table' and state.running and state.owns_activity and state
             local held=owner and 'another activity owns the run' or tracker.external_pause
                 and ('paused by '..tostring(tracker.pause_caller or 'another plugin')) or nil
-            if held and (owner and owner.phase=='revive' or not (waited>=DEFER_ANY or waited>=DEFER_TOWN and lifecycle.in_any_town())) then
+            -- QQT_Warpigz_v3 1.0.22: "never during a revive" is now at most
+            -- REVIVE_LIMIT s of revive (lifecycle.revive_holds: one clock with the trip).
+            local deferring=not (waited>=DEFER_ANY or waited>=DEFER_TOWN and lifecycle.in_any_town())
+            local reviving=lifecycle.revive_holds(owner and owner.phase=='revive',now,held and deferring)
+            if held and (reviving or deferring) then
                 auto_wait(held)
                 return
             end
-            if held then
-                console.print(string.format('[Rosie] Bag needs a town trip for %ds (%s): starting it now',math.floor(waited),held))
-                if tracker.external_pause then lifecycle.resume() end
-            end
             if lifecycle.auto_blocked() then auto_wait('last trip '..tostring(tracker.outcome)..': '..tostring(tracker.failure_reason))
             else
+                -- QQT_Warpigz_v3 1.0.22: the override is logged, and a foreign
+                -- pause cleared, only for a trip that starts: it printed every
+                -- pulse while the start was blocked or refused, and cleared the
+                -- pause for nothing. A refused start restores the pause (the
+                -- request refuses while it is set) and logs its reason once.
+                local paused_by=tracker.pause_caller
+                local cleared=held and tracker.external_pause and lifecycle.resume()
                 local accepted,why=lifecycle.request('automatic',nil,true,true)
-                if accepted then need_since=nil; auto_wait(nil) else auto_wait(tostring(why)) end
+                if accepted then
+                    if held then console.print(string.format('[Rosie] Bag needs a town trip for %ds (%s): starting it now',math.floor(waited),held)) end
+                    need_since=nil; auto_wait(nil)
+                else
+                    if cleared and not tracker.external_pause then tracker.external_pause=true; tracker.pause_caller=paused_by end
+                    auto_wait(tostring(why))
+                end
             end
         end
     end

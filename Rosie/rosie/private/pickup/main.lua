@@ -9,7 +9,10 @@ local Utils=require('rosie.private.pickup.utils.utils')
 local active=true
 local published
 local fight_busy=false -- QQT_Warpigz_v3 3.3.2: busy set only by a drop waiting for the fight
+local foreign=require('rosie.private.foreign') -- QQT_Warpigz_v3 1.0.21
 local function activity_owns_loot()
+    -- QQT_Warpigz_v3 1.0.21: Navigator's Scavenger owns the drops while busy.
+    if foreign.scavenger_busy() then return true end
     local peer=rawget(_G,'TRISTRAM_LOOP_STATE')
     if type(peer)~='table' or type(peer.status)~='function' then return false end
     local ok,status=pcall(peer.status)
@@ -70,15 +73,22 @@ local function main_pulse()
     if activity_owns_loot() then Pickup.reset(false); return end
     local wanted=ItemManager.get_item_based_on_priority()
     if wanted and Settings.get().loot_priority==1 then wanted=wanted.Item end
-    if wanted then fight_busy=false;Settings.get().looting=Pickup.step(wanted,ItemManager.destination(wanted)) -- QQT_Warpigz_v3 (Q1): receipt bag
-    else
-        Pickup.release_movement()
-        -- QQT_Warpigz_v3 3.3.2: a drop that waits for the fight keeps pickup
-        -- busy without moving, so a Pit / boss exit still waits for the loot
-        -- (bounded by the fight hold's 45 s cap).
-        if ItemManager.fight_waiting then Settings.get().looting=true;fight_busy=true
-        elseif fight_busy then Settings.get().looting=false;fight_busy=false end
-    end
+    if wanted then Settings.get().looting=Pickup.step(wanted,ItemManager.destination(wanted)) -- QQT_Warpigz_v3 (Q1): receipt bag
+    else Pickup.release_movement() end
+    -- QQT_Warpigz_v3 1.0.22: a drop that waits for the fight no longer keeps
+    -- pickup busy (farm plugins that yield to a busy Looter stood still for
+    -- the whole fight). The wait is published apart, has_pending_loot() /
+    -- status().loot_waiting, for exit checks; bounded by the fight hold's 45 s
+    -- cap. fight_busy is the time of the last pulse that saw the wait.
+    fight_busy=ItemManager.fight_waiting==true and get_time_since_inject() or false
+    if fight_busy and not wanted and Pickup.fight_wait_busy then Settings.get().looting=true end -- transitional, see pickup.lua
+end
+-- QQT_Warpigz_v3 1.0.22: a wait no pulse has confirmed for 1 s is stale (Rosie
+-- off, pickup paused / owned by an activity, reloaded).
+local function loot_waiting()
+    if not active or not fight_busy then return false end
+    local now=get_time_since_inject()
+    return now>=fight_busy and now-fight_busy<1.0
 end
 published={
     _elements=GUI.elements,
@@ -98,6 +108,7 @@ published={
     get_enabled=function() return GUI.elements.main_toggle:get() end,
     is_idle=function() return not Settings.get().looting end,
     is_actively_looting=function() return Settings.get().looting==true end,
+    has_pending_loot=loot_waiting, -- QQT_Warpigz_v3 1.0.22: a wanted drop waits for the fight
     status=function()
         Settings.update()
         local enabled,paused,owned=Settings.get().enabled,Settings.is_paused(),activity_owns_loot()
@@ -115,10 +126,12 @@ published={
             local zone=Utils.call(get_current_world(),'get_current_zone_name')
             if not zone or zone=='[sno none]' then reason,detail='loading','Waiting for the world to load.'
             elseif is_chat_open() or is_inventory_open() then reason,detail='menu_open','Waiting for chat or inventory to close.'
-            elseif Settings.get().looting then reason,detail='picking_up','Picking up accepted items.' end
+            elseif Settings.get().looting then reason,detail='picking_up','Picking up accepted items.'
+            elseif loot_waiting() then detail='Ready; a drop waits for the fight to end.' end -- QQT_Warpigz_v3 1.0.22
         end
         return {enabled=enabled,paused=paused,ready=reason=='ready' or reason=='picking_up',
-            running=reason=='picking_up',activity_owned=owned,reason=reason,detail=detail}
+            running=reason=='picking_up',activity_owned=owned,reason=reason,detail=detail,
+            loot_waiting=loot_waiting()} -- QQT_Warpigz_v3 1.0.22
     end,
     evaluate_item=function(item,ignore_distance)
         local wanted,reason,decision=ItemManager.check_want_item(item,ignore_distance)

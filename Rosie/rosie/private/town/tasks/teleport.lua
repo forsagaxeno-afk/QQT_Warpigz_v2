@@ -10,6 +10,7 @@ local base_task = require 'rosie.private.town.tasks.base'
 local lifecycle = require 'rosie.private.town.core.lifecycle'
 local town_movement = require 'rosie.private.town.core.town_movement'
 local pathfinder = require('rosie.movement').for_owner('town') -- QQT_Warpigz_v3
+local foreign = require 'rosie.private.foreign' -- QQT_Warpigz_v3 1.0.21
 
 local task = base_task.new_task()
 local status_enum = {
@@ -25,13 +26,26 @@ local debounce_time = -1
 local debounce_timeout = 3
 local outbound_attempts = 0
 local outbound = false
+local cast = {refunded = false, logged = false, request = nil} -- QQT_Warpigz_v3 1.0.21
+-- QQT_Warpigz_v3 1.0.22: at most MAX_REFUNDS interrupted casts are refunded per
+-- trip. A nudge after every cast (orbwalker/rotation in a fight) made the 8-cast
+-- cap moot (27 casts, one every 3 s, until the 60 s outbound bound); now 12 at most.
+local MAX_REFUNDS = 4
+cast.refunds = 0
+-- Exported for audit/tests/test_rosie_foreign_mover.lua (the stop-and-go case
+-- needs more than 8 and at most 8+MAX_REFUNDS-1 interrupts).
+task.MAX_REFUNDS = MAX_REFUNDS
 local reset_session = task.reset_session
 function task.reset_session()
-    reset_session(); debounce_time=-1; outbound_attempts=0; outbound=false
+    reset_session(); debounce_time=-1; outbound_attempts=0; outbound=false; cast.refunded=false
+    cast.refunds=0 -- QQT_Warpigz_v3 1.0.22: per trip
 end
 local function teleport_with_debounce()
     local local_player = get_local_player()
     if not local_player or local_player:is_dead() then return end
+    if cast.request ~= tracker.request_id then cast.request, cast.logged = tracker.request_id, false end
+    -- QQT_Warpigz_v3 1.0.21: Worldstone re-issues Navigator requests on its own.
+    foreign.quiet_navigator(tracker.request_id)
     if local_player:get_active_spell_id() == 186139 then
         task.set_status(status_enum['EXECUTE'])
     else
@@ -39,9 +53,31 @@ local function teleport_with_debounce()
         string.format("%.2f", debounce_time + debounce_timeout - get_time_since_inject()) .. 's'
         task.set_status(status)
     end
+    -- QQT_Warpigz_v3 1.0.21: a cast the player was moved out of (another
+    -- addon, e.g. Navigator, kept walking) is no attempt; re-cast only once
+    -- the player has stood still (the live trip spent 8 casts in 24 s).
+    if debounce_time>=0 and not cast.refunded and lifecycle.moved_since(debounce_time) then
+        cast.refunded=true
+        -- QQT_Warpigz_v3 1.0.22: capped per trip; later interrupted casts count.
+        if cast.refunds<MAX_REFUNDS then
+            cast.refunds=cast.refunds+1; outbound_attempts=math.max(0,outbound_attempts-1)
+            if cast.refunds==MAX_REFUNDS then
+                console.print(string.format('[Rosie] Town Portal: %d interrupted casts were not counted; the next ones count as attempts', MAX_REFUNDS))
+            end
+        end
+    end
+    if lifecycle.still_for()<lifecycle.STILL then
+        if not cast.logged then
+            cast.logged=true
+            console.print('[Rosie] Town Portal waits: another addon moves the player; casting once it stands still')
+        end
+        task.set_status('Waiting for the player to stand still')
+        return
+    end
     if debounce_time + debounce_timeout > get_time_since_inject() then return end
     if outbound_attempts>=8 then return end
     outbound_attempts=outbound_attempts+1
+    cast.refunded=false
     debounce_time = get_time_since_inject()
     teleport_to_waypoint(utils.get_town().waypoint_sno)
     task.set_status(status_enum['EXECUTE'])
