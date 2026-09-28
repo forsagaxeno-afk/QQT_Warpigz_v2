@@ -29,11 +29,15 @@ local function log(msg) console.print('[' .. plugin_label .. ' ' .. task.name ..
 local function teleport_with_debounce()
     local local_player = get_local_player()
     if not local_player then return end
+    local now = get_time_since_inject()
     if local_player:get_active_spell_id() == 186139 then
+        -- QQT_Warpigz_v3 WonderCity 2.2.6 (review): the debounce runs from the
+        -- end of our channel, not its start (a 5 s channel plus a 4 s gap
+        -- re-cast into the arriving trip). Only for a channel of our own cast.
+        if task.casts > 0 and now - task.debounce_time < task.debounce_timeout + 15 then task.debounce_time = now end
         task.status = status_enum['TELEPORTING']
         return
     end
-    local now = get_time_since_inject()
     -- QQT_Warpigz_v3 WonderCity 2.2.6: the old Limbo/Loading guard sat after
     -- the debounce and was unreachable (main.lua/task_manager return first);
     -- kept as a plain no-cast guard ahead of any counting.
@@ -96,6 +100,11 @@ end
 -- intermediate world/zone before town) must not wipe the debounce or the
 -- count, or the next 50 ms pulse casts again. Town arrival, Undercity
 -- transitions and a bare reset() still clear everything.
+-- QQT_Warpigz_v3 WonderCity 2.2.6 (review): release_control (disable, a
+-- WarPigs hand-off) ends the trip; a re-enable starts with a fresh count.
+-- (Not on a task switch: a preemption mid-channel keeps the debounce.)
+task.on_release = function () clear_trip() end
+
 task.reset = function (transition)
     if transition == 'outside' and not utils.player_in_zone(settings.town_zone) then return end
     clear_trip()

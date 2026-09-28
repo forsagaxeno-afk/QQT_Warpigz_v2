@@ -99,7 +99,10 @@ local function drive(f, seconds, opts)
         if limbo_end then
             if f.now >= limbo_end then
                 limbo_end = nil
-                f.pos = vec(10 + (opts.jitter and (math.random() * 2 - 1) * opts.jitter or 0), 10)
+                f.landings = (f.landings or 0) + 1
+                -- deterministic landing jitter (review: no math.random in tests)
+                local j = opts.jitter and ({0.8, -1.9, 1.4, -0.6, 2.0, -1.2})[(f.landings - 1) % 6 + 1] or 0
+                f.pos = vec(10 + j, 10)
                 if opts.on_land then opts.on_land(f) end
             end
         else
@@ -127,7 +130,6 @@ check('walk_kurast 2.2.6: a stall 30 m past the landing re-teleports at most twi
 end)
 
 check('walk_kurast 2.2.6: a stall at the landing with 2 m landing jitter stays bounded', function()
-    math.randomseed(7)
     local f = live_fixture(10)
     drive(f, 180, {jitter = 2})
     assert(f.teleports <= 2, 'teleports ' .. f.teleports)
@@ -135,7 +137,7 @@ end)
 
 check('walk_kurast 2.2.6: a world-key change (task.reset) after each landing does not re-arm the cap', function()
     local f = live_fixture(40)
-    drive(f, 180, {on_land = function(ff) ff.walk.reset('run') end})
+    drive(f, 180, {on_land = function(ff) ff.walk.reset('outside') end})
     assert(f.teleports <= 2, 'teleports ' .. f.teleports .. ' (3.3.6: task.reset zeroed the count)')
 end)
 

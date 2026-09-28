@@ -33,6 +33,14 @@ local function rosie_need_pending()
     if not ok or type(st) ~= 'table' or st.enabled ~= true or st.paused == true then return false end
     if st.need_trigger ~= true then return false end
     if st.inventory_full == true or st.need_repair == true then return true end
+    -- QQT_Warpigz_v3 WonderCity 2.2.6 (review): the alfred task's 30 s
+    -- post-cycle grace skips an advisory-only need; so does the exit.
+    local ok_a, alfred_task = pcall(require, 'tasks.alfred')
+    if ok_a and type(alfred_task) == 'table' and type(alfred_task.advisory_grace_active) == 'function'
+        and alfred_task.advisory_grace_active()
+    then
+        return false
+    end
     local wp = WarPigsPlugin
     if type(wp) == 'table' and type(wp.status) == 'function' then
         local ok_wp, ws = pcall(wp.status)

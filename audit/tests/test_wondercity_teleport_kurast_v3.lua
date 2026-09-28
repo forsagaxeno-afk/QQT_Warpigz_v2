@@ -114,10 +114,36 @@ end)
 
 check("run/floor transitions and a bare reset() still clear the trip", function()
     local f = fixture(1.5)
-    f.run(33) -- 4 casts + back-off
+    f.run(40) -- 4 casts + back-off (2.2.6 review: 8 s from the channel end)
     assert(f.tp.backoff_until ~= nil, 'expected back-off')
     f.tp.reset('run')
     f.pulse(); eq(f.teleports, 5, 'cast allowed right after a run transition')
+end)
+
+-- Review round 2026-09-28 16:30 (fail on a2a5c57):
+check('T2: a 5 s channel then a 4 s non-Limbo gap before arrival -> exactly 1 cast (a2a5c57: 4)', function()
+    local f = fixture(5)
+    f.pulse()
+    eq(f.teleports, 1, 'first cast')
+    f.run(5 + 4) -- channel, then the gap before the loading screen
+    f.world = 'Limbo'; f.run(2)
+    f.world, f.zone = 'Sanctuary', TOWN; f.run(1)
+    eq(f.teleports, 1, 'casts into the arriving trip')
+end)
+
+check('T5: release_control (on_release) ends the trip: a re-enable gets a fresh count, no back-off', function()
+    local f = fixture(1.5)
+    f.run(30) -- a few undelivered casts
+    assert(f.teleports >= 3, 'casts ' .. f.teleports)
+    assert(type(f.tp.on_release) == 'function', 'teleport_kurast has no on_release (a2a5c57)')
+    f.tp.on_release()
+    local before = #f.events
+    f.run(3)
+    local line
+    for i = before + 1, #f.events do
+        if not line and type(f.events[i]) == 'string' and f.events[i]:find(CAST) then line = f.events[i] end
+    end
+    assert(line and line:find('cast 1 ', 1, true), 'fresh count after release: ' .. tostring(line))
 end)
 
 if #failures > 0 then error('WonderCity teleport_kurast v3 regressions failed:\n' .. table.concat(failures, '\n')) end
