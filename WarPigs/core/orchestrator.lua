@@ -623,6 +623,7 @@ local dispatch = {
     paused         = {},  -- W5-4: plugin -> {since} while paused by the user (owned, in_run)
     reaper_foreign = {},  -- QQT_Warpigz_v3: {since, seen} hold of a manual Reaper run (in_run)
     exports        = {},  -- QQT_Warpigz_v3 1.1.7: plugin -> `_G` export seen while owned
+    task_suspended = {},  -- QQT_Warpigz_v3 1.1.10: task pattern -> true while its task gave up
 }
 
 -- Log `message` once per change for `key`.
@@ -2693,6 +2694,19 @@ function orchestrator.tick()
     for _, pattern in ipairs(patterns) do
         local entry = normalize(orchestrator.quest_plugin_map[pattern])
         local matched = pattern_has_match(pattern, active_names)
+        -- QQT_Warpigz_v3 1.1.10: a task that gave up (turn-in: Tyrael never
+        -- found) is suspended until its retry; its quest counts as not matched.
+        dispatch.task_suspended[pattern] = nil
+        if matched and entry.task and type(entry.task.suspended) == 'function' then
+            local ok, suspended = pcall(entry.task.suspended, now)
+            if ok and suspended == true then
+                matched = false
+                dispatch.task_suspended[pattern] = true
+                dispatch.note('suspended:' .. pattern, pattern .. ' suspended (task gave up) — continuing with the next War Plan step')
+            else
+                dispatch.notes['suspended:' .. pattern] = nil
+            end
+        end
         if matched then matches[pattern] = true end
         if entry.task then
             task_matches[pattern] = matched
@@ -2791,7 +2805,8 @@ function orchestrator.tick()
     -- it, arm the pit filler for the rest of the session.  This way cold-start
     -- with no WarPlans quests doesn't auto-launch pit — the user has to have
     -- completed at least one WarPlans cycle first.
-    local turn_in_matched_now = matches[TURN_IN_PATTERN] == true
+    -- QQT_Warpigz_v3 1.1.10: a suspended turn-in is not a completed one.
+    local turn_in_matched_now = matches[TURN_IN_PATTERN] == true or dispatch.task_suspended[TURN_IN_PATTERN] == true
     if turn_in_was_matched and not turn_in_matched_now then
         events.emit('warpigs', 'turn_in_done', {}) -- QQT_Warpigz_v3
         if not had_turn_in_complete then
