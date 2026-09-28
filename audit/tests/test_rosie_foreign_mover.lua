@@ -400,7 +400,7 @@ case('a stop-and-go Navigator that walks on during each of the first 10 casts: i
     eq(casts(h), 11, 'ten interrupted casts, then the one that lands')
     eq(h.logged('teleport_failed'), 0, 'no teleport_failed')
     eq(h.place, h.P.pit, 'back in the Pit')
-    ok(h.now - t0 < 90, 'finished: ' .. (h.now - t0))
+    ok(h.now - t0 < 140, 'finished (casts 8 s apart since 1.0.24): ' .. (h.now - t0))
     -- The refunds are per trip: the next trip gets them again.
     m.interrupts = 0
     fill_bag(h, 3)
@@ -423,7 +423,8 @@ case('a fight nudge (orbwalker) 0.3 s into every cast: the refunds are capped, a
     ok(m.interrupts >= casts(h) - 1, 'every cast was interrupted: ' .. m.interrupts .. '/' .. casts(h))
     local refunds = h.mod('Rosie', 'rosie.private.town.tasks.teleport').MAX_REFUNDS or 4
     ok(casts(h) <= 8 + refunds, 'casts are bounded by the refund cap (1.0.21: 27): ' .. casts(h))
-    eq(casts(h), 8 + refunds, '8 attempts + the refunded casts')
+    -- 1.0.24: casts are 8 s apart, so the 60 s outbound bound ends the trip first.
+    ok(casts(h) >= refunds + 1, 'the refunds were used: ' .. casts(h))
     eq(h.logged(refunds .. ' interrupted casts were not counted'), 1, 'the cap is logged once')
     ok(h.now - t0 < 90, 'bounded (fails at the 60 s outbound service bound): ' .. (h.now - t0))
     h.assert_clean('nudge')

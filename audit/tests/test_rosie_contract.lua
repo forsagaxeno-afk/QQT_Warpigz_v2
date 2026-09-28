@@ -786,17 +786,15 @@ case('Looter adapter: busy while collecting an accepted drop, idle after; paused
     h.run(1)
     eq(as_consumer(h, function() return looter(h).is_actively_looting() end), false, 'idle after the pickup')
     eq(#h.inventory, 1)
-    -- A drop during a town trip is left alone: the trip pauses pickup.
+    -- QQT_Warpigz_v3 1.0.24: a wanted drop that fits the bag on the outbound
+    -- leg is picked up before the cast (the trip lends the player to pickup);
+    -- the trip's pause is back once the cast goes and holds in town.
     fill_bag(h, 25)
     eq(as_consumer(h, function() return alfred(h).trigger_tasks_with_teleport('Consumer') end), true)
-    h.drop('pit', 3, 0)
-    local looting_during_trip = false
-    ok(h.run_until(function()
-        looting_during_trip = looting_during_trip or as_consumer(h, function() return looter(h).is_actively_looting() end)
-        return h.place == h.P.temis
-    end, 10), 'trip left for town')
-    eq(looting_during_trip, false, 'no pickup while the trip owns the player')
-    eq(as_consumer(h, function() return looter(h).status().paused end), true, 'pickup paused by the trip')
+    local d = h.drop('pit', 3, 0)
+    ok(h.run_until(function() return h.place == h.P.temis end, 30), 'trip left for town')
+    eq(d.picked, true, 'the drop was picked up before the cast')
+    eq(as_consumer(h, function() return looter(h).status().paused end), true, 'pickup paused by the trip in town')
     ok(h.run_until(function() return h.place == h.P.pit and not live(st(h)) end, 60), 'trip returned')
     eq(as_consumer(h, function() return looter(h).status().paused end), false, 'pause released after the trip')
     -- Master off: both adapters report disabled at once.
