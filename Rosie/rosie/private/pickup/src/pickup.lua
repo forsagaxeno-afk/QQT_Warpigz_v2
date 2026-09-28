@@ -147,6 +147,7 @@ function M.observe(items)
                 if gone and gone.touched and gone.world==world then announce(gone) end
                 entries[id]=nil;G.retried[id]=nil -- QQT_Warpigz_v3 (Q1)
                 if episode.since then episode.since=get_time_since_inject() end -- QQT_Warpigz_v3: progress
+                M.progress_at=now -- QQT_Warpigz_v3 1.0.22 (review): progress for the Scavenger mimic's cap
             end
         end
     end
@@ -244,6 +245,7 @@ local function settle(id,item,why,line,retry,d)
     if why=='taken' and entries[id] then announce(entries[id]) end -- QQT_Warpigz_v3: suite event
     entries[id]=nil
     if episode.since and why=='taken' then episode.since=now end -- only a pickup is progress (20 s budget)
+    if why=='taken' then M.progress_at=now end -- QQT_Warpigz_v3 1.0.22 (review): the Scavenger mimic's cap
     if before==why then return end
     local ok,interactable=pcall(function() return item:is_interactable() end)
     console.print(string.format('[Rosie pickup] %s %s%s [interactable=%s]',why=='taken' and 'Took' or 'Leaving',
@@ -339,9 +341,17 @@ local function fight_hold(now)
     return FIGHT.on and not FIGHT.capped
 end
 -- True while a drop farther than FIGHT.feet m waits for the fight to end.
+-- QQT_Warpigz_v3 1.0.22 (review): or a drop farther than REACH m while
+-- M.walk_hold(now) (scavenger_mimic.lua: the cool-down after its cap) gives
+-- Navigator the path back without a tug of war; drops in reach are still taken.
 function M.fight_deferred(item,now)
     local d=Utils.distance_to(item)
-    return d>FIGHT.feet and d~=math.huge and fight_hold(now or get_time_since_inject())
+    if d==math.huge then return false end
+    now=now or get_time_since_inject()
+    if d>FIGHT.feet and fight_hold(now) then return true end
+    if d<=REACH or type(M.walk_hold)~='function' then return false end
+    local ok,hold=pcall(M.walk_hold,now)
+    return ok and hold==true
 end
 local function foreign_move(e,item,now)
     if not e.working then e.foreign=nil;return false end

@@ -7,7 +7,8 @@
 -- Rosie now publishes a Scavenger-compatible _G.Scavenger (only while
 -- Navigator runs and no real Scavenger is present) backed by its pickup, and
 -- registers its own Navigator condition "Rosie Looting". Busy is bounded (20 s
--- per episode, then 5 s off) and never covers the fight hold.
+-- without a pickup, 60 s per episode, then 5 s off without a walk to a drop)
+-- and never covers the fight hold.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
 local checks, failures = 0, {}
@@ -109,29 +110,21 @@ local function real_scavenger(h)
     sc.api = h.G.Scavenger
     return sc
 end
--- Direction reversals of the player (heading turns more than 120 degrees
--- between two moves of more than 5 cm) and x-direction flips.
-local function watcher(h)
-    local w = {rev = 0, xflip = 0, last = h.pos, hx = nil, hy = nil, xdir = 0}
-    function w.each(hh)
-        local dx, dy = hh.pos:x() - w.last:x(), hh.pos:y() - w.last:y()
-        local d = math.sqrt(dx * dx + dy * dy)
-        if d > 0.05 then
-            dx, dy = dx / d, dy / d
-            if w.hx and dx * w.hx + dy * w.hy < -0.5 then w.rev = w.rev + 1 end
-            w.hx, w.hy = dx, dy
-            if math.abs(dx * d) > 0.05 then
-                local s = dx > 0 and 1 or -1
-                if w.xdir ~= 0 and s ~= w.xdir then w.xflip = w.xflip + 1 end
-                w.xdir = s
-            end
-        end
-        w.last = hh.pos
+-- QQT_Warpigz_v3 1.0.22 (review): the tug of war over the path, counted
+-- directly: a frame in which Rosie issued a pickup move AND Navigator re-issued
+-- its own. (Heading-reversal counters never fired in this scenario, with or
+-- without the fix.)
+local function tug_counter(h, nav)
+    local t = {tugs = 0, moves = #h.moves, walked = nav.walk_frames}
+    function t.before(hh) t.moves, t.walked = #hh.moves, nav.walk_frames end
+    function t.after(hh)
+        if #hh.moves > t.moves and nav.walk_frames > t.walked then t.tugs = t.tugs + 1 end
     end
-    return w
+    return t
 end
 -- Worldstone's route: Navigator walks the player from (0,0) toward (200,0)
--- every pulse; a wanted drop lies 6 m off the route at x=40.
+-- every pulse; a wanted drop lies 6 m off the route at x=40. opts.nav_first:
+-- Navigator acts before Rosie in each frame (plugin order is not fixed).
 local function route_run(opts)
     opts = opts or {}
     local h = new({option = opts.option})
@@ -140,17 +133,22 @@ local function route_run(opts)
     nav.active = false
     h.run(4) -- Navigator seen for more than GRACE s: the table is published
     local item = legendary(h, 40, 6)
-    local w = watcher(h)
-    local r = {h = h, nav = nav, ws = ws, item = item, w = w, busy_frames = 0, walked_busy = 0, closest = math.huge}
+    local t = tug_counter(h, nav)
+    local r = {h = h, nav = nav, ws = ws, item = item, t = t, busy_frames = 0, closest = math.huge}
     nav.active = true
-    h.run(24, function(hh)
-        nav.step(hh)
-        w.each(hh)
+    local function observe(hh)
         local sc = rawget(hh.G, 'Scavenger')
         local busy = type(sc) == 'table' and sc.is_busy() == true
         if busy then r.busy_frames = r.busy_frames + 1 end
         r.closest = math.min(r.closest, hh.pos:dist_to_ignore_z(item.pos))
-    end)
+    end
+    local stop = h.now + 24 - 1e-9
+    while h.now < stop do
+        t.before(h)
+        if opts.nav_first then nav.step(h); h.frame() else h.frame(); nav.step(h) end
+        t.after(h)
+        observe(h)
+    end
     return r
 end
 
@@ -164,9 +162,8 @@ case('a: Worldstone + Navigator, a drop 6 m off the route: Navigator waits, Rosi
     ok(r.ws.busy_reads > 0, "Worldstone's condition read a busy Scavenger")
     ok(r.nav.paused_frames > 0, 'Navigator was paused while Rosie looted')
     eq(h.logged('Another move took the player off'), 0, 'Rosie never stepped back for Navigator')
-    print(string.format('  a: reversals=%d xflips=%d paused_frames=%d busy_frames=%d', r.w.rev, r.w.xflip, r.nav.paused_frames, r.busy_frames))
-    ok(r.w.rev <= 1, 'direction reversals: ' .. r.w.rev)
-    ok(r.w.xflip <= 1, 'x-direction flips: ' .. r.w.xflip)
+    print(string.format('  a: tugs=%d paused_frames=%d busy_frames=%d', r.t.tugs, r.nav.paused_frames, r.busy_frames))
+    eq(r.t.tugs, 0, 'Navigator never re-issued its move in a frame Rosie moved')
     ok(h.pos:x() > 150, 'Navigator resumed after the pickup: x=' .. string.format('%.1f', h.pos:x()))
     ok(h.logged('pause condition "Rosie Looting"') == 1, 'own condition registered once')
     h.assert_clean('a')
@@ -176,7 +173,8 @@ case('a2: the Scavenger table alone holds a Navigator that honours only Worldsto
     local r = route_run({only = {['Worldstone Looting'] = true}})
     eq(r.item.picked, true, 'picked through the Worldstone condition alone\n' .. r.h.tail(12))
     ok(r.ws.busy_reads > 0 and r.nav.paused_frames > 0, 'paused by Worldstone reading Rosie as Scavenger')
-    ok(r.w.rev <= 1, 'direction reversals: ' .. r.w.rev)
+    eq(r.t.tugs, 0, 'no tug of war')
+    eq(r.h.logged('Another move took the player off'), 0, 'no yield')
     r.h.assert_clean('a2')
 end)
 
@@ -186,18 +184,29 @@ case('a3: Rosie\'s own condition "Rosie Looting" holds Navigator even when World
     ok(r.nav.conditions['Rosie Looting'] ~= nil, 'registered')
     ok(r.nav.conditions['Rosie'] == nil, 'the town-trip condition name is not reused')
     ok(r.nav.paused_frames > 0, 'paused by Rosie Looting')
-    ok(r.w.rev <= 1, 'direction reversals: ' .. r.w.rev)
+    eq(r.t.tugs, 0, 'no tug of war')
+    eq(r.h.logged('Another move took the player off'), 0, 'no yield')
     r.h.assert_clean('a3')
+end)
+
+case('a4: Navigator acting before Rosie in each frame: at most one shared frame, then it waits', function()
+    local r = route_run({nav_first = true})
+    eq(r.item.picked, true, 'picked\n' .. r.h.tail(12))
+    ok(r.t.tugs <= 1, 'tugs: ' .. r.t.tugs)
+    ok(r.nav.paused_frames > 0, 'paused')
+    eq(r.h.logged('Another move took the player off'), 0, 'no yield')
+    r.h.assert_clean('a4')
 end)
 
 case('b: option off (old behaviour): nothing holds Navigator, the drop is left behind or fought over', function()
     local r = route_run({option = false})
     local h = r.h
     eq(h.G.Scavenger, nil, 'no Scavenger table with the option off')
-    print(string.format('  b: picked=%s reversals=%d xflips=%d closest=%.1f paused_frames=%d', tostring(r.item.picked),
-        r.w.rev, r.w.xflip, r.closest, r.nav.paused_frames))
+    print(string.format('  b: picked=%s tugs=%d closest=%.1f paused_frames=%d', tostring(r.item.picked),
+        r.t.tugs, r.closest, r.nav.paused_frames))
     eq(r.nav.paused_frames, 0, 'Navigator was never paused')
-    ok(r.item.picked ~= true or r.w.rev >= 3, 'the old failure shows: drop left behind or back and forth')
+    ok(r.item.picked ~= true, 'the old failure shows: the drop is left behind')
+    ok(r.t.tugs >= 1, 'the old failure shows: Rosie and Navigator moved in the same frame (a yields at 0): ' .. r.t.tugs)
     ok(h.logged('Another move took the player off') >= 1, 'Rosie stepped back for Navigator (old tug of war)\n' .. h.tail(12))
     h.assert_clean('b')
 end)
@@ -227,45 +236,150 @@ case('c: the fight hold (enemy near, drop 6 m away) keeps pickup busy but not Sc
     h.assert_clean('c')
 end)
 
-case('d: refused drops keep Rosie working: is_busy is capped at 20 s, then false for 5 s, then a new episode', function()
+-- A stream of drops 4 m off the player, each taken on its 3rd interaction
+-- (bag 'sink': the bag never fills): Rosie walks and picks up without a break.
+local function stream()
+    local side, current = 1, nil
+    return function(hh)
+        if current and not current.picked then return end
+        local n = 0
+        current = legendary(hh, hh.pos:x() + 4 * side, hh.pos:y(), {bag = 'sink', refuse = function() n = n + 1; return n < 3 end})
+        side = -side
+    end
+end
+-- QQT_Warpigz_v3 1.0.22 (review): progress restarts the 20 s clock; the hard
+-- ceiling is 60 s; the cool-down walks to no drop (Navigator gets the path).
+case('d: steady pickups keep one busy episode up to 60 s; then 5 s off without a walk to a drop; then a new episode', function()
     local h = new({distance = 30})
     local nav = fake_navigator(h); nav.active = false
     h.run(4)
     local sc, m = h.G.Scavenger, mimic(h)
-    eq(m.CAP, 20); eq(m.COOL, 5)
-    -- Three drops the game refuses at the feet (3 rounds each), and a fresh
-    -- drop every 4 s that is taken (so pickup's own 20 s budget restarts).
-    for _, p in ipairs({{1, 0}, {0, 1}, {-1, 0}}) do
-        legendary(h, p[1], p[2], {name = 'Helm_Legendary_Generic_009', refuse = function() return true end})
-    end
-    local next_fresh = h.now + 4
+    eq(m.CAP, 20); eq(m.CEILING, 60); eq(m.COOL, 5)
+    local feed = stream()
+    feed(h)
     local t0 = h.now
-    local first, capped, again, cool_looting, cool_busy = nil, nil, nil, 0, 0
-    local cond_mismatch = 0
-    h.run(34, function(hh)
-        if hh.now >= next_fresh then legendary(hh, 0.5, 0); next_fresh = hh.now + 4 end
+    local first, capped, again, rises, was = nil, nil, nil, 0, false
+    local cool_busy, cool_moves, cond_mismatch, cool_pos, cool_moved, near = 0, 0, 0, nil, 0, nil
+    local moves = #h.moves
+    h.run(72, function(hh)
+        feed(hh)
         local busy = sc.is_busy()
         if (nav.conditions['Rosie Looting']() == true) ~= busy then cond_mismatch = cond_mismatch + 1 end
+        if busy and not was then rises = rises + 1 end
+        was = busy
         if busy and not first then first = hh.now end
-        if first and not capped and not busy then capped = hh.now end
-        if capped and hh.now < capped + m.COOL - 0.15 then
-            if busy then cool_busy = cool_busy + 1 end
-            if looting(hh) then cool_looting = cool_looting + 1 end
+        if first and not capped and not busy then
+            capped, cool_pos = hh.now, hh.pos
+            near = legendary(hh, hh.pos:x(), hh.pos:y() + 1, {name = 'Helm_Legendary_Generic_036', bag = 'sink'})
         end
+        if capped and hh.now > capped + 0.15 and hh.now < capped + m.COOL - 0.15 then
+            if busy then cool_busy = cool_busy + 1 end
+            cool_moves = cool_moves + (#hh.moves - moves)
+            cool_moved = math.max(cool_moved, hh.pos:dist_to_ignore_z(cool_pos))
+        end
+        moves = #hh.moves
         if capped and not again and busy then again = hh.now end
     end)
     ok(first and first - t0 < 1, 'busy at once')
     ok(capped, 'is_busy went false\n' .. h.tail(10))
-    print(string.format('  d: busy for %.1f s, off for %.1f s, looting frames in the cool-down=%d', capped - first,
-        again and again - capped or -1, cool_looting))
-    ok(math.abs((capped - first) - m.CAP) <= 0.3, 'capped after 20 s: ' .. (capped - first))
+    print(string.format('  d: busy for %.1f s in %d episode(s), off for %.1f s, pickups=%d, moves in the cool-down=%d, moved %.2f m',
+        capped - first, rises, again and again - capped or -1, h.pickups or 0, cool_moves, cool_moved))
+    ok(math.abs((capped - first) - m.CEILING) <= 0.3, 'one episode up to the 60 s ceiling: ' .. (capped - first))
+    ok(rises >= 2, 'a new episode after the cool-down')
+    eq(h.logged('Busy as Scavenger for 60s in one go'), 1, 'the ceiling is logged once per episode')
+    eq(h.logged('without a pickup'), 0, 'steady pickups never hit the 20 s stall cap')
     eq(cool_busy, 0, 'false for the whole cool-down')
-    ok(cool_looting > 0, 'Rosie still worked during the cool-down (the cap, not pickup, ended busy)')
+    eq(cool_moves, 0, 'no pickup move in the cool-down: Navigator has the path')
+    ok(cool_moved < 1, 'the player stood still in the cool-down: ' .. cool_moved)
+    eq(near.picked, true, 'a drop in reach is still taken in the cool-down')
     ok(again and math.abs((again - capped) - m.COOL) <= 0.3, 'a new episode after 5 s: ' .. tostring(again and again - capped))
-    eq(h.logged('Busy as Scavenger for 20s in one go'), 1, 'the cap is logged once per episode')
     eq(cond_mismatch, 0, 'Rosie Looting follows is_busy')
-    ok(h.pickups and h.pickups >= 3, 'fresh drops were taken: ' .. tostring(h.pickups))
+    ok(h.pickups and h.pickups >= 40, 'steady pickups: ' .. tostring(h.pickups))
     h.assert_clean('d')
+end)
+
+case('d2: a pile that takes longer than 20 s under a walking Navigator: one busy episode, every drop taken, no tug of war', function()
+    local h = new()
+    local nav = fake_navigator(h); nav.active = false
+    h.run(4)
+    local sc, m = h.G.Scavenger, mimic(h)
+    -- 24 drops within the 12 m pickup distance, each taken on its 6th interaction.
+    local items = {}
+    for i = 1, 24 do
+        local a, rad, n = i * 2.39996, 3 + (i % 8), 0
+        items[i] = legendary(h, rad * math.cos(a), rad * math.sin(a), {name = string.format('Helm_Legendary_Generic_%03d', 100 + i),
+            bag = 'sink', refuse = function() n = n + 1; return n < 6 end})
+    end
+    local function picked()
+        local c = 0
+        for _, item in ipairs(items) do if item.picked then c = c + 1 end end
+        return c
+    end
+    local t = tug_counter(h, nav)
+    nav.active = true
+    local rises, was, first, last = 0, false, nil, nil
+    local stop = h.now + 60
+    while h.now < stop and picked() < #items do
+        t.before(h); h.frame(); nav.step(h); t.after(h)
+        local busy = sc.is_busy()
+        if busy and not was then rises = rises + 1 end
+        if busy then first = first or h.now; last = h.now end
+        was = busy
+    end
+    print(string.format('  d2: picked %d/%d in %.1f s, busy episodes=%d, tugs=%d', picked(), #items, (last or 0) - (first or 0), rises, t.tugs))
+    eq(picked(), #items, 'every drop taken\n' .. h.tail(12))
+    eq(rises, 1, 'one busy episode')
+    ok(last - first > m.CAP, 'the episode outlasted the 20 s stall cap: ' .. (last - first))
+    eq(h.logged('Busy as Scavenger for'), 0, 'no cap')
+    eq(h.logged('Another move took the player off'), 0, 'Rosie never stepped back for Navigator')
+    eq(t.tugs, 0, 'no tug of war')
+    local x = h.pos:x()
+    h.run(3, function(hh) nav.step(hh) end)
+    ok(h.pos:x() > x + 10, 'Navigator walks on after the pile')
+    h.assert_clean('d2')
+end)
+
+case('d3: drops the game refuses (no pickup): busy ends after 20 s and stays off; resting drops are not wanted items', function()
+    local h = new({distance = 30})
+    local nav = fake_navigator(h); nav.active = false
+    h.run(4)
+    local sc, m = h.G.Scavenger, mimic(h)
+    local refused = {}
+    for i, p in ipairs({{1, 0}, {0, 1}, {-1, 0}}) do
+        refused[i] = legendary(h, p[1], p[2], {name = 'Helm_Legendary_Generic_009', refuse = function() return true end})
+    end
+    local first, off, off_busy = nil, nil, 0
+    h.run(27, function(hh)
+        local busy = sc.is_busy()
+        if busy and not first then first = hh.now end
+        if first and not off and not busy then off = hh.now end
+        if off and hh.now < off + m.COOL - 0.15 and busy then off_busy = off_busy + 1 end
+    end)
+    ok(first and off, 'busy, then not\n' .. h.tail(10))
+    ok(math.abs((off - first) - m.CAP) <= 0.3, 'off after 20 s without a pickup: ' .. (off - first))
+    eq(off_busy, 0, 'false for the cool-down')
+    local ItemManager = h.mod('Rosie', 'rosie.private.pickup.src.item_manager')
+    local listed = {}
+    for _, item in ipairs(sc.get_wanted_items()) do listed[item] = true end
+    for i, item in ipairs(refused) do
+        eq(ItemManager.check_want_item(item, false), true, 'the filter still wants refused drop ' .. i)
+        ok(not listed[item], 'a resting drop is not a wanted item: ' .. i)
+    end
+    h.assert_clean('d3')
+end)
+
+case('d4: without Navigator nothing is counted: no cap, no log, no walk hold for the same stream', function()
+    local h = new({distance = 30})
+    local pickup, feed, held = h.mod('Rosie', 'rosie.private.pickup.src.pickup'), stream(), 0
+    feed(h)
+    h.run(66, function(hh)
+        feed(hh)
+        if pickup.walk_hold(hh.now) then held = held + 1 end
+    end)
+    eq(h.logged('Busy as Scavenger for'), 0, 'no cap without Navigator')
+    eq(held, 0, 'never a walk hold without Navigator')
+    ok(h.pickups and h.pickups >= 70, 'pickups went on without a break: ' .. tostring(h.pickups))
+    h.assert_clean('d4')
 end)
 
 case('e: pause("Worldstone") stops Rosie pickup, resume("Worldstone") restores it', function()
@@ -282,13 +396,27 @@ case('e: pause("Worldstone") stops Rosie pickup, resume("Worldstone") restores i
     eq(sc.is_busy(), false)
     local st = sc.get_status()
     eq(st.is_paused, true); eq(st.state, 'paused'); eq(st.mimic, true); eq(st.name, 'Rosie'); eq(st.owner, 'Rosie')
-    eq(st.version, '1.0.22')
+    -- QQT_Warpigz_v3 1.0.22 (review): one version source, no literal to bump here.
+    local f = assert(io.open(ROOT .. '/versions.json', 'r'))
+    local manifest = f:read('*a'); f:close()
+    eq(st.version, manifest:match('"Rosie"%s*:%s*"([^"]+)"'), 'the Rosie version of versions.json')
+    eq(st.version, h.as(CONSUMER, function() return h.G.AlfredTheButlerPlugin.get_status().version end), 'the Rosie status version')
     local ls = h.as(CONSUMER, function() return looter(h).status() end)
     eq(ls.paused, true, 'the Looter pause')
     ok(ls.detail:find('Worldstone', 1, true), 'paused by Worldstone: ' .. ls.detail)
     eq(sc.resume('Worldstone'), true, 'resume returns true')
     ok(h.run_until(function() return item.picked == true end, 10), 'taken after resume\n' .. h.tail(10))
     eq(sc.get_status().is_paused, false)
+    -- QQT_Warpigz_v3 1.0.22 (review): the pause gate on its own: paused while
+    -- busy -> false on the same frame (not only after the 1 s debounce).
+    local item2 = legendary(h, h.pos:x() + 10, 0, {name = 'Helm_Legendary_Generic_035'})
+    ok(h.run_until(function() return sc.is_busy() end, 3), 'busy walking to the next drop')
+    eq(sc.pause('Worldstone'), true)
+    eq(sc.is_busy(), false, 'false on the same frame as the pause')
+    h.frame()
+    eq(sc.is_busy(), false, 'false while paused')
+    eq(sc.resume('Worldstone'), true)
+    ok(h.run_until(function() return item2.picked == true end, 10), 'taken after the second resume\n' .. h.tail(10))
     -- A nil caller is keyed as Scavenger-caller; 'Rosie' never takes Rosie's own trip pause.
     eq(sc.pause(), true)
     ok(looter(h).status().detail:find('Scavenger-caller', 1, true), 'nil caller key')
@@ -402,11 +530,39 @@ case('h: option off: no global, no condition; on: published; off again: removed.
     h.run(4)
     ok(h.G.Scavenger and h.G.Scavenger._rosie, 'published once on')
     ok(nav.conditions['Rosie Looting'] ~= nil, 'registered once on')
+    -- QQT_Warpigz_v3 1.0.22 (review): the option gate on its own: turned off
+    -- while Rosie walks to a drop -> false on the same frame.
+    local cond = nav.conditions['Rosie Looting']
+    local item = legendary(h, 8, 0)
+    ok(h.run_until(function() return cond() == true end, 3), 'Rosie Looting true walking to a drop')
     pgui(h).act_as_scavenger:set(false)
+    eq(cond(), false, 'false on the same frame as the option off')
+    eq(h.G.Scavenger.is_busy(), false, 'the table answers false too until it is removed')
+    h.frame()
+    eq(cond(), false, 'false on the next frame')
     h.run(0.5)
     eq(h.G.Scavenger, nil, 'removed when turned off')
-    eq(nav.conditions['Rosie Looting'](), false, 'the condition answers false while off')
+    eq(cond(), false, 'the condition answers false while off')
+    ok(h.run_until(function() return item.picked == true end, 10), 'pickup goes on with the option off')
+    eq(cond(), false)
     h.assert_clean('h')
+    -- QQT_Warpigz_v3 1.0.22 (review): GRACE: a real Scavenger loading 1 s after
+    -- Navigator: Rosie never published its table.
+    local h3 = new()
+    local nav3 = fake_navigator(h3); nav3.active = false
+    local shim_seen = false
+    local function watch(hh)
+        local cur = rawget(hh.G, 'Scavenger')
+        if type(cur) == 'table' and rawget(cur, '_rosie') then shim_seen = true end
+    end
+    h3.run(1, watch)
+    local real = real_scavenger(h3)
+    h3.run(5, watch)
+    eq(shim_seen, false, 'never published inside the grace')
+    eq(h3.G.Scavenger, real.api, 'the real Scavenger stays')
+    eq(h3.logged('Acting as Scavenger'), 0, 'nothing published')
+    eq(h3.logged('A Scavenger addon is loaded'), 0, 'nothing to take over')
+    h3.assert_clean('h3')
     -- Without Navigator Rosie publishes only its documented globals.
     local h2 = new()
     h2.run(10)
@@ -438,6 +594,13 @@ case('i: gates, status and wanted items: dead, loading, disabled, town trip; gua
     h.place = h.P.limbo
     eq(sc.is_busy(), false, 'false in a loading screen'); h.place = place
     ok(sc.is_busy(), 'busy again')
+    -- QQT_Warpigz_v3 1.0.22 (review): the town-trip gate on its own (a real
+    -- trip also pauses pickup, which hides it).
+    local life = h.mod('Rosie', 'rosie.private.town.core.lifecycle')
+    mimic(h).configure({town_busy = function() return true end})
+    eq(sc.is_busy(), false, 'false while a town trip runs')
+    mimic(h).configure({town_busy = function() return life.busy() and true or false end})
+    ok(sc.is_busy(), 'busy again after the trip gate')
     eq(h.as(CONSUMER, function() return h.G.RosiePlugin.disable() end), true)
     eq(sc.is_busy(), false, 'false when Rosie is off')
     local st = sc.get_status()

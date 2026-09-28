@@ -104,9 +104,11 @@ function M.new(cached,conflict)
         end
         -- QQT_Warpigz_v3 1.0.22: Rosie as Scavenger for Worldstone/Navigator
         -- (rosie/private/scavenger_mimic.lua); every gate is bound to this
-        -- instance, so a retired Rosie never holds Navigator. Same version as above.
+        -- instance, so a retired Rosie never holds Navigator. The version is read
+        -- from the status above (one source; QQT_Warpigz_v3 1.0.22 review).
         app.mimic=require('rosie.private.scavenger_mimic')
-        app.mimic.configure({version='1.0.22',alive=function() return app.active and not conflict end,
+        app.mimic.configure({version=function() return town.get_status().version end,
+            alive=function() return app.active and not conflict end,
             enabled=function() return enabled() and loot_gui.elements.main_toggle:get()==true end,
             town_busy=function() return life.busy() and true or false end,
             option=function() return loot_gui.elements.act_as_scavenger:get()==true end})

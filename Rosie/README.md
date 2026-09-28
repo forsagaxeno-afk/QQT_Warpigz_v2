@@ -308,7 +308,8 @@ installed, Rosie publishes a Scavenger-compatible `Scavenger` table (`is_busy`,
 `pause`, `resume`, `get_status`, `get_wanted_items`) backed by its pickup, and
 registers the Navigator pause condition `Rosie Looting`. Navigator then waits while
 Rosie walks to a wanted drop or picks it up: never during a fight hold, a pause, a
-town trip or while Rosie is off, and at most 20 s at a time (then 5 s off).
+town trip or while Rosie is off. It is bounded: at most 20 s without a pickup and
+60 s in one go; then Navigator gets 5 s, in which Rosie walks to no drop.
 `Scavenger.pause(caller)` pauses Rosie pickup under that caller's name. A real
 Scavenger addon always wins: Rosie never replaces it and yields to it while it is
 busy. Pickup rules > **Act as Scavenger for Worldstone/Navigator** (on by default)

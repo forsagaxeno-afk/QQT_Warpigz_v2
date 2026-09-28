@@ -14,17 +14,23 @@
 --  * is_busy: pickup worked a wanted drop (Pickup.step true) within DEBOUNCE s.
 --    Never for the fight hold's busy-without-moving, a paused, disabled or
 --    retired Rosie, the option off, a dead player, a loading screen or a town
---    trip (the trip holds Navigator itself). C6: one busy episode is capped at
---    CAP s (the debounce counts inside it), then false for COOL s, logged
---    once per episode, so Navigator/Worldstone never freeze on Rosie's account.
+--    trip (the trip holds Navigator itself). C6: one busy episode ends after
+--    CAP s without a drop taken or leaving the ground (Pickup.progress_at) or
+--    CEILING s in all (the debounce counts inside both), then false for COOL
+--    s, logged once per episode, so Navigator/Worldstone never freeze on
+--    Rosie's account. QQT_Warpigz_v3 1.0.22 (review): progress restarts the
+--    CAP clock (a big pile was cut off after CAP s), and in the cool-down
+--    pickup walks to no drop (Pickup.walk_hold, like the fight hold), so
+--    Navigator gets the path back without a tug of war. The episode is
+--    counted only while Navigator is loaded and the option is on.
 --  * Every entry point is pcall-guarded, never raises and never requires.
 local Settings=require('rosie.private.pickup.src.settings')
 local ItemManager=require('rosie.private.pickup.src.item_manager')
 local Pickup=require('rosie.private.pickup.src.pickup')
 local Utils=require('rosie.private.pickup.utils.utils')
-local M={NAME='Scavenger',CONDITION='Rosie Looting',DEBOUNCE=1,CAP=20,COOL=5,GRACE=3,WANTED_TTL=0.25}
-local cfg={} -- alive, enabled, town_busy, option: functions; acquire/release: the Looter pause; version
-local B={since=nil,last=nil,cool_until=nil}
+local M={NAME='Scavenger',CONDITION='Rosie Looting',DEBOUNCE=1,CAP=20,CEILING=60,COOL=5,GRACE=3,WANTED_TTL=0.25}
+local cfg={} -- alive, enabled, town_busy, option, version: functions; acquire/release: the Looter pause
+local B={start=nil,since=nil,last=nil,cool_until=nil} -- since: the episode start or its last pickup
 local S={nav_seen=nil,cond_nav=nil,published=false,wanted_at=nil,wanted={}}
 local logged={}
 local function log_once(key,text)
@@ -58,22 +64,39 @@ local function blocked()
 end
 -- The busy episode (see the header); true while it may report busy.
 local function refresh(now)
-    if not B.last or now<B.last or now-B.last>M.DEBOUNCE then B.since=nil;return false end
+    if not B.last or now<B.last or now-B.last>M.DEBOUNCE then B.start,B.since=nil,nil;return false end
     if B.cool_until then
         if now<B.cool_until and now>=B.cool_until-M.COOL then return false end
-        B.cool_until,B.since=nil,now -- cool-down over: a new episode
+        B.cool_until,B.start=nil,nil -- cool-down over: a new episode
     end
-    if not B.since or now<B.since then B.since=now end
-    if now-B.since<M.CAP then return true end
-    B.cool_until,B.since=now+M.COOL,nil
-    console.print(string.format('[Rosie] Busy as Scavenger for %ds in one go; Navigator/Worldstone get the path back for %ds',M.CAP,M.COOL))
+    if not B.start or now<B.start then B.start,B.since=now,now end
+    local p=Pickup.progress_at -- QQT_Warpigz_v3 1.0.22 (review): a drop taken restarts the CAP clock
+    if type(p)=='number' and p>B.since and p<=now then B.since=p end
+    local stalled=now-B.since>=M.CAP
+    if not stalled and now-B.start<M.CEILING then return true end
+    B.cool_until,B.start,B.since=now+M.COOL,nil,nil
+    console.print(string.format('[Rosie] Busy as Scavenger for %ds %s; Navigator/Worldstone get the path back for %ds',
+        stalled and M.CAP or M.CEILING,stalled and 'without a pickup' or 'in one go',M.COOL))
     return false
 end
+-- QQT_Warpigz_v3 1.0.22 (review): something reads is_busy (see the header).
+local function in_effect() return on('option') and on('alive') and type(rawget(_G,'Navigator'))=='table' end
 -- Pickup worked a wanted drop this pulse (Pickup.step returned true).
 function M.note_work(now)
-    if B.last and (now<B.last or now-B.last>M.DEBOUNCE) then B.since=nil end
+    if not in_effect() then return end
+    if B.last and (now<B.last or now-B.last>M.DEBOUNCE) then B.start,B.since=nil,nil end
     B.last=now
     refresh(now)
+end
+-- QQT_Warpigz_v3 1.0.22 (review): the cool-down after a cap; pickup walks to
+-- no drop meanwhile (pickup.lua fight_deferred), drops in reach are still taken.
+local function cooling(now)
+    local c=B.cool_until
+    return c~=nil and now<c and now>=c-M.COOL and on('option') and on('alive')
+end
+Pickup.walk_hold=function(now)
+    local ok,hold=pcall(cooling,now)
+    return ok and hold==true
 end
 local function busy_now()
     local busy=refresh(now_s())
@@ -97,6 +120,13 @@ local function pause_call(key,caller)
 end
 function M.pause(caller) return pause_call('acquire',caller) end
 function M.resume(caller) return pause_call('release',caller) end
+-- QQT_Warpigz_v3 1.0.22 (review): one version source (the controller's s.version).
+local function version()
+    local f=cfg.version
+    if type(f)~='function' then return nil end
+    local ok,v=pcall(f)
+    return ok and type(v)=='string' and v or nil
+end
 local function status()
     local enabled=on('alive') and on('enabled')
     local paused=Settings.is_paused()==true
@@ -104,13 +134,13 @@ local function status()
     local state=not enabled and 'disabled' or paused and 'paused' or busy and 'looting' or 'idle'
     local message=({disabled='Rosie pickup is off.',paused='Rosie pickup is paused.',
         looting='Rosie is picking up a drop.',idle='Rosie is waiting for a wanted drop.'})[state]
-    return {name='Rosie',owner='Rosie',version=cfg.version,mimic=true,is_busy=busy,is_paused=paused,
+    return {name='Rosie',owner='Rosie',version=version(),mimic=true,is_busy=busy,is_paused=paused,
         is_enabled=enabled,state=state,message=message}
 end
 function M.get_status()
     local ok,s=pcall(status)
     if ok and type(s)=='table' then return s end
-    return {name='Rosie',owner='Rosie',version=cfg.version,mimic=true,is_busy=false,is_paused=false,
+    return {name='Rosie',owner='Rosie',version=version(),mimic=true,is_busy=false,is_paused=false,
         is_enabled=false,state='disabled',message='Rosie status unavailable.'}
 end
 -- Ground items Rosie wants now (in pickup distance, not settled, resting or
