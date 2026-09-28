@@ -47,7 +47,13 @@
 --   BOSS_TRIP   a teleport cast within 30 m of the live district boss;
 --   KURAST_SLOW more than 150 s from an arrival in Kurast to the Undercity
 --               portal (the walk, brazier, tribute and portal);
---   FLOOR_SLOW  more than 240 s on one floor.
+--   FLOOR_SLOW  more than 240 s on one floor;
+--   REWARD_FORGOTTEN WonderCity waits for the reward chest to unlock on a
+--               boss floor whose chest it already opened (its reward state
+--               was reset, e.g. by a trip it did not record as resumable).
+-- A move command during a waypoint / Town Portal channel breaks it (the
+-- game's rule; the joint host lets the channel finish), so Rosie's looter
+-- walking to a drop cancels WonderCity's exit teleport.
 -- Every hit is classified by RULES below: 'known' (being fixed by a plugin
 -- session), 'finding' (reported by this sweep), 'expected' (by design /
 -- emulator). An unclassified hit fails.
@@ -400,6 +406,16 @@ local function build_world(h, seed, o)
                 loot(place, boss.pos:x(), boss.pos:y(), rng.int(1, 3), o.boss_mythic or 0.05, 'boss')
                 local chest = h.actor(place, 'X1_Undercity_Chest_Attunement', boss.pos:x() - 3, boss.pos:y())
                 run.chest = chest
+                -- o.death_after_boss: the player dies 0.3 s after the boss,
+                -- before the chest is opened (a repro trigger).
+                if o.death_after_boss then
+                    h.at(0.3, function()
+                        if h.place == place and not h.dead and not h.travel then
+                            h.dead, h.goal, h.native = true, nil, nil
+                            note('death', 'the player dies next to the dead district boss')
+                        end
+                    end)
+                end
                 chest.on_interact = function()
                     if chest.interactable == false or chest.opening or h.pos:dist_to_ignore_z(chest.pos) > 3.5 then return end
                     chest.opening = true
@@ -412,6 +428,18 @@ local function build_world(h, seed, o)
                         drop_obols(place, chest.pos:x(), chest.pos:y(), o.chest_obols or rng.int(2, 4))
                         -- o.death_after_chest: the player dies 0.2 s after the
                         -- chest opens (a repro trigger).
+                        -- o.bag_after_chest=s: the bag fills s seconds after
+                        -- the chest opens (a repro trigger: Rosie's automatic
+                        -- trip inside WonderCity's exit delay).
+                        if o.bag_after_chest then
+                            h.at(o.bag_after_chest, function()
+                                h.inventory = h.inventory or {}
+                                while #h.inventory < 33 do
+                                    h.inventory[#h.inventory + 1] = h.gear({name = 'Helm_Rare_Joint', rarity = 3})
+                                end
+                                note('bag', 'bag filled to 33 items after the reward chest opened')
+                            end)
+                        end
                         if o.death_after_chest then
                             h.at(0.2, function()
                                 if h.place == place and not h.dead and not h.travel then
@@ -650,6 +678,26 @@ local function build_world(h, seed, o)
             while #h.inventory < 33 do h.inventory[#h.inventory + 1] = h.gear({name = 'Helm_Rare_Joint', rarity = 3}) end
             note('bag', 'bag filled to 33 items next to the live district boss')
         end
+        -- Scenario invariant REWARD_FORGOTTEN: WonderCity waits for the reward
+        -- chest to unlock ('not interactable before our click', logged only
+        -- while tracker.done is false) on a boss floor whose chest was already
+        -- opened: it forgot the run's reward state and waits for a chest that
+        -- can never be opened again.
+        W.log_i = W.log_i or 1
+        while W.log_i <= #h.log do
+            local line = h.log[W.log_i]
+            W.log_i = W.log_i + 1
+            if type(line) == 'string' and line:find('[WonderCity:chest] reward chest ', 1, true) and line:find('is not interactable before our click', 1, true) then
+                local run_here = h.place.run
+                if run_here and run_here.chest_opened_at and h.place == run_here.floors[#run_here.floors] then
+                    W.forgotten = W.forgotten or {}
+                    W.forgotten[h.place.key] = W.forgotten[h.place.key] or h.now
+                    hit('REWARD_FORGOTTEN', string.format('run %d: WonderCity waits for the reward chest to unlock in %s '
+                        .. '%.0f s after it was opened (t=%.1f): %s', run_here.n, h.place.key, h.now - run_here.chest_opened_at,
+                        run_here.chest_opened_at, line:match('%); (.*)$') or '?'))
+                end
+            end
+        end
         -- leaving a boss floor for Kurast (not a Rosie trip): REWARD_LEFT
         if h.place == h.P.limbo and W.tick_place and W.tick_place.run and h.travel and h.travel.to == K then
             local floor = W.tick_place
@@ -859,6 +907,8 @@ local function start(seed, o)
         boss_mythic = o.boss_mythic, chest_mythic = o.chest_mythic, bag_at_boss = o.bag_at_boss or os.getenv('QQT_SWEEP_BAG_AT_BOSS') == '1',
         kurast_block = o.kurast_block or tonumber(os.getenv('QQT_SWEEP_KURAST_BLOCK') or ''),
         death_after_chest = o.death_after_chest or os.getenv('QQT_SWEEP_DEATH_AFTER_CHEST') == '1',
+        bag_after_chest = o.bag_after_chest or tonumber(os.getenv('QQT_SWEEP_BAG_AFTER_CHEST') or ''),
+        death_after_boss = o.death_after_boss or os.getenv('QQT_SWEEP_DEATH_AFTER_BOSS') == '1',
         bag_at_brazier = o.bag_at_brazier or tonumber(os.getenv('QQT_SWEEP_BAG_AT_BRAZIER') or ''),
         obols_at_beacon = o.obols_at_beacon or tonumber(os.getenv('QQT_SWEEP_OBOLS_AT_BEACON') or ''),
         chest_obols = o.chest_obols or tonumber(os.getenv('QQT_SWEEP_CHEST_OBOLS') or '')})
@@ -883,6 +933,30 @@ local function start(seed, o)
         return got and type(task) == 'table' and tostring(task.name) or '-'
     end
     h.wc_task = wc_task
+    -- A move command during a waypoint / Town Portal channel interrupts it,
+    -- as in the game (the host froze the player and let the cast finish;
+    -- test_rosie_foreign_mover models the same by hand). A portal entry is a
+    -- loading transition and is not affected.
+    W.move_breaks = 0
+    local pf = h.G.pathfinder
+    for _, name in ipairs({'request_move', 'force_move_raw', 'force_move', 'move_to_cpathfinder'}) do
+        local orig = pf[name]
+        if type(orig) == 'function' then
+            pf[name] = function(p, ...)
+                local tr = h.travel
+                if tr and tr.phase == 'channel' and not W.portal_entry(tr) and type(p) == 'table' and p.x
+                    and h.pos:dist_to_ignore_z(p) > 1 then
+                    h.travel, h.casting = nil, false
+                    W.move_breaks = W.move_breaks + 1
+                    W.breaks = W.breaks or {}
+                    W.breaks[#W.breaks + 1] = {t = h.now, ctx = tostring(h.context_name()), why = tostring(tr.why)}
+                    h.log[#h.log + 1] = string.format('%.1f [uc] channel: %s by %s broke the %s channel', h.now, name,
+                        tostring(h.context_name()), tostring(tr.why))
+                end
+                return orig(p, ...)
+            end
+        end
+    end
     local inv_hit = h.invariants and h.invariants.hit
     if inv_hit then
         h.invariants.hit = function(kind, detail, data)
@@ -975,7 +1049,7 @@ end, 'known: Rosie outbound Town Portal re-cast while the channel is broken')
 -- teleport log).
 local function cast_tasks(hit, ctx)
     local tasks = {}
-    local list = hit.detail:match('%(max %d+%): (.*)$') or ''
+    local list = (hit.detail:match('%(max %d+%): (.*)$') or ''):gsub(' {scene.*$', '')
     for t in list:gmatch('t=([%d%.]+)') do
         t = tonumber(t)
         for _, c in ipairs(ctx.h.tp_log) do
@@ -991,6 +1065,37 @@ rule('WC-kurast-teleports', 'known', 'TELEPORT', function(hit, ctx)
     end
     return true
 end, 'known: walk_kurast recovery / teleport_kurast uncapped re-teleports')
+-- By design (a trade-off): a wanted drop that falls during WonderCity's exit
+-- teleport channel makes Rosie's looter walk to it; the move breaks the
+-- channel and exit_undercity re-casts after its 5 s debounce. One extra cast
+-- per broken channel; the drop is picked up instead of left behind.
+rule('WC-exit-recast-after-pickup-break', 'expected', 'TELEPORT', function(hit, ctx)
+    -- WonderCity's exit casts, optionally followed by Rosie's own (separate)
+    -- Town Portal trip when the bag fills during the exit.
+    local times = {}
+    local list = (hit.detail:match('%(max %d+%): (.*)$') or ''):gsub(' {scene.*$', '')
+    for item in list:gmatch('[^;]+') do
+        local t = tonumber(item:match('t=([%d%.]+)'))
+        if item:find('waypoint->kurast by WonderCity', 1, true) and t then
+            for _, c in ipairs(ctx.h.tp_log) do
+                if math.abs(c.t - t) < 0.06 and c.task ~= 'exit_undercity' then return false end
+            end
+            times[#times + 1] = t
+        elseif item:find('town_portal->temis by Rosie', 1, true) then
+            if #times == 0 then return false end
+        elseif not item:find('...', 1, true) then
+            return false
+        end
+    end
+    for i = 1, #times - 1 do
+        local broken = false
+        for _, b in ipairs(ctx.W.breaks or {}) do
+            if b.ctx == 'Rosie' and b.t >= times[i] and b.t <= times[i + 1] then broken = true end
+        end
+        if not broken then return false end
+    end
+    return #times > 0
+end, "Rosie's pickup of a drop that fell in WonderCity's exit channel broke it; one re-cast per break")
 -- KNOWN (Rosie session): a drop that falls during Rosie's own Town Portal cast.
 rule('ROSIE-tp-cast-drop', 'known', 'LEFT_DROP', function(hit, ctx)
     return has(hit, '(waypoint)') and has(hit, '[dropped during the waypoint channel]') and cast_by(ctx, 'Rosie')
@@ -1016,7 +1121,8 @@ end, 'sweep finding: warp pad thrash while the PortalSwitch is set aside (portal
 -- is closed until the beacon is lit; the pad alone keeps the portal task
 -- pulling the player back while the beacon lies beyond check_distance.
 rule('WC-pad-thrash-beacon', 'finding', 'LOOP', function(hit)
-    return has(hit, 'WonderCity.task switches') and has(hit, 'portal') and has(hit, 'explore_undercity')
+    return has(hit, 'WonderCity.task switches') and has(hit, 'portal')
+        and (has(hit, 'explore_undercity') or has(hit, 'kill_monster'))
         and has(hit, ', exit closed ') and has(hit, 'beacon unlit')
 end, 'new variant: pad thrash on a beacon floor whose exit is still closed (beacon unlit)')
 -- FINDING (LOW): loot_obols' "obols in the beacon" exclusion depends on the
@@ -1024,6 +1130,14 @@ end, 'new variant: pad thrash on a beacon floor whose exit is still closed (beac
 rule('WC-obols-beacon-thrash', 'finding', 'LOOP', function(hit)
     return has(hit, 'WonderCity.task switches') and has(hit, 'loot_obols') and has(hit, 'beacon lit')
 end, 'loot_obols flips an obol next to a lit beacon in and out of reach (player-relative exclusion)')
+-- FINDING (LOW, same family as F1 / F6): interact_enticement picks an
+-- enticement only within check_distance (20 m) of the PLAYER; when the path
+-- to it detours away (a wall) the player leaves the 20 m ring, a lower task
+-- (loot_obols / the explorer) walks back in, and the two flip every 0.5 s.
+rule('WC-enticement-edge-thrash', 'finding', 'LOOP', function(hit)
+    return has(hit, 'WonderCity.task switches') and has(hit, 'interact_enticement')
+        and (has(hit, 'loot_obols') or has(hit, 'explore_undercity')) and mean_dwell(hit) < 3
+end, 'interact_enticement flips at the 20 m check_distance ring (player-relative selection)')
 rule('LOOP-fight-explore', 'expected', 'LOOP', function(hit)
     return has(hit, 'WonderCity.task switches') and (has(hit, 'kill_monster') or has(hit, 'loot_hold'))
         and mean_dwell(hit) >= 3
@@ -1074,6 +1188,64 @@ end, 'a Unique/Mythic beyond the pickup distance left when WonderCity exits afte
 rule('SLOW-beacon-floor', 'finding', 'FLOOR_SLOW', function(hit)
     return has(hit, 'exit opened by the beacon') or has(hit, 'exit closed (Grand Beacon')
 end, 'consequence of WC-pad-thrash-beacon: a beacon floor takes 240 s+')
+-- FINDING: a Rosie trip that starts after WonderCity's exit phase began
+-- (exit_trigger_time set: the 10 s exit delay or the exit channel) is not
+-- recorded as a resumable Alfred trip (core/tracker.lua observe_world: the
+-- resume key needs exit_trigger_time == nil); the return into the same
+-- Undercity counts as a NEW run (reset_floor_state, new start time), the
+-- opened chest is not interactable, and the player stands still in
+-- finish_undercity until the 600 s run timeout.
+rule('WC-reward-forgotten-after-trip', 'finding', 'REWARD_FORGOTTEN', function(hit)
+    return has(hit, 'no opened evidence')
+end, 'a Rosie trip during the exit delay: the return is a new run (reward state gone), 60-600 s lost')
+-- LOW: a Rosie trip between WonderCity's chest click and its confirmation:
+-- the run resumes (reward evidence kept: tracker.chest_interacted) but the
+-- 'resume' transition resets goto_chest (last_interact_call), so it re-checks
+-- the opened chest as 'not interactable before our click' and waits
+-- LOCKED_WAIT (10 s) before accepting it.
+rule('WC-chest-recheck-after-trip', 'expected', 'REWARD_FORGOTTEN', function(hit)
+    return has(hit, 'opened evidence:') or (has(hit, 'waiting up to') and not has(hit, 'no opened evidence'))
+end, 'LOW: after a resumed trip goto_chest re-checks the opened chest (10 s LOCKED_WAIT)')
+local function forgotten_here(hit, ctx)
+    local key = hit.detail:match('{scene t=[%d%.]+ (%S+) ') or hit.detail:match('now in (uc_%a+_%a+)')
+    local t = key and ctx.W.forgotten and ctx.W.forgotten[key]
+    return t ~= nil and t <= hit.t
+end
+rule('WC-reward-forgotten-stall', 'finding', 'STALL', function(hit, ctx)
+    return has(hit, 'finish_undercity (waiting for reward chest)') and forgotten_here(hit, ctx)
+end, 'consequence of WC-reward-forgotten-after-trip: standing still until the run timeout')
+rule('WC-reward-forgotten-floor', 'finding', 'FLOOR_SLOW', function(hit, ctx)
+    return has(hit, 'finish_undercity (waiting for reward chest)') and forgotten_here(hit, ctx)
+end, 'consequence of WC-reward-forgotten-after-trip')
+rule('WC-reward-forgotten-run', 'finding', 'UC_SLOW', function(hit, ctx)
+    return forgotten_here(hit, ctx)
+end, 'consequence of WC-reward-forgotten-after-trip')
+-- By design: WonderCity's run timeout (settings reset_timeout, 600 s) ends
+-- a run that chaos slowed down (it already hit UC_SLOW).
+rule('UC-timeout-exit', 'expected', 'UC_ABANDON', function(hit, ctx)
+    local n, entered = hit.detail:match('Undercity run (%d+) %(entered t=([%d%.]+)')
+    local run = n and ctx.W.runs[tonumber(n)]
+    return run ~= nil and run.slow == true and (run.exit_t or hit.t) - tonumber(entered) >= 595
+end, "WonderCity's 600 s run timeout after a slow (chaos) run")
+-- Chaos: Rosie reloaded during a town trip out of the Undercity ('cancelled:
+-- Rosie reloaded during service'); the return portal leg is gone, WonderCity
+-- teleports to Kurast and opens a new Undercity.
+rule('UC-rosie-reload-mid-trip', 'expected', 'UC_ABANDON', function(hit, ctx)
+    local entered = tonumber(hit.detail:match('%(entered t=([%d%.]+)'))
+    if not entered then return false end
+    for _, line in ipairs(ctx.h.log) do
+        local t = type(line) == 'string' and tonumber(line:match('^([%d%.]+) '))
+        if t and t >= entered and t <= hit.t and line:find('Rosie reloaded during service', 1, true) then return true end
+    end
+    return false
+end, 'chaos: a Rosie reload during a trip out of the Undercity loses the return leg')
+
+-- FINDING (LOW): Batmobile navigator log rate (navigator.lua:2084 PARTIAL
+-- PATH REJECTED, :1885 STUCK) while a target stays unreachable; same family
+-- as the harness author's LOW [nav] STUCK finding.
+rule('BAT-nav-log-rate', 'finding', 'SPAM', function(hit)
+    return has(hit, '(by Batmobile)') and has(hit, '[nav] ')
+end, 'Batmobile [nav] log lines 20+ times a minute while a target is unreachable')
 
 -- ── the sweep ─────────────────────────────────────────────────────────────
 local function parse_seeds(text)
@@ -1154,6 +1326,40 @@ local function sweep_seed(seed, o, seconds)
         h.count(h.tp_log, function(r) return r.ctx == 'Rosie' end), h.pickups or 0,
         #W.kurast_times > 0 and kt / #W.kurast_times or 0,
         h.rotation.casts, h.rotation.dashes, h.rotation.interrupts, h.chaos and #h.chaos.log or 0))
+    -- Teleport casts per transition: the casts since the previous arrival,
+    -- grouped by origin, destination and caster ('uc' = any Undercity floor).
+    local per, prev_t, ci = {}, -math.huge, 1
+    for _, a in ipairs(h.arrivals) do
+        local casts, who, from = 0, nil, nil
+        while h.tp_log[ci] and h.tp_log[ci].t <= a.t do
+            local c = h.tp_log[ci]
+            if c.t > prev_t then
+                casts = casts + 1
+                who = who and (who:find(c.ctx, 1, true) and who or (who .. '+' .. c.ctx)) or c.ctx
+                from = from or (c.from:match('^uc_') and 'uc' or c.from)
+            end
+            ci = ci + 1
+        end
+        if casts > 0 then
+            local key = string.format('%s->%s by %s', from, a.place:match('^uc_') and 'uc' or a.place, who)
+            per[key] = per[key] or {}
+            per[key][casts] = (per[key][casts] or 0) + 1
+            S.per_transition = S.per_transition or {}
+            S.per_transition[key] = S.per_transition[key] or {}
+            S.per_transition[key][casts] = (S.per_transition[key][casts] or 0) + 1
+        end
+        prev_t = a.t
+    end
+    local keys = {}
+    for k in pairs(per) do keys[#keys + 1] = k end
+    table.sort(keys)
+    local parts = {}
+    for _, k in ipairs(keys) do
+        local hist = {}
+        for n = 1, 20 do if per[k][n] then hist[#hist + 1] = string.format('%dx%d', n, per[k][n]) end end
+        parts[#parts + 1] = k .. ' [' .. table.concat(hist, ' ') .. ']'
+    end
+    print('   casts per transition (casts x transitions): ' .. table.concat(parts, '; '))
     local fb, fo = W.floor_stats.beacon, W.floor_stats.open
     print(string.format('   floors left: %d open-exit floors, mean %.0f s; %d beacon floors, mean %.0f s (%.0f s of it '
         .. 'after the exit opened)', fo.n, fo.n > 0 and fo.sum / fo.n or 0, fb.n, fb.n > 0 and fb.sum / fb.n or 0,
@@ -1325,9 +1531,14 @@ local FINDINGS = {
         .. 'Beacon: loot_obols excludes it only while the beacon is the closest enticement within 20 m of the PLAYER, '
         .. 'so it flips at the 20 m boundary (53 switches in 96 s) and is never taken (seeded chaos, default config)',
         o = {}},
-    {id = 'F7', rule = 'WC-exit-cast-drop', seed = 302, seconds = 320, title = "a Rare dropped 0.3 s into WonderCity's "
-        .. 'exit teleport channel (exit mode Teleport) is left for good (seeded chaos)',
-        o = {exit_mode = 1, distance = 8, tribute = 'none', all_plugins = false, rate = 1.5}},
+    {id = 'F7', rule = 'WC-exit-cast-drop', seed = 2, seconds = 1800, title = "a Mythic dropped 0.3 s before the end "
+        .. "of WonderCity's exit teleport channel, 2.8 m away (beyond the shipped 2 m pickup distance), is left for "
+        .. 'good: nothing re-checks the ground after the exit cast (seeded chaos, default config of seed 2)',
+        o = {}},
+    {id = 'F8', rule = 'WC-reward-forgotten-after-trip', seed = 2, seconds = 300, title = 'the bag fills 9 s after the '
+        .. "reward chest opens (inside WonderCity's 10 s exit delay): Rosie's trip is not a resumable Alfred trip, the "
+        .. 'return is a new run, and WonderCity stands in finish_undercity until the 600 s run timeout',
+        o = {chaos = false, distance = 15, bag_after_chest = 9}},
 }
 local function run_finding(f, strict)
     local passed, err = xpcall(function()
@@ -1352,6 +1563,16 @@ end
 
 print(string.format('S3 sweep: %d seed(s), %.1f emulated hours, %d/%d Undercity runs completed, %d invariant hit(s), '
     .. '%d unclassified, %d crash(es)', S.seeds, S.emulated / 3600, S.runs, S.opened, #S.hits, #S.unclassified, #S.crashes))
+if S.per_transition then
+    local keys = {}
+    for k in pairs(S.per_transition) do keys[#keys + 1] = k end
+    table.sort(keys)
+    for _, k in ipairs(keys) do
+        local hist = {}
+        for n = 1, 20 do if S.per_transition[k][n] then hist[#hist + 1] = string.format('%dx%d', n, S.per_transition[k][n]) end end
+        print('  casts per transition ' .. k .. ': ' .. table.concat(hist, ' '))
+    end
+end
 if S.floor_stats then
     local fb, fo = S.floor_stats.beacon, S.floor_stats.open
     print(string.format('  floors left: %d open-exit floors, mean %.0f s; %d beacon floors, mean %.0f s (%.0f s of it after '
