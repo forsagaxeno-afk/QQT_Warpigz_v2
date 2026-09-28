@@ -6,6 +6,7 @@ local settings = require 'rosie.private.town.core.settings'
 local tracker = require 'rosie.private.town.core.tracker'
 
 local lifecycle = require 'rosie.private.town.core.lifecycle'
+local foreign = require 'rosie.private.foreign' -- QQT_Warpigz_v3 1.0.23 (read-only: butler_busy)
 local external
 
 -- QQT_Warpigz_v2 compatibility (bundle contract C1, see AUDIT.md): the suite's
@@ -50,9 +51,16 @@ external = {
     get_status = function ()
         local is_stuck, retry_in = stuck()
         local requested = tracker.external_trigger == true or tracker.manual_trigger == true
+        -- QQT_Warpigz_v3 1.0.23: requests are refused while the third-party
+        -- Butler runs a town trip; without a sign of it farm plugins asked again
+        -- every few seconds for the whole Butler trip. Outside a Rosie trip it
+        -- reads as a pause by 'Butler' (their pause holds are bounded). Only the
+        -- status says so: tracker.external_pause is not set.
+        local busy = lifecycle.busy()
+        local butler = tracker.external_pause ~= true and not busy and foreign.butler_busy()
         return {
-            paused          = tracker.external_pause == true,
-            paused_by       = tracker.external_pause == true and tracker.pause_caller or nil,
+            paused          = tracker.external_pause == true or butler == true,
+            paused_by       = tracker.external_pause == true and tracker.pause_caller or (butler and 'Butler' or nil),
             owner           = tracker.external_caller,
             pending         = requested and tracker.trigger_tasks ~= true,
             stuck           = is_stuck,
@@ -102,7 +110,8 @@ external = {
             stash_full = tracker.stash_full,
             salvage_talisman_failed = tracker.salvage_talisman_failed,
             stash_pull_failed = tracker.stash_pull_failed,
-            returned = lifecycle.returned(),
+            -- QQT_Warpigz_v3 1.0.23: only during the trip (it stayed true while idle).
+            returned = (busy and lifecycle.returned()) == true,
             -- QQT_Warpigz_v3 (Q8): a with-teleport trip's return leg hands a
             -- ready Whisper reward over to SilentRaven (tasks/teleport.lua)
             -- under this caller name (the adapters rename `name`).
@@ -127,7 +136,8 @@ external = {
             if lifecycle.is_retired() then task.status='idle'; return false end
             if task.status == 'waiting' then return true end
             local st = external.get_status()
-            return st.enabled and st.allow_external and not st.external_pause and not st.running and st.need_trigger
+            -- QQT_Warpigz_v3 1.0.23: `paused` (also a Butler trip), not only external_pause.
+            return st.enabled and st.allow_external and not st.paused and not st.running and st.need_trigger
         end
         task.Execute = function()
             if lifecycle.is_retired() then task.status='idle'; return false end
