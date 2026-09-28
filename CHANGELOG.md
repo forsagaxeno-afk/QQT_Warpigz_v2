@@ -2,6 +2,16 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.10] — 2026-09-28
+
+### Fixed
+
+- **WarPigs 1.1.10: no more endless "NPC not found … Tyrael" in Temis** (live log since 3.3.5: the line every 4 s for 800+ s while the bot stood still).
+  - When Tyrael is not loaded yet, WarPigs walks toward his spot next to the War Plan table so he loads.
+  - After 60 s it re-teleports to the Temis waypoint once; after 3 minutes it gives the turn-in up for 10 minutes and continues with the next War Plan step, then tries again.
+  - "NPC not found" is logged once per episode; the nearby-actor dump at most every 30 s.
+  - Note: the v3.3.9 package already carried WarPigs 1.1.10 (CI published it from the WarPigs branch). CI now publishes only from the release branch.
+
 ## [3.3.9] — 2026-09-28
 
 ### Fixed
