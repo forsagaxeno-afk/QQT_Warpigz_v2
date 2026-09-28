@@ -153,11 +153,27 @@ case('B4 a yielded drop is not woken while its yield lasts, is taken once the ot
     eq(P.limits.yield_rest, 4, 'first yield rest'); eq(P.limits.yield_max, 30, 'yield cap')
 end)
 
-case('B5 Murmuring Obols (loot_manager.is_obols) are never a pickup target (pre-fix too: an unrecognized type; now also the host flag)', function()
+case('B5 Murmuring Obols (loot_manager.is_obols) are never a pickup target, even when the host lists them as lootable and the classification accepts them', function()
+    -- QQT_Warpigz_v3 1.0.23 (Auditor, test quality): the old B5 drop was an
+    -- unrecognized type, refused without the host flag too. This drop is
+    -- lootable and classified as an accepted crafting material, so only the
+    -- is_obols check keeps Rosie off it; the control twin without the flag is
+    -- taken, which proves the classification alone would target it.
+    local function obols_drop(h, flagged)
+        h.G.loot_manager.is_obols = function(item) return item and item.obols == true end
+        h.frame() -- the pickup distance slider (30 m) is read on a pulse
+        local obols = h.drop('pit', 6, 0, {rarity = 0, name = 'CraftingMaterial_Obols', display = 'Murmuring Obols'})
+        obols.obols = flagged
+        local wanted, why = h.as(CONSUMER, function() return h.G.LooteerPlugin.evaluate_item(obols, false) end)
+        return obols, wanted, why
+    end
+    local c = new()
+    local twin, twin_wanted, twin_why = obols_drop(c, false)
+    eq(twin_wanted, true, 'control: without the obols flag the classification accepts the drop (' .. tostring(twin_why) .. ')')
+    ok(c.run_until(function() return twin.picked == true end, 10), 'control: the unflagged twin is taken\n' .. c.tail(6))
     local h = new()
-    local obols = h.drop('pit', 6, 0, {rarity = 0, name = 'Item_Gold_Obols', display = 'Murmuring Obols'})
-    obols.obols = true
-    h.G.loot_manager.is_obols = function(item) return item and item.obols == true end
+    local obols, wanted, why = obols_drop(h, true)
+    eq(wanted, false, 'the obols flag refuses it (' .. tostring(why) .. ')')
     local busy_seen = false
     h.run(10, function(hh) if busy(hh) then busy_seen = true end end)
     eq(busy_seen, false, 'Rosie never busy for obols')
