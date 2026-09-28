@@ -2,6 +2,23 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.1] — 2026-09-28
+
+**Rosie 1.0.19: a full bag no longer waits forever.** Live report: a Worldstone loop farmed for hours with a full bag and a half-empty stash, with no town trip and nothing in the log.
+
+### Fixed
+
+- **Another activity owning the run** (a loop plugin publishing `TRISTRAM_LOOP_STATE`, such as a Worldstone loop) made Rosie's automatic service wait for that plugin to call it, with no limit. Now a full bag is served after **60 s** the next time the player stands in a town (between runs), or after **600 s** anywhere; never while that activity reports a revive.
+- **A town pause another plugin left on** while no trip ran blocked every automatic trip. With a full bag it is now released after **600 s** (logged with the plugin's name).
+- **"Stopped … use Run town service"** (stash capacity reached, needs left after a complete service, 3 failures in a row) is no longer permanent for Rosie's own automatic service: it tries again every **600 s** while the need remains. Other plugins' requests stay refused until then, as before.
+- A trip that leaves needs unresolved now says which need is left (equipment / talisman bag count, repair, materials) and what the bag still holds to stash / sell / salvage.
+- `AlfredTheButlerPlugin.enable()` clears a previous cancel, like the Rosie enable does.
+
+### Added
+
+- When the bag needs a town trip and none starts, Rosie logs why, once per reason: `[Rosie] Bag needs a town trip (bag 33/25, talismans …) but it waits: <reason>` (automatic service off by the keybind, another activity owns the run, paused by …, last trip failed …).
+- WarRoom 1.0.1: shows suite version 3.3.1.
+
 ## [3.3.0] — 2026-09-27
 
 ![QQT Warpigz Suite v3](https://raw.githubusercontent.com/forsagaxeno-afk/QQT_Warpigz_v2/claude/qqt-diablo4-plugins-orchestrator-4439v5/assets/branding/qqt-warpigz-suite-v3.png)

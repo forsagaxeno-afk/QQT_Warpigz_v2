@@ -23,6 +23,21 @@ if PERSISTENT_MODE ~= nil and PERSISTENT_MODE ~= false then
     gui.elements.keybind_toggle:set(keybind_data:get())
 end
 
+-- QQT_Warpigz_v3 3.3.1: a bag that needs town and why no trip starts, logged
+-- once per reason (the old silence hid hours of farming with a full bag).
+local DEFER_TOWN,DEFER_ANY=60,600
+local need_since,wait_logged=nil,nil
+local function auto_wait(why)
+    if why==nil then
+        if not tracker.need_trigger then need_since=nil end
+        wait_logged=nil; return
+    end
+    if wait_logged==why then return end
+    wait_logged=why
+    console.print(string.format('[Rosie] Bag needs a town trip (bag %s/%s, talismans %s) but it waits: %s',
+        tostring(tracker.inventory_count),tostring(settings.max_inventory),tostring(tracker.talisman_inventory_count),why))
+end
+
 local function update_locals()
     local_player = get_local_player()
 end
@@ -67,15 +82,41 @@ local function main_pulse()
     end
 
     if not (settings.get_keybind_state() or tracker.external_trigger or tracker.manual_trigger) then
+        auto_wait('automatic service is off (keybind toggle)')
         return
     end
 
     if not lifecycle.busy() then
-        local activity=rawget(_G,'TRISTRAM_LOOP_STATE')
-        local ok,state=false,nil
-        if type(activity)=='table' and type(activity.status)=='function' then ok,state=pcall(activity.status) end
-        if ok and type(state)=='table' and state.running and state.owns_activity then return end
-        if tracker.need_trigger and not lifecycle.auto_blocked() then lifecycle.request('automatic',nil,true,true) end
+        if not tracker.need_trigger then auto_wait(nil)
+        else
+            -- QQT_Warpigz_v3 3.3.1: another activity owning the run, or a
+            -- plugin's town pause, no longer holds a full bag forever (a
+            -- Worldstone loop ran for hours with a full bag): after DEFER_TOWN
+            -- s it is served the next time the player stands in a town (between
+            -- runs), after DEFER_ANY s anywhere (never during a revive).
+            local now=get_time_since_inject()
+            need_since=need_since or now
+            local waited=now-need_since
+            local activity=rawget(_G,'TRISTRAM_LOOP_STATE')
+            local ok,state=false,nil
+            if type(activity)=='table' and type(activity.status)=='function' then ok,state=pcall(activity.status) end
+            local owner=ok and type(state)=='table' and state.running and state.owns_activity and state
+            local held=owner and 'another activity owns the run' or tracker.external_pause
+                and ('paused by '..tostring(tracker.pause_caller or 'another plugin')) or nil
+            if held and (owner and owner.phase=='revive' or not (waited>=DEFER_ANY or waited>=DEFER_TOWN and lifecycle.in_any_town())) then
+                auto_wait(held)
+                return
+            end
+            if held then
+                console.print(string.format('[Rosie] Bag needs a town trip for %ds (%s): starting it now',math.floor(waited),held))
+                if tracker.external_pause then lifecycle.resume() end
+            end
+            if lifecycle.auto_blocked() then auto_wait('last trip '..tostring(tracker.outcome)..': '..tostring(tracker.failure_reason))
+            else
+                local accepted,why=lifecycle.request('automatic',nil,true,true)
+                if accepted then need_since=nil; auto_wait(nil) else auto_wait(tostring(why)) end
+            end
+        end
     end
     task_manager.execute_tasks()
 end
@@ -142,6 +183,7 @@ AlfredTheButlerPlugin._take_cleanup=lifecycle.take_cleanup
 -- --- Plugin Control ---
 AlfredTheButlerPlugin.enable = function()
     if not active then return false end
+    lifecycle.clear_cancel() -- QQT_Warpigz_v3 3.3.1: as the Rosie enable does
     gui.elements.main_toggle:set(true)
     gui.elements.keybind_toggle:set(true)
     settings:update_settings()

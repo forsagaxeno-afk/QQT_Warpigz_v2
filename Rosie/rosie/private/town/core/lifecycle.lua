@@ -248,8 +248,18 @@ function M.stuck()
     return false
 end
 -- Rosie's own automatic service: not while latched, not after a cancel.
+-- QQT_Warpigz_v3 3.3.1: a latch that waits for Run town service (stash full,
+-- needs left, MAX_FAIL_STREAK) no longer stops Rosie's own automatic service
+-- forever: with the need still there it tries again every LATCH_RETRY s (a
+-- full bag left alone for hours farmed nothing). The compatibility API keeps
+-- refusing other plugins until then.
+M.LATCH_RETRY=600
 function M.auto_blocked()
-    return tracker.outcome=='cancelled' or (M.stuck())
+    if tracker.outcome=='cancelled' then return true end
+    local stuck,left=M.stuck()
+    if not stuck then return false end
+    if left then return true end
+    return get_time_since_inject()-(tracker.failed_at or -math.huge)<M.LATCH_RETRY
 end
 -- Re-enabling Rosie clears a cancel so automatic service resumes.
 function M.clear_cancel()
@@ -265,6 +275,12 @@ function M.status_text()
         if stuck and left then
             return string.format('Stopped: %s. Retrying in %ds (failure %d of %d).',tracker.failure_reason,math.ceil(left),
                 tracker.fail_streak or 1,M.MAX_FAIL_STREAK)
+        end
+        if stuck and tracker.need_trigger==true then
+            local wait=(tracker.failed_at or 0)+M.LATCH_RETRY-get_time_since_inject()
+            if wait>0 then
+                return string.format('Stopped: %s. Automatic retry in %ds, or use Run town service.',tracker.failure_reason,math.ceil(wait))
+            end
         end
         return 'Stopped: '..tracker.failure_reason..'. Use Run town service to retry.'
     end

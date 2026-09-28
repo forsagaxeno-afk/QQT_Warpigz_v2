@@ -477,7 +477,9 @@ case('B3 standalone WonderCity in Kurast + Rosie: bag-full trips complete, no fa
         h.inventory = h.inventory or {}
         for _ = 1, 25 do h.inventory[#h.inventory + 1] = h.gear() end
         local mark = h.now
-        ok(h.run_until(function() return h.logged('[Rosie] ', mark) > 0 and h.place.key == 'kurast' end, 200),
+        -- 3.3.1: Rosie also logs why an automatic trip waits; wait for the trip's own end line.
+        ok(h.run_until(function() return h.logged('[Rosie] completed', mark) + h.logged('[Rosie] failed', mark) > 0
+            and h.place.key == 'kurast' end, 200),
             'trip ' .. trip .. ' ended back in Kurast\n' .. h.tail())
         local st = al()
         eq(st.outcome, 'completed', 'trip ' .. trip .. ' outcome')

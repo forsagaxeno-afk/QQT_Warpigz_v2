@@ -1,6 +1,6 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.18
+One local addon for pickup, item rules, repairs and storage. Version 1.0.19
 (QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
@@ -38,8 +38,12 @@ The overview explains waits, ownership, failures and cleanup, including a disabl
 town worker or its paused automatic-service keybind. Equipment and talisman bag
 counts are displayed separately from the latest scan. Settings remain available while off. A failed trip
 is retried after 120 s while its need remains; after three failures (or a failure
-that a retry cannot fix) it waits for **Run town service**. Protected full bags do
-not cause endless town trips.
+that a retry cannot fix) other plugins' requests wait for **Run town service**,
+and Rosie's own automatic service tries again every 10 minutes. Protected full
+bags do not cause endless town trips. Another activity owning the run, or a town
+pause another plugin left on, delays a needed trip at most 60 s in town (between
+runs) or 10 minutes anywhere. When the bag needs town and no trip starts, the log
+says why once: `[Rosie] Bag needs a town trip ... but it waits: <reason>`.
 
 **Keep, storage & town** reads top to bottom in the order Rosie decides; the
 first section that decides an item wins:

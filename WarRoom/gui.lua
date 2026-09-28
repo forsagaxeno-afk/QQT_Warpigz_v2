@@ -1,7 +1,7 @@
 -- QQT_Warpigz_v3: WarRoom menu. Buttons only raise a request here; main.lua
 -- handles it on the next update (no file work inside the menu callback).
 local gui = {}
-local version = 'v1.0.0'
+local version = 'v1.0.1'
 local plugin_label = 'war_room'
 
 gui.version = version

@@ -61,7 +61,16 @@ function task.Execute()
             end
             -- QQT_Warpigz_v2: a complete service that cannot clear the need will
             -- not clear it on a retry either (protected items, settings).
-            lifecycle.finish(false,'Town service left inventory or repair needs unresolved; check protected items and service settings','permanent')
+            -- QQT_Warpigz_v3 3.3.1: say which need is left and what the bag holds.
+            local t=tracker
+            local left={}
+            if t.inventory_full then left[#left+1]='equipment bag '..tostring(t.inventory_count) end
+            if t.talisman_inventory_full then left[#left+1]='talisman bag '..tostring(t.talisman_inventory_count) end
+            if t.need_repair then left[#left+1]='repair' end
+            if t.need_stash_socketables or t.need_stash_consumables or t.need_stash_keys then left[#left+1]='socketables/materials/keys' end
+            lifecycle.finish(false,string.format('Town service left needs unresolved (%s; still to stash %d+%d, sell %d, salvage %d+%d, max bag %s); check protected items and service settings',
+                table.concat(left,', '),tonumber(t.stash_count) or 0,tonumber(t.stash_talisman_count) or 0,tonumber(t.sell_count) or 0,
+                tonumber(t.salvage_count) or 0,tonumber(t.salvage_talisman_count) or 0,tostring(settings.max_inventory)),'permanent')
             return
         end
         task.status='Service completed'; lifecycle.finish(true); return
