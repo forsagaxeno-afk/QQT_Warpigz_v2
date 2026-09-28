@@ -119,7 +119,7 @@ local function wrap(name, tbl)
                     out(key)
                 end
                 if not results[1] then error(results[2], 0) end
-                return (unpack or table.unpack)(results, 2, #results)
+                return (table.unpack or unpack)(results, 2, #results)
             end
         end)
         if ok then count = count + 1 end
