@@ -71,8 +71,53 @@ function M.failure()
     if tracker.failure_reason then return tracker.failure_reason end
     for _,key in ipairs(failure_keys) do if tracker[key] then return key end end
 end
+-- QQT_Warpigz_v3 1.0.21: foreign navigators (the third-party Navigator that
+-- Worldstone drives) kept moving the player through the Town Portal cast.
+-- Each adapter {name, global, hold(api,label), release(api,label)} is held once
+-- per trip while its global exists, every call pcall-guarded: a missing or
+-- failing peer never fails the trip. The list stays empty until a peer's real
+-- API is known (ApiProbe); add_foreign_hold registers one.
+M.FOREIGN_HOLDS={}
+local held_foreign,foreign_tried={},{}
+function M.add_foreign_hold(adapter)
+    if type(adapter)~='table' or type(adapter.global)~='string' or type(adapter.hold)~='function' then return false end
+    M.FOREIGN_HOLDS[#M.FOREIGN_HOLDS+1]=adapter
+    return true
+end
+local function hold_foreign()
+    for _,adapter in ipairs(M.FOREIGN_HOLDS) do
+        local api=rawget(_G,adapter.global)
+        if type(api)=='table' and not foreign_tried[adapter] then
+            foreign_tried[adapter]=true
+            local ok,result=pcall(adapter.hold,api,settings.plugin_label)
+            if ok and result~=false then held_foreign[#held_foreign+1]={adapter=adapter,api=api}
+            else console.print('[Rosie] Could not hold '..tostring(adapter.name or adapter.global)..' for the trip: '
+                ..tostring(ok and 'refused' or result)) end
+        end
+    end
+end
+-- QQT_Warpigz_v3 1.0.21: the outbound cast waits while someone else moves the
+-- player (lifecycle.tick samples the position). Time moved by another addon is
+-- not outbound service time; it is bounded by MOVER_WAIT on its own.
+M.STILL=0.6
+M.MOVER_WAIT=120
+local motion={x=nil,y=nil,moved_at=nil}
+local function sample_motion(now)
+    local player=get_local_player()
+    local pos=player and player:get_position()
+    if not pos then return end
+    local x,y=pos:x(),pos:y()
+    if motion.x and math.abs(x-motion.x)+math.abs(y-motion.y)>0.25 then motion.moved_at=now end
+    motion.x,motion.y=x,y
+end
+-- Seconds the player has stood still (outbound only; huge when never moved).
+function M.still_for()
+    return get_time_since_inject()-(motion.moved_at or -math.huge)
+end
+function M.moved_since(t) return motion.moved_at~=nil and motion.moved_at>t end
 function M.hold_peers()
     if retired then return end
+    hold_foreign()
     local looter=rawget(_G,'LooteerPlugin')
     if type(looter)=='table' and held_looter~=looter then
         if type(looter.acquire_pause)=='function' then
@@ -122,6 +167,18 @@ function M.release_peers()
         release('movement pause',function()
             if type(bat.is_paused)=='function' and bat.is_paused()~=true then return true end
             return bat.resume(settings.plugin_label)
+        end)
+    end
+    local foreign=held_foreign
+    held_foreign,foreign_tried={},{}
+    for _,rec in ipairs(foreign) do
+        -- A foreign peer's release error is logged, never a pending cleanup.
+        release(tostring(rec.adapter.name or rec.adapter.global),function()
+            if type(rec.adapter.release)=='function' then
+                local ok,why=pcall(rec.adapter.release,rec.api,settings.plugin_label)
+                if not ok then console.print('[Rosie] Could not release '..tostring(rec.adapter.name or rec.adapter.global)..': '..tostring(why)) end
+            end
+            return true
         end)
     end
     release('path',function() return pathfinder.clear_stored_path() end)
@@ -177,6 +234,7 @@ function M.request(caller,callback,teleport,manual)
     tracker.visited_town=utils.is_in_town()
     tracker.service_elapsed=0; tracker.pause_elapsed=0; last_tick=nil
     tracker.raven_wait=nil -- QQT_Warpigz_v3
+    tracker.mover_elapsed=0; motion.x,motion.y,motion.moved_at=nil,nil,nil -- QQT_Warpigz_v3 1.0.21
     local held,why=pcall(M.hold_peers)
     if not held then
         local reason='Cannot acquire service ownership: '..tostring(why)
@@ -341,7 +399,17 @@ function M.tick()
     if utils.is_in_town() then tracker.visited_town=true end
     -- QQT_Warpigz_v3: waiting for the SilentRaven hand-off (teleport.lua,
     -- bounded there) is not service time.
-    if not tracker.raven_wait then tracker.service_elapsed=(tracker.service_elapsed or 0)+elapsed end
+    -- QQT_Warpigz_v3 1.0.21: on the outbound leg, time the player is being
+    -- moved by another addon is not service time (bounded by MOVER_WAIT).
+    local outbound=tracker.teleport and not tracker.visited_town
+    if outbound then sample_motion(now) end
+    if outbound and M.still_for()<M.STILL then
+        tracker.mover_elapsed=(tracker.mover_elapsed or 0)+elapsed
+        if tracker.mover_elapsed>=M.MOVER_WAIT then
+            M.finish(false,string.format('teleport_failed: another addon kept moving the player during the Town Portal cast (%ds)',M.MOVER_WAIT))
+            return false
+        end
+    elseif not tracker.raven_wait then tracker.service_elapsed=(tracker.service_elapsed or 0)+elapsed end
     if tracker.service_elapsed>=240 then M.finish(false,'Town service or return timed out (240s)'); return false end
     -- QQT_Warpigz_v3 (Q6): hold the next step while a panel closes (bounded:
     -- 3 Escape presses 0.5 s apart, 8 s at most; counted as service time).

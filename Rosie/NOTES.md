@@ -1,4 +1,4 @@
-# Rosie: session notes (current 1.0.20)
+# Rosie: session notes (current 1.0.21)
 
 Rosie is the pickup + town-service addon. It replaces the old Alfred (town) and Looteer (pickup) and publishes their APIs: `AlfredTheButlerPlugin`, `LooteerPlugin`, `RosiePlugin`.
 
@@ -15,7 +15,8 @@ Rosie is the pickup + town-service addon. It replaces the old Alfred (town) and 
 - 3.3.0: the Keep menu is ordered top-down and the first match wins (Always keep → loot filter → junk → Uniques → Legendary … → Seals → Charms → Storage → Town trips).
 - 3.3.1: a full bag never waits forever (an activity owner or a foreign pause waits at most 60 s in town / 600 s anywhere; a latch is retried every 600 s); wait reasons are logged.
 - 3.3.2: fight hold (no walk to a drop more than 3 m away while an enemy is within 10 m, 14 m hysteresis, 45 s cap, pickup stays busy without moving); yield to another mover (rest 4 → 30 s); obols are never targeted.
+- 1.0.21 (unreleased): the Town Portal cast waits while another addon moves the player (`lifecycle.still_for() >= STILL` 0.6 s), a cast the player was moved out of is refunded (not one of the 8 attempts), outbound time being moved is not service time but is bounded by `MOVER_WAIT` 120 s (`teleport_failed: another addon kept moving the player …`). Generic foreign-mover hold: `lifecycle.FOREIGN_HOLDS` / `add_foreign_hold{name, global, hold(api,label), release(api,label)}`, held once per trip from `hold_peers`, released in `release_peers`, all pcall-guarded, a no-op while the global is absent. Test: `test_rosie_foreign_mover.lua`.
 
 ## Open
-- **Navigator blocks the Town Portal cast.** See BOARD. Live log 2026-09-28: `Player_TownPortal` buff at 115 s, Navigator "stuck" moves from 136 to 182 s, `[Rosie] failed: teleport_failed` at 175 s. Needs the Navigator API from the ApiProbe output.
+- **Navigator blocks the Town Portal cast.** Live log 2026-09-28: `Player_TownPortal` buff at 115 s, Navigator "stuck" moves from 136 to 182 s, `[Rosie] failed: teleport_failed` at 175 s. 1.0.21 makes the cast robust and adds the hold hook; the **real Navigator adapter is still missing**: waiting for the owner's `[ApiProbe]` log of Butler's calls into Navigator, then add one entry to `lifecycle.FOREIGN_HOLDS` (no guessed API names).
 - Live checks: the fight hold feel in the Pit / Helltide; the `Another move took the player off` frequency.
