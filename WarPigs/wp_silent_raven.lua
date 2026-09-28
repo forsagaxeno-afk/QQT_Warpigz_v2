@@ -410,6 +410,23 @@ function M.new(options)
                 finish(self.callback_result or s.last_result or 'unconfirmed', s.last_reason)
                 return false
             end
+            -- QQT_Warpigz_v3 1.1.7: an unreadable status during the request
+            -- is bounded by LIMIT.run (a cancel could never be confirmed, so
+            -- tick() returned early on every pulse forever). Best-effort
+            -- cancel, then the visit is done: never submitted twice.
+            if type(s) ~= 'table' then
+                self.unreadable_since = self.unreadable_since or now
+                if now - self.unreadable_since >= LIMIT.run then
+                    log(string.format('SilentRaven status unreadable for %.0fs during the Whisper request — giving it up (bounded)',
+                        now - self.unreadable_since))
+                    self.unreadable_since = nil
+                    call(self.plugin, 'cancel', OWNER)
+                    finish('status_unreadable')
+                    return false
+                end
+            else
+                self.unreadable_since = nil
+            end
             local clear, reason = clear_companions()
             if clear then self.yield_seen = nil end
             -- C5: pause time does not age the request.
@@ -471,6 +488,7 @@ function M.new(options)
         local generation = self.generation
         self.advisory_alfred = advisory_alfred
         self.running, self.started, self.callback_result = true, now, nil
+        self.unreadable_since = nil -- QQT_Warpigz_v3 1.1.7
         self.attempts = (self.attempts or 0) + 1
         self.request_yield_base, self.yield_seen, self.yield_logged = self.yield_spent or 0, nil, false
         local function guard()

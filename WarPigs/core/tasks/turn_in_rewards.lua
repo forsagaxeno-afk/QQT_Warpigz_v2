@@ -64,8 +64,12 @@ local function now() return get_time_since_inject() end
 --   * paused without hard work (inventory_full/need_repair): idle, WarPigs
 --     never owns an Alfred pause (WPD-5). Paused WITH hard work: a bounded
 --     hold, logged when it starts and when it expires (WPT-5).
-local alfred_gate = {UNREADABLE_HOLD = 10.0, PAUSED_WORK_HOLD = 60.0,
-    unreadable_since = nil, unreadable_logged = false, paused_since = nil, paused_logged = false}
+--   * live work: yielded to for at most LIVE_WORK_HOLD per episode (QQT_Warpigz_v3
+--     1.1.7: a live flag that never cleared held the turn-in forever; the
+--     orchestrator's companion gate ctx.hold has the same 180 s bound).
+local alfred_gate = {UNREADABLE_HOLD = 10.0, PAUSED_WORK_HOLD = 60.0, LIVE_WORK_HOLD = 180.0,
+    unreadable_since = nil, unreadable_logged = false, paused_since = nil, paused_logged = false,
+    live_since = nil, live_logged = false}
 local function alfred_live_work(s)
     return s.trigger_tasks == true or s.external_trigger == true or s.pending == true or s.running == true
         or (s.teleport == true and s.teleport_done ~= true and s.teleport_failed ~= true)
@@ -90,7 +94,18 @@ local function alfred_idle()
         and (s.inventory_full == true or s.need_repair == true)
     if not paused_work then G.paused_since, G.paused_logged = nil, false end
     if s.enabled == false then return true end
-    if alfred_live_work(s) then return false end
+    if alfred_live_work(s) then
+        -- QQT_Warpigz_v3 1.1.7: bounded yield, logged once per episode.
+        G.live_since = G.live_since or t
+        if t - G.live_since < G.LIVE_WORK_HOLD then return false end
+        if not G.live_logged then
+            G.live_logged = true
+            log(string.format('Alfred has reported live work for %.0fs — continuing the turn-in (bounded yield)',
+                t - G.live_since))
+        end
+        return true
+    end
+    G.live_since, G.live_logged = nil, false
     if paused_work then
         if not G.paused_since then
             G.paused_since = t
