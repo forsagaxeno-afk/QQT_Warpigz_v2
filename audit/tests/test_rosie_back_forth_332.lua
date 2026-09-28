@@ -92,14 +92,17 @@ case('B2 Pit, a drop that falls 7 m off during an elite fight waits for the figh
     elite.t0 = h.now + 0.5
     local item = h.drop('pit', h.pos:x() - 7, ey, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_010'})
     local w = watcher(h)
-    local busy_in_fight, closest = false, math.huge
+    local busy_in_fight, pending_in_fight, closest = false, false, math.huge
     h.run(15, function(hh)
         w.each(hh)
         if busy(hh) then busy_in_fight = true end
+        if hh.as(CONSUMER, function() return hh.G.LooteerPlugin.has_pending_loot() end) then pending_in_fight = true end
         closest = math.min(closest, hh.pos:dist_to_ignore_z(item.pos))
     end)
-    -- 3.3.2 review: busy (a Pit / boss exit waits for the loot) but no walk to the drop.
-    eq(busy_in_fight, true, 'pickup stays busy while the drop waits for the fight')
+    -- QQT_Warpigz_v3 1.0.22: not busy (the farm plugin fights); a Pit / boss
+    -- exit reads the wait from has_pending_loot(). No walk to the drop.
+    eq(busy_in_fight, false, 'pickup is not busy while the drop waits for the fight')
+    eq(pending_in_fight, true, 'the wait is published (has_pending_loot)')
     eq(h.count(h.moves, function(m) return m.owner == 'Rosie' and m.t > elite.t0 end), 0, 'no Rosie move during the fight')
     ok(closest > 5, 'the player stayed at the fight: closest ' .. string.format('%.1f', closest))
     elite.health = 0
