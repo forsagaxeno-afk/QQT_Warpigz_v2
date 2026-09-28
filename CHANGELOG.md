@@ -2,6 +2,23 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.8] — 2026-09-28
+
+Two live reports: "again about 5 teleports before entering the Undercity" and "SilentRaven is manual now???".
+
+### Fixed
+
+- **WonderCity 2.2.6: far fewer teleports before the Undercity.**
+  - A snag on the walk from the Kurast waypoint to the Spirit Brazier re-teleports only after 20 s without progress (a short navigation give-up no longer counts), at most twice per 5 minutes; after that Batmobile finds another route. Its own landing no longer resets that limit.
+  - The walk no longer steps back and forth between two path points.
+  - WonderCity no longer moves during its own waypoint cast (moving cancelled the cast). Each cast is logged; after 4 casts that do not arrive it waits 60 s.
+  - A blocked walk never stands silently: every new visit (or switching WonderCity off and on) starts fresh; no hitch every 2 s while a route is blocked.
+  - If Rosie needs a town trip when a run ends, WonderCity goes straight to Temis (one teleport fewer).
+- **SilentRaven 0.2.8: claims by itself again.**
+  - Next to Worldstone / TristramLoop a Temis stop waits for the loop at most 60 s, then claims; Worldstone's walk no longer blocks a claim (the claim pauses Navigator itself); Butler, Scavenger and a town Navigator walk hold a claim at most 3 min of real waiting.
+  - A turned-in quest counts as claimed: `run finished: success (quest_turned_in)` instead of `unconfirmed`.
+  - When auto-claim waits, one line says why. A loading screen no longer makes it skip a ready reward or act on an old one, and it never starts during a teleport.
+
 ## [3.3.7] — 2026-09-28
 
 ### Fixed

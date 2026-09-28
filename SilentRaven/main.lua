@@ -1,5 +1,5 @@
 -- ---------------------------------------------------------------------------
--- SilentRaven  --  magoogle  --  v0.2.7
+-- SilentRaven  --  magoogle  --  v0.2.8
 --
 -- Standalone Tree-of-Whispers turn-in plugin.  Two trigger paths:
 --
@@ -66,14 +66,39 @@ local d4remote_registered        = false
 -- logged once after this long (a >1 s gap between samples ends the hold).
 local HOLD_LOG_S                 = 60
 
+-- QQT_Warpigz_v3 0.2.8 (re-review MED): a ready episode ends only after the
+-- quest has read not-ready this long in a live zone (a blank list for a moment
+-- after a loading screen no longer restarts every bound and per-episode line).
+local EPISODE_END_S = 3
+
 local function refresh_ready(now)
+    -- QQT_Warpigz_v3 0.2.8: no readiness from a loading screen, and the first
+    -- live pulse after it samples at once (main_pulse runs this before auto-fire),
+    -- so neither auto-fire nor Rosie's hand-off acts on a pre-teleport value.
+    if not whispers.current_zone() then tracker.last_ready_check_t = -math.huge; return end
     if (now - (tracker.last_ready_check_t or 0)) < READY_CHECK_INTERVAL_S then return end
     tracker.last_ready_check_t = now
     -- QQT_Warpigz_v3 (Q8): one snapshot for readiness, the decision log and
     -- the claim trip; WarPigs' delegation is cached in main_pulse (never in get_status).
     local snapshot = whispers.quest_snapshot()
     tracker.ready = snapshot ~= nil and snapshot.ready == true
-    claims.observe(now, settings, snapshot)
+    -- QQT_Warpigz_v3 0.2.8: the ready episode's start (the bounded holds and the
+    -- per-episode log lines key on it). An unreadable snapshot keeps it; a
+    -- not-ready one ends it after EPISODE_END_S (claims.observe sees no
+    -- snapshot inside that window, so its episode lasts as long).
+    local episode, observed = tracker.ready_since, snapshot
+    if tracker.ready then
+        tracker.ready_since, tracker.not_ready_t = tracker.ready_since or now, nil
+    elseif snapshot ~= nil and tracker.ready_since then
+        tracker.not_ready_t = tracker.not_ready_t or now
+        if now - tracker.not_ready_t >= EPISODE_END_S or now < tracker.not_ready_t then
+            tracker.ready_since, tracker.not_ready_t = nil, nil
+        else
+            observed = nil
+        end
+    end
+    if tracker.ready_since ~= episode then tracker.visit_hold = nil end -- review LOW: a new episode
+    claims.observe(now, settings, observed)
 end
 
 local function maybe_consume_external_trigger(now)
@@ -109,6 +134,22 @@ local function note_hold(reason, now)
     end
     -- QQT_Warpigz_v3: 'Debug logging' prints each change of the hold reason.
     if reason ~= tracker.hold_reason then log.debug(settings, 'auto-fire held: ' .. tostring(reason)) end
+    -- QQT_Warpigz_v3 0.2.8 (RC6): a held auto-fire is visible at normal
+    -- verbosity, once per reason and ready episode (a Temis stop is often
+    -- shorter than the 60 s line below).
+    coordination.say_once('hold:' .. tostring(reason), 'reward ready in Temis but auto-fire waits: ' .. tostring(reason))
+    -- Review fix: the reason that held longest this ready episode, not the last
+    -- one (a teleport channel at departure hid the real blocker).
+    local vh = tracker.visit_holds
+    if not vh or vh.ep ~= tracker.ready_since then vh = {ep = tracker.ready_since, t = {}}; tracker.visit_holds = vh end
+    if vh.last_t and now - vh.last_t <= 1 and now >= vh.last_t then
+        vh.t[vh.last] = (vh.t[vh.last] or 0) + (now - vh.last_t)
+    end
+    vh.last, vh.last_t = reason, now
+    vh.t[reason] = vh.t[reason] or 0
+    local best, best_t = reason, -1
+    for r, t in pairs(vh.t) do if t > best_t or (t == best_t and r < best) then best, best_t = r, t end end
+    tracker.visit_hold = best
     tracker.hold_reason, tracker.hold_seen_t = reason, now
     if not tracker.hold_logged and now - tracker.hold_since >= HOLD_LOG_S then
         tracker.hold_logged = true
@@ -148,6 +189,7 @@ local function maybe_autofire(now, cur_zone)
     local clear, reason = coordination.companions(mode, now)
     if not clear then note_hold(reason, now); return end
     tracker.hold_reason, tracker.hold_since, tracker.hold_seen_t = nil, nil, nil
+    tracker.visit_hold = nil -- QQT_Warpigz_v3 0.2.8
     fsm.start(settings, mode, false, nil)
 end
 
@@ -283,7 +325,7 @@ end
 -- side, so anything faster is wasted work.
 local function register_d4remote()
     if d4remote_registered or not (D4Remote and D4Remote.register) then return end
-    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.2.7') end) == true
+    d4remote_registered = pcall(function () D4Remote.register('SilentRaven', '0.2.8') end) == true
 end
 
 local function report_to_d4remote(now)
@@ -397,4 +439,4 @@ SilentRavenPlugin   = external
 -- report_to_d4remote retries while D4Remote loads later or register fails.
 register_d4remote()
 
-log.info('loaded magoogle | SilentRaven | v0.2.7')
+log.info('loaded magoogle | SilentRaven | v0.2.8')

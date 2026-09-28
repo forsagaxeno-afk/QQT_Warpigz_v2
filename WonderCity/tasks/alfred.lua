@@ -395,6 +395,15 @@ end
 -- known_only: count only positive evidence (own request/loot window or C1
 -- live work). The forced reset-timeout exit uses it so an unreadable status
 -- can never block it (WCY-6).
+-- QQT_Warpigz_v3 WonderCity 2.2.6 (review round 16:30): exit_undercity asks
+-- whether an advisory-only need is inside the post-cycle grace (it would not
+-- trigger a trip right after the exit), so it does not teleport out to Temis
+-- for a trip that will not start.
+task.advisory_grace_active = function ()
+    return last_completion_at ~= nil
+        and (get_time_since_inject() - last_completion_at) < STUCK_NEED_TRIGGER_GRACE
+end
+
 task.is_busy = function (known_only)
     local status = get_alfred_status()
     if not status then return not known_only end

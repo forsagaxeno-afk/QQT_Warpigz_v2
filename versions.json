@@ -1,6 +1,6 @@
 {
   "project": "QQT_Warpigz_v3",
-  "version": "3.3.7",
+  "version": "3.3.8",
   "first_release": "2.0.0",
   "components": {
     "WarPigs": "1.1.9",
@@ -10,8 +10,8 @@
     "HelltideRevamped": "2.6.3",
     "HordeDev": "2.2.7",
     "Reaper": "1.10.6",
-    "WonderCity": "2.2.5",
-    "SilentRaven": "0.2.7",
+    "WonderCity": "2.2.6",
+    "SilentRaven": "0.2.8",
     "Rosie": "1.0.24"
   }
 }

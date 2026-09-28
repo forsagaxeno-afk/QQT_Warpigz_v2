@@ -25,9 +25,9 @@ local function harness()
     e.get_quests=function()
         if c.quest_error then error('loading') end
         if not c.quest then return {} end
-        return {{get_name=function() return 'Bounty_Meta_Quest' end,get_objectives=function() return {{text=c.text}} end}}
+        return {{get_name=function() return 'Bounty_Meta_Quest' end,get_objectives=function() return c.objectives or {{text=c.text}} end}}
     end
-    e.console={print=function() end}
+    c.logs={};e.console={print=function(m) c.logs[#c.logs+1]=tostring(m) end}
     e.pathfinder={request_move=function() c.moves=c.moves+1 end,clear_stored_path=function() c.clears=c.clears+1 end}
     e.utility={send_key_press=function() c.escapes=c.escapes+1;c.panel=false end}
     e.interact_object=function() c.interacts=c.interacts+1;if not c.no_panel then c.panel=true end end
@@ -56,7 +56,7 @@ local function harness()
     end
     e.on_update=function(fn)c.update=fn end;e.on_render_menu=function()end
     assert(loadfile(root..'main.lua','t',e))();c.update()
-    c.api=e.SilentRavenPlugin;c.tracker=e.require('silent_raven.tracker');c.settings=e.require('silent_raven.settings')
+    c.gui=gui;c.api=e.SilentRavenPlugin;c.tracker=e.require('silent_raven.tracker');c.settings=e.require('silent_raven.settings')
     c.fsm=e.require('silent_raven.fsm');c.whispers=e.require('silent_raven.whispers');c.rewards=e.require('silent_raven.rewards')
     function c.tick(delta) c.time=c.time+(delta or 0.1);c.update() end
     function c.start(guard) c.api.set_managed('WarPigs',true);return c.api.trigger_tasks('WarPigs',function(result)c.callbacks=(c.callbacks or 0)+1;c.result=result end,guard) end
@@ -92,14 +92,55 @@ do
     c.zone='Dungeon';c.tick();eq(c.tracker.last_zone_handled,nil)
     c.zone='Skov_Temis';c.quest=true;c.tick();eq(c.start(),true);c.tick();c.tick();eq(c.accepts,2,'return visit is eligible')
 end
--- Lost quest data or empty quest list without receipt never prove success/retry.
-for _, failure in ipairs({'quest_error','quest_empty','accept_throws'}) do
+-- Receipt without a cache in the bags (QQT_Warpigz_v3 0.2.8, RC4): a quest that
+-- was ready at START and is gone (panel closed, held 1 s) was turned in: success
+-- 'quest_turned_in'. Lost quest data never proves it, and a quest still ready
+-- stays unconfirmed with one diagnostic line. Never a second accept.
+local function logged(c, text)
+    local n=0
+    for _, line in ipairs(c.logs) do if line:find(text,1,true) then n=n+1 end end
+    return n
+end
+for _, case in ipairs({{'quest_error','unconfirmed'},{'quest_empty','success'},{'accept_throws','success'},
+        {'quest_still_ready','unconfirmed'},{'accept_throws_still_ready','unconfirmed'}}) do
+    local failure, want = case[1], case[2]
     local c=harness();eq(c.start(),true);c.tick()
-    if failure=='accept_throws' then c.accept_throws=true end
+    if failure:find('accept_throws',1,true) then c.accept_throws=true end
     c.tick();eq(c.accepts,1)
-    if failure=='quest_error' then c.quest_error=true else c.quest=false end
+    if failure=='quest_error' then c.quest_error=true
+    elseif not failure:find('still_ready',1,true) then c.quest=false end
     c.panel=false;c.tick();c.tick(8)
-    eq(c.result,'unconfirmed',failure);eq(c.accepts,1,'ambiguous claim is never retried');eq(c.callbacks,1)
+    eq(c.result,want,failure);eq(c.accepts,1,'ambiguous claim is never retried');eq(c.callbacks,1)
+    if want=='success' then eq(c.tracker.last_reason,'quest_turned_in',failure..' reason')
+        eq(logged(c,'(quest turned in; cache not seen in the bags)'),1,failure..' line')
+    else eq(logged(c,'receipt not seen: pick sno=1087411'),1,failure..' diagnostic line')
+        if failure=='quest_still_ready' then eq(logged(c,'panel open=false'),1,'the closed panel is reported') end end
+end
+-- 0.2.8 re-review [LOW]: the turned-in receipt needs the quest ready at START.
+-- START accepts a present, not-ready quest (no readable state); a quest list
+-- that reads empty after the accept is then no proof: unconfirmed.
+do
+    local c=harness();c.objectives={{text=''}};eq(c.start(),true);c.tick();c.tick();eq(c.accepts,1,'accepted')
+    c.quest=false;c.panel=false;c.tick();c.tick(8)
+    eq(c.result,'unconfirmed','present-not-ready at START, gone after: unconfirmed');eq(c.accepts,1)
+end
+-- An objective without text (QQT_Warpigz_v3 0.2.8, RC7): only the host's
+-- progress fields decide: ratio 1 is ready (inferred) and auto-fire claims in
+-- Temis, a partial ratio is collecting, no fields is not ready.
+do
+    local c=harness();c.objectives={{text='',has_progress=true,progress_ratio=1}}
+    for _=1,4 do c.tick(0.3) end
+    eq(c.api.get_status().ready,true,'no text, ratio 1: ready')
+    c.gui.elements.auto_fire_toggle:set(true);c.deliver=true
+    for _=1,8 do c.tick(0.3) end
+    eq(c.tracker.last_reason,'auto','auto-fire claimed');eq(c.accepts,1,'accepted')
+    c=harness();c.objectives={{text='',has_progress=true,progress_ratio=0.4}}
+    for _=1,4 do c.tick(0.3) end
+    eq(c.api.get_status().ready,false,'no text, ratio 0.4: collecting')
+    -- 0.2.8 review [LOW]: no text and no progress fields is no evidence (0.2.7).
+    c=harness();c.objectives={{text=''}}
+    for _=1,4 do c.tick(0.3) end
+    eq(c.api.get_status().ready,false,'no text, no progress fields: not ready')
 end
 -- Wrong selected index and all-invalid entries cannot accept.
 do
