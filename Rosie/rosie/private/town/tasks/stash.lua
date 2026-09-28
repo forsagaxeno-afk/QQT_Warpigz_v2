@@ -361,7 +361,7 @@ function task.Execute()
     if not waiting then item,bag=next_item(player) end
     if not waiting and not item then finish(); return end
     if state.deposited and #player:get_stash_items()>=settings.max_stash_items then
-        tracker.stash_full=true; fail('Configured stash capacity reached.'); return
+        tracker.stash_full=true; fail('The stash is full ('..settings.max_stash_items..' items).'); return -- QQT_Warpigz_v3 1.0.24: the game maximum
     end
     if state.time-state.progress>=45 then
         fail('No stash progress for 45 active seconds; check the chest and available space.')
@@ -423,7 +423,7 @@ function task.Execute()
     local stash_count=#player:get_stash_items()
     tracker.stash_item_count_cached=stash_count
     if stash_count>=settings.max_stash_items then
-        tracker.stash_full=true; fail('Configured stash capacity reached ('..stash_count..'/'..settings.max_stash_items..').'); return
+        tracker.stash_full=true; fail('The stash is full ('..stash_count..'/'..settings.max_stash_items..').'); return -- QQT_Warpigz_v3 1.0.24
     end
     -- QQT_Warpigz_v3 (Q5 review): the SNO and stack count are the ones
     -- candidate() read for this item this tick (never re-read, never a

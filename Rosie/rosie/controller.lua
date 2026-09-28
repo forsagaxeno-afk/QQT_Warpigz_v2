@@ -196,7 +196,9 @@ function M.new(cached,conflict)
             local detail=tostring(why)
             app.preview_fail_since=app.preview_fail_since or now
             if now-app.preview_fail_since>=2 then
-                if app.preview_failure~=detail then console.print('[Rosie] Item preview failed: '..detail) end
+                -- QQT_Warpigz_v3 1.0.24: no player or world yet (loading) is a wait, not an error.
+                local waiting=detail:find('waiting for',1,true)~=nil
+                if app.preview_failure~=detail and not waiting then console.print('[Rosie] Item preview failed: '..detail) end
                 app.preview_failure=detail
                 app.preview_error='Item preview unavailable: wait for a living character and loaded bags, then reopen this menu.'
             end
