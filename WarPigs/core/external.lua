@@ -14,6 +14,8 @@ local external = {
     end,
     status  = function()
         local enabled = gui.elements.main_toggle:get() and settings.get_keybind_state()
+        local alfred_idle = nil
+        if enabled then alfred_idle = orchestrator.alfred_idle() end
         return {
             name    = settings.plugin_label,
             version = settings.plugin_version,
@@ -30,7 +32,11 @@ local external = {
             -- it enabled is on (its own Whisper slot stays closed; SilentRaven
             -- claims a Temis stop of it while WarPigs delegates). Additive.
             activity_on = enabled and settings.manage_whispers == true and orchestrator.activity_on(),
-            alfred_idle = orchestrator.alfred_idle(),
+            -- QQT_Warpigz_v3 1.1.7: read only while WarPigs is on (its only
+            -- consumer, WarPug, checks enabled first). alfred_idle() runs the
+            -- bounded-hold clocks and logs; activity plugins poll status() on
+            -- every pulse, so an off WarPigs no longer runs them.
+            alfred_idle = alfred_idle,
             busy    = orchestrator.is_busy(),
         }
     end,

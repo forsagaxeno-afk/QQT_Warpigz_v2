@@ -23,6 +23,11 @@ local CLICK_FADE = 6.0
 -- clear town; long holds are logged every HOLD_LOG_INTERVAL.
 local ADVISORY_HOLD, ALFRED_UNREADABLE_LIMIT = 30.0, 10.0
 local RESUME_QUIET, HOLD_LOG_INTERVAL = 3.0, 60.0
+-- QQT_Warpigz_v3 1.0.16: hard Alfred work (inventory_full / need_repair)
+-- without live work holds at most HARD_HOLD per episode; a `stuck` provider
+-- (C1) is held while it allows a retry (stuck_retry_in), at most STUCK_HOLD,
+-- and not at all when it waits for an explicit retry. Same bounds as WarPigs.
+local HARD_HOLD, STUCK_HOLD = 180.0, 150.0
 local state, state_entered = 'IDLE', -math.huge
 local last_interact, last_diag = -math.huge, -math.huge
 local session_started, session_world, owned_path
@@ -35,7 +40,8 @@ local recent_clicks = {}
 local session = { alfred = nil, paused_at = nil, paused_from = nil }
 local hold = { reason = nil, since = nil, logged_at = -math.huge, cleared_at = nil }
 local alfred_gate = { advisory_since = nil, advisory_logged = false,
-    unreadable_since = nil, unreadable_logged = false }
+    unreadable_since = nil, unreadable_logged = false,
+    hard_since = nil, hard_logged = false }  -- QQT_Warpigz_v3 1.0.16
 
 local function now() return get_time_since_inject() end
 local function log(m) console.print('[WarPug] ' .. m) end
@@ -170,9 +176,24 @@ local function alfred_hold(alfred, dispatcher)
         or (session.alfred ~= nil and session.alfred == alfred)
         or (dispatcher and dispatcher.enabled == true and dispatcher.alfred_idle == true) then
         alfred_gate.advisory_since, alfred_gate.advisory_logged = nil, false
+        if status.enabled == false or live or not hard then alfred_gate.hard_since, alfred_gate.hard_logged = nil, false end
         if status.enabled == false then return nil end
         if live then return 'Alfred working' end
-        if hard then return 'Alfred inventory/repair work' end
+        if hard then
+            -- QQT_Warpigz_v3 1.0.16: bounded (C1), `stuck` honoured.
+            local stuck = status.stuck == true
+            local retry_in = stuck and type(status.stuck_retry_in) == 'number' or false
+            if stuck and not retry_in then return nil end
+            local cap = retry_in and STUCK_HOLD or HARD_HOLD
+            alfred_gate.hard_since = alfred_gate.hard_since or t
+            if t - alfred_gate.hard_since < cap then return 'Alfred inventory/repair work' end
+            if not alfred_gate.hard_logged then
+                alfred_gate.hard_logged = true
+                log(string.format('Alfred %s for %.0fs without live work; planning anyway (bounded hold)',
+                    stuck and ('stuck (' .. tostring(status.stuck_reason or '?') .. ')') or 'has inventory/repair work',
+                    t - alfred_gate.hard_since))
+            end
+        end
         return nil
     end
     alfred_gate.advisory_since = alfred_gate.advisory_since or t
@@ -202,6 +223,30 @@ local function activity_running()
     return nil
 end
 
+-- QQT_Warpigz_v3 1.0.16: a busy third-party Scavenger (loot) or Butler (town
+-- trip) owns town (docs/THIRD_PARTY_APIS.md). Guarded and pcall'd; each busy
+-- episode holds at most THIRD_PARTY_HOLD, logged once.
+local THIRD_PARTY = { {'Scavenger', 'Scavenger busy'}, {'Butler', 'Butler town trip'} }
+local third_party = { since = {}, logged = {}, HOLD = 180.0 }
+local function third_party_busy(t)
+    for _, entry in ipairs(THIRD_PARTY) do
+        local key, p = entry[1], rawget and rawget(_G, entry[1]) or _G[entry[1]]
+        local ok, busy = false, false
+        if type(p) == 'table' and type(p.is_busy) == 'function' then ok, busy = pcall(p.is_busy) end
+        if ok and busy == true then
+            third_party.since[key] = third_party.since[key] or t
+            if t - third_party.since[key] < third_party.HOLD then return entry[2] end
+            if not third_party.logged[key] then
+                third_party.logged[key] = true
+                log(string.format('%s for %.0fs; no longer holding for it (bounded hold)', entry[2], t - third_party.since[key]))
+            end
+        else
+            third_party.since[key], third_party.logged[key] = nil, nil
+        end
+    end
+    return nil
+end
+
 -- Returns the companion that currently owns town, or nil.
 local function integrations_busy()
     local dispatcher, dispatcher_reason
@@ -223,6 +268,8 @@ local function integrations_busy()
         if status.running or status.pending or status.external_trigger then return 'SilentRaven busy' end
     end
     if looter_busy() then return 'Looter busy' end
+    local third = third_party_busy(now())  -- QQT_Warpigz_v3 1.0.16
+    if third then return third end
     return activity_running()   -- QQT_Warpigz_v3
 end
 

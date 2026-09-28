@@ -127,6 +127,7 @@ local function live_reason(reason)
     end
     return reason == 'alfred_busy' or reason == 'alfred_work_pending' or reason == 'war_pug_busy'
         or reason == 'looter_settling' or reason == 'silent_raven_busy'
+        or reason == 'scavenger_busy' or reason == 'butler_busy' -- QQT_Warpigz_v3 1.1.7
         or (type(reason) == 'string' and reason:find('looter_busy', 1, true) == 1)
 end
 local function companion_reason(reason)
@@ -174,6 +175,9 @@ local function companions_clear(advisory_idle, admitted_alfred, gate)
     local looting, source = M.looter_state()
     if looting == nil then return false, 'looter_status_unavailable' end
     if looting then return false, 'looter_busy:' .. source end
+    -- QQT_Warpigz_v3 1.1.7: third-party loot / town owners (bounded by wait_live).
+    if call(_G.Scavenger, 'is_busy') == true then return false, 'scavenger_busy' end
+    if call(_G.Butler, 'is_busy') == true then return false, 'butler_busy' end
     local creator = _G.WarPugPlugin
     if creator then
         local s = call(creator, 'status')
@@ -410,6 +414,23 @@ function M.new(options)
                 finish(self.callback_result or s.last_result or 'unconfirmed', s.last_reason)
                 return false
             end
+            -- QQT_Warpigz_v3 1.1.7: an unreadable status during the request
+            -- is bounded by LIMIT.run (a cancel could never be confirmed, so
+            -- tick() returned early on every pulse forever). Best-effort
+            -- cancel, then the visit is done: never submitted twice.
+            if type(s) ~= 'table' then
+                self.unreadable_since = self.unreadable_since or now
+                if now - self.unreadable_since >= LIMIT.run then
+                    log(string.format('SilentRaven status unreadable for %.0fs during the Whisper request — giving it up (bounded)',
+                        now - self.unreadable_since))
+                    self.unreadable_since = nil
+                    call(self.plugin, 'cancel', OWNER)
+                    finish('status_unreadable')
+                    return false
+                end
+            else
+                self.unreadable_since = nil
+            end
             local clear, reason = clear_companions()
             if clear then self.yield_seen = nil end
             -- C5: pause time does not age the request.
@@ -471,6 +492,7 @@ function M.new(options)
         local generation = self.generation
         self.advisory_alfred = advisory_alfred
         self.running, self.started, self.callback_result = true, now, nil
+        self.unreadable_since = nil -- QQT_Warpigz_v3 1.1.7
         self.attempts = (self.attempts or 0) + 1
         self.request_yield_base, self.yield_seen, self.yield_logged = self.yield_spent or 0, nil, false
         local function guard()
