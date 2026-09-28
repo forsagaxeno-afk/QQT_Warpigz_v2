@@ -21,9 +21,18 @@ local function call(t,fn,...)
 end
 M.call=call
 
+-- QQT_Warpigz_v3 1.0.23: the Scavenger addon, never Rosie's own Scavenger
+-- table (scavenger_mimic.lua, _rosie=true): yielding to it would be yielding
+-- to itself (busy -> reset -> not busy -> oscillation).
+local function real_scavenger()
+    local t=peer('Scavenger')
+    if t and rawget(t,'_rosie')~=true then return t end
+    return nil
+end
+M.real_scavenger=real_scavenger
 -- Navigator's looter owns the drops while it is busy (pickup yields).
 function M.scavenger_busy()
-    local ok,busy=call(peer('Scavenger'),'is_busy')
+    local ok,busy=call(real_scavenger(),'is_busy')
     return ok and busy==true
 end
 -- Butler (another town service): Rosie never starts a trip while it runs one.
@@ -90,10 +99,12 @@ function M.quiet_navigator(trip)
 end
 
 function M.scavenger_hold()
-    local ok=call(peer('Scavenger'),'pause',LABEL)
+    local sc=real_scavenger()
+    if not sc then return 'mimic' end -- QQT_Warpigz_v3 1.0.23: Rosie's own table: nothing to pause
+    local ok=call(sc,'pause',LABEL)
     if ok then log_once('scav','Scavenger is paused during town trips') end
     return ok
 end
-function M.scavenger_release() call(peer('Scavenger'),'resume',LABEL) end
+function M.scavenger_release() call(real_scavenger(),'resume',LABEL) end -- QQT_Warpigz_v3 1.0.23: never Rosie's own table
 
 return M

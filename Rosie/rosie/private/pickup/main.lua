@@ -10,6 +10,7 @@ local active=true
 local published
 local fight_busy=false -- QQT_Warpigz_v3 3.3.2: busy set only by a drop waiting for the fight
 local foreign=require('rosie.private.foreign') -- QQT_Warpigz_v3 1.0.21
+local Mimic=require('rosie.private.scavenger_mimic') -- QQT_Warpigz_v3 1.0.23: Rosie as Scavenger
 local function activity_owns_loot()
     -- QQT_Warpigz_v3 1.0.21: Navigator's Scavenger owns the drops while busy.
     if foreign.scavenger_busy() then return true end
@@ -74,6 +75,9 @@ local function main_pulse()
     local wanted=ItemManager.get_item_based_on_priority()
     if wanted and Settings.get().loot_priority==1 then wanted=wanted.Item end
     if wanted then Settings.get().looting=Pickup.step(wanted,ItemManager.destination(wanted)) -- QQT_Warpigz_v3 (Q1): receipt bag
+        -- QQT_Warpigz_v3 1.0.23: only a pulse that really works a drop
+        -- (Pickup.step true) makes the Scavenger mimic busy, never the fight wait below.
+        if Settings.get().looting==true then Mimic.note_work(get_time_since_inject()) end
     else Pickup.release_movement() end
     -- QQT_Warpigz_v3 1.0.22: a drop that waits for the fight no longer keeps
     -- pickup busy (farm plugins that yield to a busy Looter stood still for
@@ -148,6 +152,8 @@ published={
     diagnose=ItemManager.diagnose,
 }
 LooteerPlugin=published
+-- QQT_Warpigz_v3 1.0.23: Scavenger.pause/resume; owned: no wanted items while an activity owns the loot (review).
+Mimic.configure({acquire=acquire_pause,release=release_pause,owned=activity_owns_loot})
 callbacks.on_update(main_pulse)
 callbacks.on_render_menu(function()
     if not active then return end

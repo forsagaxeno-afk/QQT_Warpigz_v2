@@ -5,12 +5,17 @@
 --  2. Logs every call into the Navigator / Worldstone / Butler / Scavenger
 --     APIs: which file called it, the arguments and what it returned.
 --     A call repeated with the same arguments is logged once per 5 s.
+--  3. Every 5 s reads Worldstone.get_status() (read-only) and logs all its
+--     fields when they change: is there a running/enabled flag while
+--     Worldstone is switched off in its menu? (QQT_Warpigz_v3 1.0.22: the
+--     Rosie Scavenger mimic reads only the Worldstone global so far.)
 -- Everything goes to the console and to ApiProbe\probe_log.txt.
 -- Remove the folder when done.
 local WATCH = {'navig', 'worldstone', 'butler', 'scavenger', 'tristram', 'loop'}
 local WRAP = {'navig', 'worldstone', 'butler', 'scavenger'}
 local SKIP = {ApiProbePlugin = true}
 local seen, wrapped, last_line = {}, {}, {}
+local probe = {busy = false, next_at = 0, last = nil} -- item 3
 local file_path, lines_written = nil, 0
 
 do
@@ -114,7 +119,7 @@ local function wrap(name, tbl)
                 if not results[1] then ret = {'ERROR ' .. tostring(results[2])} end
                 local key = line .. ' -> ' .. table.concat(ret, ', ')
                 local now = get_time_since_inject()
-                if not last_line[key] or now - last_line[key] >= 5 then
+                if not probe.busy and (not last_line[key] or now - last_line[key] >= 5) then
                     last_line[key] = now
                     out(key)
                 end
@@ -127,9 +132,31 @@ local function wrap(name, tbl)
     out(string.format('watching %d functions of %s', count, name))
 end
 
+-- Item 3: every field of Worldstone.get_status(), logged when it changes.
+local function probe_worldstone(now)
+    if now < probe.next_at then return end
+    probe.next_at = now + 5
+    local ws = rawget(_G, 'Worldstone')
+    if type(ws) ~= 'table' or type(ws.get_status) ~= 'function' then return end
+    probe.busy = true
+    local ok, st = pcall(ws.get_status)
+    probe.busy = false
+    local line
+    if not ok then line = 'ERROR ' .. tostring(st)
+    elseif type(st) ~= 'table' then line = show(st, 0)
+    else
+        local parts = {}
+        for k, v in pairs(st) do parts[#parts + 1] = tostring(k) .. '=' .. show(v, 1) end
+        table.sort(parts)
+        line = '{' .. table.concat(parts, ', ') .. '}'
+    end
+    if line ~= probe.last then probe.last = line; out('Worldstone.get_status() -> ' .. line) end
+end
+
 local next_scan = 0
 on_update(function()
     local now = get_time_since_inject()
+    probe_worldstone(now)
     if now < next_scan then return end
     next_scan = now + 1
     for name, v in pairs(_G) do
