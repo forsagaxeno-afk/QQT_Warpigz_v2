@@ -38,7 +38,7 @@
 -- each seed's full log to <prefix>.<seed>.log; QQT_INVARIANTS_LOG=<file>
 -- appends every hit, tab separated.)
 -- Minimised findings (assert the correct behaviour, fail on 3.3.6):
---   QQT_SWEEP_REPRO=chest_pair|hour_end_tear|road_cost|all luajit ...
+--   QQT_SWEEP_REPRO=chest_pair|hour_end_tear|road_cost|loot_hold_after_trip|all luajit ...
 -- Runs under Lua 5.4 and LuaJIT.
 SUITE_ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(SUITE_ROOT .. '/audit/tests/joint_host.lua')
@@ -727,6 +727,50 @@ repro('road_cost', function()
         .. ' player spots 13-15 m apart:\n    %s', L.total, L.n, table.concat(rows, '\n    ')))
     ok(ratio <= 1.5, string.format('the road cost is up to %.1fx the shortest road route between the same places', ratio))
     ok(worst <= 60, string.format('a 15 m step changes a road cost by %.0f m more than the step itself', worst))
+end)
+
+-- F4 (HelltideRevamped tasks/helltide.lua loot_hold / credit_yield): the
+-- in-Helltide Looter hold ends after 15 s of Rosie busy without a new bag
+-- item (_loot_since). A yield (a Rosie town trip, a revive) is credited to
+-- every other window but not to this one, and the trip empties the bag, so
+-- when Rosie was busy just before the trip, the first busy tick after the
+-- return reads "busy 19 s without progress": HR farms on at once and walks
+-- the player off the drops the trip left at the portal spot ("Another move
+-- took the player off ...; leaving it", Rosie yields). The portal brings the
+-- player back to them, and they are still lost. Sweep seed 2 t=3255-3276
+-- (a Rare 3.8 m away), seeds 5 and 7 (a Mythic and a Legendary GA3).
+repro('loot_hold_after_trip', function()
+    local h = J.new({rosie = true, dirs = {'Batmobile', HR}, place = 'helltide', ordered_pairs = true,
+        invariants = true, minute = 10})
+    h.mod(HR, 'core.hr_clock')._now = function() return EPOCH0 + h.minute * 60 + math.floor(h.now) % 60 end
+    h.assert_clean('load')
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(12)
+    ok(h.as('Rosie', function() return h.G.RosiePlugin.enable() end) == true, 'Rosie enabled')
+    local e = h.mod(HR, 'gui').elements
+    e.mode:set(1)
+    e.main_toggle:set(true)
+    h.pos = h.v(-600, 300)
+    h.run(8) -- HR patrols
+    -- Rosie goes busy on a drop, and the bag fills with it: the trip starts.
+    local first = h.drop('helltide', h.pos:x() + 3, h.pos:y(), {name = 'Helm_Legendary_Chaos', rarity = 5, ancestral = true, ga = 3})
+    h.inventory = h.inventory or {}
+    while #h.inventory < 24 do h.inventory[#h.inventory + 1] = h.gear({name = 'Helm_Rare_Joint', rarity = 3}) end
+    ok(h.run_until(function() return h.travel ~= nil and h.travel.phase == 'channel' end, 20),
+        'the Rosie trip casts\n' .. h.tail(20))
+    ok(first.picked == true, 'the first drop was taken before the trip')
+    -- A drop falls next to the player during the cast (the known issue).
+    local left = h.drop('helltide', h.pos:x() - 3, h.pos:y() + 2, {name = 'Helm_Legendary_Chaos', rarity = 5, ancestral = true, ga = 3})
+    local back
+    ok(h.run_until(function()
+        for _, a in ipairs(h.arrivals) do if a.why == 'town_portal' and a.place == 'helltide' then back = a end end
+        return back ~= nil
+    end, 90), 'back through the portal\n' .. h.tail(20))
+    h.run(20)
+    h.assert_clean('loot hold after a trip')
+    print(string.format('  back at t=%.1f, %.1f m from the drop; picked=%s; "farming on" x%d, "Another move took the player off" x%d',
+        back.t, left.pos:dist_to_ignore_z(h.pos), tostring(left.picked == true),
+        h.logged('without progress — farming on'), h.logged('Another move took the player off')))
+    ok(left.picked == true, 'the drop at the portal spot is taken after the return\n' .. h.tail(25))
 end)
 
 -- QQT_SWEEP_LIB=1: return the builders (scratch drivers, minimisation).
