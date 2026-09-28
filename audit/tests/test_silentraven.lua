@@ -128,6 +128,10 @@ do
     c=harness();c.objectives={{text='',has_progress=true,progress_ratio=0.4}}
     for _=1,4 do c.tick(0.3) end
     eq(c.api.get_status().ready,false,'no text, ratio 0.4: collecting')
+    -- 0.2.8 review [LOW]: no text and no progress fields is no evidence (0.2.7).
+    c=harness();c.objectives={{text=''}}
+    for _=1,4 do c.tick(0.3) end
+    eq(c.api.get_status().ready,false,'no text, no progress fields: not ready')
 end
 -- Wrong selected index and all-invalid entries cannot accept.
 do

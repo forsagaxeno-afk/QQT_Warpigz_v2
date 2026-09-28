@@ -153,13 +153,14 @@ M.quest_snapshot = function ()
                         end
                     elseif meta and type(objective) == 'table' then
                         -- QQT_Warpigz_v3 0.2.8 (RC7): an objective without text
-                        -- (unreadable or empty): the host's progress fields
-                        -- decide, and no incomplete evidence is no collecting.
-                        -- The readiness is inferred (one probe per visit).
-                        if not result.detail then result.detail = name .. ': (no objective text)' end
-                        meta_read = true
-                        if counter_state('', objective) == 'incomplete' then
-                            meta_incomplete, result.collecting = true, true
+                        -- (unreadable or empty): only the host's progress fields
+                        -- decide (review: no fields is no evidence, as in 0.2.7).
+                        -- A complete one is ready, inferred (one probe per visit).
+                        local progress = counter_state('', objective)
+                        if progress then
+                            if not result.detail then result.detail = name .. ': (no objective text)' end
+                            meta_read = true
+                            if progress == 'incomplete' then meta_incomplete, result.collecting = true, true end
                         end
                     end
                 end

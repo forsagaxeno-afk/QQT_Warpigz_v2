@@ -300,13 +300,20 @@ local function say_once(key, message)
     log.info(message)
 end
 M.say_once = say_once
--- QQT_Warpigz_v3 0.2.8 (RC2): the first time each third-party hold was seen in
--- this ready episode; past THIRD_HOLD_S it no longer holds (one line).
-local third = {ep = nil, first = {}}
+-- QQT_Warpigz_v3 0.2.8 (RC2): the time each third-party hold has actually held
+-- in this ready episode; past THIRD_HOLD_S it no longer holds (one line).
+-- Review fix: summed between sightings at most THIRD_GAP_S apart (samples come
+-- at 0.5-1 s), so a short sighting early in a long ready episode no longer
+-- used up the limit for a later, real Butler trip.
+local THIRD_GAP_S = 10
+local third = {ep = nil, kinds = {}}
 local function bounded(kind, reason, now)
-    if third.ep ~= tracker.ready_since then third.ep, third.first = tracker.ready_since, {} end
-    third.first[kind] = third.first[kind] or now
-    if now - third.first[kind] < M.THIRD_HOLD_S then return reason end
+    if third.ep ~= tracker.ready_since then third.ep, third.kinds = tracker.ready_since, {} end
+    local k = third.kinds[kind]
+    if not k then k = {held = 0, seen = nil}; third.kinds[kind] = k end
+    if k.seen and now >= k.seen and now - k.seen <= THIRD_GAP_S then k.held = k.held + (now - k.seen) end
+    k.seen = now
+    if k.held < M.THIRD_HOLD_S then return reason end
     say_once('third:' .. kind, string.format('waited %ds for %s this ready episode; no longer holding for it',
         M.THIRD_HOLD_S, reason))
     return nil

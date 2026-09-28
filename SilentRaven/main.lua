@@ -117,7 +117,18 @@ local function note_hold(reason, now)
     -- verbosity, once per reason and ready episode (a Temis stop is often
     -- shorter than the 60 s line below).
     coordination.say_once('hold:' .. tostring(reason), 'reward ready in Temis but auto-fire waits: ' .. tostring(reason))
-    tracker.visit_hold = reason
+    -- Review fix: the reason that held longest this ready episode, not the last
+    -- one (a teleport channel at departure hid the real blocker).
+    local vh = tracker.visit_holds
+    if not vh or vh.ep ~= tracker.ready_since then vh = {ep = tracker.ready_since, t = {}}; tracker.visit_holds = vh end
+    if vh.last_t and now - vh.last_t <= 1 and now >= vh.last_t then
+        vh.t[vh.last] = (vh.t[vh.last] or 0) + (now - vh.last_t)
+    end
+    vh.last, vh.last_t = reason, now
+    vh.t[reason] = vh.t[reason] or 0
+    local best, best_t = reason, -1
+    for r, t in pairs(vh.t) do if t > best_t or (t == best_t and r < best) then best, best_t = r, t end end
+    tracker.visit_hold = best
     tracker.hold_reason, tracker.hold_seen_t = reason, now
     if not tracker.hold_logged and now - tracker.hold_since >= HOLD_LOG_S then
         tracker.hold_logged = true

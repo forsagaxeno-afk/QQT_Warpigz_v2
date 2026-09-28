@@ -7,6 +7,7 @@
 - A claim-trip callback that arrives after the reward left no longer starves the next reward's claim trip.
 - A Whisper objective without text counts by the host's progress fields (ratio 1: ready, partial: collecting, none: ready, inferred).
 - No claim walk or claim trip starts while the player channels a teleport (spell 186139, at most 15 s), e.g. WonderCity's cast to Kurast.
+- Review fixes: the 180 s third-party limit counts time actually held (a short early Butler sighting no longer switches the Butler hold off for the rest of the reward); a textless objective needs positive progress fields to count as ready; the outside-Temis line names the reason that held longest, not the last one.
 
 # 0.2.6 — QQT_Warpigz_v3 3.3.3
 

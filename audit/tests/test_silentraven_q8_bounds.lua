@@ -522,6 +522,59 @@ case('U a Butler stuck busy holds auto-fire at most 180 s', function()
     eq(h.logged('[SilentRaven] reward ready in Temis but auto-fire waits: butler_busy'), 1, 'one hold line')
 end)
 
+-- 0.2.8 review [MED]: the 180 s limit counts time actually held, not time
+-- since the first sighting. A 5 s Butler sighting early in a long ready
+-- episode must not switch the Butler hold off for a later, real Butler trip.
+case('V a short early Butler sighting does not use up the 180 s limit', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    local butler, looting = true, false
+    h.G.Butler = {is_busy = function() return butler end}
+    h.G.LooteerPlugin = {is_actively_looting = function() return looting end}
+    h.bounty_ready = true
+    h.run(5)
+    butler, looting = false, true -- another hold for a long while
+    h.run(200)
+    butler, looting = true, false -- a real Butler trip
+    h.run(15)
+    h.assert_clean('V')
+    eq(h.logged('[SilentRaven] claiming the Whisper reward'), 0, 'Butler still holds (held ~5 s of 180)\n' .. h.tail(20))
+    eq(h.logged('waited 180s for butler_busy'), 0, 'the limit is not used up')
+    butler = false
+    ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward (auto)') == 1 end, 3),
+        'the claim starts once Butler is done\n' .. h.tail(20))
+end)
+
+-- 0.2.8 review [LOW]: the reason that held longest, not the last one (a
+-- teleport channel at departure), is what the outside-Temis line names.
+case('L the held reason reported is the one that held longest', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    local butler = true
+    h.G.Butler = {is_busy = function() return butler end}
+    h.bounty_ready = true
+    h.run(20)
+    butler = false
+    h.casting = true
+    h.run(2)
+    local tracker = h.mod(SR, 'silent_raven.tracker')
+    eq(tracker.visit_hold, 'butler_busy', 'the long Butler hold, not the last teleport channel')
+end)
+
+-- 0.2.8 review [LOW]: the claim trip waits for a loop owning the run at most
+-- 600 s of readiness (Rosie's DEFER_ANY), with one line each.
+case('Z the claim trip waits for a loop owning the run at most 600 s', function()
+    local h = host()
+    h.G.TRISTRAM_LOOP_STATE = {status = function() return {running = true, owns_activity = true, phase = 'farm'} end}
+    h.bounty_ready = true
+    h.run(590)
+    h.assert_clean('Z held')
+    eq(trips(h), 0, 'no trip before 600 s\n' .. h.tail(20))
+    eq(h.logged('claim trip waits because another activity owns the run (TristramLoop, farm)'), 1, 'one wait line')
+    ok(h.run_until(function() return trips(h) == 1 end, 30), 'the trip after 600 s\n' .. h.tail(20))
+    eq(h.logged('claim trip waited 600s for TristramLoop, farm'), 1, 'one bound line')
+end)
+
 -- QQT_Warpigz_v3 0.2.8 (RC3): a Looter blip during the claim keeps Navigator
 -- paused (only a Butler / town-priority Navigator yield releases it), so the
 -- loop's walk never resumes and holds the yield until its 120 s timeout.
