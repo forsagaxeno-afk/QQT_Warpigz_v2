@@ -2,6 +2,16 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.11] — 2026-09-28
+
+### Fixed
+
+- **Rosie 1.0.26: pickup next to Worldstone/Navigator and at close range** (live 3.3.5: Royal gems left behind under Worldstone; Discord: chest loot ignored until the player steps 2-3 m away).
+  - While Rosie walks to a drop, Navigator gets a short grace (2.5 s per drop) instead of taking the player away at once; if Navigator keeps pulling the player off a drop, Rosie stops it at most once per drop (5 per pickup episode) and logs why.
+  - The fight hold starts only when you are really fighting (a cast, or an enemy that is alive, targetable and on your floor within 10 m), not next to a passive monster; one line per wait says it.
+  - Close range: a drop 1-3 m away that does not come into the bag after a few interactions makes Rosie step in (at most 1.2 s); in the 2-3 m band interacting alternates with a short walk. A drop counts as taken only when it really left the ground from 1.1 m or closer.
+  - New one-line reasons when pickup waits: Scavenger busy, Orbwalker outside Clear mode, the fight hold.
+
 ## [3.3.10] — 2026-09-28
 
 ### Fixed

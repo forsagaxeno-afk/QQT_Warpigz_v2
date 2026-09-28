@@ -373,7 +373,12 @@ function M.diagnose()
             local wanted,reason=M.check_want_item(item,false)
             local blocked,why=Pickup.blocked(item)
             if wanted and blocked then wanted,reason=false,why end
-            console.print('[Rosie pickup] '..(wanted and 'Wanted ' or 'Skipped ')..M.describe(item,reason))
+            -- QQT_Warpigz_v3 1.0.25: a drop the fight hold defers is not 'Wanted' now.
+            local held,held_by=false,nil
+            if wanted then held,held_by=Pickup.fight_deferred(item) end
+            if held then wanted,reason=false,held_by=='fight' and 'held by the fight hold (it is taken after the fight)'
+                or 'held while Navigator gets the path back (Scavenger stand-in cool-down)' end
+            console.print('[Rosie pickup] '..(wanted and 'Wanted ' or held and 'Waiting ' or 'Skipped ')..M.describe(item,reason))
             count=count+1
             if count>=64 then console.print('[Rosie pickup] Diagnostic limited to 64 nearby drops.'); break end
         end
@@ -402,6 +407,7 @@ local function choose(best_first)
     -- QQT_Warpigz_v3 1.0.22 (perf): each bag read once this pulse; Pickup.blocked
     -- only when its answer is used or a settled drop needs its away mark.
     local bags,tracking={},Pickup.tracking()
+    local fight_n=0 -- QQT_Warpigz_v3 1.0.25: drops the fight hold defers this pulse
     for _,item in pairs(items) do
         local wanted,reason=check_want(item,false,bags)
         local blocked,why
@@ -415,8 +421,9 @@ local function choose(best_first)
         if wanted and blocked and Pickup.resting(item) then Pickup.fight_refresh() end -- QQT_Warpigz_v3 1.0.22: the fight hold stays observed
         if wanted and blocked then wanted,reason=false,why end
         -- QQT_Warpigz_v3 3.3.2: a drop off the feet waits for the fight (pickup.lua header).
-        local deferred=wanted and Pickup.fight_deferred(item)
-        if deferred then wanted=false;M.fight_waiting=true end
+        local deferred,held_by=false,nil
+        if wanted then deferred,held_by=Pickup.fight_deferred(item) end
+        if deferred then wanted=false;M.fight_waiting=true;if held_by=='fight' then fight_n=fight_n+1 end end -- QQT_Warpigz_v3 1.0.25: counted for the line
         if wanted then
             -- QQT_Warpigz_v2 local patch (Rosie 1.0.8): a Unique taken by "Pick up
             -- every Unique" logs its ground reading too (LIVE_CHECKLIST R1/S1).
@@ -429,6 +436,9 @@ local function choose(best_first)
             end
         elseif item~=rested and not deferred then M.report_rejection(item,reason) end
     end
+    -- QQT_Warpigz_v3 1.0.25 (Discord: the fight hold was silent until its 45 s
+    -- cap): one line per hold episode, and the count for status().
+    if fight_n>0 then Pickup.fight_report(fight_n) else Pickup.fight_waiting_n=nil end
     if not selected and rested and Pickup.wake(rested)~=false then -- QQT_Warpigz_v3 3.3.2: false = not woken
         selected,score,distance=rested,best_first and M.calculate_item_score(rested) or 0,rested_distance
     end
