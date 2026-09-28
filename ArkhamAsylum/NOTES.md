@@ -16,6 +16,7 @@ One session owns all four. Notes for each are below.
 - 2.2.5: `loot_guard.ready` — a quiet gap < 3 s no longer re-arms the 120 s bound (a flapping Looter held the chest/exit forever). Test: `test_activities_bounds_v3.lua` L1.
 
 ## WonderCity (Undercity)
+- 2.2.6 (teleport storm, audit/reviews/undercity_teleports_2026-09-28.md): walk_kurast cap ≤2 per rolling 300 s (not reset by the landing or task.reset; cleared past the stall), window 20 s, refused goal = next nodes, no Batmobile during a 186139 channel; teleport_kurast logs casts + 60 s back-off after 4; exit to Temis when a Rosie need is pending at run end. Live: count casts before entry; look for '[wonder_city teleport_kurast] cast N' and 'Rosie need pending at run end'.
 - 3.2.2: a failed exit / beacon walk is set aside for 20/40/60 s and then retried (it was stuck on floor 1). Tests: `test_wondercity_bounds.lua` B1–B7.
 - Town trips from Kurast hop to Temis; the caller's own travel returns.
 
