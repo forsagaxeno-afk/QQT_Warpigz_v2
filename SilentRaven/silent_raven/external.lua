@@ -3,6 +3,8 @@ local settings = require 'silent_raven.settings'
 local tracker = require 'silent_raven.tracker'
 local whispers = require 'silent_raven.whispers'
 local coordination = require 'silent_raven.coordination'
+-- QQT_Warpigz_v3 3.3.3: at load (a require inside a call would resolve in the caller's plugin).
+local fsm = require 'silent_raven.fsm'
 local external = {}
 local function caller_valid(caller) return type(caller) == 'string' and caller ~= '' end
 
@@ -119,7 +121,7 @@ function external.cancel(caller, preserve_navigation)
     end
     -- QQT_Warpigz_v3 3.3.3: through the FSM's finish (event + latch after an
     -- accept); the movement was handled above.
-    require('silent_raven.fsm').finish_external('cancelled', true)
+    fsm.finish_external('cancelled', true)
     return true, 'cancelled'
 end
 function external.check_version(input)
