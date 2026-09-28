@@ -116,9 +116,17 @@ for _, case in ipairs({{'quest_error','unconfirmed'},{'quest_empty','success'},{
     else eq(logged(c,'receipt not seen: pick sno=1087411'),1,failure..' diagnostic line')
         if failure=='quest_still_ready' then eq(logged(c,'panel open=false'),1,'the closed panel is reported') end end
 end
--- An objective without text (QQT_Warpigz_v3 0.2.8, RC7): the host's progress
--- fields decide; complete (or no incomplete evidence) is ready, inferred, and
--- auto-fire claims in Temis. A partial ratio stays collecting.
+-- 0.2.8 re-review [LOW]: the turned-in receipt needs the quest ready at START.
+-- START accepts a present, not-ready quest (no readable state); a quest list
+-- that reads empty after the accept is then no proof: unconfirmed.
+do
+    local c=harness();c.objectives={{text=''}};eq(c.start(),true);c.tick();c.tick();eq(c.accepts,1,'accepted')
+    c.quest=false;c.panel=false;c.tick();c.tick(8)
+    eq(c.result,'unconfirmed','present-not-ready at START, gone after: unconfirmed');eq(c.accepts,1)
+end
+-- An objective without text (QQT_Warpigz_v3 0.2.8, RC7): only the host's
+-- progress fields decide: ratio 1 is ready (inferred) and auto-fire claims in
+-- Temis, a partial ratio is collecting, no fields is not ready.
 do
     local c=harness();c.objectives={{text='',has_progress=true,progress_ratio=1}}
     for _=1,4 do c.tick(0.3) end

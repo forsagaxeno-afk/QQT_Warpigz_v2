@@ -389,7 +389,8 @@ function M.register_navigator()
         if tracker.running ~= true then return false end
         if tracker.yield_since == nil then return true end
         local why = tostring(tracker.yield_reason)
-        return not (why == 'butler_busy' or why:find('^navigator_busy:') ~= nil)
+        -- (re-review LOW: a real Scavenger may walk through Navigator too)
+        return not (why == 'butler_busy' or why == 'scavenger_busy' or why:find('^navigator_busy:') ~= nil)
     end)
 end
 

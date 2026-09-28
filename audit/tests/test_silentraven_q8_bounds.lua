@@ -628,6 +628,94 @@ case('S the claim trip waits for a teleport channel', function()
     ok(h.run_until(function() return trips(h) == 1 end, 3), 'the trip once the channel ends\n' .. h.tail(20))
 end)
 
+-- 0.2.8 re-review [MED]: after a loading screen the quest is re-read before
+-- auto-fire. The list reads blank in Limbo and for the first 0.6 s in Temis;
+-- dd60352 auto-fired on the stale pre-teleport ready, START saw no quest and
+-- latched the visit (skipped_not_ready): no claim.
+local function arrive_blank(h, limbo_s)
+    h.place, h.pos = h.P.limbo, h.P.limbo.spawn
+    h.bounty_ready = false
+    h.run(limbo_s or 2)
+    h.place, h.pos = h.P.temis, h.P.temis.spawn
+    h.run(0.6)
+    h.bounty_ready = true
+end
+-- The stale window depends on where the 0.5 s ready-check clock stands at the
+-- arrival, so several loading-screen lengths are tried.
+local LIMBO_LENGTHS = {2.0, 2.1, 2.2, 2.3, 2.4}
+case('F2 a quest list blank just after arriving in Temis: the claim still runs', function()
+    for _, limbo_s in ipairs(LIMBO_LENGTHS) do
+        local h = J.new({dirs = {'Batmobile', SR}, place = 'helltide'})
+        h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+        h.mod(SR, 'silent_raven.gui').elements.claim_trip_slider:set(0)
+        h.bounty_ready = true
+        h.run(5)
+        arrive_blank(h, limbo_s)
+        ok(h.run_until(function() return h.logged('[SilentRaven] run finished: success') == 1 end, 40),
+            'Limbo ' .. limbo_s .. ' s: claimed at this Temis stop\n' .. h.tail(20))
+        eq(h.logged('skipped_not_ready'), 0, 'Limbo ' .. limbo_s .. ' s: no stale start\n' .. h.tail(20))
+    end
+end)
+case('F3 the same under TristramLoop: the ready episode survives the blank arrival', function()
+    for _, limbo_s in ipairs(LIMBO_LENGTHS) do
+        local h = J.new({dirs = {'Batmobile', SR}, place = 'helltide'})
+        h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+        h.mod(SR, 'silent_raven.gui').elements.claim_trip_slider:set(0)
+        h.G.TRISTRAM_LOOP_STATE = {status = function() return {running = true, owns_activity = true, phase = 'town'} end}
+        h.bounty_ready = true
+        h.run(120)
+        arrive_blank(h, limbo_s)
+        ok(h.run_until(function() return h.logged('[SilentRaven] run finished: success') == 1 end, 40),
+            'Limbo ' .. limbo_s .. ' s: claimed during a 40 s Temis stop (ready for 120 s)\n' .. h.tail(20))
+        eq(h.logged('skipped_not_ready'), 0, 'Limbo ' .. limbo_s .. ' s: no stale start\n' .. h.tail(20))
+    end
+end)
+
+-- 0.2.8 re-review [LOW]: a new ready episode clears the held reason; the next
+-- outside-Temis line promises the next visit again.
+case('M a new ready episode forgets the last held reason', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    h.mod(SR, 'silent_raven.gui').elements.claim_trip_slider:set(1)
+    local butler = true
+    h.G.Butler = {is_busy = function() return butler end}
+    h.bounty_ready = true
+    h.run(5)
+    butler = false
+    h.place, h.pos = h.P.helltide, h.P.helltide.spawn
+    h.run(3)
+    eq(h.logged('the last one waited: butler_busy'), 1, 'this episode names the held visit\n' .. h.tail(20))
+    h.bounty_ready = false -- the reward was claimed elsewhere
+    h.run(5)
+    h.bounty_ready = true -- the next reward
+    h.run(3)
+    h.assert_clean('M')
+    eq(h.logged('the last one waited'), 1, 'not repeated for the new reward\n' .. h.tail(20))
+    eq(h.logged('reward ready: claimed on the next Temis visit, or by a claim trip'), 1, 'the plain line\n' .. h.tail(20))
+end)
+
+-- 0.2.8 re-review [LOW]: a yield on a real Scavenger releases the Navigator
+-- pause like Butler's (it may walk through Navigator).
+case('R2 a Scavenger yield mid-claim releases the Navigator pause', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    local nav = navigator(h, nil, 0)
+    local busy = false
+    h.G.Scavenger = {is_busy = function() return busy end}
+    h.bounty_ready = true
+    ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward (auto)') == 1 end, 5), 'started')
+    h.at(0.5, function() busy = true end)
+    h.at(3.0, function() busy = false end)
+    local released = false
+    ok(h.run_until(function()
+        local s = h.as(SR, function() return h.G.SilentRavenPlugin.get_status() end)
+        if busy and s.running and s.hold_reason == 'scavenger_busy' and nav.cond.SilentRaven
+            and nav.cond.SilentRaven() == false then released = true end
+        return h.logged('[SilentRaven] run finished') > 0
+    end, 30), 'the claim finished\n' .. h.tail(20))
+    ok(released, 'Navigator was released during the Scavenger yield')
+end)
+
 -- QQT_Warpigz_v3 0.2.8 (RC3): a Looter blip during the claim keeps Navigator
 -- paused (only a Butler / town-priority Navigator yield releases it), so the
 -- loop's walk never resumes and holds the yield until its 120 s timeout.
