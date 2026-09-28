@@ -7,8 +7,8 @@ local feed = require 'core.wr_feed'
 local plugins = require 'core.wr_plugins'
 local ingest = require 'core.wr_ingest'
 
--- QQT_Warpigz_v3 3.3.4 (WarRoom 1.0.4): shows suite version 3.3.4.
-local M = {SCHEMA = 1, SUITE = '3.3.4', PREFIX = 'window.SUITE_DATA = ', NULL = json.raw('null')}
+-- QQT_Warpigz_v3 3.3.5 (WarRoom 1.0.5): shows suite version 3.3.5.
+local M = {SCHEMA = 1, SUITE = '3.3.5', PREFIX = 'window.SUITE_DATA = ', NULL = json.raw('null')}
 
 local comma = ingest.comma
 

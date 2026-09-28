@@ -80,7 +80,8 @@ if args.base:
         require(semver(version) > semver(previous["version"]), "Bundle version must increase")
         require("CHANGELOG.md" in changed, "Every delivered change needs an English changelog entry")
     for folder, component_version in manifest["components"].items():
-        if any(path.startswith(folder + "/") for path in changed):
+        # NOTES.md is a session note that build_release.py does not ship.
+        if any(path.startswith(folder + "/") and not path.endswith("/NOTES.md") for path in changed):
             old = previous["components"].get(folder)
             require(old is None or semver(component_version) > semver(old), f"Component version must increase: {folder}")
 

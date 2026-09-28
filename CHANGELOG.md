@@ -2,6 +2,14 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.5] — 2026-09-28
+
+### Fixed
+
+- **Reaper 1.10.5, HordeDev 2.2.6:** a lair or Horde exit waits for a drop only while Rosie can actually pick it up. A paused Rosie, or one waiting for the orbwalker, no longer holds the exit for the full 75 s / 120 s.
+- **HordeDev 2.2.6:** the town salvage step no longer uses `goto`. The code works the same.
+- WarRoom 1.0.5: shows suite version 3.3.5.
+
 ## [3.3.4] — 2026-09-28
 
 **Rosie 1.0.23: Rosie acts as Scavenger for Worldstone.** Worldstone waits for its looter, Scavenger, before it moves on. Without Scavenger installed it never waited for Rosie's pickup.
