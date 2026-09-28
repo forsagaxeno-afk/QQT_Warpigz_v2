@@ -286,8 +286,9 @@ local function build_world(h, seed, o)
         if last and not last.completed_at and h.invariants then
             local where = last.last_floor and last.last_floor.key or 'no floor'
             h.invariants.hit('PIT_ABANDON', string.format('pit run %d opened at t=%.1f was abandoned (reached %s, '
-                .. 'Guardian %s) and a new pit is opened in %s', last.n, last.opened_at, where,
-                last.boss_dead_at and 'dead' or 'alive', h.place.key))
+                .. 'Guardian %s, back portals taken %d, %d dungeon reset(s) so far) and a new pit is opened in %s',
+                last.n, last.opened_at, where, last.boss_dead_at and 'dead' or 'alive', last.back_taken or 0,
+                W.resets, h.place.key))
         end
         local run = W.new_run(h.place)
         local town = h.place
@@ -588,10 +589,21 @@ end, 'known BOARD LOW: Arkham [portal] candidate dump every 2 s')
 -- A drop that falls inside the 0.3 s floor-portal transition: nobody can
 -- react (the game loads the next floor at once). Chaos puts one there.
 rule('floor-portal-transition-drop', 'expected', 'LEFT_DROP', function(hit)
-    return (has(hit, '(pit_floor_portal)') or has(hit, '(pit_back_portal)'))
+    return (has(hit, '(pit_floor_portal)') or has(hit, '(pit_back_portal)') or has(hit, '(dungeon_reset)'))
         and (has(hit, '[dropped during the pit_floor_portal channel]')
-            or has(hit, '[dropped during the pit_back_portal channel]'))
-end, 'emulator: a drop injected inside the 0.3 s floor-portal transition')
+            or has(hit, '[dropped during the pit_back_portal channel]')
+            or has(hit, '[dropped during the dungeon_reset channel]'))
+end, 'emulator: a drop injected inside the 0.3 s floor-portal / 0.1 s dungeon-reset transition')
+-- KNOWN (Rosie session): the outbound Town Portal re-cast (every ~3 s, up to
+-- 12 casts with refunds) when the channel breaks (the rotation's cast/evade).
+rule('ROSIE-tp-recast', 'known', 'TELEPORT', function(hit)
+    local list = hit.detail:match('%(max %d+%): (.*)$') or ''
+    local other = false
+    for item in list:gmatch('[^;]+') do
+        if not item:find('town_portal->temis by Rosie', 1, true) and not item:find('...', 1, true) then other = true end
+    end
+    return list ~= '' and not other
+end, 'known: Rosie outbound Town Portal re-cast while the channel is broken')
 -- KNOWN (Rosie session): a drop that falls during Rosie's own Town Portal cast.
 rule('ROSIE-tp-cast-drop', 'known', 'LEFT_DROP', function(hit, ctx)
     return has(hit, '(waypoint)') and has(hit, '[dropped during the waypoint channel]') and cast_by(ctx, 'Rosie')
@@ -599,8 +611,21 @@ end, 'known: Rosie leaving a drop that falls during the Town Portal cast')
 -- New variant: the same, for Arkham's own casts (the exit teleport, exit
 -- mode Teleport; its Alfred town hop).
 rule('ARK-cast-drop', 'finding', 'LEFT_DROP', function(hit, ctx)
-    return has(hit, '(waypoint)') and has(hit, '[dropped during the waypoint channel]') and cast_by(ctx, ARK)
+    if has(hit, '(waypoint)') and has(hit, '[dropped during the waypoint channel]') and cast_by(ctx, ARK) then
+        return true
+    end
+    -- exit mode Reset: the drop fell after reset_all_dungeons (0.6 s before
+    -- the ejection here), Guardian loot is older and is ARK-exit-unique-*
+    local age = tonumber(hit.detail:match('on the ground ([%d%.]+) s'))
+    return has(hit, '(dungeon_reset)') and age ~= nil and age <= 0.7
+        and not has(hit, '(beyond it: Unique/Mythic within the radius)')
 end, 'new variant: a drop falling during an Arkham teleport channel (exit / town hop) is left')
+-- SWEEP (the harness author's finding, S2 variant): wanted drops on the
+-- ground when Rosie's own automatic Town Portal starts are left; in the Pit
+-- the portal back returns to the spot and they are picked up after it.
+rule('ROSIE-trip-leaves-ground-drops', 'sweep', 'LEFT_DROP', function(hit)
+    return has(hit, '[already wanted at the cast: town_portal by Rosie')
+end, "sweep finding: Rosie's trip leaves wanted drops already on the ground (picked up after the return)")
 -- Config-dependent: a Unique/Mythic beyond Rosie's pickup distance (default
 -- 2 m) near the glyphstone when Arkham leaves: Arkham never walks the boss
 -- loot area, Rosie never walks beyond its distance.
@@ -633,6 +658,10 @@ rule('ARK-back-portal-stuck', 'finding', 'PIT_SLOW', function(hit)
     local n = tonumber(hit.detail:match('back portals taken (%d+)'))
     return n ~= nil and n >= 1
 end, 'the run is stuck on an upper floor (descend portal blacklisted) until the 600 s reset timer')
+rule('ARK-back-portal-abandon', 'finding', 'PIT_ABANDON', function(hit)
+    local n = tonumber(hit.detail:match('back portals taken (%d+)'))
+    return n ~= nil and n >= 1
+end, 'the stuck run ends at the reset timer without its Guardian')
 rule('ARK-floor-ping-pong', 'finding', 'LOOP', function(hit)
     return has(hit, 'world.place switches pit_') and has(hit, '<-> pit_')
 end, 'floor ping-pong: each slow floor transition takes the portal back (no blacklist)')
