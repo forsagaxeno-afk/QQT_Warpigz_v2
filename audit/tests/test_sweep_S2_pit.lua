@@ -80,7 +80,7 @@ local function build_world(h, seed, o)
     local v = h.v
     local W = {runs = {}, run = nil, opens = 0, portal = nil, kills = 0, glyph_ui = false, chances = 0,
         upgrades = 0, resets = 0, floors_entered = 0, deaths = 0, completed = 0, exits = {}, back_taken = 0,
-        shrines_used = 0, altars_used = 0, events = {}}
+        shrines_used = 0, altars_used = 0, events = {}, death_times = {}}
     h.world = W
     local function note(kind, detail)
         W.events[#W.events + 1] = {t = h.now, kind = kind, detail = detail}
@@ -302,11 +302,31 @@ local function build_world(h, seed, o)
         end
     end
     -- Reset inside a pit ejects the player to the obelisk town.
+    -- Scenario invariant GLYPH_TRIP: leaving the Guardian's floor while the
+    -- Awakened Glyphstone still has upgrade chances (Arkham ARK-4: a trip from
+    -- there loses the upgrade; Arkham defers its own trips until the upgrade
+    -- is done, at most 120 s).
+    function W.glyph_check(how)
+        local run = W.run
+        if not (h.invariants and run and run.glyph and h.place == run.floors[#run.floors] and W.chances > 0) then
+            return
+        end
+        local since = run.boss_dead_at or h.now
+        local deaths = 0
+        for _, t in ipairs(W.death_times) do if t >= since then deaths = deaths + 1 end end
+        local au = h.mod(ARK, 'core.utils')
+        local okf, forced = pcall(function() return au and au.exit_pit_forced() end)
+        h.invariants.hit('GLYPH_TRIP', string.format('%s from %s with the glyphstone unused (%d upgrade chance(s) '
+            .. 'left, %d upgrade(s) done, Guardian died at t=%.1f, %d death(s) since%s); bag %d items', how, h.place.key,
+            W.chances, run.upgrades or 0, since, deaths, okf and forced and ', reset timer expired' or '',
+            #(h.inventory or {})))
+    end
     rawset(G, 'reset_all_dungeons', function()
         h.resets = h.resets + 1
         W.resets = W.resets + 1
         local run = h.place.run
         if not run or h.travel then return end
+        W.glyph_check('reset_all_dungeons() by ' .. tostring(h.context_name()))
         local town = run.town
         h.at(0.5, function()
             if h.place.run == run and not h.travel then
@@ -337,6 +357,7 @@ local function build_world(h, seed, o)
         if not W.glyph_ui or W.chances <= 0 or type(g) ~= 'table' then return false end
         W.chances = W.chances - 1
         W.upgrades = W.upgrades + 1
+        if W.run then W.run.upgrades = (W.run.upgrades or 0) + 1 end
         if rng.chance(0.85) then g.level = g.level + 1 end
         return true
     end)
@@ -385,6 +406,7 @@ local function build_world(h, seed, o)
         end
         if h.dead and not W.was_dead then
             W.deaths = W.deaths + 1
+            W.death_times[#W.death_times + 1] = h.now
             for _, item in ipairs(h.equipped) do item.durability = math.max(0, item.durability - 10) end
         end
         W.was_dead = h.dead
@@ -527,12 +549,9 @@ local function start(seed, o)
         -- (Arkham ARK-4: a trip from there loses the upgrade; Arkham defers
         -- its own trips until the upgrade is done, at most 120 s).
         local run = W.run
-        if h.invariants and run and run.glyph and h.place == run.floors[#run.floors] and not h.travel
-            and W.chances > 0 then
-            h.invariants.hit('GLYPH_TRIP', string.format('teleport_to_waypoint(0x%X) cast by %s (Arkham task %s) '
-                .. 'from %s with the glyphstone unused (%d upgrade chance(s) left, Guardian died at t=%.1f); bag %d items',
-                sno, tp_log[#tp_log].ctx, tp_log[#tp_log].task, h.place.key, W.chances, run.boss_dead_at or -1,
-                #(h.inventory or {})))
+        if not h.travel then
+            W.glyph_check(string.format('teleport_to_waypoint(0x%X) cast by %s (Arkham task %s)', sno,
+                tp_log[#tp_log].ctx, tp_log[#tp_log].task))
         end
         -- Scenario invariant BOSS_TRIP: a teleport cast next to a live Pit
         -- Guardian (Arkham defers its own trips while one is within 30 m).
@@ -677,6 +696,19 @@ end, "Rosie's automatic Town Portal during a live Pit Guardian fight")
 rule('ROSIE-auto-trip-before-glyph', 'finding', 'GLYPH_TRIP', function(hit)
     return has(hit, 'cast by Rosie')
 end, "Rosie's automatic Town Portal before the glyph upgrade")
+-- By design: the 600 s reset timer overrides the glyph upgrade.
+rule('ARK-glyph-reset-timer', 'expected', 'GLYPH_TRIP', function(hit)
+    return has(hit, 'reset timer expired')
+end, 'the reset timer (600 s) forces the exit over the glyph upgrade')
+-- FINDING (Arkham tasks/upgrade_glyph.lua): once the glyphstone UI was
+-- opened, an interruption (a death and the walk back from the checkpoint, an
+-- evade/knock-back out of the UI's 5 m, a loading screen) closes it; back at
+-- the stone the glyph list reads empty, 8 s have passed since the FIRST
+-- interaction (EMPTY_LIST_TIMEOUT), so glyph_done is set without opening the
+-- UI again and exit_pit leaves with chances unused.
+rule('ARK-glyph-done-after-interruption', 'finding', 'GLYPH_TRIP', function(hit)
+    return has(hit, 'by ArkhamAsylum') or has(hit, '(Arkham task exit_pit)')
+end, 'Arkham exits with glyph upgrade chances left after an interruption at the glyphstone')
 -- FINDING (LOW, Arkham tasks/alfred.lua note_hold): the hold clock
 -- (trip.hold/hold_since) survives the task being preempted, so the next
 -- hold with the same reason logs the time since the first one.
@@ -926,6 +958,13 @@ local FINDINGS = {
     {id = 'F3b', rule = 'ROSIE-auto-trip-before-glyph', seed = 101, seconds = 200, title = "the Guardian's loot pile "
         .. "fills the bag; Rosie's automatic Town Portal 3.6 s after the kill, the glyphstone unused",
         o = {town = 'temis', exit_mode = 0, distance = 15, all_plugins = false, chaos = false, bag_near_full = true}},
+    {id = 'F6', rule = 'ARK-glyph-done-after-interruption', seed = 101, seconds = 200, title = 'a death after the first '
+        .. 'glyph upgrade: back at the stone the list reads empty 8 s after the first interaction, glyph marked done, '
+        .. 'the pit is reset with 2 chances unused',
+        o = {town = 'temis', exit_mode = 0, distance = 15, all_plugins = false, schedule = {{t = 1159, kind = 'death'}}}},
+    {id = 'F6b', rule = 'ARK-glyph-done-after-interruption', seed = 60, seconds = 740, title = 'an elite pack right '
+        .. "after the Guardian: the rotation's evade takes the player out of the glyph UI after 2 upgrades, 1 chance "
+        .. 'unused at the exit (seeded chaos, no death)', o = {}},
     {id = 'F4', rule = 'ARK-exit-unique-beyond-distance', seed = 4, seconds = 300, title = 'with the shipped 2 m pickup '
         .. 'distance a boss Mythic 2.4 m from the glyphstone stays behind at the pit exit',
         o = {chaos = false, distance = 2, boss_mythic = 1}},
