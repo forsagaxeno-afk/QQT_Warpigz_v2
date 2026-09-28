@@ -1,6 +1,9 @@
 -- QQT_Warpigz_v3 (3.3.0): the suite event bus (core/qqt_events.lua in every
 -- plugin, Rosie: rosie/private/qqt_events.lua).
---   * every copy is byte-identical (WarRoom's too, once it ships one);
+--   * every copy is byte-identical: one per shipped plugin, 10 since 3.3.6
+--     (WarRoom's copy is parked with it in archive/ and not checked);
+--   * no shipped plugin creates the bus: WarRoom was its only creator, so
+--     in the 3.3.6 package emit() is a no-op (the tests below create it);
 --   * no bus -> emit() is a no-op that creates no global;
 --   * bus(true) creates _G.QQT_Warpigz_events = {seq, ring, max = 512};
 --   * an event is {seq, t, epoch, source, kind, ...scalar fields}: tables,
@@ -32,7 +35,9 @@ local COPIES = {'ArkhamAsylum/core/qqt_events.lua', 'Batmobile/core/qqt_events.l
     'HelltideRevamped/core/qqt_events.lua', 'HordeDev/core/qqt_events.lua', 'Reaper/core/qqt_events.lua',
     'Rosie/rosie/private/qqt_events.lua', 'SilentRaven/silent_raven/qqt_events.lua', 'WarPigs/core/qqt_events.lua',
     'WarPug/core/qqt_events.lua', 'WonderCity/core/qqt_events.lua'}
-local OPTIONAL = {'WarRoom/core/qqt_events.lua'} -- the collector's copy (lane CORE)
+-- QQT_Warpigz_v3 3.3.6: the shipped plugins (versions.json); each has one copy above.
+local SHIPPED = {'ArkhamAsylum', 'Batmobile', 'HelltideRevamped', 'HordeDev', 'Reaper', 'Rosie', 'SilentRaven',
+    'WarPigs', 'WarPug', 'WonderCity'}
 
 local function read(rel)
     local f = io.open(ROOT .. '/' .. rel, 'rb')
@@ -70,11 +75,21 @@ case('every plugin ships the same file, byte for byte', function()
         ok(text ~= nil, rel .. ' is missing')
         eq(text, base, rel .. ' differs from ' .. COPIES[1])
     end
-    for _, rel in ipairs(OPTIONAL) do
-        local text = read(rel)
-        if text ~= nil then eq(text, base, rel .. ' differs from ' .. COPIES[1]) end
-    end
     ok(base:find('QQT_Warpigz_v3', 1, true) ~= nil, 'marked')
+end)
+
+case('the copies cover exactly the shipped plugins of versions.json', function()
+    local manifest = assert(read('versions.json'), 'versions.json')
+    local block = assert(manifest:match('"components"%s*:%s*(%b{})'), 'components block')
+    local listed, n = {}, 0
+    for name in block:gmatch('"([%w_]+)"%s*:') do listed[name] = true; n = n + 1 end
+    eq(n, #SHIPPED, 'shipped plugins in versions.json')
+    eq(#COPIES, #SHIPPED, 'one copy per shipped plugin')
+    for i, dir in ipairs(SHIPPED) do
+        ok(listed[dir], dir .. ' is a component of versions.json')
+        eq(COPIES[i]:match('^[^/]+'), dir, 'copy ' .. i .. ' belongs to ' .. dir)
+    end
+    ok(not listed.WarRoom, 'WarRoom is not shipped (archived in 3.3.6)')
 end)
 
 case('no bus: emit is a no-op and creates no global', function()
@@ -153,7 +168,7 @@ case('emit never raises: broken bus, failing clock, failing on_emit, odd argumen
 end)
 
 -- Every emit call site in the runtime code names a source.kind of the
--- contract (scratchpad PLAN / WarRoom collector).
+-- contract (scratchpad PLAN; the archived WarRoom collector read these).
 local KINDS = {
     arkham = {'pit_start', 'pit_floor', 'pit_boss_killed', 'glyph_upgraded', 'glyph_upgrade_failed', 'pit_end'},
     wondercity = {'undercity_start', 'boss_killed', 'undercity_reward', 'undercity_end'},
@@ -168,8 +183,14 @@ local KINDS = {
 local HORDE_TRACKER = {horde_fail = true, horde_chest = true, horde_chest_fault = true, horde_pylon = true,
     horde_council = true}
 
+-- 3.3.6: archive/ (parked WarRoom) and ROOT/.claude/ (local worktrees of
+-- other sessions: old full checkouts) are not this tree's runtime code; an
+-- old copy there could otherwise satisfy "emitted somewhere" for a lost call
+-- site. Only ROOT's own .claude is pruned, so a suite run from inside such a
+-- worktree still scans its files.
 case('every emit call site uses a contract source.kind; every contract kind is emitted somewhere', function()
-    local list = io.popen and io.popen('find "' .. ROOT .. '" -name "*.lua" -not -path "*/audit/*" -not -path "*/WarRoom/*"')
+    local list = io.popen and io.popen('find "' .. ROOT .. '" -path "' .. ROOT .. '/.claude" -prune -o -name "*.lua"'
+        .. ' -not -path "*/audit/*" -not -path "*/archive/*" -print')
     if not list then print('NOTE: io.popen unavailable — call-site scan skipped'); return end
     local allowed, used = {}, {}
     for source, kinds in pairs(KINDS) do
@@ -198,6 +219,38 @@ case('every emit call site uses a contract source.kind; every contract kind is e
     -- tracker.emit_start / emit_done (HordeDev) emit horde_start / horde_done.
     used['hordedev.horde_start'], used['hordedev.horde_done'] = true, true
     for key in pairs(allowed) do ok(used[key], 'contract event never emitted: ' .. key) end
+end)
+
+-- QQT_Warpigz_v3 3.3.6: WarRoom, the only collector, is archived. No shipped
+-- plugin creates the bus or writes the global, so every emit() in the package
+-- returns at once (the cases above create the bus themselves).
+case('no shipped plugin creates the bus', function()
+    local dirs = {}
+    for _, dir in ipairs(SHIPPED) do dirs[#dirs + 1] = '"' .. ROOT .. '/' .. dir .. '"' end
+    local list = io.popen and io.popen('find ' .. table.concat(dirs, ' ') .. ' -name "*.lua" -type f')
+    if not list then print('NOTE: io.popen unavailable — creator scan skipped'); return end
+    local files, bad = 0, {}
+    for path in list:lines() do
+        files = files + 1
+        local f = io.open(path, 'r')
+        local text = f and f:read('*a') or ''
+        if f then f:close() end
+        local n, emitter = 0, path:find('/qqt_events%.lua$') ~= nil
+        if emitter then eq(text, read(COPIES[1]), path:sub(#ROOT + 2) .. ' is the shared emitter') end
+        for line in (text .. '\n'):gmatch('([^\n]*)\n') do
+            n = n + 1
+            local code = line:gsub('%-%-.*$', '')
+            local where = path:sub(#ROOT + 2) .. ':' .. n
+            if code:find('bus%(%s*true%s*%)') then bad[#bad + 1] = where .. ': creates the bus: ' .. line end
+            -- The emitter itself names the key (KEY) and only reads it without create.
+            if not emitter and code:find('QQT_Warpigz_events', 1, true) then
+                bad[#bad + 1] = where .. ': touches the bus global: ' .. line
+            end
+        end
+    end
+    list:close()
+    ok(files > 100, 'runtime files scanned: ' .. files)
+    eq(#bad, 0, 'bus creators / global writers in the package:\n' .. table.concat(bad, '\n'))
 end)
 
 print(string.format('QQT events bus: %d checks, %d failures', checks, #failures))

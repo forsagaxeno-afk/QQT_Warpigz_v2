@@ -368,15 +368,14 @@ free Pandemonium chests are still opened.
   panel in the top-left corner ends above the party frames at 1080p and up;
   move a tall one-column panel right (Offset X about 13%) or to a right
   anchor. The old Position X / Y values are not used any more (new ids).
-- **Web dashboard** (off): the data of the Helltide map, `hr_data.js`, every
-  10 s (**Update every (s)**, 5-60). The map is the **Helltide** tab of the
-  WarRoom dashboard (QQT_Warpigz_v3 3.3.0; the pages live in
-  `WarRoom\dashboard\helltide\`). While WarRoom is enabled the file is
-  written into `WarRoom\dashboard\` by itself and this option is not needed;
-  without WarRoom it goes to `dashboard\hr_data.js` here (no page of its
-  own any more). The theme switcher at the top of the page picks a look
-  (**Forge** · **Daylight** · **Console**); every theme shows the same data.
-  It reloads by itself every 5 s and shows:
+- **Web dashboard** (off): writes the data of the Helltide map, `hr_data.js`,
+  to `dashboard\hr_data.js` every 10 s (**Update every (s)**, 5-60).
+  **No page to view it ships at the moment** (QQT_Warpigz_v3 3.3.6): the
+  pages were part of the WarRoom dashboard, which is no longer in the
+  package, so leave this option off. The rest of this item describes those
+  pages for when a viewer returns. A theme switcher at the top of the page
+  picks a look (**Forge** · **Daylight** · **Console**); every theme shows
+  the same data. It reloads by itself every 5 s and shows:
   the chest-reset and Helltide-end countdowns (UTC, from your computer's
   clock), cinders against the current goal, chests this session and all
   time; a map drawn like the in-game map (drag to pan, wheel or +/- to zoom,
@@ -394,7 +393,7 @@ free Pandemonium chests are still opened.
 Files are written only while the plugin is enabled: `learned\stats.txt` and
 `learned\<zone>.txt` every 5 minutes (only when something changed), when a
 Helltide ends and when you switch the plugin off; `hr_data.js` only
-with the dashboard on or WarRoom enabled. Every file is bounded (512 KB, the dashboard 256 KB);
+with the dashboard on. Every file is bounded (512 KB, the dashboard 256 KB);
 a file that cannot be written three times in a row is not tried again that
 session (one log line). A save goes to `<file>.tmp` first and replaces the
 file only when complete; if the file itself cannot be written, the `.tmp`

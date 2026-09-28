@@ -3,10 +3,12 @@ QQT_Warpigz_v3 (версия в имени архива) — установка
 
 1. Закрой QQT. Сделай резервную копию своих папок плагинов, настроек и WarPug\positions.txt
    ВНЕ папки scripts.
-2. Скопируй в папку scripts QQT ТОЛЬКО 11 папок из каталога scripts\ этого архива
+2. Скопируй в папку scripts QQT ТОЛЬКО 10 папок из каталога scripts\ этого архива
    (ArkhamAsylum, Batmobile, HelltideRevamped, HordeDev, Reaper,
-   Rosie, SilentRaven, WarPigs, WarPug, WarRoom, WonderCity).
+   Rosie, SilentRaven, WarPigs, WarPug, WonderCity).
    Заменяй папки целиком. Папки audit, docs, assets в scripts НЕ копируй.
+   С версии 3.3.6 папки WarRoom (веб-дашборд) в архиве НЕТ — он пока отложен. Если она
+   осталась в scripts от прошлой версии, УДАЛИ папку WarRoom. Остальным плагинам она не нужна.
    С версии 3.0 в именах папок НЕТ номеров версий. При обновлении с 2.x СНАЧАЛА удали старые
    WarPigs-1.0.0, WarPug-1.0.0, Batmobile-1.0.12, ArkhamAsylum-1.0.6, HelltideRevamped-0.4,
    HordeDev-1.3.9, Reaper-main, WonderCity-main, SilentRaven-0.1.3 — иначе QQT загрузит две копии.
@@ -61,11 +63,8 @@ QQT_Warpigz_v3 (версия в имени архива) — установка
    Бот больше не стоит минутами у сундука, избивая обычных мобов: после 25 с боя на одном месте
    идёт дальше по маршруту искать tears (элиток и боссов по-прежнему бьёт).
    Раздел "Live data & stats": Stats overlay (ВКЛ),
-   Web dashboard (ВЫКЛ; с WarRoom включать не нужно — пока WarRoom включён, карта и
-   статистика Helltide сами появляются на вкладке Helltide дашборда WarRoom, см. пункт 18,
-   а Update every (s) задаёт, как часто; опция нужна только без WarRoom: тогда файл
-   пишется в HelltideRevamped\dashboard\hr_data.js, но своих страниц у HelltideRevamped
-   больше нет),
+   Web dashboard (ВЫКЛ; оставь выключенным: опция пишет данные карты Helltide в
+   HelltideRevamped\dashboard\hr_data.js, но страницы для просмотра в сборке сейчас нет),
    Live Helltide zone (internet) (ВЫКЛ). Выученные точки сундуков лежат в
    HelltideRevamped\learned\ — при обновлении эту папку можно сохранить. Под WarPigs (Warplan)
    всё это не используется. Координат сундуков в интернете нет: сундуки бот видит сам и
@@ -140,37 +139,3 @@ positions.txt. Настройки меню сохраняются.
 
 После первой сессии пришли лог — особенно строки из LIVE_CHECKLIST.md
 (где приземляет телепорт War Plan, "[SilentRaven] reward diagnostics", "[WarPigs] ... held ...").
-
-Новое в 3.3.0: WarRoom (дашборд)
---------------------------------
-18. WarRoom — веб-страница со статистикой всего бота: что он делает сейчас и следующие шаги
-   War Plan; золото, опыт (уровни/Paragon), смерти, золото и опыт в час; забеги Pit, Helltide,
-   Undercity, Hordes, боссы, Whispers; добыча по редкости, GA, продано/разобрано/в сундук;
-   вкладка Helltide (карта и статистика HelltideRevamped); график по часам. Переключатель
-   Session / Today / All-time. WarRoom только смотрит: не жмёт клавиши, не двигает персонажа,
-   не меняет настройки других плагинов. Работает и с WarPigs, и без него.
-   WarRoom включён по умолчанию. Меню QQT "Z | War Room | Dashboard": Enable (ВКЛ; выкл —
-   ничего не считает и не пишет), Write every (s) (15, от 5 до 60 — как часто обновляется
-   WarRoom\dashboard\suite_data.js), кнопки Reset session stats / Reset today stats /
-   Reset all-time stats. Helltide считается один раз за заход (не меньше минуты в Helltide);
-   сундуки и cinders добавляются, когда HelltideRevamped закрывает час Helltide.
-   Как открыть:
-   - На игровом ПК: двойной щелчок по WarRoom\dashboard\index.html (интернет не нужен),
-     или запусти WarRoom\server\serve.bat и открой http://127.0.0.1:8765
-     (сервер доступен только с этого ПК, окно не закрывай; остановка — Ctrl+C или закрыть окно).
-   - С телефона/планшета дома: запусти WarRoom\server\serve-lan.bat. Окно покажет ссылку
-     вида http://192.168.1.20:8765/t/ABCD... — последняя часть это личный ключ доступа, никому
-     её не давай. Брандмауэр Windows спросит про PowerShell: отметь ТОЛЬКО "Частные сети"
-     (Private networks) и нажми "Разрешить". Сеть Wi-Fi в Windows должна быть "Частная"
-     (Параметры -> Сеть и Интернет -> Wi-Fi -> твоя сеть -> Тип сетевого профиля: Частная).
-     Открой ссылку на телефоне один раз — дальше он помнит ключ. Новый ключ (старые ссылки
-     перестанут работать): serve-lan.bat -NewToken. Другой порт: serve.bat -Port 8766.
-   - Не из дома: НЕ открывай порт на роутере. Используй VPN, например Tailscale: поставь его
-     на ПК и телефон (один аккаунт), запусти serve-lan.bat и открой ссылку с адресом
-     100.x.y.z. Для имени вида mypc.tailnet.ts.net: serve-lan.bat -AllowHost mypc.tailnet.ts.net.
-   Безопасность: в файлах данных нет имени персонажа, аккаунта, BattleTag, чата и путей.
-   Ничего не отправляется в интернет. Сервер только читает: отдаёт лишь файлы страницы из
-   WarRoom\dashboard (html, js, css, json, картинки), не показывает списки папок, не
-   принимает запросы на запись; с других устройств — только с ключом и только из домашней
-   сети/VPN. Ключ хранится в WarRoom\server\.dashboard-token (в архив релиза не входит).
-   Если окно сервера "зависло" после щелчка мышью внутри — нажми Esc.

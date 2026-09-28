@@ -10,7 +10,11 @@ All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0
   - **WarPigs 1.1.8:** a Whisper claim is no longer cancelled on every Rosie pickup burst (after three bursts the visit's claim was dropped). The outgoing teleport no longer waits for "Scavenger collecting loot" on Rosie's account.
   - **WarPug 1.0.17, SilentRaven 0.2.7, ArkhamAsylum 2.1.4, Reaper 1.10.6, HordeDev 2.2.7, WonderCity 2.2.5, Batmobile 2.2.3:** no double waits for Rosie's pickup in planning, Whisper claims, Pit, bosses, Hordes, Undercity and freeroam.
   - A real third-party Scavenger still holds every wait as before.
-- WarRoom 1.0.6: shows suite version 3.3.6.
+
+### Removed
+
+- **WarRoom is no longer part of the package** (parked for later). The package now has 10 plugin folders. **Delete the `WarRoom` folder from your QQT scripts folder.** No other plugin depends on it; the Helltide web map (WarRoom's Helltide tab) goes with it.
+  - **HelltideRevamped 2.6.3:** the *Web dashboard* tooltip no longer points to WarRoom. No viewer page ships for its data file now, so leave the option off (it is off by default).
 
 ## [3.3.5] — 2026-09-28
 
