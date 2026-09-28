@@ -47,9 +47,16 @@ task.status_enum = {
 -- passes after which a panel only a receipt proved open is opened again.
 -- QUIET_LINE: while nothing moves, one progress line every this many passes.
 -- SKIP_LINES and NAMES cap the log lines and the names in a reason.
+-- QQT_Warpigz_v3 1.0.25 (review 2): THIN: after QUIET_LINE passes in which
+-- nothing moved and the count stood still, a pass sends only THIN items (in
+-- turn over the list) until something moves or the count changes (a stash
+-- that refuses everything is not sent every item every second).
+-- LEAVE_KEYS: a stash that read open by its list or vendor screen and took
+-- nothing leaves at most this many kinds of item for the trip instead of
+-- failing it (3.3.6 skipped up to MAX_SKIPS-1=2 before failing).
 local C={PASS_GAP=1.0,COUNT_STABLE=0.5,INV_HOLD=1.5,PROBE_AFTER=2.0,FIRST_WAIT=12,SECOND_WAIT=5,
-    AFTER_DEPOSIT=3,RECEIPT_IDLE=2,QUIET_LINE=3,NO_PROGRESS=45,MAX_INTERACTIONS=4,INTERACT_GAP=3,BURST=2,
-    SKIP_LINES=5,NAMES=10}
+    AFTER_DEPOSIT=3,RECEIPT_IDLE=2,QUIET_LINE=3,THIN=2,LEAVE_KEYS=2,NO_PROGRESS=45,MAX_INTERACTIONS=4,
+    INTERACT_GAP=3,BURST=2,SKIP_LINES=5,NAMES=10}
 task.C=C
 
 local function log(message) console.print('[Rosie:stash] '..message) end
@@ -65,11 +72,17 @@ function task.reset_session()
     -- {name, sno, bag, units, dest, sent_at, host, via} per bag:SNO key sent;
     -- count_max: the highest stash count read this session (the reasons never
     -- quote a partial list below it).
+    -- QQT_Warpigz_v3 1.0.25 (review 2): gear_moved: receipts from the gear
+    -- bags (equipment and talismans land in the stash list, which may still be
+    -- loading; gems, runes and materials may not); ready_inv: the inventory
+    -- panel was up when the stash read open; quiet: passes since the last
+    -- receipt or count change (the stall does not reset it); rot: the
+    -- thinned passes' turn.
     state = { time=0, progress=0, next_action=0, next_interact=0, interactions=0, interacted=false,
         interacted_at=0, burst_until=0, base=nil, open_logged=nil, near_since=nil,
-        ready=nil, ready_at=nil, count_n=nil, count_since=nil, inv_since=nil, lost=0, probe_sent=false,
-        next_pass=0, passes=0, idle=0, stalls=0, deposited=0, last_count=nil, count_max=nil, first_logged=false,
-        ledger={}, keys={}, requested={}, noted={}, qty_now={} }
+        ready=nil, ready_at=nil, ready_inv=false, count_n=nil, count_since=nil, inv_since=nil, lost=0, probe_sent=false,
+        next_pass=0, passes=0, idle=0, quiet=0, rot=0, stalls=0, deposited=0, gear_moved=0, last_count=nil,
+        count_max=nil, first_logged=false, ledger={}, keys={}, requested={}, noted={}, qty_now={} }
     tracker.stash_skipped=nil -- QQT_Warpigz_v3 (Q5): names read by tasks/status.lua
     task.set_status(task.status_enum.IDLE)
 end
@@ -161,7 +174,7 @@ local BAGS={
 -- from this read, and so do the candidates when `full` is set. A bag whose
 -- read raises is skipped this tick (err: the step cannot finish on it); an
 -- entry whose SNO or count cannot be read is left out of that SNO's quantity.
--- Review (1.0.25): the keep decisions (full) run only while the stash is not
+-- QQT_Warpigz_v3 1.0.25 (review): the keep decisions (full) run only while the stash is not
 -- open or when a pass is due; the other ticks read SNOs and stack counts only.
 local function snapshot(player,full)
     local snap={list={},qty={},err=false}
@@ -349,7 +362,7 @@ local function finish()
     log('All selected deposits observed; continuing town service.'..skipped)
 end
 local function unready()
-    state.ready,state.interacted,state.open_logged=nil,false,nil
+    state.ready,state.interacted,state.open_logged,state.ready_inv=nil,false,nil,false
     state.count_n,state.count_since,state.inv_since,state.lost=nil,nil,nil,0
 end
 -- The highest stash count read this session, for the reasons.
@@ -388,12 +401,13 @@ local function observe(player,snap)
             if not scanned then dest,scanned=stash_qty(player),true end
             local d=stash_units(dest,L.sno)
             local delta=(d~=false and L.dest~=false) and string.format('%+.0f',d-L.dest) or 'unreadable'
-            -- Review (1.0.25): the move that worked (live check: host=).
+            -- QQT_Warpigz_v3 1.0.25 (review): the move that worked (live check: host=).
             log(string.format('Deposited %s (sno=%s); %.0f of %.0f unit(s) left the bag (stash list %s); last sent on %s, host=%s.',
                 L.name,tostring(L.sno),L.units-now,L.units,delta,tostring(L.via),tostring(L.host)))
             events.emit('rosie','stashed',{name=L.name,sno=L.sno,bag=L.bag}) -- QQT_Warpigz_v3
             L.units,L.dest=now,d
-            state.deposited=state.deposited+1; state.progress=state.time; state.idle=0
+            state.deposited=state.deposited+1; state.progress=state.time; state.idle=0; state.quiet=0
+            if L.gear then state.gear_moved=state.gear_moved+1 end
             if not state.first_logged then
                 state.first_logged=true
                 -- The live measure of the load delay.
@@ -403,11 +417,12 @@ local function observe(player,snap)
                 end
             end
             -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): a deposit probe's
-            -- receipt proves the panel open. Review (1.0.25): only a move sent
+            -- receipt proves the panel open. QQT_Warpigz_v3 1.0.25 (review): only a move sent
             -- after this interaction (a late receipt of an earlier one proves
             -- nothing about the panel now).
             if not state.ready and state.interacted and (L.sent_at or -math.huge)>=state.interacted_at then
                 state.ready,state.ready_at,state.lost,state.open_logged='receipt',state.time,0,state.interactions
+                state.ready_inv=false
                 log('Stash reads open: signal=receipt attempt='..state.interactions..' '..diag_now())
             end
             state.interactions=0
@@ -421,14 +436,22 @@ end
 -- equal on two consecutive checks; a loading list changes and restarts the
 -- timer); (c) the inventory panel held for INV_HOLD while the count is 0,
 -- unreadable or cached (an empty stash). Once open, the deciding raw signal
--- missing for 2 ticks reads closed. Review (1.0.25): a panel only a receipt
+-- missing for 2 ticks reads closed. QQT_Warpigz_v3 1.0.25 (review): a panel only a receipt
 -- proved open (no signal at all) reads closed after RECEIPT_IDLE idle passes,
 -- so Rosie walks back and opens it again instead of passing into nothing.
+-- QQT_Warpigz_v3 1.0.25 (review 2): a stash that read open by its count
+-- while the inventory panel was up stays open only while that panel is up
+-- (the owner's host: inv=true while the stash is open). A list that stays
+-- readable after the panel closed (cached) no longer keeps Rosie passing into
+-- a closed panel; a list that reads 0 for a moment under an open panel does
+-- not close it.
 local function readiness()
     local r=stash_read(state.base)
     if state.ready then
         local still
+        if state.ready=='count' and r.inv then state.ready_inv=true end -- the panel came up after the count
         if state.ready=='receipt' then still=state.idle<C.RECEIPT_IDLE
+        elseif state.ready=='count' and state.ready_inv then still=r.inv
         else
             still=state.ready=='sdk' and r.sdk or state.ready=='inv' and r.inv
                 or state.ready=='count' and (r.n or 0)>0
@@ -457,7 +480,7 @@ local function readiness()
         if state.time-state.inv_since>=C.INV_HOLD then why=why or 'inv' end
     else state.inv_since=nil end
     if not why then return false,r end
-    state.ready,state.ready_at,state.lost,state.idle=why,state.time,0,0
+    state.ready,state.ready_at,state.lost,state.idle,state.ready_inv=why,state.time,0,0,r.inv
     if state.open_logged~=state.interactions then
         state.open_logged=state.interactions
         log('Stash reads open: signal='..why..' attempt='..state.interactions..' '..r.diag)
@@ -471,7 +494,8 @@ end
 local function send(c,probe,dest)
     local L=state.ledger[c.key]
     if not L then
-        L={name=c.name,sno=c.sno,bag=c.bag,units=(state.qty_now[c.bag] or {})[c.sno] or 0,dest=stash_units(dest,c.sno)}
+        L={name=c.name,sno=c.sno,bag=c.bag,gear=c.gear,units=(state.qty_now[c.bag] or {})[c.sno] or 0,
+            dest=stash_units(dest,c.sno)}
         state.ledger[c.key]=L
         state.keys[#state.keys+1]=c.key
     end
@@ -492,25 +516,45 @@ end
 -- restart a long load); otherwise it is opened again once. Nothing moved
 -- after that: a retryable failure. Anything moved: the rest stays in the bag
 -- for this trip. Returns true when this pass must not be sent.
--- Review (1.0.25): never tracker.stash_full here (see the header).
-local function stall(list,count)
-    if state.deposited==0 and state.stalls==0 then
+-- QQT_Warpigz_v3 1.0.25 (review): never tracker.stash_full here (see the header).
+-- QQT_Warpigz_v3 1.0.25 (review 2):
+-- - proven: the stash took something of what is left: any receipt when no
+--   gear is left, a gear receipt when gear is left. A gem or material that
+--   went to the materials storage while the stash list still loaded proves
+--   nothing about the gear (live model: gear moves are dropped until the list
+--   loaded); the gear keeps the long windows.
+-- - The first stall waits as it is on any panel signal that still reads open
+--   (count, vendor screen and now the inventory panel: a list that reads 0
+--   while it loads). Only a panel a receipt alone proved open is opened again.
+-- - Nothing moved at all on a stash that read open by its list or vendor
+--   screen, and at most LEAVE_KEYS kinds of item left: they are left for this
+--   trip (3.3.6 skipped them too). One item the game refuses that is the only
+--   candidate of every trip no longer fails every trip.
+local function stall(list,count,proven)
+    if not proven and state.stalls==0 then
         state.stalls=1; state.idle=0
-        if state.ready=='count' or state.ready=='sdk' then
-            log(string.format('Nothing moved in %d passes; the stash still reads open (signal=%s, stash_n=%s): %d more passes.',
-                state.passes,state.ready,tostring(count),C.SECOND_WAIT))
+        if state.ready~='receipt' then
+            log(string.format('%s in %d passes; the stash still reads open (signal=%s, stash_n=%s): %d more passes.',
+                state.deposited>0 and 'No equipment moved' or 'Nothing moved',state.passes,tostring(state.ready),
+                tostring(count),C.SECOND_WAIT))
             return false
         end
         log(string.format('Nothing moved in %d passes; opening the stash again.',state.passes))
         unready(); state.next_interact=math.min(state.next_interact,state.time)
         return true
     end
+    local why=string.format('the stash did not take it in %d passes (%s)',state.passes,most())
     if state.deposited==0 then
+        local _,keys=names_of(list)
+        if #keys<=C.LEAVE_KEYS and (state.ready=='count' or state.ready=='sdk') then
+            leave(list,why)
+            return true
+        end
         fail(string.format('The stash took nothing in %d passes (full or not open? %s); still in the bag: %s. %s',
             state.passes,most(),(names_of(list)),diag_now()))
         return true
     end
-    leave(list,string.format('the stash did not take it in %d passes (%s)',state.passes,most()))
+    leave(list,why)
     return true
 end
 
@@ -518,24 +562,40 @@ end
 -- that read open before the chest interaction (review rc.10 R-F8). An idle
 -- pass: no receipt and no stash count change since the previous pass (a
 -- loading list changes the count, so a slow load never ends the step).
+-- QQT_Warpigz_v3 1.0.25 (review 2): the short AFTER_DEPOSIT window only once
+-- the stash proved it takes what is left and FIRST_WAIT passes went by (a
+-- receipt early in a long load, even a false one from a bag read that flaps,
+-- no longer ends the step while the list still loads). After QUIET_LINE
+-- quiet passes only THIN items per pass, in turn, until something moves or
+-- the count changes.
 local function pass(player,list,count)
     if vendor.npc_panel_held(state.base) then return end
-    if count~=state.last_count then state.last_count=count; state.idle=0 end
+    if count~=state.last_count then state.last_count=count; state.idle=0; state.quiet=0 end
     order(list)
-    local window=state.deposited>0 and C.AFTER_DEPOSIT or (state.stalls==0 and C.FIRST_WAIT or C.SECOND_WAIT)
-    if state.idle>=window and stall(list,count) then return end
-    -- Review (1.0.25): a stalled load is not silent in the log.
-    if state.idle>0 and state.idle%C.QUIET_LINE==0 then
-        log(string.format('Pass %d: nothing has left the bag in %d pass(es); sending %d item(s) again (stash_n=%s).',
-            state.passes+1,state.idle,#list,tostring(count)))
+    local gear=false
+    for _,c in ipairs(list) do if c.gear then gear=true; break end end
+    local proven=state.deposited>0 and (state.gear_moved>0 or not gear)
+    local window=proven and state.passes>=C.FIRST_WAIT and C.AFTER_DEPOSIT
+        or (state.stalls==0 and C.FIRST_WAIT or C.SECOND_WAIT)
+    if state.idle>=window and stall(list,count,proven) then return end
+    local sending=list
+    if state.quiet>=C.QUIET_LINE and #list>C.THIN then
+        sending={}
+        for i=1,C.THIN do sending[i]=list[(state.rot+i-1)%#list+1] end
+        state.rot=state.rot+C.THIN
     end
-    state.passes=state.passes+1; state.idle=state.idle+1
+    -- QQT_Warpigz_v3 1.0.25 (review): a stalled load is not silent in the log.
+    if state.quiet>0 and state.quiet%C.QUIET_LINE==0 then
+        log(string.format('Pass %d: nothing has left the bag in %d pass(es); sending %d of %d item(s) again (stash_n=%s).',
+            state.passes+1,state.quiet,#sending,#list,tostring(count)))
+    end
+    state.passes=state.passes+1; state.idle=state.idle+1; state.quiet=state.quiet+1
     local dest=stash_qty(player) -- one stash scan per pass
     for _,key in ipairs(state.keys) do
         local L=state.ledger[key]
         L.dest=stash_units(dest,L.sno)
     end
-    for _,c in ipairs(list) do send(c,false,dest) end
+    for _,c in ipairs(sending) do send(c,false,dest) end
 end
 
 function task.Execute()
@@ -546,7 +606,7 @@ function task.Execute()
     state.last_tick=now
     if state.time<state.next_action then return end
     state.next_action=state.time+0.3
-    -- Review (1.0.25): the keep decisions run while the stash is not open and
+    -- QQT_Warpigz_v3 1.0.25 (review): the keep decisions run while the stash is not open and
     -- on pass ticks; the ticks between passes only read the receipts.
     local full=state.ready==nil or state.time>=state.next_pass
     local snap=snapshot(player,full)
@@ -571,13 +631,17 @@ function task.Execute()
             tracker.stash_item_count_cached=count
             if count>(state.count_max or -1) then state.count_max=count end
         end
-        if count and count>=settings.max_stash_items then
-            tracker.stash_full=true
-            fail(string.format('The stash is full (%d/%d items).',count,settings.max_stash_items))
-            return
-        end
         if state.time>=state.next_pass then
-            -- Review (1.0.25): PASS_GAP on average (the pass fires on the
+            -- QQT_Warpigz_v3 1.0.25 (review 2): the maximum is checked only
+            -- where a pass would send (this tick's candidates are not empty: an
+            -- empty list finished above). A last deposit that fills the stash
+            -- to the maximum ends the step as done, not "full" (SP17).
+            if count and count>=settings.max_stash_items then
+                tracker.stash_full=true
+                fail(string.format('The stash is full (%d/%d items).',count,settings.max_stash_items))
+                return
+            end
+            -- QQT_Warpigz_v3 1.0.25 (review): PASS_GAP on average (the pass fires on the
             -- first 0.3 s tick after it is due; that delay is not added to
             -- the next one), never closer than half a gap.
             local planned=state.next_pass+C.PASS_GAP
@@ -605,7 +669,7 @@ function task.Execute()
         if r~=nil and (r.sdk or r.inv or (r.count_ok and (r.n or 0)>0)) then return end
         -- QQT_Warpigz_v2 local patch (Rosie 1.0.7): a host that raised no
         -- signal at all gets one deposit probe per interaction; only its
-        -- receipt opens the stash. Review (1.0.25): each interaction probes
+        -- receipt opens the stash. QQT_Warpigz_v3 1.0.25 (review): each interaction probes
         -- the next candidate (one item the game refuses cannot use them all).
         if state.interacted and not state.probe_sent and state.time-state.interacted_at>=C.PROBE_AFTER
             and not vendor.npc_panel_held(state.base) then
@@ -617,7 +681,7 @@ function task.Execute()
         if state.time>=state.next_interact then
             if state.probe_sent then log('Deposit probe moved nothing; the stash panel is not open.') end
             if state.interactions>=C.MAX_INTERACTIONS then
-                -- Review (1.0.25): a panel that stops opening after deposits
+                -- QQT_Warpigz_v3 1.0.25 (review): a panel that stops opening after deposits
                 -- leaves the rest for this trip, like a stall.
                 if state.deposited>0 then
                     leave(order(snap.list),'the stash panel did not open again after '..C.MAX_INTERACTIONS..' interactions')

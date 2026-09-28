@@ -29,6 +29,12 @@
 -- after FIRST_WAIT + SECOND_WAIT (12 + 5) idle passes with nothing moved
 -- ("The stash took nothing in 17 passes", retryable). Q5-4, Q5-5, Q5-9,
 -- Q5-14 and Q5-16 were adjusted to those bounds.
+-- QQT_Warpigz_v3 1.0.25 (review 2): once anything moved, the AFTER_DEPOSIT
+-- window starts only from pass FIRST_WAIT (12): a receipt early in a long
+-- stash load no longer ends the step while the list still loads. After 3
+-- quiet passes a pass sends only THIN (2) items in turn. Q5-4, Q5-5 (12
+-- commands for the one leftover rune) and Q5-14 (2 + 23 x 4 + 2 x 8) were
+-- adjusted to those bounds.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
 local checks, failures = 0, {}
@@ -197,7 +203,7 @@ case('Q5-4 one rune the stash never takes: skipped once for this trip, every oth
     expect_serviced(h, done, 'Q5-4')
     eq(left(h), 3, 'only the refused rune stays in the bag')
     eq(h.logged('Skipped Rune_Condition_Summons'), 1, 'the skip is logged once\n' .. h.tail(30))
-    ok(h.socket_moves[RUNE] <= 4, 'bounded commands for the refused rune (pass 1 + 3 idle passes): ' .. tostring(h.socket_moves[RUNE]))
+    ok(h.socket_moves[RUNE] <= 12, 'bounded commands for the refused rune (one per pass up to pass FIRST_WAIT): ' .. tostring(h.socket_moves[RUNE]))
     eq(h.logged('did not open'), 0, 'no stash-window failure')
 end)
 
@@ -207,7 +213,7 @@ case('Q5-5 the stash receives the rune but the bag list keeps it: re-sent only u
     print('   Q5-5 result: ' .. reason(done))
     expect_serviced(h, done, 'Q5-5')
     eq(left(h) - left(h, RUNE), 0, 'every gem stashed')
-    ok(h.socket_moves[RUNE] <= 4, 'the stale stack is re-sent at most until the stall: ' .. tostring(h.socket_moves[RUNE]))
+    ok(h.socket_moves[RUNE] <= 12, 'the stale stack is re-sent at most until the stall (pass FIRST_WAIT): ' .. tostring(h.socket_moves[RUNE]))
     eq(h.logged('Skipped Rune_Condition_Summons'), 1, 'the skip is logged once\n' .. h.tail(30))
 end)
 
@@ -340,7 +346,7 @@ case('Q5-13 a socketable whose get_name() raises is still stashed (the name is o
     eq(h.logged('Item metadata unavailable'), 0, 'no metadata failure')
 end)
 
-case('Q5-14 the stash accepts 2 stacks, then refuses everything: 3 idle passes end the step, bounded commands', function()
+case('Q5-14 the stash accepts 2 stacks, then refuses everything: the idle passes end the step at pass 12, bounded commands', function()
     local h = live_host({gems = 24})
     local lm, commands, accepted = h.G.loot_manager, 0, 0
     local move = lm.move_item_to_stash
@@ -355,10 +361,12 @@ case('Q5-14 the stash accepts 2 stacks, then refuses everything: 3 idle passes e
     local t0 = h.now
     local done = trip(h, 300)
     print(string.format('   Q5-14 result: %s commands=%d seconds=%.0f', reason(done), commands, h.now - t0))
-    eq(done[1], nil, 'the step ends once 3 passes move nothing (the bag need is gone): ' .. reason(done))
+    eq(done[1], nil, 'the step ends once the passes move nothing (the bag need is gone): ' .. reason(done))
     eq(tracker(h).stash_done, true, 'stash step done, not failed')
     eq(h.logged('Skipped Gem_Ruby_0'), 5, 'five per-item skip lines, then a summary\n' .. h.tail(12))
-    ok(commands <= 2 + 23 * 4, 'at most 2 + 23 x (1 + 3 idle passes) deposit commands: ' .. commands)
+    -- Pass 1 sends all 25 (2 move), passes 2-4 send the 23 left, passes 5-12
+    -- only THIN=2 each; the step ends at pass 12 (FIRST_WAIT).
+    ok(commands <= 2 + 23 * 4 + 2 * 8, 'at most 2 + 23 x 4 + 2 x 8 deposit commands: ' .. commands)
     eq(h.logged('timed out'), 0, 'ended by the idle-pass bound, not by a service timeout')
     eq(tracker(h).fail_permanent, false, 'retryable')
 end)
