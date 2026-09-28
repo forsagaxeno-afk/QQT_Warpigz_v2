@@ -15,6 +15,46 @@ local task = {
     status = status_enum['IDLE'],
     debounce_time = nil
 }
+-- QQT_Warpigz_v3 WonderCity 2.2.6: Kurast<->Temis ping-pong. Rosie serves
+-- Temis only, so a need left over from the run (need_repair, a full talisman
+-- bag, stash extras) used to cost 3 casts: exit to Kurast, Rosie's hop to
+-- Temis, teleport_kurast back. With such a need pending at run end the exit
+-- goes straight to Temis: Rosie serves there without a cast and
+-- teleport_kurast brings the player back (2 casts). Rosie only (RosiePlugin
+-- + AlfredTheButlerPlugin, enabled, not paused); the same rule as
+-- tasks/alfred.lua wants_trigger: need_trigger, and advisory-only needs
+-- (no inventory_full/need_repair) are left to WarPigs when it is enabled.
+local TEMIS_WAYPOINT = 0x1CE51E
+local exit_plan = {trigger = nil, waypoint = nil}
+local function rosie_need_pending()
+    local a = AlfredTheButlerPlugin
+    if type(RosiePlugin) ~= 'table' or type(a) ~= 'table' or type(a.get_status) ~= 'function' then return false end
+    local ok, st = pcall(a.get_status)
+    if not ok or type(st) ~= 'table' or st.enabled ~= true or st.paused == true then return false end
+    if st.need_trigger ~= true then return false end
+    if st.inventory_full == true or st.need_repair == true then return true end
+    local wp = WarPigsPlugin
+    if type(wp) == 'table' and type(wp.status) == 'function' then
+        local ok_wp, ws = pcall(wp.status)
+        if ok_wp and type(ws) == 'table' and ws.enabled == true then return false end
+    end
+    return true
+end
+-- Decided once per exit (keyed on tracker.exit_trigger_time), so the
+-- debounced re-cast targets the same waypoint.
+local function exit_waypoint()
+    if exit_plan.trigger ~= nil and exit_plan.trigger == tracker.exit_trigger_time then
+        return exit_plan.waypoint
+    end
+    local waypoint = settings.town_waypoint
+    if waypoint ~= TEMIS_WAYPOINT and rosie_need_pending() then
+        waypoint = TEMIS_WAYPOINT
+        console.print('[WonderCity] Rosie need pending at run end: teleporting out to Temis (Rosie serves there, then back to town)')
+    end
+    exit_plan.trigger, exit_plan.waypoint = tracker.exit_trigger_time, waypoint
+    return waypoint
+end
+
 local exit_with_debounce = function (delay)
     if tracker.exit_trigger_time + settings.exit_undercity_delay >= get_time_since_inject() then
         local wait_time = tracker.exit_trigger_time + settings.exit_undercity_delay - get_time_since_inject()
@@ -41,7 +81,7 @@ local exit_with_debounce = function (delay)
         task.status = status_enum['EXIT']
         if settings.exit_mode == 1 then
             console.print('teleport out')
-            teleport_to_waypoint(settings.town_waypoint)
+            teleport_to_waypoint(exit_waypoint()) -- QQT_Warpigz_v3 WonderCity 2.2.6: Temis when a Rosie need is pending
         else
             console.print('reset dungeon')
             reset_all_dungeons()
@@ -86,6 +126,6 @@ task.Execute = function ()
     end
 end
 
-task.reset = function () task.debounce_time = nil end
+task.reset = function () task.debounce_time = nil; exit_plan.trigger, exit_plan.waypoint = nil, nil end
 
 return task
