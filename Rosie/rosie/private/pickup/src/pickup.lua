@@ -24,7 +24,7 @@ local ROUND_STALL=6
 local PROGRESS=0.5
 local REST=8
 local MAX_ROUNDS=3
--- QQT_Warpigz_v3 1.0.25 (Discord: chest loot next to a standing player was
+-- QQT_Warpigz_v3 1.0.26 (Discord: chest loot next to a standing player was
 -- not taken until he stepped 2-3 m away; live Worldstone 'no progress,
 -- distance 2.1-2.8' lines). Rosie interacted only from where the player
 -- stood within REACH and only walked beyond it:
@@ -273,7 +273,7 @@ local function fail_round(e,now,why,item,d)
         why=='stall' and 'no progress toward it' or why=='yield' and 'another move kept taking the player off it' -- QQT_Warpigz_v3 1.0.22
             or 'interactions did not pick it up',d or -1))
     e.interacts=0;e.best=nil;e.best_at=nil;e.working=false;e.next=0
-    e.stepped,e.step_until,e.still_n,e.still_at=nil,nil,0,nil -- QQT_Warpigz_v3 1.0.25: one step-in per round
+    e.stepped,e.step_until,e.still_n,e.still_at=nil,nil,0,nil -- QQT_Warpigz_v3 1.0.26: one step-in per round
 end
 -- QQT_Warpigz_v3 (Q1): settle a drop (see the header); one line per drop and outcome.
 local function settle(id,item,why,line,retry,d)
@@ -291,7 +291,7 @@ local function settle(id,item,why,line,retry,d)
     if episode.since and why=='taken' then episode.since=now end -- only a pickup is progress (20 s budget)
     if why=='taken' then M.progress_at=now end -- QQT_Warpigz_v3 1.0.23 (review): the Scavenger mimic's cap
     local ok,interactable=pcall(function() return item:is_interactable() end)
-    -- QQT_Warpigz_v3 1.0.25: the one retry ended like the first attempt; it
+    -- QQT_Warpigz_v3 1.0.26: the one retry ended like the first attempt; it
     -- used to end silently.
     if before==why then
         console.print(string.format('[Rosie pickup] Second attempt at %s ended like the first (%s); ignoring it while the host lists it [interactable=%s]',
@@ -331,11 +331,11 @@ local function settled_spot(id,item)
     return nil
 end
 -- QQT_Warpigz_v3: true when this episode's budget is spent (see the header).
-local NAVSTOP -- QQT_Warpigz_v3 1.0.25: defined below (Navigator stop fallback)
+local NAVSTOP -- QQT_Warpigz_v3 1.0.26: defined below (Navigator stop fallback)
 local function episode_spent(now,e)
     if not episode.last or now-episode.last>=EPISODE_QUIET or now<(episode.last or now) then
         episode.since=now
-        if NAVSTOP then NAVSTOP.count,NAVSTOP.logged=0,false end -- QQT_Warpigz_v3 1.0.25: a new pickup episode
+        if NAVSTOP then NAVSTOP.count,NAVSTOP.logged=0,false end -- QQT_Warpigz_v3 1.0.26: a new pickup episode
     end
     episode.last=now
     if now-episode.since<EPISODE_BUDGET then return false end
@@ -355,21 +355,31 @@ end
 -- QQT_Warpigz_v3 (Q1 review): true while the player cannot act on a drop
 -- (see the header): casting, a live enemy within fight_radius m, or the host
 -- kept its current move instead of Rosie's pickup move. Read at most every 0.25 s.
--- QQT_Warpigz_v3 1.0.25: the player's cast, sampled every pulse (main.lua
+-- QQT_Warpigz_v3 1.0.26: the player's cast, sampled every pulse (main.lua
 -- M.sample_cast) for the fight hold's engaged rule. G.cast_seen: the host has
 -- reported a cast at least once this session (proof the reading works).
--- QQT_Warpigz_v3 1.0.25 (review): the Town Portal channel (186139, as in
+-- QQT_Warpigz_v3 1.0.26 (review): the Town Portal channel (186139, as in
 -- Batmobile utils.in_combat) is a cast but no fight evidence: it never
 -- proves the reading nor marks the player engaged (a trip-drop lend
 -- channels next to monsters).
 local TP_CHANNEL=186139
+-- QQT_Warpigz_v3 1.0.29 (post-release review): each spell id that counts as
+-- a cast (sets cast_at) is logged once per session, at most CAST_LOG.max ids,
+-- so the owner's log shows whether interaction or pickup ids count as casts.
+local CAST_LOG={seen={},n=0,max=32}
 local function cast_now(now)
     local spell=Utils.call(Utils.host_call(rawget(_G,'get_local_player')),'get_active_spell_id')
     local on=type(spell)=='number' and spell>0
-    if on and spell~=TP_CHANNEL then G.cast_seen=true;G.cast_at=now end
-    return on
+    if on and spell~=TP_CHANNEL then
+        G.cast_seen=true;G.cast_at=now
+        if not CAST_LOG.seen[spell] and CAST_LOG.n<CAST_LOG.max then
+            CAST_LOG.seen[spell]=true;CAST_LOG.n=CAST_LOG.n+1
+            console.print(string.format('[Rosie pickup] Active spell id %d counts as a cast (logged once per id)',spell))
+        end
+    end
+    return on,spell
 end
--- QQT_Warpigz_v3 1.0.25 (review round 3): the player's recent positions,
+-- QQT_Warpigz_v3 1.0.26 (review round 3): the player's recent positions,
 -- sampled every TRAIL.gap s by M.sample_cast (the last TRAIL.n), for the
 -- engaged rule's 'toward' reading. The host keeps reporting an old move
 -- destination after the player stops (test_rosie_back_forth_332 B7): a
@@ -408,10 +418,10 @@ end
 function M.sample_cast(now)
     now=now or get_time_since_inject()
     pcall(cast_now,now)
-    pcall(note_trail,now) -- QQT_Warpigz_v3 1.0.25 (review round 3)
+    pcall(note_trail,now) -- QQT_Warpigz_v3 1.0.26 (review round 3)
 end
-local engaged -- QQT_Warpigz_v3 1.0.25: defined with FIGHT below
--- QQT_Warpigz_v3 1.0.25 (review): G.fight_src says why the player cannot act
+local engaged -- QQT_Warpigz_v3 1.0.26: defined with FIGHT below
+-- QQT_Warpigz_v3 1.0.26 (review): G.fight_src says why the player cannot act
 -- ('cast', 'kept' or 'enemy'); for 'enemy' G.fight_engaged says whether that
 -- fight engages the player (the fight hold's engaged rule). A listed but
 -- passive enemy still keeps interactions from counting as CLEAR, but no
@@ -419,7 +429,15 @@ local engaged -- QQT_Warpigz_v3 1.0.25: defined with FIGHT below
 local function fighting(now)
     if G.fight_at and now>=G.fight_at and now-G.fight_at<0.25 then return G.fight end
     G.fight_at=now
-    local fight=cast_now(now) -- QQT_Warpigz_v3 1.0.25: also the engaged rule's cast evidence
+    local on,spell=cast_now(now) -- QQT_Warpigz_v3 1.0.26: also the engaged rule's cast evidence
+    -- QQT_Warpigz_v3 1.0.29 (scenario sweep R3): a travel channel (the Town
+    -- Portal / waypoint channel, 186139), Rosie's or another plugin's (an
+    -- activity's exit), is no fight: the step onto a drop in reach goes on
+    -- (a walk breaks the channel) instead of the drop being left behind.
+    -- It still pauses the settle evidence (src 'travel': no CLEAR time while
+    -- interactions may not take); an enemy or a kept move still wins.
+    local travel=on and spell==TP_CHANNEL
+    local fight=on and not travel
     local src=fight and 'cast' or nil
     if not fight then
         local st=Utils.host_call(G.movement.status)
@@ -432,11 +450,12 @@ local function fighting(now)
         local near,_,d=Utils.enemy_near(G.fight_radius)
         if near then fight,src=true,'enemy';G.fight_engaged=engaged(now,d)~=nil end
     end
+    if not fight and travel then fight,src=true,'travel' end -- QQT_Warpigz_v3 1.0.29 (R3)
     G.fight,G.fight_src=fight==true,src
     return G.fight
 end
 -- QQT_Warpigz_v3 3.3.2: FIGHT hold and YIELD to another mover (see the header).
--- QQT_Warpigz_v3 1.0.25 (Discord: chest loot left silently until the player
+-- QQT_Warpigz_v3 1.0.26 (Discord: chest loot left silently until the player
 -- stepped 2-3 m): a passive monster near a chest held its drops beyond 3 m
 -- for up to 45 s with no line. The hold now STARTS only when the player is
 -- engaged: a counted enemy (utils.lua valid_enemy) within FIGHT.engage m, or
@@ -445,7 +464,7 @@ end
 -- within fight_radius starts it (1.0.24). Once on, the 14 m / FIGHT.calm s
 -- exit and the FIGHT.max cap are unchanged. Each hold episode prints one
 -- line naming the nearest enemy (M.fight_report).
--- QQT_Warpigz_v3 1.0.25 (review: live the host reports casts, so the engaged
+-- QQT_Warpigz_v3 1.0.26 (review: live the host reports casts, so the engaged
 -- rule is the live path; a farm plugin walking the player to an enemy the
 -- rotation cannot reach yet had no cast and the enemy was 8 m off, and Rosie
 -- walked 7 m the other way, test_activities_fight_hold_332 A2): also engaged
@@ -455,12 +474,12 @@ end
 -- counted enemy. The line says
 -- when the hold started only through the unproven cast reading.
 local FIGHT={feet=REACH+1,margin=4,calm=1.0,max=45,on=false,engage=6,cast=3,toward=4}
--- QQT_Warpigz_v3 1.0.25: held/held_gap, see foreign_move (Navigator grace).
+-- QQT_Warpigz_v3 1.0.26: held/held_gap, see foreign_move (Navigator grace).
 local YIELD={confirm=0.3,rest=4,max=30,far=REACH+0.5,sent=1.5,moved=0.5,per_round=2,held=2.5,held_gap=1.0}
 M.limits.fight_feet,M.limits.fight_calm,M.limits.fight_max=FIGHT.feet,FIGHT.calm,FIGHT.max
 M.limits.yield_rest,M.limits.yield_max=YIELD.rest,YIELD.max
 M.limits.yield_per_round=YIELD.per_round -- QQT_Warpigz_v3 1.0.22
-M.limits.fight_engage,M.limits.fight_cast,M.limits.yield_held=FIGHT.engage,FIGHT.cast,YIELD.held -- QQT_Warpigz_v3 1.0.25
+M.limits.fight_engage,M.limits.fight_cast,M.limits.yield_held=FIGHT.engage,FIGHT.cast,YIELD.held -- QQT_Warpigz_v3 1.0.26
 M.limits.step_after,M.limits.step_min,M.limits.band_far,M.limits.band_stall=STEP.after,STEP.min,BAND.far,BAND.stall
 -- QQT_Warpigz_v3 1.0.22: a drop that waits for the fight is published as
 -- LooteerPlugin.has_pending_loot(). Until every exit guard (Arkham, Reaper,
@@ -482,7 +501,7 @@ engaged=function(now,who_d)
     if type(who_d)=='number' and who_d<=FIGHT.engage then return 'near' end
     local player=Utils.host_call(rawget(_G,'get_local_player'))
     local dest,here=xy(Utils.call(player,'get_move_destination')),xy(Utils.call(player,'get_position'))
-    -- QQT_Warpigz_v3 1.0.25 (review round 3): only while the player moves (TRAIL)
+    -- QQT_Warpigz_v3 1.0.26 (review round 3): only while the player moves (TRAIL)
     if dest and here and flat(dest,here)>1 and player_moving(now,here) then
         local st=Utils.host_call(G.movement.status)
         local sent=type(st)=='table' and st.sent
@@ -506,7 +525,7 @@ local function fight_hold(now)
     end
     FIGHT.at=now
     local near,who,who_d=Utils.enemy_near(FIGHT.on and G.fight_radius+FIGHT.margin or G.fight_radius)
-    -- QQT_Warpigz_v3 1.0.25: a hold starts only when engaged (see FIGHT).
+    -- QQT_Warpigz_v3 1.0.26: a hold starts only when engaged (see FIGHT).
     local why
     if near and not FIGHT.on then
         local w,a,d=engaged(now,who_d)
@@ -516,7 +535,7 @@ local function fight_hold(now)
         FIGHT.last=now
         if not FIGHT.on then
             FIGHT.on,FIGHT.since,FIGHT.capped,FIGHT.reported=true,now,nil,nil
-            FIGHT.who=tostring(Utils.call(who,'get_skin_name') or 'an enemy'):gsub('[\r\n]',' '):sub(1,60) -- QQT_Warpigz_v3 1.0.25
+            FIGHT.who=tostring(Utils.call(who,'get_skin_name') or 'an enemy'):gsub('[\r\n]',' '):sub(1,60) -- QQT_Warpigz_v3 1.0.26
             FIGHT.who_d=type(who_d)=='number' and who_d or -1
             FIGHT.why=why
         end
@@ -531,7 +550,7 @@ local function fight_hold(now)
 end
 -- QQT_Warpigz_v3 1.0.22: keep the hold observed while a wanted drop rests.
 function M.fight_refresh(now) fight_hold(now or get_time_since_inject()) end
--- QQT_Warpigz_v3 1.0.25: `n` wanted drops wait for this hold (item_manager
+-- QQT_Warpigz_v3 1.0.26: `n` wanted drops wait for this hold (item_manager
 -- choose); one line per hold episode, and the count for the status line.
 function M.fight_report(n,now)
     now=now or get_time_since_inject()
@@ -539,16 +558,16 @@ function M.fight_report(n,now)
     M.fight_waiting_n,M.fight_waiting_at=n,now
     if FIGHT.reported then return end
     FIGHT.reported=true
-    -- QQT_Warpigz_v3 1.0.25 (review): say when only the unproven cast reading started it.
+    -- QQT_Warpigz_v3 1.0.26 (review): say when only the unproven cast reading started it.
     console.print(string.format('[Rosie pickup] %d drop(s) wait for the fight (%s at %.1f m)%s',n,FIGHT.who or 'an enemy',FIGHT.who_d or -1,
         FIGHT.why=='unproven' and string.format('; the host has not reported a cast yet, so any enemy within %d m holds them',G.fight_radius) or ''))
 end
--- QQT_Warpigz_v3 1.0.25 (Navigator review, calm tail): the hold is on but no
+-- QQT_Warpigz_v3 1.0.26 (Navigator review, calm tail): the hold is on but no
 -- counted enemy is within fight_radius+margin m (the last kill's FIGHT.calm
 -- s). pickup/main.lua reports the Scavenger stand-in busy meanwhile, so
 -- Worldstone does not leave before Rosie's first step (never while an enemy
 -- is that near).
--- QQT_Warpigz_v3 1.0.25 (review): read from the hold's last evaluation
+-- QQT_Warpigz_v3 1.0.26 (review): read from the hold's last evaluation
 -- (choose() evaluates it every pulse a drop waits, cached 0.25 s): no enemy
 -- scan of its own.
 function M.calm_tail()
@@ -562,12 +581,12 @@ function M.fight_deferred(item,now)
     local d=Utils.distance_to(item)
     if d==math.huge then return false end
     now=now or get_time_since_inject()
-    if d>FIGHT.feet and fight_hold(now) then return true,'fight' end -- QQT_Warpigz_v3 1.0.25: why
+    if d>FIGHT.feet and fight_hold(now) then return true,'fight' end -- QQT_Warpigz_v3 1.0.26: why
     if d<=REACH or type(M.walk_hold)~='function' then return false end
     local ok,hold=pcall(M.walk_hold,now)
     return ok and hold==true,'walk'
 end
--- QQT_Warpigz_v3 1.0.25 (Navigator review, cause 2): diagnostics while
+-- QQT_Warpigz_v3 1.0.26 (Navigator review, cause 2): diagnostics while
 -- Rosie acts as Scavenger for Worldstone only (her own _G.Scavenger table,
 -- _rosie=true, is published): is "Rosie Looting" true, how long the grace
 -- ran, what Navigator.get_status() says and Rosie's movement detail.
@@ -592,7 +611,7 @@ function M.nav_diag(e,now)
         e and e.held_since and string.format('%.1fs',math.max(0,now-e.held_since)) or 'none',s,
         type(mv)=='table' and tostring(mv.detail) or '?'):gsub('[\r\n]',' '))
 end
--- QQT_Warpigz_v3 1.0.25 (review, blocker): the grace below applies only
+-- QQT_Warpigz_v3 1.0.26 (review, blocker): the grace below applies only
 -- while Navigator has a live request (get_status: is_busy, or a state other
 -- than idle/arrived/failed; read at most every 0.25 s). The mimic is in
 -- effect whenever the Worldstone .pak publishes its global, even with
@@ -612,11 +631,11 @@ local function nav_live(now)
     NAVLIVE.on=on==true
     return NAVLIVE.on
 end
--- QQT_Warpigz_v3 1.0.25 (Navigator review, cause 2 fallback): a Navigator
+-- QQT_Warpigz_v3 1.0.26 (Navigator review, cause 2 fallback): a Navigator
 -- that ignores "Rosie Looting" gets one stop() per drop, at most per_episode
 -- per pickup episode and NAVSTOP.gap s apart (foreign.lua's quiet_navigator
 -- pattern), logged once per episode; Worldstone re-issues its navigate().
--- QQT_Warpigz_v3 1.0.25 (review): only on positive evidence that Navigator
+-- QQT_Warpigz_v3 1.0.26 (review): only on positive evidence that Navigator
 -- itself still drives: a NEW foreign command (the destination moved more
 -- than NAVSTOP.moved m, or it came back after Rosie's own move held the
 -- path) NAVSTOP.after s or more into the grace, while get_status says busy,
@@ -624,7 +643,7 @@ end
 -- read up to about 1 s late is never stopped. Watchdog (M.nav_watch): when
 -- Navigator stays idle NAVSTOP.idle s after a stop while Rosie does not hold
 -- it, that is logged once and Rosie stops Navigator no more this session.
--- QQT_Warpigz_v3 1.0.25 (review round 3): a new foreign destination does
+-- QQT_Warpigz_v3 1.0.26 (review round 3): a new foreign destination does
 -- not have to be Navigator's. With a Navigator that honours the hold but
 -- never reports is_paused, a rotation's evade point or another mover's step
 -- during the grace got it stopped, and if Worldstone did not navigate again
@@ -644,9 +663,17 @@ end
 -- Both read NAVSTOP.after s or more into the grace.
 -- The watchdog reads Navigator fresh (M.nav_watch): the 0.25 s nav_live
 -- cache still held the reading from before the stop.
-NAVSTOP={after=1.2,moved=1.0,gap=1.0,per_episode=5,idle=5,count=0,last=nil,logged=false,off=false,watch=nil,idle_from=nil,
+NAVSTOP={after=1.2,moved=1.0,gap=1.0,per_episode=5,idle=5,count=0,last=nil,logged=false,off=false,watch=nil,idle_from=nil,saw_idle=false,
     span=0.5,gain=0.5,settle=0.5}
--- QQT_Warpigz_v3 1.0.25 (review round 3): the OUT-COMMANDED and PROGRESS
+-- QQT_Warpigz_v3 1.0.29 (post-release review): the fight guard of the stop
+-- and of the grace (foreign_move): a player cast within FIGHT.cast s or a
+-- counted enemy within fight_radius m (a rotation or orbwalker moves the
+-- player then; engaged or not).
+local function nav_fight(now)
+    if G.cast_at and now>=G.cast_at and now-G.cast_at<=FIGHT.cast then return true end
+    return Utils.enemy_near(G.fight_radius)==true
+end
+-- QQT_Warpigz_v3 1.0.26 (review round 3): the OUT-COMMANDED and PROGRESS
 -- reading, every NAVSTOP.span s of the grace (e.nav_s: the last one).
 local function nav_progress(e,now)
     local s=e.nav_s
@@ -664,19 +691,18 @@ end
 function M.nav_stop(e,item,now)
     if NAVSTOP.off or e.nav_stopped or not e.held_since or now-e.held_since<NAVSTOP.after then return false end
     if not (e.nav_new_at and e.nav_new_at-e.held_since>=NAVSTOP.after) then return false end
-    -- QQT_Warpigz_v3 1.0.25 (review round 3): Navigator's own progress (the last reading)
+    -- QQT_Warpigz_v3 1.0.26 (review round 3): Navigator's own progress (the last reading)
     if not (e.nav_prog_at and e.nav_prog_at-e.held_since>=NAVSTOP.after) then return false end
     if NAVSTOP.count>=NAVSTOP.per_episode or (NAVSTOP.last and now>=NAVSTOP.last and now-NAVSTOP.last<NAVSTOP.gap) then return false end
     local nav=rawget(_G,'Navigator')
     if type(nav)~='table' or type(nav.get_status)~='function' or type(nav.stop)~='function' then return false end
-    -- QQT_Warpigz_v3 1.0.25 (review round 3): no fight (see NAVSTOP)
-    if G.cast_at and now>=G.cast_at and now-G.cast_at<=FIGHT.cast then return false end
-    if Utils.enemy_near(G.fight_radius) then return false end
+    -- QQT_Warpigz_v3 1.0.26 (review round 3): no fight (see NAVSTOP)
+    if nav_fight(now) then return false end -- QQT_Warpigz_v3 1.0.29: shared with the grace
     local ok,st=pcall(nav.get_status)
     if not ok or type(st)~='table' or st.is_busy~=true or st.is_paused==true or st.owner=='Rosie' or st.owner=='Butler' then return false end
     e.nav_stopped=true
     NAVSTOP.count,NAVSTOP.last=NAVSTOP.count+1,now
-    NAVSTOP.watch,NAVSTOP.idle_from=now,nil
+    NAVSTOP.watch,NAVSTOP.idle_from,NAVSTOP.saw_idle=now,nil,false
     local line=M.nav_diag(e,now)
     pcall(nav.stop)
     if not NAVSTOP.logged then
@@ -687,7 +713,7 @@ function M.nav_stop(e,item,now)
     return true
 end
 -- Every pulse (pickup/main.lua): the watchdog after a Rosie stop (see NAVSTOP).
--- QQT_Warpigz_v3 1.0.25 (review round 3): only a reading taken NAVSTOP.settle
+-- QQT_Warpigz_v3 1.0.26 (review round 3): only a reading taken NAVSTOP.settle
 -- s or more after the stop disarms it (the cached one came from before the
 -- stop; a Navigator may still read busy on the frame of its stop).
 function M.nav_watch(now)
@@ -696,17 +722,23 @@ function M.nav_watch(now)
     if now<NAVSTOP.watch then NAVSTOP.watch,NAVSTOP.idle_from=nil,nil;return end -- the clock went back
     if now-NAVSTOP.watch<NAVSTOP.settle then return end
     if not (NAVLIVE.at and NAVLIVE.at>=NAVSTOP.watch+NAVSTOP.settle and NAVLIVE.at<=now) then NAVLIVE.at=nil end -- a fresh read
-    if nav_live(now) then NAVSTOP.watch,NAVSTOP.idle_from=nil,nil;return end -- something navigated again
+    -- QQT_Warpigz_v3 1.0.29 (post-release review): only an idle -> busy
+    -- transition after the stop disarms it (something navigated again). A
+    -- Navigator that keeps reporting busy for a while after stop() is not a
+    -- new request; that reading counts toward the idle clock like an idle one.
+    local live=nav_live(now)
+    if live and NAVSTOP.saw_idle then NAVSTOP.watch,NAVSTOP.idle_from,NAVSTOP.saw_idle=nil,nil,false;return end
+    if not live then NAVSTOP.saw_idle=true end
     local held=false
     if type(M.nav_held)=='function' then local ok,h=pcall(M.nav_held,now);held=ok and h==true end
     if held or (NAVSTOP.idle_from and now<NAVSTOP.idle_from) then NAVSTOP.idle_from=nil;return end -- Rosie's hold explains it
     NAVSTOP.idle_from=NAVSTOP.idle_from or now
     if now-NAVSTOP.idle_from<NAVSTOP.idle then return end
-    NAVSTOP.watch,NAVSTOP.idle_from,NAVSTOP.off=nil,nil,true
+    NAVSTOP.watch,NAVSTOP.idle_from,NAVSTOP.off,NAVSTOP.saw_idle=nil,nil,true,false
     console.print(string.format('[Rosie pickup] Navigator has stayed idle %ds since Rosie stopped its request and nothing navigated again; Rosie will not stop Navigator again this session%s',
         NAVSTOP.idle,M.nav_diag(nil,now)))
 end
--- QQT_Warpigz_v3 1.0.25 (review round 3): at live frame rates a Navigator
+-- QQT_Warpigz_v3 1.0.26 (review round 3): at live frame rates a Navigator
 -- that ignores the hold and has no stop() can carry the player out of the
 -- Distance range inside the 2.5 s grace; the drop then left the wanted list
 -- with no line at all (1.0.24 printed the yield line with Navigator's state
@@ -736,8 +768,8 @@ local function foreign_move(e,item,now)
     local player=Utils.host_call(rawget(_G,'get_local_player'))
     local dest,here,spot=xy(Utils.call(player,'get_move_destination')),xy(Utils.call(player,'get_position')),xy(Utils.call(item,'get_position'))
     if not dest or not here or not spot then e.foreign=nil;return false end
-    -- QQT_Warpigz_v3 1.0.25: e.own_at, a sample with no foreign destination (NAVSTOP's evidence)
-    -- QQT_Warpigz_v3 1.0.25 (review round 3): e.own_last, never cleared (NAVSTOP OUT-COMMANDED)
+    -- QQT_Warpigz_v3 1.0.26: e.own_at, a sample with no foreign destination (NAVSTOP's evidence)
+    -- QQT_Warpigz_v3 1.0.26 (review round 3): e.own_last, never cleared (NAVSTOP OUT-COMMANDED)
     if flat(dest,here)<=YIELD.far or flat(dest,spot)<=YIELD.far then e.foreign=nil;e.own_at,e.own_last=now,now;return false end
     -- QQT_Warpigz_v3 1.0.23 (review): a yielded drop in REACH is only
     -- interacted with (no move): the mover carrying the player over it is no
@@ -746,7 +778,7 @@ local function foreign_move(e,item,now)
     local st=movement_owned and Utils.host_call(G.movement.status)
     local sent=type(st)=='table' and st.owner=='pickup' and st.sent
     if sent and flat(dest,sent)<=YIELD.sent then e.foreign=nil;e.own_at,e.own_last=now,now;return false end
-    -- QQT_Warpigz_v3 1.0.25 (live 3.3.5, Worldstone: 2-4 yields 0.4 s apart,
+    -- QQT_Warpigz_v3 1.0.26 (live 3.3.5, Worldstone: 2-4 yields 0.4 s apart,
     -- then the portal): while Rosie's own "Rosie Looting" condition holds
     -- Navigator (M.nav_held, scavenger_mimic.lua), a foreign destination is
     -- Navigator's command still in flight (the host skips request_move while
@@ -755,26 +787,31 @@ local function foreign_move(e,item,now)
     -- rosie/movement.lua) for up to YIELD.held s per drop (a gap of more
     -- than YIELD.held_gap s starts it again); a yield ends the grace for that
     -- drop (held_spent). Without Worldstone nav_held is false: 1.0.21 as is.
-    -- QQT_Warpigz_v3 1.0.25 (review): and only while Navigator has a live
+    -- QQT_Warpigz_v3 1.0.26 (review): and only while Navigator has a live
     -- request (nav_live): beside an idle Worldstone a farm mover gets the
     -- 1.0.24 yield.
-    -- QQT_Warpigz_v3 1.0.25 (review round 3): or Rosie stopped Navigator for
+    -- QQT_Warpigz_v3 1.0.26 (review round 3): or Rosie stopped Navigator for
     -- this drop (idle now, its last command can still be in flight).
-    if type(M.nav_held)=='function' and not e.held_spent and (e.nav_stopped or nav_live(now)) then
+    -- QQT_Warpigz_v3 1.0.29 (post-release review): no grace in a fight (the
+    -- stop's guard, nav_fight): the force re-assert walked the player to a
+    -- drop the fight hold does not defer (an enemy it does not count as
+    -- engaged, or a drop within FIGHT.feet during a cast) against the
+    -- rotation's moves. A foreign move in a fight gets the 1.0.24 yield.
+    if type(M.nav_held)=='function' and not e.held_spent and (e.nav_stopped or nav_live(now)) and not nav_fight(now) then
         local okh,held=pcall(M.nav_held,now)
         if okh and held==true then
             if e.held_last and (now<e.held_last or now-e.held_last>YIELD.held_gap) then e.held_since,e.nav_ref,e.nav_new_at=nil,nil,nil end
             e.held_last=now
             if not e.held_since then
                 e.held_since,e.nav_ref,e.own_at=now,dest,nil
-                e.nav_s,e.nav_prog_at=nil,nil -- QQT_Warpigz_v3 1.0.25 (review round 3): NAVSTOP's reading starts with the grace
+                e.nav_s,e.nav_prog_at=nil,nil -- QQT_Warpigz_v3 1.0.26 (review round 3): NAVSTOP's reading starts with the grace
             end
             -- a NEW foreign command while held (NAVSTOP's evidence)
             if flat(dest,e.nav_ref)>NAVSTOP.moved or (e.own_at and e.own_at>e.held_since) then e.nav_ref,e.nav_new_at,e.own_at=dest,now,nil end
             if now-e.held_since<YIELD.held then
                 e.foreign=nil;e.reassert=true
-                GRACE.e,GRACE.item=e,item -- QQT_Warpigz_v3 1.0.25 (review round 3): see GRACE
-                nav_progress(e,now) -- QQT_Warpigz_v3 1.0.25 (review round 3): see NAVSTOP
+                GRACE.e,GRACE.item=e,item -- QQT_Warpigz_v3 1.0.26 (review round 3): see GRACE
+                nav_progress(e,now) -- QQT_Warpigz_v3 1.0.26 (review round 3): see NAVSTOP
                 M.nav_stop(e,item,now)
                 return false
             end
@@ -789,14 +826,14 @@ local function stand_down(e,item,now)
     e.yields=(e.yields or 0)+1
     local rest=math.min(YIELD.rest*2^(e.yields-1),YIELD.max)
     e.yield_until=now+rest;e.working=false;e.next=0;e.foreign=nil;e.best=nil;e.best_at=nil
-    if e.held_since then e.held_spent=true end -- QQT_Warpigz_v3 1.0.25: one Navigator grace per drop
+    if e.held_since then e.held_spent=true end -- QQT_Warpigz_v3 1.0.26: one Navigator grace per drop
     e.reassert=nil
     if Utils.enemy_near(G.fight_radius) then e.fight_yield=true end -- QQT_Warpigz_v3 1.0.22: see M.blocked
     if movement_owned then pcall(G.movement.yield,'pickup') end -- never clears the other mover's path
     movement_owned=false;movement_key=nil
     if e.yields<=3 then
         console.print(string.format('[Rosie pickup] Another move took the player off %s; leaving it for %ds (yield %d)%s',
-            item_name(item),rest,e.yields,M.nav_diag(e,now))) -- QQT_Warpigz_v3 1.0.25: Navigator state beside Worldstone
+            item_name(item),rest,e.yields,M.nav_diag(e,now))) -- QQT_Warpigz_v3 1.0.26: Navigator state beside Worldstone
     end
     -- QQT_Warpigz_v3 1.0.22: a yield counted no round, so a drop that kept
     -- losing the path came back every YIELD.max s forever. Every
@@ -818,10 +855,10 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
             e.desc=ok_desc and desc or nil
         end
         e.world=G.world
-        e.key=id -- QQT_Warpigz_v3 1.0.25 (review round 3): GRACE
+        e.key=id -- QQT_Warpigz_v3 1.0.26 (review round 3): GRACE
         entries[id]=e
     end
-    e.step_at=now -- QQT_Warpigz_v3 1.0.25 (review round 3): the last pulse that worked it (GRACE)
+    e.step_at=now -- QQT_Warpigz_v3 1.0.26 (review round 3): the last pulse that worked it (GRACE)
     -- QQT_Warpigz_v3 (Q1): another drop went first meanwhile (it may share
     -- this SNO): read this drop's bag baseline again before its next interaction.
     if G.last~=id then e.receipt=nil;G.last=id end
@@ -835,10 +872,10 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
     -- QQT_Warpigz_v3 (Q1 review): CLEAR time in reach (see the header).
     local fight=fighting(now)
     if fight then e.fight_at=now end
-    -- QQT_Warpigz_v3 1.0.25 (review): a fight that engages the player (see
+    -- QQT_Warpigz_v3 1.0.26 (review): a fight that engages the player (see
     -- fighting); a listed but passive enemy is still no CLEAR time, but it
     -- no longer blocks the step-in (a Discord chest next to a passive monster).
-    local engaged_fight=fight and (G.fight_src~='enemy' or G.fight_engaged==true)
+    local engaged_fight=fight and G.fight_src~='travel' and (G.fight_src~='enemy' or G.fight_engaged==true) -- QQT_Warpigz_v3 1.0.29: not the travel channel (R3)
     if d<=REACH and not fight then
         if e.clear_last and now>=e.clear_last and now-e.clear_last<=0.5 then e.clear=(e.clear or 0)+now-e.clear_last end
         e.clear_last=now
@@ -852,11 +889,11 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
         end
     end
     if e.class=='nonbag' and e.reach>=G.nonbag_interacts and (e.clear or 0)>=G.nonbag_clear then -- QQT_Warpigz_v3 (Q1 review)
-        if (e.near or 0)>=G.nonbag_interacts or Utils.call(item,'is_interactable')==false then -- QQT_Warpigz_v3 1.0.25: see STEP
+        if (e.near or 0)>=G.nonbag_interacts or Utils.call(item,'is_interactable')==false then -- QQT_Warpigz_v3 1.0.26: see STEP
             settle(id,item,'taken',' (it goes to no bag; the host still lists it on the ground, ignoring it)',true,d)
             M.release_movement();return false
         end
-        -- QQT_Warpigz_v3 1.0.25 (review): the round's step-in is over and the
+        -- QQT_Warpigz_v3 1.0.26 (review): the round's step-in is over and the
         -- player is still farther than STEP.min m (body-blocked, an altar
         -- edge): no 'Took' without the proof, and no 3 rounds of busy either
         -- (the 1.0.24 ghost timing); one more attempt when the route brings
@@ -893,7 +930,7 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
         fail_round(e,now,'stall',item,d);M.release_movement();return e.rounds<MAX_ROUNDS
     end
     if e.interacts>=ROUND_INTERACTS then fail_round(e,now,'interact',item,d);M.release_movement();return e.rounds<MAX_ROUNDS end
-    -- QQT_Warpigz_v3 1.0.25: a step-in under way (see STEP) keeps its move
+    -- QQT_Warpigz_v3 1.0.26: a step-in under way (see STEP) keeps its move
     -- until the player is on the drop, STEP.time s passed or it left reach.
     if e.step_until then
         if d<=REACH and now<e.step_until and d>STEP.arrive+STEP.slack and e.step_to then
@@ -902,9 +939,9 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
         end
         e.step_until,e.next=nil,0
     end
-    -- QQT_Warpigz_v3 1.0.25: re-assert the walk at once under the Navigator
+    -- QQT_Warpigz_v3 1.0.26: re-assert the walk at once under the Navigator
     -- grace (foreign_move), inside a short force window (rosie/movement.lua).
-    -- QQT_Warpigz_v3 1.0.25 (review): only a walk tick skips its gap; an
+    -- QQT_Warpigz_v3 1.0.26 (review): only a walk tick skips its gap; an
     -- interaction (in reach or a band tick) keeps its gap (the grace
     -- re-asserts on every pulse; interact_object was sent every frame). A
     -- band walk tick under the grace is followed by its interaction tick
@@ -916,7 +953,7 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
         if d>REACH and (not band or e.band_walk==true) then e.next=0;pcall(G.movement.force_for,'pickup',0.5) end
     end
     if now<e.next then return e.working==true end
-    -- QQT_Warpigz_v3 1.0.25: the walk-only band (see BAND). Its ticks
+    -- QQT_Warpigz_v3 1.0.26: the walk-only band (see BAND). Its ticks
     -- alternate an interaction and the walk (a planned route keeps advancing).
     local band_walk=band and e.band_walk==true
     if band then e.band_walk=not band_walk end
@@ -933,7 +970,7 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
         movement_owned=true
         movement_key=id
     elseif band then
-        -- QQT_Warpigz_v3 1.0.25: interact from here; the walk's own move is
+        -- QQT_Warpigz_v3 1.0.26: interact from here; the walk's own move is
         -- kept (not released), the next tick walks again.
         e.next=now+BAND.gap
         if not e.band_logged then
@@ -945,11 +982,11 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
         e.touched=true
         pcall(interact_object,item)
     else
-        -- QQT_Warpigz_v3 1.0.25: step onto a drop in-reach interactions do not
+        -- QQT_Warpigz_v3 1.0.26: step onto a drop in-reach interactions do not
         -- take while the player stands still (see STEP).
         local here=xy(Utils.call(Utils.host_call(rawget(_G,'get_local_player')),'get_position'))
         if not here or not e.still_at or flat(here,e.still_at)>STEP.still then e.still_at,e.still_n=here,0 end
-        if not engaged_fight and not e.stepped and d>STEP.min and (e.still_n or 0)>=STEP.after then -- QQT_Warpigz_v3 1.0.25 (review): engaged
+        if not engaged_fight and not e.stepped and d>STEP.min and (e.still_n or 0)>=STEP.after then -- QQT_Warpigz_v3 1.0.26 (review): engaged
             e.stepped=true
             e.step_to=M.step_target(item)
             if e.step_to then
@@ -971,15 +1008,15 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
         local p=point_of(item)
         if p and e.spot and (math.abs(p.x-e.spot.x)>G.same_spot or math.abs(p.y-e.spot.y)>G.same_spot) then
             e.reach=0;e.clear=0;e.spot=nil -- QQT_Warpigz_v3 (Q1 review): another spot, another count
-            e.near=0 -- QQT_Warpigz_v3 1.0.25
+            e.near=0 -- QQT_Warpigz_v3 1.0.26
         end
         if not e.spot then e.spot=p end
         if e.bag and e.receipt==nil then e.receipt=Utils.sno_count(e.bag,e.sno) end
         if not fight then
             e.reach=e.reach+1 -- QQT_Warpigz_v3 (Q1 review): only CLEAR interactions count
-            if d<=STEP.min then e.near=(e.near or 0)+1 end -- QQT_Warpigz_v3 1.0.25: the no-bag settle's evidence
+            if d<=STEP.min then e.near=(e.near or 0)+1 end -- QQT_Warpigz_v3 1.0.26: the no-bag settle's evidence
         end
-        -- QQT_Warpigz_v3 1.0.25 (review): the step-in's count follows the engaged rule, not CLEAR
+        -- QQT_Warpigz_v3 1.0.26 (review): the step-in's count follows the engaged rule, not CLEAR
         if not engaged_fight and Utils.call(item,'is_interactable')~=false then e.still_n=(e.still_n or 0)+1 end
         e.interacts=e.interacts+1
         e.touched=true -- QQT_Warpigz_v3: suite event
@@ -988,7 +1025,7 @@ function M.step(item,kind,bag) -- QQT_Warpigz_v3 (Q1): kind and bag from ItemMan
     e.working=true
     return true
 end
--- QQT_Warpigz_v3 1.0.25: the step-in target: the drop's spot with its height
+-- QQT_Warpigz_v3 1.0.26: the step-in target: the drop's spot with its height
 -- snapped to the ground (utility.set_height_of_valid_position).
 function M.step_target(item)
     local p=point_of(item)
@@ -1008,6 +1045,6 @@ function M.reset(clear_movement)
     G.fight_at,G.fight=nil,nil -- QQT_Warpigz_v3 (Q1 review)
     episode.since,episode.last,episode.capped_until=nil,nil,0 -- QQT_Warpigz_v3
     FIGHT.on,FIGHT.at,FIGHT.since,FIGHT.last,FIGHT.capped=false,nil,nil,nil,nil -- QQT_Warpigz_v3 3.3.2
-    FIGHT.reported,FIGHT.why,M.fight_waiting_n=nil,nil,nil -- QQT_Warpigz_v3 1.0.25 (G.cast_seen is a host fact: kept)
+    FIGHT.reported,FIGHT.why,M.fight_waiting_n=nil,nil,nil -- QQT_Warpigz_v3 1.0.26 (G.cast_seen is a host fact: kept)
 end
 return M

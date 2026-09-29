@@ -135,7 +135,7 @@ function M.is_busy()
     return ok and busy==true
 end
 local function condition() return M.is_busy() end
-Pickup.nav_held=function() return M.is_busy() end -- QQT_Warpigz_v3 1.0.25: "Rosie Looting" holds Navigator now (pickup.lua foreign_move grace)
+Pickup.nav_held=function() return M.is_busy() end -- QQT_Warpigz_v3 1.0.26: "Rosie Looting" holds Navigator now (pickup.lua foreign_move grace)
 -- Pause keyed by the caller (see the header). 'Rosie' is Rosie's own
 -- town-trip pause and keeps that name to itself.
 local function caller_of(caller)

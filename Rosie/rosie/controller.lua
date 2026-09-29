@@ -99,7 +99,7 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.28';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.29';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
         -- QQT_Warpigz_v3 1.0.23: Rosie as Scavenger for Worldstone/Navigator

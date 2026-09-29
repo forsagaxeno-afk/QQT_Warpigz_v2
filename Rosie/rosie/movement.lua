@@ -92,7 +92,7 @@ function M.retry_cleanup()
     if state.releasing then M.release(state.owner,true) end
     return not state.releasing and #inherited_cleanup==0
 end
--- QQT_Warpigz_v3 1.0.25: `arrive` (optional, m, 3D) replaces the 1.5 m
+-- QQT_Warpigz_v3 1.0.26: `arrive` (optional, m, 3D) replaces the 1.5 m
 -- arrival: pickup's step-in onto a drop 1.2-2 m away needs about 0.3 m, or
 -- the request would be released as already arrived.
 function M.move(owner,target,arrive)
@@ -117,7 +117,7 @@ function M.move(owner,target,arrive)
         state.anchor=here;state.progress_at=now;state.route=nil;state.recovery=0;state.overrides=0
         state.sent=nil -- QQT_Warpigz_v3 3.3.2
     end
-    local radius=type(arrive)=='number' and arrive>0 and arrive<1.5 and arrive or 1.5 -- QQT_Warpigz_v3 1.0.25
+    local radius=type(arrive)=='number' and arrive>0 and arrive<1.5 and arrive or 1.5 -- QQT_Warpigz_v3 1.0.26
     if distance(here,goal)<=radius then M.release(owner);return true end
     if distance(here,state.anchor)>=0.4 then state.anchor=here;state.progress_at=now;state.recovery=0 end
     if now-state.progress_at>=3 then
@@ -155,7 +155,7 @@ function M.move(owner,target,arrive)
     state.requests=state.requests+1
     state.sent=state.route[state.index] -- QQT_Warpigz_v3 3.3.2: see M.status
     if not ok then state.detail='Movement request refused';return false end
-    -- QQT_Warpigz_v3 1.0.25 (live 3.3.5, Worldstone): the host skips
+    -- QQT_Warpigz_v3 1.0.26 (live 3.3.5, Worldstone): the host skips
     -- request_move while the player still walks another mover's command, and
     -- clear_stored_path may not stop that command. Inside a short window the
     -- owner opened (M.force_for: pickup re-asserting its walk while Rosie's
@@ -163,7 +163,7 @@ function M.move(owner,target,arrive)
     -- skipped request whose player destination is more than 1.5 m off is sent
     -- once more with force_move_raw (a live API: Reaper tasks and
     -- HelltideRevamped explorerlite.lua call it). At most once per pace (0.2 s).
-    -- QQT_Warpigz_v3 1.0.25 (review): the destination is compared in 2D (a
+    -- QQT_Warpigz_v3 1.0.26 (review): the destination is compared in 2D (a
     -- ramp, or a destination read with z=0, forced every resend).
     if result==false and state.force_until and state.force_owner==owner and now<state.force_until
         and type(native.force_move_raw)=='function' then
@@ -190,7 +190,7 @@ function M.move(owner,target,arrive)
         or 'Walking to '..owner..' destination'
     return true
 end
--- QQT_Warpigz_v3 1.0.25: open the force window above for `owner` (see M.move).
+-- QQT_Warpigz_v3 1.0.26: open the force window above for `owner` (see M.move).
 function M.force_for(owner,seconds)
     if state.owner~=nil and state.owner~=owner then return false end
     state.force_owner=owner
@@ -198,7 +198,7 @@ function M.force_for(owner,seconds)
     return true
 end
 function M.for_owner(owner)
-    return {request_move=function(target,arrive) return M.move(owner,target,arrive) end, -- QQT_Warpigz_v3 1.0.25: arrive
+    return {request_move=function(target,arrive) return M.move(owner,target,arrive) end, -- QQT_Warpigz_v3 1.0.26: arrive
         clear_stored_path=function() return M.release(owner) end}
 end
 return M

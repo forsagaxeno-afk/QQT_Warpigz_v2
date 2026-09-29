@@ -119,14 +119,16 @@ local function run(o)
         nav.arrive = opts.arrive_distance or 2
         return 1
     end
-    if not o.no_stop then function nav.api.stop() nav.active = false; nav.stops = nav.stops + 1 end end
+    if not o.no_stop then function nav.api.stop() nav.active = false; nav.stops = nav.stops + 1; nav.stopped_at = h.now end end
+    -- QQT_Warpigz_v3 1.0.29: o.linger: get_status keeps reporting busy that many s after stop()
+    local function busy() return nav.active or (o.linger ~= nil and nav.stopped_at ~= nil and h.now - nav.stopped_at < o.linger) end
     if o.status ~= 'missing' then
         function nav.api.get_status()
             nav.status_calls = nav.status_calls + 1
             if o.status == 'raises' then error('Navigator.get_status exploded') end
-            return {state = nav.active and 'travelling' or 'idle', owner = 'Worldstone', is_busy = nav.active,
+            return {state = busy() and 'travelling' or 'idle', owner = 'Worldstone', is_busy = busy(),
                 is_paused = o.paused_flag ~= 'never' and nav.last_paused == true, priority = 0, mode = 'travel',
-                remaining_distance = o.rd ~= 'none' and (nav.active and nav.target and h.pos:dist_to_ignore_z(nav.target) or 0) or nil}
+                remaining_distance = o.rd ~= 'none' and (busy() and nav.target and h.pos:dist_to_ignore_z(nav.target) or 0) or nil}
         end
     end
     function nav.step(hh)
@@ -558,6 +560,25 @@ case('N19 guard: a Navigator that ignores the hold but reports no remaining_dist
     eq(r.nav.stops, 0, 'no stop()\n' .. rosie_tail(r.h))
     -- one yield after the grace, or (dragged out of the Distance range first, finer frames) the "no longer wanted" line
     eq(#r.yields + #(r.lost or {}), 1, 'one line after the grace\n' .. rosie_tail(r.h))
+    ok(r.portal_t ~= nil, 'the portal is reached')
+end)
+
+-- QQT_Warpigz_v3 1.0.29 (post-release review of 1.0.26): the watchdog
+-- disarmed on any busy reading 0.5 s or more after Navigator.stop(); a real
+-- Navigator that keeps reporting busy for a while after stop() never let it
+-- fire. Only an idle -> busy transition disarms it now.
+case('N20 a Navigator that keeps reporting busy after stop() (3 s, or for good): the watchdog still fires once and Rosie stops no more', function()
+    for _, linger in ipairs({3, 1e9}) do
+        local r = run({label = 'N20 ignore + stop, renav never, busy lingers ' .. linger, model = 'ignore', look = 6, nav_last = true,
+            renav = 'never', limit = 30, linger = linger})
+        eq(r.nav.stops, 1, 'linger ' .. linger .. ': one stop()\n' .. rosie_tail(r.h))
+        eq(r.h.logged('[Rosie pickup] Navigator has stayed idle 5s since Rosie stopped its request'), 1,
+            'linger ' .. linger .. ': the watchdog line (1.0.28: none, a lingering busy reading disarmed it)\n' .. rosie_tail(r.h))
+    end
+end)
+case('N21 guard: Worldstone navigating again after the stop (idle, then busy) still disarms the watchdog', function()
+    local r = run({label = 'N21 ignore + stop, renav idle', model = 'ignore', look = 6, nav_last = true, limit = 40})
+    eq(r.h.logged('[Rosie pickup] Navigator has stayed idle'), 0, 'no watchdog line while Worldstone navigates again\n' .. rosie_tail(r.h))
     ok(r.portal_t ~= nil, 'the portal is reached')
 end)
 

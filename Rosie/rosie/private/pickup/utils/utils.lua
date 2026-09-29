@@ -130,7 +130,7 @@ function Utils.walkable_near(x,y,z,reach)
 end
 -- QQT_Warpigz_v3 (Q1 review): a live enemy within `radius` m of the player
 -- (the fight that swallows pickup interactions and moves). false when unknown.
--- QQT_Warpigz_v3 1.0.25 (Discord, chest loot left silently): the host list
+-- QQT_Warpigz_v3 1.0.26 (Discord, chest loot left silently): the host list
 -- also holds actors the rotation never fights (1-HP apparitions and totems,
 -- untargetable actors, monsters on another floor); each one held chest drops
 -- beyond 3 m for up to 45 s. An actor counts only with more than 1 HP, not
@@ -165,7 +165,7 @@ function Utils.enemy_near(radius)
     if best then return true,best,best_d end
     return false
 end
--- QQT_Warpigz_v3 1.0.25 (review): the fight hold's engaged rule
+-- QQT_Warpigz_v3 1.0.26 (review): the fight hold's engaged rule
 -- (pickup.lua) asks whether a counted enemy within `radius` m is an elite,
 -- champion or boss, or lies within `toward` m of the point `dest` another
 -- mover takes the player to. Returns the reason ('elite'/'toward'), the actor
