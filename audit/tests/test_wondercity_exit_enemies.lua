@@ -35,7 +35,7 @@ local function reward_done(o)
     local h = J.new({dirs = {'Batmobile', 'WonderCity'}, place = 'undercity'})
     h.assert_clean('load')
     local wc = h.mod('WonderCity', 'gui').elements
-    wc.skip_tribute:set(true); wc.exit_mode:set(1); wc.exit_undercity_delay:set(0)
+    wc.skip_tribute:set(true); wc.exit_mode:set(1); wc.exit_undercity_delay:set(o.delay or 0)
     local chest = h.actor('undercity', 'X1_Undercity_Chest_Attunement', 5, 0)
     chest.on_interact = function() chest.interactable = false end
     wc.main_toggle:set(true)
@@ -91,6 +91,28 @@ case('W3-D a forced exit (run timeout) casts at once with enemies next to the pl
     local mark = h.now
     ok(h.run_until(function() return casts(h) > 0 end, 2), 'the forced exit is cast\n' .. h.tail(20))
     ok(h.waypoints[1].t - mark <= 1, 'at once')
+end)
+
+-- QQT_Warpigz_v3 WonderCity 2.2.8 (3.3.13 review #3).
+case('W3-E with an exit delay of 25 s the enemy hold still applies after the delay', function()
+    local h = reward_done({immortal = true, delay = 25})
+    local due
+    ok(h.run_until(function() due = due or h.tracker.exit_trigger_time; return due ~= nil end, 10), 'the exit is due')
+    h.run(25 + 8 - (h.now - due))
+    eq(casts(h), 0, 'no exit cast into the fight 8 s after the delay')
+    ok(h.run_until(function() return casts(h) > 0 end, 20), 'cast within the 20 s hold after the delay\n' .. h.tail(20))
+end)
+
+case('W3-F a forced exit during the re-cast back-off is cast at once', function()
+    local h = reward_done({immortal = true})
+    ok(h.run_until(function() return casts(h) > 0 end, 30), 'first cast')
+    cut_channels(h, 25)
+    ok(h.logged('backing off 30s') == 1, 'in the back-off\n' .. h.tail(20))
+    local before = casts(h)
+    h.tracker.undercity_start_time = h.now - 10000
+    h.tracker.reward_grace_until = h.now - 1
+    ok(h.run_until(function() return casts(h) > before end, 6),
+        'the forced exit is not held by the back-off\n' .. h.tail(20))
 end)
 
 if #failures > 0 then error(#failures .. ' WonderCity exit enemies case(s) failed:\n' .. table.concat(failures, '\n')) end

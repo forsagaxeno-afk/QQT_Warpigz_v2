@@ -42,6 +42,7 @@ task.Execute = function ()
         walk.key, walk.best, walk.best_at = key, dist, now
     elseif now - walk.best_at >= RL.STALL then
         state.skipped[key] = true
+        state.tick_at = nil -- QQT_Warpigz_v3 WonderCity 2.2.8: rescan without it
         walk.key, walk.best, walk.best_at = nil, nil, nil
         console.print(string.format('[WonderCity:finish] reward loot %s: no progress for %ds at %.1fm - skipping it',
             key, RL.STALL, dist))
@@ -58,6 +59,7 @@ task.Execute = function ()
     local pos = target.get_position and target:get_position() or target
     if BatmobilePlugin.set_target(plugin_label, pos) == false then
         state.skipped[key] = true
+        state.tick_at = nil -- QQT_Warpigz_v3 WonderCity 2.2.8: rescan without it
         console.print('[WonderCity:finish] reward loot ' .. tostring(key) .. ': Batmobile rejected the target - skipping it')
         utils.stop_movement()
         return

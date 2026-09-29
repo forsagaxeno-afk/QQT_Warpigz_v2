@@ -124,5 +124,38 @@ case('W2 a floor exit without a switch in view keeps the pad as the way down (op
     eq(h.as('WonderCity', function() return portal_task.shouldExecute() end), true, 'the pad drives the portal task')
 end)
 
+-- QQT_Warpigz_v3 WonderCity 2.2.8 (3.3.13 review #1): a Grand Beacon clicked
+-- but never lit is marked done on its interact timeout, so beacon_lit() read
+-- the out-of-view exit as open while the switch stayed locked: the player
+-- walked back, found it locked, the explorer took it away, and again, with
+-- no bound. Walk-backs are capped per floor.
+case('W2-D a beacon clicked but not lit: the walk back to the locked exit is bounded per floor', function()
+    local h = beacon_floor(-55)
+    h.beacon.on_interact = function() end -- the click does not light it
+    h.run(1)
+    h.pos, h.goal = h.v(-52, 3), nil
+    -- Live the exit actors drop out of the actor list far away (40 m here).
+    local listed, arrivals = true, 0
+    local function stream()
+        local near = h.pos:dist_to(h.switch.pos) <= 40
+        if near ~= listed then
+            listed = near
+            if near and h.manager.get_current_task() == h.portal_task then arrivals = arrivals + 1 end
+            if near then
+                local list = h.P.undercity.actors
+                list[#list + 1] = h.pad; list[#list + 1] = h.switch
+            else
+                h.remove_actor(h.pad); h.remove_actor(h.switch)
+            end
+        end
+    end
+    h.run(240, function()
+        stream()
+    end)
+    print('  walk-backs that reached the locked exit in 240 s: ' .. arrivals)
+    ok(arrivals <= 2, 'walk-backs to a locked exit per floor: ' .. arrivals .. '\n' .. h.tail(20))
+    eq(#h.errors, 0, 'no host errors')
+end)
+
 if #failures > 0 then error(#failures .. ' WonderCity beacon exit case(s) failed:\n' .. table.concat(failures, '\n')) end
 print('WonderCity beacon exit: ' .. checks .. ' checks')

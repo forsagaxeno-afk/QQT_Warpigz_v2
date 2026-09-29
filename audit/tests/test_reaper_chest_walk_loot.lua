@@ -107,6 +107,22 @@ case('W2 the hold is bounded: a Looter that never idles releases the walk at ~75
     eq(c.count('leaving the lair without waiting any longer'), 1, 'bound logged once')
 end)
 
+-- QQT_Warpigz_v3 Reaper 1.10.8 (3.3.13 review #2): the chest walk and the
+-- post-chest wait shared one 75 s Looter bound; a walk that spent it left
+-- the lair at once, before the Looter picked up the chest drops.
+case('W4 a bound spent on the chest walk does not release the post-chest loot wait', function()
+    local state = {busy = true}
+    local e, c = boot(looter_api(state))
+    c.run(80, 0.5)
+    ok(c.interactions >= 1, 'chest opened after the walk bound')
+    c.actors({})  -- the chest is spent: it drops its loot and goes away
+    c.run(40, 0.5)
+    eq(c.count('Run complete'), 0, 'the run waits for the Looter picking up the chest drops')
+    state.busy = false
+    c.run(10, 0.5)
+    ok(c.count('Run complete') >= 1, 'the run completes once the Looter is idle')
+end)
+
 case('W3 control: without a Looter the chest walk starts at once', function()
     local e, c = boot(nil)
     c.run(2, 0.2)
