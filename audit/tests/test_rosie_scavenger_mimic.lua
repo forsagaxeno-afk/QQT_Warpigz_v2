@@ -48,7 +48,10 @@ local function new(opts)
     eq(h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end), true, 'RosiePlugin.enable()')
     h.frame()
     pgui(h).general.distance_slider:set(opts.distance or 12)
-    if opts.option == false then pgui(h).act_as_scavenger:set(false) end
+    if opts.option == false then
+        pgui(h).act_as_scavenger:set(false)
+        pgui(h).act_as_butler:set(false) -- QQT_Warpigz_v3 1.0.31: the old behaviour has no stand-in at all (b2 compares the logs)
+    end
     return h
 end
 local function legendary(h, x, y, fields)

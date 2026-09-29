@@ -99,7 +99,7 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.30';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.31';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
         -- QQT_Warpigz_v3 1.0.23: Rosie as Scavenger for Worldstone/Navigator
@@ -112,6 +112,20 @@ function M.new(cached,conflict)
             enabled=function() return enabled() and loot_gui.elements.main_toggle:get()==true end,
             town_busy=function() return life.busy() and true or false end,
             option=function() return loot_gui.elements.act_as_scavenger:get()==true end})
+        -- QQT_Warpigz_v3 1.0.31 (owner: Worldstone v0.1.9 requires Butler): Rosie
+        -- stands in for Butler (rosie/private/butler_mimic.lua), bound to this instance.
+        app.butler=require('rosie.private.butler_mimic')
+        app.butler.configure({alive=function() return app.active and not conflict end,
+            option=function() return loot_gui.elements.act_as_butler:get()==true end,
+            busy=function() return life.busy() and true or false end,
+            will_run=function()
+                if not enabled() or settings.enabled~=true or life.busy() then return false end
+                local s=town.get_status()
+                return s.need_trigger==true and s.stuck~=true and settings.get_keybind_state()==true and not life.auto_blocked()
+            end,
+            status=function() return town.get_status() end,
+            in_town=function() return town_utils.is_in_town()==true end,
+            step=function() local t=app.task_manager.get_current_task();return type(t)=='table' and t.name or nil end})
         for _,key in ipairs({'trigger_tasks','trigger_tasks_with_teleport'}) do
             local original=town[key]
             town[key]=function(...)
@@ -166,6 +180,7 @@ function M.new(cached,conflict)
             conflict='Another pickup or town addon loaded. Unload it, then reload Rosie.'
             app.conflict=conflict;app.elements.enabled:set(false)
             if app.mimic then app.mimic.retire() end -- QQT_Warpigz_v3 1.0.23 (review): own Scavenger table and its pauses go
+            if app.butler then app.butler.retire() end -- QQT_Warpigz_v3 1.0.31
             Movement.yield('pickup');Movement.yield('town')
             town.shutdown();loot.shutdown()
             return false
@@ -260,6 +275,7 @@ function M.new(cached,conflict)
         end
         if not installation_valid() then return end
         if app.mimic then app.mimic.tick() end -- QQT_Warpigz_v3 1.0.23: publish/remove the Scavenger table (guarded)
+        if app.butler then app.butler.tick() end -- QQT_Warpigz_v3 1.0.31: the Butler stand-in (guarded)
         -- QQT_Warpigz_v3 (Q6): close a panel Rosie's own service opened, also
         -- after the trip, a stop or a disable (bounded: town/core/vendor.lua).
         if app.town_vendor then pcall(app.town_vendor.close_tick) end
@@ -374,6 +390,7 @@ function M.new(cached,conflict)
             -- QQT_Warpigz_v3 1.0.23 (review): the retired instance removes its own
             -- Scavenger table and releases its pauses; the next one republishes at once.
             if app.mimic then app.api._scavenger_handoff=app.mimic.retire() end
+            if app.butler then app.butler.retire() end -- QQT_Warpigz_v3 1.0.31: the next instance republishes on its first pulse
             app.active=false
             if town then town.shutdown() end
             if loot then loot.shutdown() end

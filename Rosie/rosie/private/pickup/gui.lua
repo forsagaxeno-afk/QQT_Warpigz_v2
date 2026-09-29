@@ -159,6 +159,9 @@ gui.elements.item_types.other_consumable_items_toggle=gui.elements.item_types.ot
 -- QQT_Warpigz_v3 1.0.23: Rosie answers Worldstone's looter calls (only while Worldstone runs, no Scavenger addon installed).
 gui.elements.act_as_scavenger=gui.elements.act_as_scavenger
    or checkbox:new(true,get_hash(plugin_label.."_act_as_scavenger"))
+-- QQT_Warpigz_v3 1.0.31: Rosie answers Worldstone's town-service calls (only while Worldstone runs, no Butler addon installed).
+gui.elements.act_as_butler=gui.elements.act_as_butler
+   or checkbox:new(true,get_hash(plugin_label.."_act_as_butler"))
 
 local menu_stack,menu_error={},nil
 local function push_tree(node,label)
@@ -184,6 +187,9 @@ local function render_settings(status)
    -- QQT_Warpigz_v3 1.0.23: see rosie/private/scavenger_mimic.lua.
    gui.elements.act_as_scavenger:render("Act as Scavenger for Worldstone/Navigator",
       "Only while Worldstone runs and no Scavenger addon is installed: Worldstone and Navigator wait while Rosie walks to a drop and picks it up (at most 20 s without a pickup, 60 s in one go). In a fight Rosie takes only drops at the feet (Navigator waits for that moment); drops farther away wait until the fight is over (at most 45 s). Off: Rosie does not pose as Scavenger.")
+   -- QQT_Warpigz_v3 1.0.31: see rosie/private/butler_mimic.lua.
+   gui.elements.act_as_butler:render("Stand in for Butler while Worldstone runs",
+      "Only while Worldstone runs and no Butler addon is installed: Worldstone stands still while Rosie runs a town trip, and asks Rosie (as Butler) whether the bag needs a town visit. Off: Rosie does not pose as Butler.")
 
    if push_tree(gui.elements.general.tree,"General Settings") then
       gui.elements.general.behavior_combo:render("Behavior", options.behaviors,
