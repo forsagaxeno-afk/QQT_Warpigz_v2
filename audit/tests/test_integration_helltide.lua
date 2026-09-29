@@ -1186,6 +1186,38 @@ case('2.6.4 a minute of patrol and chest walks logs at most 20 lines per debug t
     ok(d.logged('[PATROL]') > 20, 'Debug log on: the patrol lines are logged (' .. d.logged('[PATROL]') .. ')')
 end)
 
+-- QQT_Warpigz_v3 2.6.5 (review of 2.6.4, a): the 15 s cap fired before the
+-- trip (_loot_capped stayed set), so the first busy tick after the trip
+-- returned "not holding" and HR walked off the portal-spot drops. A gap of
+-- 2 s or more starts a new Looter episode.
+case('2.6.5 a Looter hold capped before a Rosie trip starts afresh after it', function()
+    local s = session({salvage = true, zone = 'Scos_Coast'})
+    rosie_like(s)
+    s.full = false
+    s.tick(5)
+    s.looting = true                 -- a long pickup with no new bag item
+    s.tick(17)
+    eq(s.logged('without progress — farming on'), 1, 'the 15 s cap fired before the trip')
+    s.full = true                    -- the trip starts while Rosie is still busy
+    s.tick(0.2)
+    eq(#s.triggers, 1, 'trip requested')
+    s.looting = false
+    s.alfred_cb_at = s.now + 40
+    local prev = s.before_tick
+    s.before_tick = function()
+        local had = s.alfred_cb_at
+        prev()
+        if had and not s.alfred_cb_at then s.looting = true end -- back: drops at the portal spot
+    end
+    s.tick(40.5)
+    local held = 0
+    for _ = 1, 80 do
+        s.tick(0.1)
+        if s.helltide.hold_reason == 'waiting for Looter to finish' then held = held + 1 end
+    end
+    ok(held >= 70, 'HR held for the Looter after the trip: ' .. held .. '/80 ticks')
+end)
+
 print(string.format('Helltide integration: %d cases, %d checks, %d failures', cases, checks, #failures))
 if #failures > 0 then error('Helltide integration failures:\n' .. table.concat(failures, '\n')) end
 print('PASS: test_integration_helltide (' .. cases .. ' cases)')

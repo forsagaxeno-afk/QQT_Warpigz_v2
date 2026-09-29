@@ -2,6 +2,24 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.16] — 2026-09-29
+
+### Changed
+
+- **Rosie 1.0.28: one "2. Uniques" section** (owner request: Unique settings were spread over 3-4 places, and the Item Power slider kept every Unique).
+  - Keep, storage & town → **2. Uniques** now holds everything about Uniques: "Pick up every Unique" (moved from the top of the menu; its saved value is kept), the list **Uniques I keep** (was "Unique items I always keep"), the new toggle **Keep checked Uniques only when Ancestral** (default off = as before), the Greater Affix rule, both "Otherwise" actions and "Uniques to salvage or sell".
+  - Recipe "keep only my checked Ancestral Uniques, salvage the rest": tick them, turn the toggle on, both Otherwise = Salvage, Greater Affixes 0, in-game loot filter off.
+  - The "Keep Uniques with Item Power at least" slider is removed (at endgame nearly every Unique drops at max item power, so it kept them all). A saved value above 0 still shows as "Old: …" until you set it to 0.
+  - Mythics are unchanged ("1. Always keep"). In "Drop on the spot" mode a checked Unique is left to the town trip (no drop and pick-up loop).
+  - The other sections are renumbered: 3. In-game loot filter, 4. Items marked as junk; the order in which rules decide is unchanged.
+
+### Fixed
+
+- **HelltideRevamped 2.6.5**
+  - After a Rosie trip or a revive the loot hold starts fresh, so drops at the portal spot are not left behind.
+  - At :55 the teleport waits for held-back drops only when there are some.
+  - Road planning caches its exits and refreshes them only when the learned fence really changes.
+
 ## [3.3.15] — 2026-09-29
 
 ### Fixed

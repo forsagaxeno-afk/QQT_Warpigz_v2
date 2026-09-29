@@ -249,6 +249,18 @@ local function in_area(w, pos)
     return w.start_pos ~= nil and pdist(w.start_pos, pos) <= C.AROUND_M
 end
 
+-- QQT_Warpigz_v3 2.6.5: a wanted drop within radius of pos is on the ground.
+function M.wanted_near(pos, radius)
+    local am = rawget(_G, 'actors_manager')
+    local ok, items = pcall(function() return am.get_all_items() end)
+    if not ok or type(items) ~= 'table' then return false end
+    for _, item in pairs(items) do
+        local ip = mcall(item, 'get_position')
+        if ip and pdist(pos, ip) <= radius and wanted(item) then return true end
+    end
+    return false
+end
+
 -- Nearest wanted drop in the event area that was not given up (scanned at
 -- most every SCAN_TTL; the current target is kept while it is listed).
 local function pick_target(w, t)

@@ -1581,7 +1581,7 @@ local function check_events(self)
     -- Periodic summary when nothing triggered — reveals blind spots
     if not self._last_check_events_debug then self._last_check_events_debug = 0 end
     local now_ce = get_time_since_inject()
-    if settings.debug_log and now_ce - self._last_check_events_debug > 5 then
+    if settings.debug_log and now_ce - self._last_check_events_debug > 5 then -- QQT_Warpigz_v3 2.6.4: Debug log
         self._last_check_events_debug = now_ce
         local cinders = get_helltide_coin_cinders()
         local rem_count = 0
@@ -2081,7 +2081,7 @@ local helltide_task = {
 
         -- Throttled debug
         if not self._last_trav_debug then self._last_trav_debug = 0 end
-        if settings.debug_log and now - self._last_trav_debug > 2 then
+        if settings.debug_log and now - self._last_trav_debug > 2 then -- QQT_Warpigz_v3 2.6.4: Debug log
             self._last_trav_debug = now
             local elapsed = now - trav_start_time
             local z_diff = trav_start_pos and math.abs(player_pos:z() - trav_start_pos:z()) or 0
@@ -2191,7 +2191,7 @@ local helltide_task = {
             local dist_from_stuck = patrol_stuck_pos and player_pos:dist_to(patrol_stuck_pos) or 0
             -- Throttled debug
             if not self._last_patrol_debug then self._last_patrol_debug = 0 end
-            if settings.debug_log and now - self._last_patrol_debug > 2 then
+            if settings.debug_log and now - self._last_patrol_debug > 2 then -- QQT_Warpigz_v3 2.6.4: Debug log
                 self._last_patrol_debug = now
                 console.print(string.format("[PATROL] FREE_EXPLORE | moved=%.1f stuck_for=%.1fs | player=(%.1f,%.1f)",
                     dist_from_stuck, now - patrol_free_explore_start, player_pos:x(), player_pos:y()))
@@ -2386,7 +2386,7 @@ local helltide_task = {
             end
 
             if not self._last_patrol_debug then self._last_patrol_debug = 0 end
-            if settings.debug_log and now - self._last_patrol_debug > 2 then
+            if settings.debug_log and now - self._last_patrol_debug > 2 then -- QQT_Warpigz_v3 2.6.4: Debug log
                 self._last_patrol_debug = now
                 local player_speed = get_local_player():get_current_speed()
                 local stuck_elapsed = patrol_stuck_time and (now - patrol_stuck_time) or 0
@@ -2893,7 +2893,7 @@ local helltide_task = {
         -- Throttled debug
         if not self._last_hchest_debug then self._last_hchest_debug = 0 end
         local now = get_time_since_inject()
-        if settings.debug_log and now - self._last_hchest_debug > 2 then
+        if settings.debug_log and now - self._last_hchest_debug > 2 then -- QQT_Warpigz_v3 2.6.4: Debug log
             self._last_hchest_debug = now
             local player_pos = get_player_position()
             local speed = get_local_player():get_current_speed()
@@ -3214,7 +3214,7 @@ local helltide_task = {
         -- Throttled debug logging
         if not self._last_recall_debug then self._last_recall_debug = 0 end
         local now = get_time_since_inject()
-        if settings.debug_log and now - self._last_recall_debug > 2 then
+        if settings.debug_log and now - self._last_recall_debug > 2 then -- QQT_Warpigz_v3 2.6.4: Debug log
             self._last_recall_debug = now
             local player_pos = get_player_position()
             local player_speed = get_local_player():get_current_speed()
@@ -3465,7 +3465,7 @@ local helltide_task = {
 
         -- Throttled debug
         if not self._last_farm_debug then self._last_farm_debug = 0 end
-        if settings.debug_log and now - self._last_farm_debug > 3 then
+        if settings.debug_log and now - self._last_farm_debug > 3 then -- QQT_Warpigz_v3 2.6.4: Debug log
             self._last_farm_debug = now
             local km_target = get_kill_target()
             console.print(string.format("[FARM CHEST] %s | need %d more cinders (%d/%d) | dist_to_chest=%.1f | has_target=%s",
@@ -3891,7 +3891,12 @@ local helltide_task = {
         local seen = self._loot_seen_at
         self._loot_seen_at = now
         local gap = seen and now - seen or 0
-        if gap >= 0.5 then
+        if gap >= 2 then
+            -- QQT_Warpigz_v3 2.6.5 (review of 2.6.4): a gap of 2 s or more (a
+            -- trip, a revive) starts a new Looter episode: a cap that fired
+            -- before it (_loot_capped) made HR walk off the portal-spot drops.
+            self._loot_since, self._loot_items, self._loot_capped, self._loot_quiet = nil, nil, nil, nil
+        elseif gap >= 0.5 then
             if self._loot_since then self._loot_since = self._loot_since + gap end
             if self._loot_quiet then self._loot_quiet = self._loot_quiet + gap end
         end
