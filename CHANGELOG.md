@@ -8,7 +8,7 @@ All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0
 
 - **Rosie 1.0.26: pickup next to Worldstone/Navigator and at close range** (live 3.3.5: Royal gems left behind under Worldstone; Discord: chest loot ignored until the player steps 2-3 m away).
   - While Rosie walks to a drop, Navigator gets a short grace (2.5 s per drop) instead of taking the player away at once; if Navigator keeps pulling the player off a drop, Rosie stops it at most once per drop (5 per pickup episode) and logs why.
-  - The fight hold starts only when you are really fighting (a cast, or an enemy that is alive, targetable and on your floor within 10 m), not next to a passive monster; one line per wait says it.
+  - The fight hold starts only when you are really fighting (your own cast, a live targetable enemy on your floor within 6 m, an elite/champion/boss within 10 m, or another mover taking you toward an enemy), not next to a passive monster; one line per wait says it.
   - Close range: a drop 1-3 m away that does not come into the bag after a few interactions makes Rosie step in (at most 1.2 s); in the 2-3 m band interacting alternates with a short walk. A drop counts as taken only when it really left the ground from 1.1 m or closer.
   - New one-line reasons when pickup waits: Scavenger busy, Orbwalker outside Clear mode, the fight hold.
 
@@ -30,7 +30,7 @@ All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0
   - The stash counts as open only when it has finished loading (its item count stays the same for 0.5 s, or the game reports the stash screen), so no item is sent while the game would drop it.
   - Every second Rosie sends every item that should be stashed; whatever did not move is simply sent again next pass. No item is skipped for the whole trip any more after one lost move.
   - Rosie still decides what goes in (Mythics, keep lists, talismans, materials and socketables by your settings), still closes the panel it opened with Escape, and the stash pull is unchanged.
-  - "Stash full" now comes from the game: only when deposits are really refused, or at 350 items, and the log names what stayed in the bag.
+  - "Stash full" is set only at 350 items (a refused deposit is retried, not taken as full), and the log names what stayed in the bag.
 
 ## [3.3.8] — 2026-09-28
 
