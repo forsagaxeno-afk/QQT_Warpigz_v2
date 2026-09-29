@@ -593,5 +593,42 @@ case('N21 guard: Worldstone navigating again after the stop (idle then busy, or 
     end
 end)
 
+-- QQT_Warpigz_v3 1.0.30 (Auditor review of 1.0.29, LOW): the watchdog read a
+-- busy Navigator that another pause condition held (is_paused=true) as idle
+-- and switched the stops off.
+case('Z2 Worldstone navigates again at once after the stop, but another pause condition holds Navigator 8 s (busy, is_paused=true, player standing): no watchdog off', function()
+    for _, fdt in ipairs({0.1, 0.05}) do
+        local r = run({label = 'Z2 renav at_once, other pause 8 s, frame ' .. fdt, model = 'ignore', look = 6, nav_last = true,
+            renav = 'at_once', limit = 40, fdt = fdt, setup = function(h, nav)
+                local base = nav.paused
+                nav.paused = function(hh)
+                    if nav.stopped_at and hh.now - nav.stopped_at > 0.1 and hh.now - nav.stopped_at < 8.1 then return true end
+                    return base(hh)
+                end
+            end})
+        eq(r.h.logged('[Rosie pickup] Navigator has stayed idle'), 0, 'frame ' .. fdt
+            .. ': Navigator navigated again (paused by another condition), no watchdog off (1.0.29: switched off)\n' .. rosie_tail(r.h))
+    end
+end)
+-- QQT_Warpigz_v3 1.0.30 (Auditor review, LOW): nav_moving compared
+-- remaining_distance with the reading at the stop; a pickup walk toward
+-- Navigator's target kept it below that reading for good and disarmed the
+-- watchdog. A rolling reference now.
+case('N22 after the stop Rosie walks 6 m toward Navigator\'s target for a drop, Navigator stays busy without moving: the watchdog still fires once', function()
+    local r = run({label = 'N22 ignore + stop, renav never, busy lingers, drop toward the target', model = 'ignore', look = 6, nav_last = true,
+        renav = 'never', limit = 30, linger = 1e9,
+        setup = function(h, nav)
+            local real = nav.api.stop
+            nav.api.stop = function()
+                real()
+                -- a second drop between the player and Navigator's target
+                h.at(0.6, function() h.drop('pit', h.pos:x() + 6, h.pos:y(), {name = 'Item_Gemstone_Royal_Ruby', sno = 265750, bag = 'socketables', rarity = 0}) end)
+            end
+        end})
+    eq(r.nav.stops, 1, 'one stop()\n' .. rosie_tail(r.h))
+    eq(r.h.logged('[Rosie pickup] Navigator has stayed idle 5s since Rosie stopped its request'), 1,
+        'the watchdog line (1.0.29: the walk toward the target disarmed it)\n' .. rosie_tail(r.h))
+end)
+
 print(string.format('rosie nav hold 1.0.25: %d checks, %d failures', checks, #failures))
 if #failures > 0 then error(#failures .. ' nav-hold case(s) failed: ' .. table.concat(failures, ' | ')) end

@@ -627,6 +627,8 @@ local function nav_live(now)
     if type(nav)=='table' and type(nav.get_status)=='function' then
         local ok,st=pcall(nav.get_status)
         on=ok and type(st)=='table' and (st.is_busy==true or (st.state~=nil and NAV_IDLE[tostring(st.state)]~=true))
+        NAVLIVE.paused=ok and type(st)=='table' and st.is_paused==true -- QQT_Warpigz_v3 1.0.30: see M.nav_watch
+    else NAVLIVE.paused=false
     end
     NAVLIVE.on=on==true
     return NAVLIVE.on
@@ -673,6 +675,17 @@ local function nav_fight(now)
     if G.cast_at and now>=G.cast_at and now-G.cast_at<=FIGHT.cast then return true end
     return Utils.enemy_near(G.fight_radius)==true
 end
+-- QQT_Warpigz_v3 1.0.30 (Auditor review of 1.0.29, HIGH): the grace's own
+-- guard counts a spell being cast right now (not the Town Portal channel) or
+-- a counted enemy within fight_radius, never the trailing FIGHT.cast window:
+-- after a kill that window kept the grace off for about 2 s (the fight hold
+-- ends after FIGHT.calm s) and Worldstone's portal command dragged the player
+-- off the post-kill drops; a rotation casting buffs kept it off for good.
+local function grace_fight()
+    local spell=Utils.call(Utils.host_call(rawget(_G,'get_local_player')),'get_active_spell_id')
+    if type(spell)=='number' and spell>0 and spell~=TP_CHANNEL then return true end
+    return Utils.enemy_near(G.fight_radius)==true
+end
 -- QQT_Warpigz_v3 1.0.26 (review round 3): the OUT-COMMANDED and PROGRESS
 -- reading, every NAVSTOP.span s of the grace (e.nav_s: the last one).
 local function nav_progress(e,now)
@@ -704,7 +717,7 @@ function M.nav_stop(e,item,now)
     NAVSTOP.count,NAVSTOP.last=NAVSTOP.count+1,now
     NAVSTOP.watch,NAVSTOP.idle_from,NAVSTOP.saw_idle=now,nil,false
     NAVSTOP.travelled,NAVSTOP.moved_at=0,nil -- QQT_Warpigz_v3 1.0.29: see M.nav_watch
-    NAVSTOP.rd0=type(st.remaining_distance)=='number' and st.remaining_distance==st.remaining_distance and st.remaining_distance or nil -- QQT_Warpigz_v3 1.0.29
+    NAVSTOP.rd_s,NAVSTOP.rd_fell=nil,false -- QQT_Warpigz_v3 1.0.30: M.nav_moving's rolling reference
     local line=M.nav_diag(e,now)
     pcall(nav.stop)
     if not NAVSTOP.logged then
@@ -724,12 +737,20 @@ function M.nav_moving(now)
         local sent=type(st)=='table' and st.sent
         if not (type(sent)=='table' and type(sent.x)=='number' and flat(dest,sent)<=YIELD.sent) then return true end
     end
-    if movement_owned or not NAVSTOP.rd0 then return false end
+    -- QQT_Warpigz_v3 1.0.30 (Auditor review, LOW): a rolling reference (a
+    -- fall of NAVSTOP.gain m within NAVSTOP.span s), not the reading at the
+    -- stop: a pickup walk toward Navigator's target kept remaining_distance
+    -- below that reading for good and disarmed the watchdog.
     local nav=rawget(_G,'Navigator')
     if type(nav)~='table' or type(nav.get_status)~='function' then return false end
     local ok,st=pcall(nav.get_status)
     local rd=ok and type(st)=='table' and st.remaining_distance
-    return type(rd)=='number' and rd==rd and NAVSTOP.rd0-rd>=NAVSTOP.gain
+    if type(rd)~='number' or rd~=rd then NAVSTOP.rd_s=nil;return false end
+    local s=NAVSTOP.rd_s
+    if s and now>=s.at and now-s.at<NAVSTOP.span then return NAVSTOP.rd_fell==true end
+    NAVSTOP.rd_fell=s~=nil and now>=s.at and not movement_owned and s.rd-rd>=NAVSTOP.gain
+    NAVSTOP.rd_s={rd=rd,at=now}
+    return NAVSTOP.rd_fell
 end
 -- Every pulse (pickup/main.lua): the watchdog after a Rosie stop (see NAVSTOP).
 -- QQT_Warpigz_v3 1.0.26 (review round 3): only a reading taken NAVSTOP.settle
@@ -755,6 +776,10 @@ function M.nav_watch(now)
     -- command still in flight at the stop walks the player on for a moment).
     local live=nav_live(now)
     if live and NAVSTOP.saw_idle then NAVSTOP.watch,NAVSTOP.idle_from,NAVSTOP.saw_idle=nil,nil,false;return end
+    -- QQT_Warpigz_v3 1.0.30 (Auditor review, LOW): a busy Navigator that
+    -- reports is_paused is held by some pause condition (another addon's, or
+    -- a late read of Rosie's): like Rosie's own hold, not idle.
+    if live and NAVLIVE.paused then NAVSTOP.idle_from,NAVSTOP.moved_at=nil,nil;return end
     if live and M.nav_moving(now) then
         if NAVSTOP.moved_at and now>=NAVSTOP.moved_at and now-NAVSTOP.moved_at<=0.5 then NAVSTOP.travelled=(NAVSTOP.travelled or 0)+now-NAVSTOP.moved_at end
         NAVSTOP.moved_at,NAVSTOP.idle_from=now,nil
@@ -826,12 +851,12 @@ local function foreign_move(e,item,now)
     -- 1.0.24 yield.
     -- QQT_Warpigz_v3 1.0.26 (review round 3): or Rosie stopped Navigator for
     -- this drop (idle now, its last command can still be in flight).
-    -- QQT_Warpigz_v3 1.0.29 (post-release review): no grace in a fight (the
-    -- stop's guard, nav_fight): the force re-assert walked the player to a
+    -- QQT_Warpigz_v3 1.0.29 (post-release review): no grace in a fight (1.0.30:
+    -- grace_fight, a cast now or an enemy near): the force re-assert walked the player to a
     -- drop the fight hold does not defer (an enemy it does not count as
     -- engaged, or a drop within FIGHT.feet during a cast) against the
     -- rotation's moves. A foreign move in a fight gets the 1.0.24 yield.
-    if type(M.nav_held)=='function' and not e.held_spent and (e.nav_stopped or nav_live(now)) and not nav_fight(now) then
+    if type(M.nav_held)=='function' and not e.held_spent and (e.nav_stopped or nav_live(now)) and not grace_fight() then -- QQT_Warpigz_v3 1.0.30: grace_fight
         local okh,held=pcall(M.nav_held,now)
         if okh and held==true then
             if e.held_last and (now<e.held_last or now-e.held_last>YIELD.held_gap) then e.held_since,e.nav_ref,e.nav_new_at=nil,nil,nil end

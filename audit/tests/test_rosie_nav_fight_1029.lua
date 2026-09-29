@@ -1,4 +1,4 @@
--- QQT_Warpigz_v3 Rosie 1.0.29 (post-release review of 3.3.9-3.3.11, audit/BOARD.md):
+-- QQT_Warpigz_v3 Rosie 1.0.29 (post-release review of 3.3.9-3.3.11, audit/BOARD.md), Z1 1.0.30:
 --  F  [LOW-MED] the 1.0.26 Navigator grace re-asserted Rosie's walk with
 --     force_move_raw in a fight (an enemy within fight_radius the fight hold
 --     does not count as engaged, or a drop within FIGHT.feet during a cast),
@@ -130,6 +130,28 @@ case('F3 control: no fight, a foreign command in flight under the hold still get
     eq(h.logged('Another move took the player off', t0), 0, 'no yield')
     eq(nav.stops, 0, 'no stop()')
 end)
+
+-- QQT_Warpigz_v3 1.0.30 (Auditor review of 1.0.29, HIGH, shipped in 3.3.17):
+-- the grace's guard counted the trailing FIGHT.cast = 3 s window after any
+-- cast, so for about 2 s after a kill (the fight hold ends after 1 s) Rosie
+-- had no grace, Worldstone's portal command dragged the player off and the
+-- post-kill drop was skipped. Only a cast right now or an enemy near counts.
+for _, cast_ago in ipairs({0.3, 1.0, 2.0, 2.9}) do
+    case('Z1 the boss just died (last rotation cast ' .. cast_ago .. ' s before the drop), no enemy, a Navigator command in flight: the grace takes the drop (like F3)', function()
+        local h = host()
+        worldstone(h)
+        h.spell = 333
+        h.run(1) -- the rotation casts on the boss
+        h.spell = nil
+        h.run(cast_ago) -- the boss dies; the drops fall now
+        local it = h.drop('pit', -5, 0, {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_031'})
+        local t0 = h.now
+        h.goal = h.v(30, 0) -- Worldstone heads for the portal
+        h.run(6)
+        eq(h.logged('Another move took the player off', t0), 0, 'no yield (1.0.29: yielded, the drop skipped)\n' .. rosie_tail(h))
+        ok(it.picked == true, 'taken\n' .. rosie_tail(h))
+    end)
+end
 
 print(string.format('nav fight 1.0.29: %d checks, %d failures', checks, #failures))
 if #failures > 0 then error(#failures .. ' case(s) failed: ' .. table.concat(failures, ' | ')) end
