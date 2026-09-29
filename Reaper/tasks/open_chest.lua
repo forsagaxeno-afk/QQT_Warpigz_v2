@@ -186,6 +186,9 @@ function task.Execute()
         -- below is set and with the name read there (no extra host call).
         local first_open = tracker.chest_opened_time == nil
         tracker.chest_opened_time = os.time()
+        -- QQT_Warpigz_v3 Reaper 1.10.8: the chest drops get their own Looter
+        -- bound; the walk here could have spent the shared 75 s one.
+        if first_open then utils.reset_loot_guard() end
         -- Live 2.1.2 (Grigoire): a reward chest means the boss was summoned and
         -- killed. Until the run is counted (WAIT_COMPLETE) the altar must not
         -- be summoned again, even if its actor is back and interactable.

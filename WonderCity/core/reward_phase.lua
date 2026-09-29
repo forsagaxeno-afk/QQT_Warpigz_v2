@@ -192,6 +192,7 @@ local function rloot_state()
     if rloot.key ~= key then
         rloot.key, rloot.skipped, rloot.capped = key, {}, false
         rloot.target, rloot.best, rloot.best_at = nil, nil, nil
+        rloot.tick_at, rloot.tick_best, rloot.tick_key = nil, nil, nil -- QQT_Warpigz_v3 WonderCity 2.2.8
     end
     return rloot
 end
@@ -217,6 +218,10 @@ reward_phase.reward_loot_target = function ()
     end
     local player = get_local_player()
     if not player then return nil end
+    -- QQT_Warpigz_v3 WonderCity 2.2.8 (3.3.13 review #5): one item scan per
+    -- tick (shouldExecute, Execute and can_exit each asked); a skip in
+    -- tasks/loot_reward clears it (state.tick_at = nil).
+    if state.tick_at == now then return state.tick_best, state.tick_key end
     local chest, boss = tracker.chest_last_pos, tracker.boss_last_pos
     local ok, best, best_key = pcall(function()
         local pp, found, found_key, found_d = player:get_position(), nil, nil, nil
@@ -234,7 +239,8 @@ reward_phase.reward_loot_target = function ()
         end
         return found, found_key
     end)
-    if not ok then return nil end
+    if not ok then best, best_key = nil, nil end
+    state.tick_at, state.tick_best, state.tick_key = now, best, best_key
     return best, best_key
 end
 reward_phase.pending_loot = function ()

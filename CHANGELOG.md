@@ -2,6 +2,17 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.14] — 2026-09-29
+
+### Fixed
+
+- **Rosie 1.0.27**
+  - An automatic town trip waits while the Undercity, the Pit or Reaper is in a live boss fight (at most 90 s; in the Pit up to 210 s so the glyph upgrade comes first), instead of casting Town Portal in melee. Manual, keybind and farm-plugin trips are not held.
+  - When another addon teleports the player out of town during Rosie's town service, Rosie goes back once with a Town Portal and finishes it, instead of idling 4 minutes and latching a failure.
+- **WonderCity 2.2.8**: the walk back to a floor exit stops when the switch is seen locked (a Grand Beacon click that did not light it), at most 2 walk-backs per floor; the forced exit (run timer) is never delayed; the enemy wait before the exit cast counts from the end of the exit delay; one reward-loot scan per tick.
+- **Reaper 1.10.8**: the boss chest's own drops get their own looter wait after the chest opens.
+- **ArkhamAsylum 2.1.6**: the first-load back-portal guess needs a second portal on the floor, so floor 1's only (descend) portal is never taken for the back one.
+
 ## [3.3.13] — 2026-09-29
 
 Fixes from the scenario sweep (about 269 emulated hours of the owner's setups; report `audit/reviews/sweep_2026-09-28.md`).

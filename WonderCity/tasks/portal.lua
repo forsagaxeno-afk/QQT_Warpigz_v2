@@ -45,6 +45,7 @@ local PROGRESS_GAP = 2 -- a longer gap (another task ran) starts a fresh window
 -- a Grand Beacon of this floor was lit) and no enticement is in reach, the
 -- player walks back to it instead of wandering until it passes by again.
 local PAD_SWITCH_RANGE = 4
+local MAX_EXIT_RECALLS = 2 -- QQT_Warpigz_v3 WonderCity 2.2.8
 local function floor_skip()
     if skip.generation ~= tracker.floor_generation then
         skip.generation, skip.keys, skip.exit = tracker.floor_generation, {}, nil
@@ -149,7 +150,15 @@ local function exit_recall()
     local exit = state.exit
     if exit == nil then return nil end
     local player = get_local_player()
-    if not player or utils.distance(player, exit.pos) <= settings.check_distance then return nil end
+    if not player then return nil end
+    if utils.distance(player, exit.pos) <= settings.check_distance then
+        -- QQT_Warpigz_v3 WonderCity 2.2.8 (3.3.13 review #1): arrived. A switch
+        -- still locked after a Grand Beacon "lit" (a click marked done on its
+        -- interact timeout) means the beacon is not proof the exit is open.
+        exit.active = nil
+        if exit.open == false and beacon_lit() then exit.beacon_unreliable = true end
+        return nil
+    end
     local visible = nil
     for _, actor in pairs(actors_manager:get_ally_actors()) do
         if actor:get_skin_name() == 'X1_Undercity_PortalSwitch' and utils.distance(exit.pos, actor) <= PAD_SWITCH_RANGE then
@@ -162,9 +171,28 @@ local function exit_recall()
         if now < entry.until_t then return nil end -- the exit (pad/switch) is set aside: explore meanwhile
     end
     local open
-    if visible then open = visible:is_interactable() == true
-    else open = exit.open ~= false or beacon_lit() end
+    if visible then
+        open = visible:is_interactable() == true
+        -- QQT_Warpigz_v3 WonderCity 2.2.8: seen locked (from any distance)
+        -- ends the walk-back episode, and a "lit" beacon is no proof any more.
+        if not open then
+            exit.active = nil
+            if beacon_lit() then exit.beacon_unreliable = true end
+        end
+    else open = exit.open ~= false or (beacon_lit() and not exit.beacon_unreliable) end
     if not open or utils.get_closest_enticement() ~= nil then return nil end
+    -- QQT_Warpigz_v3 WonderCity 2.2.8 (3.3.13 review #1): at most
+    -- MAX_EXIT_RECALLS walk-backs per floor (an episode ends on arrival).
+    if not exit.active then
+        if (exit.recalls or 0) >= MAX_EXIT_RECALLS then
+            if exit.capped ~= true then
+                exit.capped = true
+                console.print(string.format('[WonderCity:portal] floor exit walked back to %d times - exploring on', MAX_EXIT_RECALLS))
+            end
+            return nil
+        end
+        exit.active, exit.recalls = true, (exit.recalls or 0) + 1
+    end
     if exit.logged ~= true then
         exit.logged = true
         console.print(string.format('[WonderCity:portal] floor exit open - walking back to it (%.0fm)',
