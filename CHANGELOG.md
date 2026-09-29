@@ -2,6 +2,14 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.21] — 2026-09-29
+
+### Fixed
+
+- **Rosie 1.0.32** (review of the Butler stand-in):
+  - During Rosie's own trip her status no longer reports "a Butler trip" (`foreign_busy`); only a real Butler counts.
+  - A Butler function Rosie does not mimic yet is logged as "Butler.<name> called (not mimicked yet) by <file:line>", naming the addon that called it.
+
 ## [3.3.20] — 2026-09-29
 
 ### Added
