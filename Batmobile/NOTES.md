@@ -1,4 +1,4 @@
-# Batmobile: session notes (current 2.2.4)
+# Batmobile: session notes (current 2.2.5)
 
 The shared movement / navigation core: explorer, pathfinding, long paths, the movement-skill catalog (evade, Warlock Rampage) and freeroam. Most activity plugins move through `BatmobilePlugin` (`set_target` / `move` / `pause` / `resume` / `stop_long_path` / `is_paused` / `get_owner`).
 
@@ -8,6 +8,7 @@ The shared movement / navigation core: explorer, pathfinding, long paths, the mo
 - The third-party **Navigator** (with Worldstone) is a different navigator and not ours.
 
 ## History
+- 2.2.5 (Auditor LOWs on 2.2.4): the `[unstuck] … replanning, target kept` and `[unstuck] EXHAUSTED` lines go through `nav_log` too; B10 now also covers both `PARTIAL PATH SKIPPED` lines and the two `[unstuck]` lines; the 2.2.4 lines carry their version marker. `test_integration_batmobile.lua` BAT-4 reads the replan line at Debug.
 - 2.2.4 (scenario sweep 2026-09-28, §2.5 B1; test B10): the per-attempt `[nav] STUCK`, `PARTIAL PATH REJECTED` and both `PARTIAL PATH SKIPPED` lines go through `nav_log` (Disabled: none, Info: one per 5 s with `(+N similar)`, Debug: every line). A wedged paused caller printed 236 STUCK lines in 60 s. `test_batmobile_nav_recovery.lua` N5 now reads STUCK at Info.
 - 2.2.3 (Coordinator, 3.3.x): freeroam does not double-wait for Rosie's pickup (see CHANGELOG).
 - 2.2.2 (self-review "the bot goes back and forth", `test_batmobile_oscillation.lua`):
