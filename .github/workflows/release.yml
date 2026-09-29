@@ -16,8 +16,12 @@ on:
 permissions:
   contents: write
 
+# One queue per branch: GitHub keeps only the newest pending run of a group,
+# so a shared group let plugin-branch pushes cancel the release branch's
+# pending run (3.3.14 was never published). Only the release branch and main
+# publish (see the steps below), so per-branch queues cannot race a release.
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
