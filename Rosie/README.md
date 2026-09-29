@@ -1,6 +1,6 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.27
+One local addon for pickup, item rules, repairs and storage. Version 1.0.28
 (QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
@@ -64,17 +64,25 @@ first section that decides an item wins:
      items to keep* (one row per name; a checked name also keeps its Season 14
      re-issue) and *Mythic Uniques to keep* (a checked row keeps the plain
      Unique too).
-   - *Keep Uniques with Item Power at least* (0 = off): plain Uniques only.
-   - *Unique items I always keep*: a checked Unique is kept as the plain Unique
-     AND as its Mythic form, Ancestral or not, even when marked junk or hidden by
-     the in-game filter, and pickup takes it whatever the GA sliders or the
-     in-game filter say. An empty list keeps nothing extra (the old *Use
-     unique/mythic filter* switch is gone; saved selections are used as they are).
-2. **In-game loot filter** (optional, off): decides the rest of the equipment.
-3. **Items marked as junk**: Ancestral / Non-Ancestral action.
-4. **Uniques**: keep with at least N Greater Affixes (0 = off), otherwise the
-   Ancestral / Non-Ancestral action; *Uniques to salvage or sell* (Carry to
-   town / Drop on the spot) is shown while *Pick up every Unique* is on.
+2. **Uniques** (plain Uniques; since 1.0.28 all Unique settings are here):
+   - *Pick up every Unique (sort in the bag)* (moved from the root menu; saved
+     value kept).
+   - *Uniques I keep* (was *Unique items I always keep*; saved selections kept):
+     a checked Unique is kept even when marked junk or hidden by the in-game
+     filter, and pickup takes it whatever the GA sliders or the in-game filter
+     say. Under each checked row, *Keep it when*: **Any** (default: Ancestral
+     or not), **Ancestral only**, or **Ancestral with enough Greater Affixes**
+     (N = *Greater Affixes for the Ancestral condition*, shared). A copy that
+     fails its condition goes on to the rules below. Its Mythic form follows
+     *1. Always keep*.
+   - *Keep with Greater Affixes at least* (0 = off), otherwise the Ancestral /
+     Non-Ancestral action; *Uniques to salvage or sell* (Carry to town / Drop
+     on the spot) is shown while *Pick up every Unique* is on.
+   - The old *Keep Uniques with Item Power at least* slider is gone (at endgame
+     nearly every Unique drops at max item power, so any value kept them all).
+     A saved value above 0 still works and is shown read-only with a *Reset*.
+3. **In-game loot filter** (optional, off): decides the rest of the equipment.
+4. **Items marked as junk**: Ancestral / Non-Ancestral action.
 5. **Legendary, Rare, Magic, Common**: keep Ancestral items with at least N
    Greater Affixes (optionally only with checked affixes), otherwise the
    Ancestral / Non-Ancestral action.
@@ -244,7 +252,7 @@ A fresh ground drop shows no affixes until it has been picked up once, and a
 Season 15 Mythic form keeps its Unique's name, SNO and rarity. On the ground a
 Mythic and a plain Unique therefore look the same; in the bag they do not.
 
-**Pick up every Unique (sort in the bag)** (right under *Enable Rosie*, default
+**Pick up every Unique (sort in the bag)** (Keep, storage & town > 2. Uniques since 1.0.28, default
 on) makes pickup take every Unique and every Mythic, whatever the Greater Affix
 sliders and slot overrides say (`accepted: every Unique is taken (sorted in the
 bag)`). Bag space is still checked. A Mythic ignores *Respect in-game loot
@@ -257,7 +265,7 @@ iconic Mythics (including the 14 re-issued in Season 14, such as Harlequin
 Crest), or carries the Mythic upgrade affix (`S14_Mythic_UniquePotency`, hash
 2628989, or any affix whose name contains `Mythic`). Everything else with
 rarity 6 is a **plain Unique**. **Uniques to salvage or sell** (Keep, storage &
-town > 4. Uniques, shown while the option is on):
+town > 2. Uniques, shown while the option is on):
 
 - *Carry to town* (default): nothing is dropped.
   Plain Uniques wait in the bag; the town trip sells, salvages or keeps them by

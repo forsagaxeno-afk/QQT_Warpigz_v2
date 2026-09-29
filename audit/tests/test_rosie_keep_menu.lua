@@ -89,7 +89,7 @@ case("user report: a checked Leoric's Crown is kept as plain Unique AND as Mythi
     eq(t.verdict(item(LEORIC, {ancestral = false, ga = 0, affixes = LEORIC_PLAIN})), 'keep',
         'plain non-Ancestral Leoric (the old list only applied to Ancestral items: it was sold)')
     eq(t.verdict(item(LEORIC, {ancestral = true, ga = 0, affixes = LEORIC_PLAIN, junk = true})), 'keep', 'junk mark: Always keep wins')
-    -- Guard: an unchecked plain Unique still follows 4. Uniques (Salvage).
+    -- Guard: an unchecked plain Unique still follows 2. Uniques (Salvage).
     eq(t.verdict(item(CONDEMNATION, {ancestral = true, ga = 0, affixes = {affix(3, 'Dagger_Unique_Generic_001')}})), 'salvage',
         'an unlisted plain Unique is still salvaged')
     -- Always keep Mythics wins over "unchecked Mythic Uniques = Salvage".
@@ -97,11 +97,11 @@ case("user report: a checked Leoric's Crown is kept as plain Unique AND as Mythi
         'an unchecked Mythic Unique is kept (Always keep Mythics is on)')
     local n = t.lines("[Rosie] Kept Leoric's Crown: Mythic (Always keep mythics) (Mythic Unique, sno=2647147)")
     eq(n, 1, 'one keep line for the Mythic form\n' .. t.h.tail())
-    n = t.lines("[Rosie] Kept Leoric's Crown: checked in \"Unique items I always keep\" (Unique, sno=2647147)")
+    n = t.lines("[Rosie] Kept Leoric's Crown: checked in \"Uniques I keep\" (Any) (Unique, sno=2647147)") -- Rosie 1.0.28: the list moved to 2. Uniques
     eq(n, 1, 'one keep line for the plain Unique')
     t.tg.mythic_always_keep:set(false); t.h.run(1.5)
     eq(t.verdict(item(LEORIC, {ancestral = true, ga = 1, affixes = LEORIC_MYTHIC})), 'keep', 'Always keep off: the list keeps the Mythic form')
-    n = t.lines("[Rosie] Kept Leoric's Crown: checked in \"Unique items I always keep\" (Mythic Unique, sno=2647147)")
+    n = t.lines("[Rosie] Kept Leoric's Crown: checked in \"Uniques I keep\" (Mythic Unique, sno=2647147)")
     eq(n, 1, 'its keep line')
     t.h.assert_clean('user report')
 end)
@@ -181,7 +181,7 @@ case('pickup: a listed Unique is taken whatever the GA sliders or the in-game lo
     t.h.run(1)
     local w, why = t.want(item(LEORIC, {ancestral = true, ga = 0, affixes = LEORIC_PLAIN, filtered = true}))
     eq(w, true, tostring(why))
-    eq(why, "accepted: selected in 'Unique items I always keep'", 'reason')
+    eq(why, "accepted: selected in 'Uniques I keep'", 'reason')
     w, why = t.want(item(CONDEMNATION, {ancestral = true, ga = 1, affixes = {affix(3, 'x')}}))
     eq(w, false, 'guard: an unlisted Unique below the GA slider is skipped (' .. tostring(why) .. ')')
     -- Mythic Uniques list (used while not Keep all) and Iconic list.
@@ -200,13 +200,18 @@ case('menu: numbered sections in decision order, Mythic choices only while Alway
         for i, l in ipairs(labels) do if l == label then return i end end
         return nil
     end
-    for _, label in ipairs({'Always keep Mythics', 'Keep Uniques with Item Power at least', 'Keep with Greater Affixes at least',
+    for _, label in ipairs({'Always keep Mythics', 'Pick up every Unique (sort in the bag)', 'Keep with Greater Affixes at least',
             'Otherwise: Ancestral Uniques', 'Otherwise: Non-Ancestral Uniques', 'Ancestral junk',
             'Keep Ancestral with Greater Affixes at least', "Leoric's Crown - helm  [keeps plain + Mythic form]"}) do
         ok(at(label), 'renders ' .. label .. '\n' .. table.concat(labels, ' | '))
     end
-    ok(at('Always keep Mythics') < at('Ancestral junk') and at('Ancestral junk') < at('Keep with Greater Affixes at least'),
-        'the menu reads in decision order')
+    -- Rosie 1.0.28 (owner): one Uniques section right after 1. Always keep;
+    -- the old item power slider is not shown (saved 0).
+    ok(at('Always keep Mythics') < at('Pick up every Unique (sort in the bag)')
+        and at('Pick up every Unique (sort in the bag)') < at('Keep with Greater Affixes at least')
+        and at('Keep with Greater Affixes at least') < at('Ancestral junk'),
+        'the menu reads: 1. Always keep, 2. Uniques, then junk')
+    ok(not at('Keep Uniques with Item Power at least'), 'the item power slider is gone')
     for _, old in ipairs({'Always keep mythics', 'Use Mythic Unique filter', 'Use unique/mythic filter', 'unchecked Mythic Uniques',
             'mythic items', 'Plain Uniques', 'Iconic Mythics not checked', 'Separate list for Mythic Uniques'}) do
         ok(not at(old), 'not shown (Always keep Mythics on): ' .. old)

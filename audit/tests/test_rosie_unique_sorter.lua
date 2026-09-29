@@ -102,7 +102,7 @@ local function setup(opts)
     return t
 end
 
-case('menu: the new controls render right after the enable toggle; defaults and persisted values', function()
+case('menu: the controls render (Pick up every Unique in 2. Uniques); defaults and persisted values', function()
     local t = setup()
     eq(t.e.all_uniques:get(), true, 'shipped default: Pick up every Unique ON')
     eq(t.e.all_uniques_mode:get(), 0, 'shipped default: Handle in town')
@@ -110,14 +110,17 @@ case('menu: the new controls render right after the enable toggle; defaults and 
     t.h.frame()
     local labels = t.h.menu_labels
     eq(labels[1], 'Enable Rosie', 'first widget\n' .. table.concat(labels, ' | '))
-    eq(labels[2], 'Pick up every Unique (sort in the bag)', 'second widget')
-    -- QQT_Warpigz_v3 (keep menu): the mode moved to Keep, storage & town > 4. Uniques.
+    -- QQT_Warpigz_v3 Rosie 1.0.28 (owner): the toggle moved to Keep, storage &
+    -- town > 2. Uniques (same widget), right before its mode.
     local function has(list, label) for _, l in ipairs(list) do if l == label then return true end end return false end
-    ok(has(labels, t.sorter.MODE_LABEL), 'the mode renders (in 4. Uniques) while the option is on')
+    local function at(list, label) for i, l in ipairs(list) do if l == label then return i end end return nil end
+    ok(at(labels, 'Pick up every Unique (sort in the bag)') and at(labels, 'Pick up every Unique (sort in the bag)') > at(labels, 'Enable town service'),
+        'the toggle renders in Keep, storage & town')
+    ok(has(labels, t.sorter.MODE_LABEL), 'the mode renders (in 2. Uniques) while the option is on')
     t.e.all_uniques:set(false)
     t.h.menu_labels = {}
     t.h.frame()
-    eq(t.h.menu_labels[2], 'Pick up every Unique (sort in the bag)', 'off: still right after the toggle')
+    ok(has(t.h.menu_labels, 'Pick up every Unique (sort in the bag)'), 'off: the toggle still renders')
     ok(not has(t.h.menu_labels, t.sorter.MODE_LABEL), 'off: the mode combo is hidden')
     t.h.menu_labels = nil
     -- QQT restores both widgets by their own hashes.

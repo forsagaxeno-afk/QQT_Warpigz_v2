@@ -67,8 +67,22 @@ function M.mode()
 end
 function M.drop_mode() return M.pick_all() and M.mode() == M.MODE_DROP end
 -- QQT_Warpigz_v3 (keep menu): the mode is shown in Keep, storage & town >
--- 4. Uniques (only while "Pick up every Unique" is on).
+-- 2. Uniques (only while "Pick up every Unique" is on).
 M.MODE_LABEL = 'Uniques to salvage or sell'
+-- QQT_Warpigz_v3 Rosie 1.0.28 (owner: the Unique settings were scattered):
+-- the toggle is shown at the top of Keep, storage & town > 2. Uniques (same
+-- widget and saved value; it was in Rosie's root menu).
+M.TOGGLE_LABEL = 'Pick up every Unique (sort in the bag)'
+function M.render_toggle()
+    if toggle == nil then return false end
+    toggle:render(M.TOGGLE_LABEL,
+        'On the ground a fresh Unique and its Mythic form look the same (no affixes until picked up). '
+        ..'On: every Unique and every Mythic is picked up whatever the GA sliders say (a plain Unique still respects '
+        ..'"Respect Ingame Loot Filter"); in the bag Rosie sees which is a Mythic and never drops it '
+        ..'(in town, "1. Always keep" decides Mythics and the rules below decide plain Uniques). '
+        ..'Off: the pickup GA rules decide on the ground as before.')
+    return true
+end
 function M.render_mode()
     if mode_widget == nil or not M.pick_all() then return false end
     mode_widget:render(M.MODE_LABEL, {'Carry to town', 'Drop on the spot'},

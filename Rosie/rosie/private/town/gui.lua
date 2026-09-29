@@ -83,7 +83,7 @@ end
 -- QQT_Warpigz_v3 (keep menu): `cached` (SNO -> true, the saved selection,
 -- at most a second old) marks a long list: with an empty search only its
 -- checked rows are shown, and only shown rows read their checkbox.
-local function render_checkbox(name,data, show_item_type, annotate, cached)
+local function render_checkbox(name,data, show_item_type, annotate, cached, after)
     local search_string=string.lower(gui.elements[tostring(name)..'_search']:get())
     local character_class=utils.get_character_class()
     local scope=gui.elements[tostring(name)..'_scope']
@@ -105,6 +105,7 @@ local function render_checkbox(name,data, show_item_type, annotate, cached)
         if cached and search_string=='' then visible=checked end
         if visible and (checked or search_string=='' or row.search:find(search_string,1,true)) then
             widget:render(annotate and annotate(row,checked) or row.label,row.tip)
+            if after and checked then after(row) end -- QQT_Warpigz_v3 Rosie 1.0.28: a checked row's own settings
             shown=shown+1
         end
     end
@@ -202,6 +203,12 @@ local element_makers = {
     ancestral_mythic_ga_count_slider = function() return slider_int:new(0, 4, 1, get_hash(plugin_label .. '_mythic_ga_slider')) end,
     -- QQT_Warpigz_v3 3.2.4 (Rosie 1.0.16): keep plain Uniques by item power (0 = off).
     unique_ip_keep_slider = function() return slider_int:new(0, 925, 0, get_hash(plugin_label .. '_unique_ip_keep')) end,
+    -- QQT_Warpigz_v3 Rosie 1.0.28 (owner): the slider is no longer shown; a
+    -- saved value > 0 is shown read-only with this reset button.
+    unique_ip_reset = function() return button:new(get_hash(plugin_label .. '_unique_ip_reset')) end,
+    -- QQT_Warpigz_v3 Rosie 1.0.28: N of the "Ancestral with Greater Affixes"
+    -- condition of checked Uniques (one shared slider).
+    unique_cond_ga_slider = function() return slider_int:new(1, 4, 2, get_hash(plugin_label .. '_unique_cond_ga')) end,
     ancestral_filter_toggle = function() return create_checkbox(false, 'use_filter') end,
     ancestral_unique_filter_toggle = function() return create_checkbox(false, 'use_unique_filter') end,
 
@@ -377,23 +384,54 @@ local function sorter()
     local ok,mod=pcall(require,'rosie.private.unique_sorter')
     return ok and type(mod)=='table' and mod or nil
 end
+-- QQT_Warpigz_v3 Rosie 1.0.28 (owner: "no option to keep a selected Unique
+-- only when Ancestral"): each checked row of "Uniques I keep" has a condition
+-- for its plain Unique, saved per SNO (unique_cond_<sno>, created on first
+-- use: only checked rows have one). 0 Any, 1 Ancestral only, 2 Ancestral
+-- with at least N Greater Affixes (unique_cond_ga_slider). The Mythic form
+-- of a checked Unique follows 1. Always keep as before.
+gui.UNIQUE_COND_OPTIONS={'Any','Ancestral only','Ancestral with enough Greater Affixes'}
+function gui.unique_cond(sno)
+    local key='unique_cond_'..tostring(sno)
+    local w=gui.elements[key]
+    if not w then w=combo_box:new(0,get_hash(plugin_label..'_'..key));gui.elements[key]=w end
+    return w
+end
+function gui.unique_cond_text(cond,n)
+    if cond==1 then return 'Ancestral only' end
+    if cond==2 then return 'Ancestral with '..tostring(n or 2)..'+ Greater Affixes' end
+    return 'Any'
+end
 -- Which forms of an item a keep list keeps (shown on checked rows).
 local function annotate_unique(row,checked)
-    if checked then return row.label..'  [keeps plain + Mythic form]' end
+    if not checked then return nil end
+    local cond=gui.unique_cond(row.sno):get()
+    if cond==1 or cond==2 then
+        return row.label..'  [keeps plain: '..gui.unique_cond_text(cond,gui.elements.unique_cond_ga_slider:get())..'; Mythic form: 1. Always keep]'
+    end
+    return row.label..'  [keeps plain + Mythic form]'
+end
+local function render_unique_cond(row)
+    gui.unique_cond(row.sno):render('    Keep it when',gui.UNIQUE_COND_OPTIONS,
+        'Any: every copy is kept, Ancestral or not. Ancestral only: only an Ancestral copy is kept. '
+        ..'Ancestral with enough Greater Affixes: only an Ancestral copy with at least the number set by '
+        ..'"Greater Affixes for the Ancestral condition" below. A copy that fails its condition goes on to the '
+        ..'Greater Affix rule and the Otherwise actions of this section (never kept by this list then). '
+        ..'Its Mythic form follows 1. Always keep.')
 end
 local function annotate_form(row,checked)
     local plain=gui.elements['unique_'..tostring(row.sno)]
-    if plain and plain:get() then return row.label.."  [kept by 'Unique items I always keep']" end
+    if plain and plain:get() then return row.label.."  [kept by 'Uniques I keep']" end
     if checked then return row.label..'  [keeps Mythic form + plain]' end
 end
 local LIST_CACHE={unique='ancestral_unique',mythic_form='mythic_form_keep'}
-local function render_list(key,label,data,header,annotate)
+local function render_list(key,label,data,header,annotate,after)
     if push_tree(gui.elements[key..'_tree'],label) then
         if header then render_menu_header(header) end
         gui.elements[key..'_search']:render('Search','Search name, class, item type or item ID',false,'','')
         local s=utils.settings
         local cached=LIST_CACHE[key] and type(s)=='table' and type(s[LIST_CACHE[key]])=='table' and s[LIST_CACHE[key]] or nil
-        render_checkbox(key,data,true,annotate,cached)
+        render_checkbox(key,data,true,annotate,cached,after)
         pop_tree(gui.elements[key..'_tree'])
     end
 end
@@ -420,7 +458,7 @@ local function render_settings()
                 ..'Off: Mythic Uniques follow the Iconic Mythic action above.')
             if e.mythic_form_filter_toggle:get() then
                 e.mythic_form_other:render('Mythic Uniques not checked', gui.item_options,
-                    'What to do with a Mythic Unique not checked in "Mythic Uniques to keep" nor in "Unique items I always keep".')
+                    'What to do with a Mythic Unique not checked in "Mythic Uniques to keep" nor in "Uniques I keep" (2. Uniques).')
             end
             render_list('mythic','Iconic Mythic items to keep',mythic_items,
                 'Checked Iconic Mythics are kept (a checked name also keeps its Season 14 re-issue).')
@@ -429,16 +467,36 @@ local function render_settings()
                     'Checked: the Mythic form is kept, and the plain Unique too.',annotate_form)
             end
         end
-        e.unique_ip_keep_slider:render('Keep Uniques with Item Power at least',
-            'Plain Uniques (not Mythics) with at least this item power are always kept (never sold, salvaged or dropped), '
-            ..'whatever the Greater Affix rules and actions below say. 0 = off. Max item power is 900 (925 with the upgrade).')
-        render_list('unique','Unique items I always keep',unique_items,
-            'Checked Uniques are kept as the plain Unique AND as its Mythic form, Ancestral or not. Rosie also picks them up whatever the pickup Greater Affix sliders or the in-game loot filter say. An empty list keeps nothing extra.',
-            annotate_unique)
         pop_tree(e.always_keep_tree)
     end
-    if push_tree(e.loot_filter_tree, '2. In-game loot filter (optional)') then
-        render_menu_header('Off by default. When on, the in-game filter decides the equipment not kept by 1. Always keep: shown items are kept, hidden items are salvaged. Sections 3 to 5 then no longer apply to that equipment.')
+    -- QQT_Warpigz_v3 Rosie 1.0.28 (owner: the Unique settings were in 3-4
+    -- places): one section for plain Uniques. The checked list (with its
+    -- condition) is still decided before the loot filter and junk, as before
+    -- (town/core/utils.lua decide()); the GA rule and the Otherwise actions
+    -- after them.
+    if push_tree(e.unique_rules_tree, '2. Uniques') then
+        render_menu_header('Plain Uniques (Mythics follow 1. Always keep). Checked Uniques are kept even if the loot filter hides them or they are marked junk.')
+        local sort=sorter()
+        if sort and type(sort.render_toggle)=='function' then sort.render_toggle() end
+        local ip=tonumber(e.unique_ip_keep_slider:get()) or 0
+        if ip>0 then
+            render_menu_header(string.format('Old setting still on: every plain Unique with item power %d or more is kept. At endgame nearly every Unique drops at max item power, so it keeps them all.',ip))
+            e.unique_ip_reset:render('Reset (turn the item power rule off)','Sets the old "Keep Uniques with Item Power at least" to 0. Use the conditions in "Uniques I keep" instead.')
+            if e.unique_ip_reset:get() then e.unique_ip_keep_slider:set(0) end
+        end
+        render_list('unique','Uniques I keep',unique_items,
+            'Checked: the plain Unique is kept when its condition holds (Any, Ancestral only, Ancestral with enough Greater Affixes), and its Mythic form by 1. Always keep. Rosie picks them up whatever the pickup Greater Affix sliders or the in-game loot filter say.',
+            annotate_unique,render_unique_cond)
+        e.unique_cond_ga_slider:render('Greater Affixes for the Ancestral condition',
+            'N of "Ancestral with enough Greater Affixes" for every checked Unique that uses it.')
+        e.ancestral_unique_ga_count_slider:render('Keep with Greater Affixes at least', 'Any other plain Unique with at least this many Greater Affixes is kept. 0 = off.')
+        e.ancestral_item_unique:render('Otherwise: Ancestral Uniques', gui.item_options, 'What to do with the other Ancestral Uniques.'..ACTION_TIP)
+        e.item_unique:render('Otherwise: Non-Ancestral Uniques', gui.item_options, 'What to do with the other non-Ancestral Uniques.'..ACTION_TIP)
+        if sort and type(sort.render_mode)=='function' then sort.render_mode() end
+        pop_tree(e.unique_rules_tree)
+    end
+    if push_tree(e.loot_filter_tree, '3. In-game loot filter (optional)') then
+        render_menu_header('Off by default. When on, the in-game filter decides the equipment not kept by 1. Always keep or a checked Unique of 2.: shown items are kept, hidden items are salvaged. The Unique Greater Affix rule and actions and sections 4 and 5 then no longer apply to that equipment.')
         e.loot_filter_toggle:render('Use for equipment, seals and charms', 'Use the in-game filter for equipment, seals and charms. Protected or unreadable items are kept.')
         if e.loot_filter_toggle:get() then
             -- QQT_Warpigz_v3 (Q10, review): a seal affix filter that is on decides seals; charms keep the old order.
@@ -450,20 +508,11 @@ local function render_settings()
         end
         pop_tree(e.loot_filter_tree)
     end
-    if push_tree(e.junk_tree, '3. Items marked as junk') then
-        render_menu_header('Gear you marked as junk in game (and not kept by 1. or 2.).')
+    if push_tree(e.junk_tree, '4. Items marked as junk') then
+        render_menu_header('Gear you marked as junk in game (and not kept by 1., a checked Unique of 2. or 3.).')
         e.ancestral_item_junk:render('Ancestral junk', gui.item_options, 'What to do with Ancestral items marked as junk.'..ACTION_TIP)
         e.item_junk:render('Non-Ancestral junk', gui.item_options, 'What to do with non-Ancestral items marked as junk.'..ACTION_TIP)
         pop_tree(e.junk_tree)
-    end
-    if push_tree(e.unique_rules_tree, '4. Uniques') then
-        render_menu_header('Plain Uniques not kept by 1. Always keep (Mythics never get here).')
-        e.ancestral_unique_ga_count_slider:render('Keep with Greater Affixes at least', 'A Unique with at least this many Greater Affixes is kept. 0 = off.')
-        e.ancestral_item_unique:render('Otherwise: Ancestral Uniques', gui.item_options, 'What to do with the other Ancestral Uniques.'..ACTION_TIP)
-        e.item_unique:render('Otherwise: Non-Ancestral Uniques', gui.item_options, 'What to do with the other non-Ancestral Uniques.'..ACTION_TIP)
-        local sort=sorter()
-        if sort and type(sort.render_mode)=='function' then sort.render_mode() end
-        pop_tree(e.unique_rules_tree)
     end
     if push_tree(e.legendary_tree, '5. Legendary, Rare, Magic, Common') then
         render_menu_header('All other gear, including crafting bases.')

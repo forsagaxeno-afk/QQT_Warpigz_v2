@@ -101,7 +101,7 @@ case('town: live settings keep the checked Leoric\'s Crown in its Mythic form an
     eq(t.acts(t.h.gear(plain_leoric(false))), false, 'non-ancestral plain Leoric (checked) is kept')
     local n, line = t.lines("[Rosie] Kept Leoric's Crown: ")
     ok(n >= 1, 'a Kept line\n' .. t.h.tail())
-    ok(line:find('Always keep mythics', 1, true) or line:find('Unique items', 1, true), line)
+    ok(line:find('Always keep mythics', 1, true) or line:find('Uniques I keep', 1, true), line) -- Rosie 1.0.28: the list's new name
     -- Once per item: the same Mythic read again logs nothing new.
     local before = t.lines('[Rosie] Kept ')
     t.acts(t.h.gear(mythic_leoric())); t.acts(t.h.gear(plain_leoric()))

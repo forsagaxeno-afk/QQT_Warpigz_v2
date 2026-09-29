@@ -34,6 +34,8 @@ local settings = {
     unique_ip_keep = 0,
     ancestral_unique_filter = false,
     ancestral_unique = {},
+    unique_cond = {}, -- QQT_Warpigz_v3 Rosie 1.0.28: SNO -> condition of a checked Unique (town/gui.lua)
+    unique_cond_ga = 2,
     ancestral_mythic = {},
     mythic_form_filter = false,
     mythic_form_other = utils.item_enum['SALVAGE'],
@@ -146,11 +148,15 @@ function settings:update_selections()
         end
     end
     settings.ancestral_unique = {}
+    settings.unique_cond = {}
     for _,items in ipairs(unique_selection_lists) do
         for _,item in pairs(items) do
             local checkbox_name = 'unique_' .. tostring(item.sno_id)
             if gui.elements[checkbox_name] and gui.elements[checkbox_name]:get() then
                 settings.ancestral_unique[item.sno_id] = true
+                -- QQT_Warpigz_v3 Rosie 1.0.28: its condition (0 Any when unreadable)
+                local okc,cond=pcall(function() return gui.unique_cond(item.sno_id):get() end)
+                settings.unique_cond[item.sno_id]=okc and tonumber(cond) or 0
             end
         end
     end
@@ -222,7 +228,9 @@ function settings:update_settings(force)
     settings.ancestral_mythic_ga_count = gui.elements.ancestral_mythic_ga_count_slider:get()
     local ip_el = gui.elements.unique_ip_keep_slider -- QQT_Warpigz_v3 3.2.5: nil-safe after a reload
     settings.unique_ip_keep = ip_el and tonumber(ip_el:get()) or 0
-    -- QQT_Warpigz_v3 (keep menu): 'Unique items I always keep' has no switch; an
+    local cga_el = gui.elements.unique_cond_ga_slider -- QQT_Warpigz_v3 Rosie 1.0.28
+    settings.unique_cond_ga = cga_el and tonumber(cga_el:get()) or 2
+    -- QQT_Warpigz_v3 (keep menu): 'Uniques I keep' has no switch; an
     -- empty list is no per-item rule.
     settings.ancestral_unique_filter = true
     settings.ancestral_filter        = gui.elements.ancestral_filter_toggle:get()
