@@ -1,3 +1,7 @@
+# 0.2.9 — reward cards that fill in late (owner live, 3.3.19)
+
+- The reward panel may list its cards as empty placeholders (no SNO, `valid=false`) for a moment after it opens. SilentRaven no longer declares `no_valid_reward` on the first frame: it keeps the panel open and re-reads the cards for up to 4 s. Cards that stay empty end the attempt with `reward cards still empty after 4s (…); attempt N of 3, retrying in 5s` and one reward dump (host API state included), the next attempt waits 5 s, and after 3 attempts the run ends `failed (reward_cards_empty)`. The host's `pick_and_accept` is not used as a fallback (its index convention is unverified); the dump shows whether it exists.
+
 # 0.2.8 — "SilentRaven is manual now" (QQT_Warpigz_v3, after 3.3.6)
 
 - **Auto-claims again next to Worldstone / TristramLoop / Butler.** A loop owning the run (`TRISTRAM_LOOP_STATE.owns_activity`) holds auto-fire at a Temis stop only until the reward has been ready 60 s (`auto-fire waited 60s for …; claiming at this Temis stop`), the claim trip at most 600 s. A Navigator request below priority 10 (Worldstone's walk) no longer holds; the claim's Navigator pause condition stops it. Butler, Scavenger and a town-priority Navigator walk hold at most 180 s per ready reward (one line).

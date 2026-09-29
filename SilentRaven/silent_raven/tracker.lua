@@ -94,6 +94,10 @@ M.reset_run = function ()
     M.claim_quest_ready = false
     M.turnin_since      = nil
     M.claim_bags        = nil
+    -- QQT_Warpigz_v3 0.2.9: placeholder reward cards seen since; the next
+    -- WAIT_RETRY length (nil: the default).
+    M.cards_empty_since = nil
+    M.retry_delay       = nil
     M.reward_dumped     = false
     -- Own runs (auto/manual) yield to companions, and an owner's guard may
     -- pause a request (R15 'yield:'); paused time is not run time.
