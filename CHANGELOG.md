@@ -2,6 +2,14 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.18] — 2026-09-29
+
+### Fixed
+
+- **Rosie 1.0.30: post-kill drops next to Worldstone (regression in 3.3.17 / Rosie 1.0.29).**
+  - For about 2 s after the last cast of a fight, 1.0.29 took the player as still fighting and did not hold Navigator; Worldstone's portal command dragged the player off the first boss drops. The Navigator grace now counts a fight only while a spell is being cast right now or an enemy is near.
+  - The Navigator stop watchdog treats a paused Navigator as held (not idle), and judges Navigator's motion over the last half second instead of from the moment of the stop.
+
 ## [3.3.17] — 2026-09-29
 
 ### Fixed
