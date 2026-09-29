@@ -926,7 +926,22 @@ local function close_tears_at(self, states, anchor, r, pad)
             clear_movement()
         else
             sess.tear_standing = nil
-            move_to(tear, d <= stand.C.STAND_IN + 3)
+            -- QQT_Warpigz_v3 2.6.6 (owner live): the last metres are a direct
+            -- step (Batmobile stopped 1-3 m off the gizmo and called it reached).
+            -- Only once the walk stalled near the tear (no 0.3 m closer in 1 s):
+            -- a Batmobile that is still closing in keeps the walk.
+            local tpos = actor_pos(tear)
+            if sess.tear_force_key ~= key and d <= stand.C.NEAR_IN then
+                if not sess.tear_near_d or d < sess.tear_near_d - 0.3 or sess.tear_near_key ~= key then
+                    sess.tear_near_d, sess.tear_near_t, sess.tear_near_key = d, t, key
+                elseif t - sess.tear_near_t >= 1.0 then
+                    sess.tear_force_key = key
+                    log(string.format("[RIFT] The walk stopped %.1fm from the tear — stepping into its circle directly", d))
+                end
+            end
+            if not (sess.tear_force_key == key and tpos and helpers.force_step and helpers.force_step(tpos)) then
+                move_to(tear, d <= stand.C.STAND_IN + 3)
+            end
         end
     elseif d <= C.TEAR_ATTACK_DIST then
         clear_movement()

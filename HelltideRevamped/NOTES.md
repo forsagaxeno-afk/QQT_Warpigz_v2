@@ -1,4 +1,4 @@
-# HelltideRevamped: session notes (current 2.6.5)
+# HelltideRevamped: session notes (current 2.6.6)
 
 ## Map
 - `tasks/helltide.lua`: the main state machine, about 186 file-level locals. **Add no new file-level locals.**
@@ -24,7 +24,10 @@
 
 - 2.6.5 (review of 2.6.4): a gap of 2 s or more in `loot_hold` starts a new Looter episode (a cap that fired before a trip no longer makes HR leave the portal-spot drops); road starts never cross a learned out cell (no distance guard on the start side: the lap 30-40 m away often gives the short road), recomputed after 2 m or a fence change; exit candidates cached per target (reset on a loop change or when a cell can change its out status, `hr_fence.gen`); the :55 wait after HR drops its tear pause only when a wanted drop is within 30 m (`hr_tear_loot.wanted_near`).
 
+- 2.6.6 (owner live, 3.3.16+: "not standing in tears to close those"): Batmobile's path to a tear ends on the walkable node next to the gizmo, 1-3 m off it, and reports the goal reached; the player stood outside the charge circle until the 15 s approach bound skipped the tear (tear after tear: 50+ s in RIFT_CLOSE_TEARS). Within NEAR_IN (5 m) of a chargeable tear, once the walk made no 0.3 m progress in 1 s, HR steps in with `pathfinder.force_move_raw` (Batmobile held, its goal dropped), logged once per tear; without force_move_raw the Batmobile walk stays. "Batmobile paused" in the owner's [NAV STATE] is HR's own hold while it drives the target (normal).
+
 ## Open / live checks
+- 2.6.6: live check: the log shows "The walk stopped …m from the tear — stepping into its circle directly" and the tear bar fills; does force_move_raw walk into the circle past the gizmo's collision?
 - The move-on numbers (25 s / 45 m / 50 m); whether 2000 cinders is reachable in a typical Helltide hour; the map orientation and overlay fit.
 - A Surging rupture made only of waves (no tears or cultists) is kept alive by the marker skins only and completes after 30 s of quiet. Verify live.
 - 2.6.2: before the player starts a rupture, is its SwitchGizmo interactable (weak evidence relies on it)? Does Rosie's trip callback fire before the buff is back (the stamp covers it either way)?
