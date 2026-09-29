@@ -46,12 +46,146 @@ local back_portal_pos = nil
 local kept_back_portal = nil
 local portal_just_used = false
 local portal_used_time = -math.huge
-local PORTAL_TRANSITION_WINDOW = 5  -- seconds to accept world-change as portal-induced
+-- QQT_Warpigz_v3 Arkham 2.1.5: 5 -> 15 s. The loading screen counts toward the
+-- window, so a floor load of 5 s or more read as "not via portal" (no
+-- back-portal blacklist, floor ping-pong; sweep 2026-09-28 A2 / S2 F2).
+local PORTAL_TRANSITION_WINDOW = 15  -- seconds to accept world-change as portal-induced
 -- The game offsets the spawn 4-7 units from the back-portal so the player doesn't
 -- immediately re-trigger it. Confirmed via log: spawns at distances 4.9 and 6.1 from
 -- the back-portal. Use 10 to safely catch them without snagging a descend portal,
 -- which is typically 30+ units away on multi-portal floors.
 local BACK_PORTAL_RADIUS = 10
+
+-- QQT_Warpigz_v3 Arkham 2.1.5 (sweep A2 / S2 F1, F1b): the blacklist lived only in
+-- module locals, so a plugin reload on floor 2+ (or a first load there) took
+-- the portal back up, and the floor above then blacklisted its own descend
+-- portal. Per-world positions of this run are kept in back.store[world_key] =
+-- {back = {x,y,z}|false, down = {x,y,z}|nil, first = true|nil, t, wall},
+-- restored on a "not via portal" entry and pruned when the pit is left. No
+-- new global (_G is shared by every plugin): the store survives a reload in
+-- the file back_portals.txt of this plugin's folder (read once at load,
+-- written on a change; entries older than BACK_STORE_TTL by the wall clock
+-- are dropped). `down` is set by the chain guard: an arrival via portal in a
+-- world already seen this run means the bot went back up, so the portal next
+-- to that arrival is this floor's descend portal. `first`: the pit's first
+-- floor (entered from outside), which has no floor above.
+local BACK_STORE_FILE, BACK_STORE_TTL, BACK_STORE_FAILS = 'back_portals.txt', 1800, 3
+-- First load on floor 2+ (nothing stored): a portal at the arrival offset from
+-- the player (the game spawns 4-7 m from the back portal) on the first pit
+-- world seen since load is the one back up. Closer than the band the player
+-- stands at a portal to take it; farther it is any other portal.
+local FIRST_LOAD_BACK_MIN, FIRST_LOAD_BACK_MAX = 2.5, 7.5
+-- fresh: no world seen since load; from_outside: the last world seen was not a pit.
+local back = {pos_down = nil, fresh = true, from_outside = false, store = {}, path = nil, fails = 0}
+local function wall_clock()
+    local ok, t = pcall(function() return os.time() end)
+    return ok and type(t) == 'number' and t or nil
+end
+local function to_xyz(v) return v and {x = v:x(), y = v:y(), z = v:z()} or false end
+local function from_xyz(t) return type(t) == 'table' and vec3:new(t.x, t.y, t.z) or nil end
+-- This plugin's folder, from its own package.path (read at load, in this
+-- plugin's context). Unresolved: nothing is read or written.
+pcall(function()
+    local pkg = package
+    local ppath = type(pkg) == 'table' and pkg.path or nil
+    if type(ppath) ~= 'string' then return end
+    local dir
+    if type(pkg.searchpath) == 'function' then
+        local ok, found = pcall(pkg.searchpath, 'gui', ppath)
+        if ok and type(found) == 'string' then dir = found:match('^(.*[/\\])') end
+    end
+    dir = dir or ppath:match('^([^;]-)%?')
+    if type(dir) ~= 'string' or dir == '' or dir:sub(1, 1) == '.' then return end
+    local sep = dir:find('\\', 1, true) and '\\' or '/'
+    local f = io.open(dir .. 'data' .. sep .. 'pitlevels.lua', 'r')
+    if not f then return end
+    f:close()
+    back.path = dir .. BACK_STORE_FILE
+end)
+local function num(v) return type(v) == 'number' and string.format('%.2f', v) or '-' end
+local function back_store_save()
+    if not back.path or back.fails >= BACK_STORE_FAILS then return end
+    local lines = {}
+    for key, e in pairs(back.store) do
+        local b, d = e.back or {}, e.down or {}
+        lines[#lines + 1] = table.concat({key, num(b.x), num(b.y), num(b.z), num(d.x), num(d.y), num(d.z),
+            e.first and '1' or '0', num(e.wall)}, '\t')
+    end
+    local ok, done = pcall(function()
+        local f = io.open(back.path, 'w')
+        if not f then return false end
+        f:write(table.concat(lines, '\n'))
+        f:close()
+        return true
+    end)
+    if ok and done then back.fails = 0; return end
+    back.fails = back.fails + 1
+    if back.fails >= BACK_STORE_FAILS then
+        console.print('[portal] cannot write ' .. tostring(back.path) .. ' — back-portal memory is not kept over a reload')
+    end
+end
+-- Read once at load: a reload restores the floors of the run in progress.
+pcall(function()
+    if not back.path then return end
+    local f = io.open(back.path, 'r')
+    if not f then return end
+    local text = f:read('*a') or ''
+    f:close()
+    local wall, now = wall_clock(), get_time_since_inject()
+    for line in text:gmatch('[^\n]+') do
+        local c = {}
+        for field in (line .. '\t'):gmatch('([^\t]*)\t') do c[#c + 1] = field end
+        local w = tonumber(c[9])
+        if #c >= 9 and c[1] ~= '' and wall and w and wall >= w and wall - w <= BACK_STORE_TTL then
+            local bx, by, bz = tonumber(c[2]), tonumber(c[3]), tonumber(c[4])
+            local dx, dy, dz = tonumber(c[5]), tonumber(c[6]), tonumber(c[7])
+            back.store[c[1]] = {back = bx and by and {x = bx, y = by, z = bz or 0} or false,
+                down = dx and dy and {x = dx, y = dy, z = dz or 0} or nil,
+                first = c[8] == '1' or nil, t = now, wall = w}
+        end
+    end
+end)
+local function back_store_set(key, entry)
+    entry.t, entry.wall = get_time_since_inject(), wall_clock()
+    back.store[key] = entry
+    back_store_save()
+end
+-- Keep only `keep` (a world key or nil) in the store.
+local function back_store_prune(keep)
+    local changed = false
+    for k in pairs(back.store) do
+        if k ~= keep then back.store[k] = nil; changed = true end
+    end
+    if changed then back_store_save() end
+end
+local function back_store_get(key)
+    local e = back.store[key]
+    if type(e) ~= 'table' then return nil end
+    if type(e.t) ~= 'number' or get_time_since_inject() - e.t > BACK_STORE_TTL
+        or get_time_since_inject() < e.t
+    then
+        back.store[key] = nil
+        back_store_save()
+        return nil
+    end
+    return e
+end
+local function nearest_portal_within(pos, radius, min_d)
+    local best, best_d = nil, radius
+    local ok = pcall(function()
+        for _, actor in pairs(actors_manager:get_all_actors() or {}) do
+            local name = actor:get_skin_name()
+            if type(name) == 'string' and name:match('Portal_Dungeon') and not name:match('Light_NoShadows')
+                and actor:is_interactable()
+            then
+                local d = utils.distance(pos, actor:get_position())
+                if d <= best_d and d >= (min_d or 0) then best, best_d = actor, d end
+            end
+        end
+    end)
+    if not ok or not best then return nil end
+    return best:get_position(), best_d
+end
 -- Portal task engages at a larger radius than settings.check_distance (12). The explorer
 -- doesn't seek portal actors directly — it picks walkable-tile frontiers — so the bot can
 -- circle a portal at distance 13–28 forever without crossing the 12-unit threshold.
@@ -216,7 +350,13 @@ local function update_back_portal_tracking()
         end
         current_world_name = nil
         back_portal_pos = nil
+        back.pos_down = nil
+        back.fresh = false -- QQT_Warpigz_v3 Arkham 2.1.5: loaded outside the pit
+        back.from_outside = true
         portal_just_used = false
+        -- QQT_Warpigz_v3 Arkham 2.1.5: the run's floors are gone, except the
+        -- one an Alfred trip resumes (tracker.resume_key).
+        back_store_prune(tracker.resume_key)
         -- Pit-exit: also wipe death-recovery state so it can't bleed into the
         -- next pit run.  shouldExecute already does this on its early-return
         -- path, but keep the wipe here too in case this runs first.
@@ -242,16 +382,57 @@ local function update_back_portal_tracking()
         return
     end
     -- World changed
+    local fresh, from_outside = back.fresh, back.from_outside -- QQT_Warpigz_v3 Arkham 2.1.5
+    back.fresh, back.from_outside = false, false
+    back.pos_down = nil
+    local stored = back_store_get(world_key)
     if portal_just_used and (get_time_since_inject() - portal_used_time) < PORTAL_TRANSITION_WINDOW then
         local pos = get_player_position()
-        if pos then
+        -- QQT_Warpigz_v3 Arkham 2.1.5 chain guard: back in a floor of this run
+        -- via a portal, away from its stored back portal (or next to its
+        -- known descend portal) = the bot went back up. We stand next to this
+        -- floor's descend portal: keep it, the stored back portal stays out.
+        -- The pit's first floor (entered from outside) has no floor above: any
+        -- portal arrival there is a way back up.
+        local up = pos and stored and (stored.first or (stored.down and utils.distance(pos, from_xyz(stored.down)) < BACK_PORTAL_RADIUS)
+            or (stored.back and utils.distance(pos, from_xyz(stored.back)) >= BACK_PORTAL_RADIUS))
+        if up then
+            back_portal_pos = from_xyz(stored.back)
+            back.pos_down = from_xyz(stored.down) or vec3:new(pos:x(), pos:y(), pos:z())
+            stored.down = to_xyz(back.pos_down)
+            back_store_set(world_key, stored)
+            console.print(string.format("[portal] back in '%s' via portal (went back up) — the portal near (%.1f,%.1f) is the descend portal, any other stays blacklisted",
+                wname, back.pos_down:x(), back.pos_down:y()))
+        elseif pos then
             back_portal_pos = vec3:new(pos:x(), pos:y(), pos:z())
+            back.pos_down = stored and from_xyz(stored.down) or nil
+            back_store_set(world_key, {back = to_xyz(back_portal_pos), down = stored and stored.down or nil,
+                first = stored and stored.first or nil}) -- QQT_Warpigz_v3 Arkham 2.1.5
             console.print(string.format("[portal] arrived in '%s' via portal — back-portal blacklisted near (%.1f,%.1f) radius=%.0f",
                 wname, pos:x(), pos:y(), BACK_PORTAL_RADIUS))
         end
+    elseif stored then
+        -- QQT_Warpigz_v3 Arkham 2.1.5: a reload (or a return) on a floor of this run.
+        back_portal_pos = from_xyz(stored.back)
+        back.pos_down = from_xyz(stored.down)
+        stored.t = get_time_since_inject()
+        console.print(string.format("[portal] entered '%s' (not via portal) — back-portal blacklist restored%s",
+            wname, back_portal_pos and string.format(' near (%.1f,%.1f)', back_portal_pos:x(), back_portal_pos:y()) or ' (none)'))
     else
         back_portal_pos = nil
-        console.print(string.format("[portal] entered '%s' (not via portal) — no back-portal blacklist", wname))
+        -- QQT_Warpigz_v3 Arkham 2.1.5: first pit world since load with a portal
+        -- at spawn distance: a start on floor 2+, that portal leads back up.
+        local pos = fresh and get_player_position() or nil
+        local ppos, pd = nil, nil
+        if pos then ppos, pd = nearest_portal_within(pos, FIRST_LOAD_BACK_MAX, FIRST_LOAD_BACK_MIN) end
+        if ppos then
+            back_portal_pos = vec3:new(ppos:x(), ppos:y(), ppos:z())
+            console.print(string.format("[portal] entered '%s' on load (not via portal) — portal %.1f away treated as the back portal",
+                wname, pd))
+        else
+            console.print(string.format("[portal] entered '%s' (not via portal) — no back-portal blacklist", wname))
+        end
+        back_store_set(world_key, {back = to_xyz(back_portal_pos), first = from_outside or nil})
     end
     current_world_name = world_key
     portal_just_used = false
@@ -275,8 +456,10 @@ local function update_back_portal_tracking()
 end
 
 local function is_back_portal(actor)
-    if not back_portal_pos then return false end
     local pos = actor:get_position()
+    -- QQT_Warpigz_v3 Arkham 2.1.5 chain guard: a known descend portal excludes the others.
+    if back.pos_down and utils.distance(pos, back.pos_down) >= BACK_PORTAL_RADIUS then return true end
+    if not back_portal_pos then return false end
     return utils.distance(pos, back_portal_pos) < BACK_PORTAL_RADIUS
 end
 
@@ -585,11 +768,14 @@ task.reset = function (transition)
     if transition ~= 'floor' then
         current_world_name = nil
         back_portal_pos = nil
+        back.pos_down = nil -- QQT_Warpigz_v3 Arkham 2.1.5
         portal_just_used = false
     end
     if transition == 'resume' and kept_back_portal ~= nil then
         if kept_back_portal.key == tracker.world_key then
             current_world_name, back_portal_pos = kept_back_portal.key, kept_back_portal.pos
+            local stored = back_store_get(current_world_name) -- QQT_Warpigz_v3 Arkham 2.1.5
+            back.pos_down = stored and from_xyz(stored.down) or nil
             if back_portal_pos ~= nil then
                 console.print(string.format('[portal] resumed %s — back-portal blacklist near (%.1f,%.1f) kept',
                     current_world_name, back_portal_pos:x(), back_portal_pos:y()))

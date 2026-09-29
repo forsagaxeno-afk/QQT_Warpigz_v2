@@ -16,14 +16,18 @@ local external = {
         -- progress; in_run = inside/committed to a Pit run; committed_entry =
         -- pit opened / portal being entered but not yet inside.
         local run = task_manager.get_run_status()
+        local enabled = settings.enabled and settings.get_keybind_state()
         return {
             name            = settings.plugin_label,
             version         = settings.plugin_version,
-            enabled         = settings.enabled and settings.get_keybind_state(),
+            enabled         = enabled,
             task            = msg,
             alfred_trip     = run.alfred_trip,
             in_run          = run.in_run,
             committed_entry = run.committed_entry,
+            -- QQT_Warpigz_v3 Arkham 2.1.5 (C-boss): hold automatic town trips
+            -- (Rosie) while a live boss is near or the glyph upgrade is pending.
+            boss_fight      = enabled == true and run.boss_fight == true,
         }
     end,
     enable = function ()

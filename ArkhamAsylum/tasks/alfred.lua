@@ -78,7 +78,8 @@ local RETURN_WINDOW = 30
 local HOLD_LOG_AFTER = 60
 local trip = {teleport = false, return_until = nil, live_seen = false,
     paused_since = nil, paused_logged = false, glyph_since = nil,
-    hold = nil, hold_since = nil, hold_logged = -math.huge, return_logged = false, advisory_logged = -math.huge}
+    hold = nil, hold_since = nil, hold_seen = -math.huge, hold_logged = -math.huge, return_logged = false,
+    advisory_logged = -math.huge}
 
 -- C1 canonical live-work predicate (a latched teleport after a finished or
 -- failed trip is not live work).
@@ -112,7 +113,11 @@ end
 -- Status text + one rate-limited log line for any hold longer than a minute.
 local function note_hold(reason)
     local now = get_time_since_inject()
-    if reason ~= trip.hold then trip.hold, trip.hold_since = reason, now end
+    -- QQT_Warpigz_v3 Arkham 2.1.5: a gap (the task did not run, e.g. between two
+    -- Rosie trips) starts a new hold; the same reason string kept the first
+    -- trip's clock and logged "holding for 400s" at once.
+    if reason ~= trip.hold or now - trip.hold_seen > 2 then trip.hold, trip.hold_since = reason, now end
+    trip.hold_seen = now
     task.note = reason
     if reason and now - trip.hold_since >= HOLD_LOG_AFTER and now - trip.hold_logged >= HOLD_LOG_AFTER then
         trip.hold_logged = now
@@ -328,6 +333,35 @@ local function boss_fight_defer()
     return now - trip.boss_since < BOSS_DEFER_MAX
 end
 
+-- QQT_Warpigz_v3 Arkham 2.1.5 (contract C-boss, sweep 2026-09-28 #6): Rosie's
+-- automatic trip is not Arkham's request, so the defers above never gated
+-- it (a Town Portal cast in melee with the Guardian, or right after the kill
+-- with glyph chances unused). get_status().boss_fight publishes the same two
+-- conditions for Rosie's gate: a live boss within BOSS_DEFER_RANGE (at most
+-- BOSS_DEFER_MAX s) or a pending glyph upgrade (at most GLYPH_DEFER_MAX s).
+-- Own clocks (reading the status never starts the trip defers or logs), and a
+-- read gap of more than 2 s starts them over.
+local pub = {boss_since = nil, glyph_since = nil, seen = -math.huge}
+task.boss_fight = function ()
+    local now = get_time_since_inject()
+    if now - pub.seen > 2 then pub.boss_since, pub.glyph_since = nil, nil end
+    pub.seen = now
+    if not in_pit() then
+        pub.boss_since, pub.glyph_since = nil, nil
+        return false
+    end
+    local boss = live_boss_near()
+    pub.boss_since = boss and (pub.boss_since or now) or nil
+    local ok, glyph = pcall(function()
+        return settings.upgrade_toggle == true and not tracker.glyph_done
+            and type(utils.get_glyph_upgrade_gizmo) == 'function' and utils.get_glyph_upgrade_gizmo() ~= nil
+    end)
+    glyph = ok and glyph == true
+    pub.glyph_since = glyph and (pub.glyph_since or now) or nil
+    return (boss and now - pub.boss_since < BOSS_DEFER_MAX)
+        or (glyph and now - pub.glyph_since < GLYPH_DEFER_MAX) or false
+end
+
 -- Should a NEW request start now (no own request, no live work)?
 local function wants_new_request(status)
     if status.need_trigger ~= true then return false end
@@ -509,6 +543,7 @@ task.on_cancel = function ()
     task.debounce_time = -math.huge
     trip.teleport, trip.return_until = false, nil
     task.note = nil
+    trip.hold, trip.hold_since = nil, nil -- QQT_Warpigz_v3 Arkham 2.1.5
     -- last_completion_at is kept: preemption/cancel must not re-arm a
     -- sticky need_trigger (ARK-1).
 end

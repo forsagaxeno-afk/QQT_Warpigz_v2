@@ -215,10 +215,14 @@ task_manager.get_run_status = function ()
     local in_pit = utils.player_in_pit()
     local committed = not in_pit and enter_task ~= nil and enter_task.committed ~= nil
         and enter_task.committed() or false
+    -- QQT_Warpigz_v3 Arkham 2.1.5 (C-boss): live boss within 30 m or glyph pending, bounded.
+    local boss_fight = in_pit and alfred_task ~= nil and alfred_task.boss_fight ~= nil
+        and alfred_task.boss_fight() or false
     return {
         alfred_trip = alfred_trip,
         in_run = in_pit or alfred_trip or committed,
         committed_entry = committed,
+        boss_fight = boss_fight,
     }
 end
 

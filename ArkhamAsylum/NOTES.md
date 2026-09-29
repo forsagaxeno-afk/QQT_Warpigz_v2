@@ -1,4 +1,4 @@
-# Activities: ArkhamAsylum (Pit 2.1.3), Reaper (bosses 1.10.4), HordeDev (Hordes 2.2.5), WonderCity (Undercity 2.2.4)
+# Activities: ArkhamAsylum (Pit 2.1.5), Reaper (bosses 1.10.7), HordeDev (Hordes 2.2.8), WonderCity (Undercity 2.2.7)
 
 One session owns all four. Notes for each are below.
 
@@ -28,6 +28,12 @@ One session owns all four. Notes for each are below.
 - HordeDev `town_salvage.lua`: no `goto` (test `test_horde_salvage_v3.lua`). `loot_pending()` also requires `LooteerPlugin.status().ready` (P1).
 - Reaper/HordeDev exits wait for a drop Rosie yielded/rests (`evaluate_item(item,false) and evaluate_item(item,true)`), inside the 75/120 s bound. All four loot waits also hold on a busy `Scavenger.is_busy()`. Test `test_activities_loot_waits_v3.lua`.
 - Open LOWs (not done): 30 s bound on Pit/Undercity normal exit loot wait; `resume_key` never cleared after a trip that never returns; HordeDev tasks without pcall; log spam; actor-scan perf; custom explorer beacon_aside; `cross_traversal` vs `kill_boss`.
+
+## Scenario sweep 2026-09-28 (audit/reviews/sweep_2026-09-28.md)
+- HordeDev 2.2.8: D1 victory lap dwell counter reset (`test_horde_victory_lap.lua`); D2 zero-aether chest not retried (`test_horde_audit.lua`); D3 movement spell log is one summary line / 30 s (`test_hordedev_movement_spell_spam.lua`).
+- Reaper 1.10.7: P1 chest walk waits for the Looter (75 s); P2 reload mid-fight on the last key joins the fight (one committed run); P3 no task in Limbo/Loading/`[sno none]`; C-boss `status().boss_fight` (fresh evidence ≤5 s). Tests `test_reaper_chest_walk_loot`, `_reload_last_key`, `_limbo_guard`, `_boss_fight_status`.
+- Arkham 2.1.5: A1 glyph UI lost → re-interact (≤3 re-arms, `test_arkham_glyph_reopen`); A2 portal transition window 5 → 15 s, back-portal memory per floor in `ArkhamAsylum/back_portals.txt` (runtime file, 1800 s TTL, no global), chain guard after going back up, first-load heuristic: a portal 2.5–7.5 m away on the first pit floor seen since load is the back portal (`test_arkham_back_portal_slow_load`, `_reload`); A3 exit sweeps the boss pile ≤20 s for drops Rosie wants but not from her radius (`test_arkham_boss_pile_v3`); A4 hold log clock restarts after a gap/cancel (`test_arkham_hold_log`); C-boss `status().boss_fight` (live boss ≤30 m for ≤90 s, glyph pending ≤120 s; `test_arkham_boss_fight_status`).
+  - Risk: a load on floor 1 standing 2.5–7.5 m from its descend portal blacklists it until the 600 s reset. Live check.
 
 ## Rosie 3.3.2 fight hold (checked)
 - Rosie reports busy without moving while a drop waits out a fight, max 45 s, then picks up. `test_activities_fight_hold_332.lua` (real Rosie):
