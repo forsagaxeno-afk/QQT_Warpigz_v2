@@ -402,6 +402,7 @@ local function stuck_evades(use_evade)
     h.env.cast_spell.position = function(id) if id == 337031 then evades = evades + 1 end return true end
     local settings = h.env.require('core.settings')
     settings.use_movement = false; settings.use_evade = use_evade
+    settings.log_level = 1   -- Info: the STUCK line honours the logging combo (2.2.4)
     nav.update_trap_state = function() end
     for _ = 1, 40 do                                               -- wedged for 4 s
         h.adv(0.1); ext.pause('helltide_revamped'); ext.set_target('helltide_revamped', v(40, 0))

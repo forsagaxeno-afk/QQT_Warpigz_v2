@@ -1,4 +1,4 @@
-# HelltideRevamped: session notes (current 2.6.3)
+# HelltideRevamped: session notes (current 2.6.4)
 
 ## Map
 - `tasks/helltide.lua`: the main state machine, about 186 file-level locals. **Add no new file-level locals.**
@@ -19,6 +19,8 @@
 - 2.6.2 (auditor findings on 2.6.1): rupture grace/quiet timers run only within LIVE_SCAN_M of the site (a death/revive no longer finishes or abandons a live rupture); the quiet cap returns from `M.execute` (no old-state handler overwrites it on the same tick); an interactable starter switch is weak evidence (no 6 s exit, 30 s quiet cap, then left uncounted, 300 s); a Realmwalker counts only when this rupture would fight it and never re-arms a spent site; `listed()` compares ids. `tasks/alfred.lua`: any refusal blocks 30 s whatever `stuck` says (no 5 s request loop), no retry-delay hold after it, and the alfred task gives up the tick while dead (revive runs); a trip that left from the Helltide stamps `helltide_seen_at` on completion (no search reset when the buff lags). Search restarts from SEARCHING when the helltide task farmed since its last tick (no stale scan teleport at :55). `km_nav_map` entries older than 10 s are pruned.
 
 - 2.6.3 (Coordinator, suite 3.3.6): WarRoom archived by the owner. The "Web dashboard" tooltip no longer points to WarRoom (no viewer page ships now); `hr_dashboard.warroom_path()` / `warroom_on()` stay as an optional, harmless integration (nil without `_G.QQT_WarRoom`). No behaviour change.
+
+- 2.6.4 (scenario sweep 2026-09-28, H1-H5): road routes take one start and one exit per lap of the self-crossing patrol loop and the cheapest pair (exits on another lap only within 30 m of the nearest one); `loot_hold` credits the time the task did not run (no "farming on" right after a Rosie trip, drops at the portal spot are picked); rupture chests resolve to the chest at the spotted position (two chests 8 m apart are both opened); at :55 search waits up to 4 s after HR dropped its own tear pause so Rosie picks the drops it held; Advanced "Debug log" (off) gates the periodic [PATROL]/[NAV]/[CHEST RECALL]/[HELLTIDE CHEST]/[FARM CHEST]/[TRAVERSAL]/[CHECK_EVENTS] lines.
 
 ## Open / live checks
 - The move-on numbers (25 s / 45 m / 50 m); whether 2000 cinders is reachable in a typical Helltide hour; the map orientation and overlay fit.

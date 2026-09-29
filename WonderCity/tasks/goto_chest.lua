@@ -103,7 +103,7 @@ local function locked_log(key, interactable, now, evidence)
         tostring(key), tostring(interactable), stamp(tracker.boss_kill_time), stamp(tracker.boss_kill_seen), boss,
         stamp(tracker.chest_first_seen),
         evidence and string.format('opened evidence: %s; treating it as already opened in %ds unless it unlocks',
-            evidence, LOCKED_WAIT)
+            evidence, (tracker.chest_interacted and task.resume_confirm) and CONFIRM_SECONDS or LOCKED_WAIT) -- QQT_Warpigz_v3 WonderCity 2.2.7 (W5)
         or string.format('no opened evidence; waiting up to %ds for an unlock', LOCKED_WAIT_UNKNOWN)))
 end
 
@@ -121,6 +121,11 @@ local function locked_wait(now, key, interactable)
     local waited = now - task.locked_since
     local limit = task.evidence_at and math.min(LOCKED_WAIT_UNKNOWN, task.evidence_at - task.locked_since + LOCKED_WAIT)
         or LOCKED_WAIT_UNKNOWN
+    -- QQT_Warpigz_v3 WonderCity 2.2.7 (W5, sweep #16): back from a resumed
+    -- Alfred trip, our own click on this floor found the chest interactable,
+    -- so a non-interactable chest now is the opened one: confirm like a fresh
+    -- click. (Without a resume, a replacement actor keeps the 10 s wait.)
+    if tracker.chest_interacted and task.resume_confirm then limit = CONFIRM_SECONDS end
     if waited >= limit then
         complete(evidence and string.format('chest not interactable for %.0fs before our click; already opened (%s)',
             waited, evidence)
@@ -238,7 +243,12 @@ task.on_yield = function (seconds)
     end
 end
 
-task.reset = function ()
+task.reset = function (transition)
+    -- QQT_Warpigz_v3 WonderCity 2.2.7 (W5): a 'resume' transition (same
+    -- Undercity after an Alfred trip / reload) arms the short confirmation;
+    -- a new run or floor clears it; an internal reset keeps it.
+    if transition == 'resume' then task.resume_confirm = true
+    elseif transition ~= nil then task.resume_confirm = nil end
     task.interact_time, task.last_interact_call, task.active_key = nil, nil, nil
     task.items_before, task.loot_observed = nil, false
     task.locked_since, task.missing_since, task.evidence_at, task.locked_logged = nil, nil, nil, nil

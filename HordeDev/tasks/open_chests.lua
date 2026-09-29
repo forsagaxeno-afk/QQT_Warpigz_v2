@@ -470,6 +470,14 @@ open_chests_task = {
             return
         end
         tracker.clear_key("chest_vfx_wait")
+        -- QQT_Warpigz_v3 HordeDev 2.2.8 (sweep D2): with no aether before and
+        -- after the interact the chest cannot be paid for; retrying it
+        -- max_attempts times only delays the exit.
+        if self.pre_interact_aether == 0 and count == 0 then
+            self.failed_attempts = 0
+            self:try_next_chest(false)
+            return
+        end
         self.failed_attempts = self.failed_attempts + 1
         if self.failed_attempts >= self.max_attempts then
             self:try_next_chest(false)

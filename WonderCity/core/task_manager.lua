@@ -8,6 +8,7 @@ local active_task = nil
 local running = false
 local pending_navigation_reset = false
 local exit_task, entry_task, alfred_task, chest_task, kill_task, obols_task
+local loot_reward_task -- QQT_Warpigz_v3 WonderCity 2.2.7 (W4)
 local current_task = { name = 'Idle', status = 'Idle' } -- Default state when no task is active
 -- C5: when the alfred task became the active task (WonderCity yielding
 -- control to Alfred). That time is not progress time for any stuck window.
@@ -203,6 +204,9 @@ task_manager.execute_tasks = function ()
         elseif tracker.done and obols_task.shouldExecute() then
             tracker.loot_quiet_since = nil
             execute(obols_task)
+        elseif tracker.done and not utils.exit_forced() and loot_reward_task.shouldExecute() then
+            tracker.loot_quiet_since = nil
+            execute(loot_reward_task) -- QQT_Warpigz_v3 WonderCity 2.2.7 (W4): reward loot beyond the pickup distance
         elseif exit_task.shouldExecute() then execute(exit_task)
         else execute(reward_wait_task) end
         return
@@ -235,10 +239,21 @@ task_manager.get_run_status = function ()
     local committed = not inside and entry_task ~= nil and entry_task.committed ~= nil
         and entry_task.committed() or false
     local run_trip = alfred_trip and alfred_task.run_trip ~= nil and alfred_task.run_trip() or false
+    -- QQT_Warpigz_v3 WonderCity 2.2.7 (contract C-boss): a live boss fight
+    -- inside the Undercity, for Rosie's automatic trip gate. The reward scan
+    -- sees a live boss, or kill_monster saw one within its 10 s gate; the
+    -- gate's tail ends at once when the reward scan observed the kill.
+    local boss_fight = false
+    if inside then
+        local kill, seen = tracker.boss_kill_seen, tracker.boss_seen_at
+        boss_fight = tracker.boss_alive == true
+            or (tracker.boss_gate_active() == true and not (kill ~= nil and seen ~= nil and kill >= seen))
+    end
     return {
         alfred_trip = alfred_trip,
         in_run = inside or committed or run_trip,
         committed_entry = committed,
+        boss_fight = boss_fight,
     }
 end
 
@@ -253,6 +268,7 @@ local task_files = {
     'portal',
     'kill_monster',
     'goto_chest',
+    'loot_reward', -- QQT_Warpigz_v3 WonderCity 2.2.7 (W4)
     'exit_undercity',
     -- 'follower',
     'explore_undercity',
@@ -268,6 +284,7 @@ for _, file in ipairs(task_files) do
     if file == 'goto_chest' then chest_task = task end
     if file == 'kill_monster' then kill_task = task end
     if file == 'loot_obols' then obols_task = task end
+    if file == 'loot_reward' then loot_reward_task = task end
 end
 
 return task_manager

@@ -100,6 +100,13 @@ check('unavailable aether evidence cannot mark chest sequence finished',function
  task:wait_for_loot();s.now=s.now+2;task:wait_for_loot()
  assert(task.current_state=='WAITING_FOR_LOOT' and not tr.finished_chest_looting)
 end)
+check('zero-aether chest is not retried (sweep D2)',function()
+ local e,s=harness();local task,tr=chest_task(e,s)
+ task.pre_interact_aether=0;s.aether=0;s.chests.BSK_UniqueOpChest_Materials=actor('BSK_UniqueOpChest_Materials',1)
+ task.current_state='WAITING_FOR_VFX';task:wait_for_vfx();s.now=s.now+1;task:wait_for_vfx()
+ assert(task.current_state=='FINISHED',tostring(task.current_state))
+ assert(not tr.selected_chest_opened)
+end)
 check('active chest completion survives disappearance of gold-room actor',function()
  local e,s=harness();local task=chest_task(e,s)
  task.current_state='WAITING_FOR_VFX';s.chests={}

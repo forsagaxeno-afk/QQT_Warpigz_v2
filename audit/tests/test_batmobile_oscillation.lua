@@ -15,6 +15,8 @@
 --   B7 STUCK detection returns ~6 s after a loading screen, not load + 6 s (R3)
 --   B8 a paused caller pressed against a big target: no STUCK/Evade spam (R5)
 --   B9 freeroam also yields to a busy Scavenger (Navigator's looter)
+-- Scenario sweep 2026-09-28 (audit/reviews/sweep_2026-09-28.md §2.5):
+--   B10 STUCK / PARTIAL PATH REJECTED honour the logging combo (2.2.4)
 -- Runs under Lua 5.4 and LuaJIT.
 local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/Batmobile/'
 local checks, cases, failures = 0, 0, {}
@@ -423,6 +425,46 @@ case('B9 freeroam holds for a busy Scavenger like for a busy Looter', function()
     end
     ok(moves_with(false) > 0, 'freeroam drives')
     ok(moves_with(true) == 0, 'freeroam waits while Scavenger is busy')
+end)
+
+-- ── B10 (sweep B1) ──────────────────────────────────────────────────────
+case('B10 STUCK and PARTIAL PATH REJECTED lines honour the logging combo', function()
+    local function run(level, pattern)
+        local h = harness({blocked = function() return true end, explorer_target = v(30, 0),
+            find_path = function(a, b, custom)
+                if custom then return {a, b}, false end
+                return {a, v(a:x() + 1, a:y())}, true            -- a 2-node partial toward a far goal
+            end})
+        h.env.require('core.settings').log_level = level
+        h.nav.update_trap_state = function() end
+        if pattern == '[nav] STUCK' then
+            for _ = 1, 600 do                                  -- 60 s wedged, paused caller
+                h.now = h.now + 0.1
+                h.ext.pause('helltide_revamped'); h.ext.set_target('helltide_revamped', v(40, 0))
+                h.ext.move('helltide_revamped')
+            end
+        else
+            -- an explorer frontier behind a cliff re-picked every 0.5 s
+            h.ext.resume('helltide_revamped')
+            for _ = 1, 120 do
+                h.now = h.now + 0.5
+                h.nav.target, h.nav.path, h.nav.is_custom_target = v(30, 0), {}, false
+                h.nav.pathfind_area_cooldown, h.nav.pathfind_replan_cooldown = -1, -1
+                h.nav.pathfind_fail_count = 0
+                h.ext.move('helltide_revamped')
+            end
+        end
+        return h.logged(pattern), h.logged('similar)')
+    end
+    for _, pattern in ipairs({'[nav] STUCK', '[nav] PARTIAL PATH REJECTED'}) do
+        local debug = run(2, pattern)
+        local info, similar = run(1, pattern)
+        local off = run(0, pattern)
+        ok(debug > 12, pattern .. ': the scenario repeats (Debug lines=' .. debug .. ')')
+        ok(info >= 1 and info <= 12, pattern .. ': Info lines in 60 s=' .. info .. ' (was ' .. debug .. ')')
+        ok(similar >= 1, pattern .. ': Info appends (+N similar)')
+        ok(off == 0, pattern .. ': Disabled prints nothing (got ' .. off .. ')')
+    end
 end)
 
 if #failures > 0 then

@@ -76,10 +76,12 @@ reward_phase.observe = function ()
     local dead_boss, alive_boss, reward_seen = false, false, false
     local chest_actor, boss_name, boss_health = nil, nil, nil
     for _, actor in pairs(actors) do
-        local read, name, boss, health = pcall(function()
+        local read, name, boss, health, pos = pcall(function()
             local skin = actor:get_skin_name()
             local is_boss = boss_names[skin] or (actor.is_boss and actor:is_boss())
-            return skin, is_boss, is_boss and actor:get_current_health() or nil
+            local hp = is_boss and actor:get_current_health() or nil
+            -- QQT_Warpigz_v3 WonderCity 2.2.7 (W4): where the boss fell.
+            return skin, is_boss, hp, is_boss and actor:get_position() or nil
         end)
         if not read then return end -- incomplete enumeration is not kill evidence
         if type(name) == 'string' and name:match('^X1_Undercity_Chest_Attunement') then
@@ -89,6 +91,7 @@ reward_phase.observe = function ()
         if boss and type(health) == 'number' then
             if health > 0 then alive_boss = true elseif health == 0 then dead_boss = true end
             if boss_name == nil or health > 0 then boss_name, boss_health = name, health end
+            if pos then tracker.boss_last_pos = pos end -- QQT_Warpigz_v3 WonderCity 2.2.7 (W4)
         end
     end
     -- R14 (complete scans only): first sight of the reward chest, the last
@@ -173,9 +176,78 @@ reward_phase.chest_vanished = function ()
     return ok and near == true
 end
 
+-- QQT_Warpigz_v3 WonderCity 2.2.7 (W4, sweep S3 F4/F5): reward loot the
+-- Looter wants (evaluate_item(item, true)) within REWARD_LOOT_RANGE m of the
+-- reward chest or the boss, but beyond its own pickup distance, was left at
+-- the exit (only 3 s of loot quiet were needed). Such an item now holds the
+-- exit and tasks/loot_reward walks to it (within REWARD_LOOT_REACH m); after
+-- a death it walks back to the chest first. Bounded: REWARD_LOOT_CAP s from
+-- the reward opening (one log line), and an item (or the walk back) without
+-- REWARD_LOOT_STEP m of progress for REWARD_LOOT_STALL s is skipped.
+local RL = {RANGE = 12, CAP = 25, STALL = 5, STEP = 0.5, REACH = 1.5}
+reward_phase.REWARD_LOOT = RL
+local rloot = {key = nil, skipped = {}, capped = false}
+local function rloot_state()
+    local key = tostring(tracker.floor_generation) .. '|' .. tostring(tracker.reward_opened_time)
+    if rloot.key ~= key then
+        rloot.key, rloot.skipped, rloot.capped = key, {}, false
+        rloot.target, rloot.best, rloot.best_at = nil, nil, nil
+    end
+    return rloot
+end
+reward_phase.reward_loot_state = rloot_state
+local function near2(pos, anchor)
+    return anchor ~= nil and (pos:x() - anchor:x())^2 + (pos:y() - anchor:y())^2 <= RL.RANGE^2
+end
+-- Returns the wanted reward item (or, after a death, the chest position to
+-- walk back to) and its key, or nil.
+reward_phase.reward_loot_target = function ()
+    if not tracker.done or not tracker.reward_opened_time or not utils.player_in_undercity() then return nil end
+    local looter = LooteerPlugin
+    if type(looter) ~= 'table' or type(looter.evaluate_item) ~= 'function' then return nil end
+    local state, now = rloot_state(), get_time_since_inject()
+    if now - tracker.reward_opened_time > RL.CAP then
+        if not state.capped then
+            state.capped = true
+            if state.target ~= nil then
+                console.print(string.format('[WonderCity:finish] reward loot not picked up within %ds - exiting anyway', RL.CAP))
+            end
+        end
+        return nil
+    end
+    local player = get_local_player()
+    if not player then return nil end
+    local chest, boss = tracker.chest_last_pos, tracker.boss_last_pos
+    local ok, best, best_key = pcall(function()
+        local pp, found, found_key, found_d = player:get_position(), nil, nil, nil
+        for _, item in pairs(actors_manager.get_all_items() or {}) do
+            local pos = item:get_position()
+            local key = string.format('item:%.1f:%.1f', pos:x(), pos:y()) -- position: ground items may have no id
+            if not state.skipped[key] and (near2(pos, chest) or near2(pos, boss)) and not is_obols(item)
+                and looter.evaluate_item(item, true) == true then
+                local d = (pos:x() - pp:x())^2 + (pos:y() - pp:y())^2
+                if found_d == nil or d < found_d then found, found_key, found_d = item, key, d end
+            end
+        end
+        if found == nil and chest ~= nil and not state.skipped.chest and not near2(pp, chest) then
+            return chest, 'chest' -- a death: back to the chest, its loot may be out of view
+        end
+        return found, found_key
+    end)
+    if not ok then return nil end
+    return best, best_key
+end
+reward_phase.pending_loot = function ()
+    return reward_phase.reward_loot_target() ~= nil
+end
+
 reward_phase.can_exit = function ()
     if not tracker.done then return false end
     if utils.is_looting() then
+        tracker.loot_quiet_since = nil
+        return false
+    end
+    if reward_phase.pending_loot() then -- QQT_Warpigz_v3 WonderCity 2.2.7 (W4)
         tracker.loot_quiet_since = nil
         return false
     end

@@ -13,7 +13,13 @@ local task = {
     blacklist = {},
     failed_count = 0,
     pending_attempt = nil,
+    -- QQT_Warpigz_v3 Arkham 2.1.5: the glyph UI closes when the player is
+    -- pulled off the stone (death, evade, loading screen). ui_lost marks it;
+    -- back at the stone the interaction is re-armed (at most MAX_REARMS).
+    ui_lost = false,
+    rearms = 0,
 }
+local MAX_REARMS = 3 -- QQT_Warpigz_v3 Arkham 2.1.5
 local ATTEMPT_DELAY = 2
 local EMPTY_LIST_TIMEOUT = 8
 -- ARK-4/C6: yield to an active Looter (boss drops), but not forever.
@@ -76,6 +82,8 @@ task.reset = function ()
     task.pending_attempt = nil
     task.last_attempt_hash = nil
     task.status = 'idle'
+    task.ui_lost = false -- QQT_Warpigz_v3 Arkham 2.1.5
+    task.rearms = 0
     looter_yield_since = nil
 end
 
@@ -117,6 +125,10 @@ task.Execute = function ()
         settings.orb_set_clear(false)
     end
     if distance > 2 then
+        -- QQT_Warpigz_v3 Arkham 2.1.5: off the stone after an interaction the
+        -- game closes the glyph UI; without a re-interact the list read empty
+        -- and glyph_done was set with chances unused.
+        if tracker.glyph_trigger_time ~= nil then task.ui_lost = true end
         BatmobilePlugin.set_target(plugin_label, gizmo, distance <= 4)
         BatmobilePlugin.move(plugin_label)
         task.status = 'walking to Awakened Glyphstone'
@@ -131,6 +143,21 @@ task.Execute = function ()
         interact_object(gizmo)
         task.status = 'interacting with Awakened Glyphstone'
         return
+    end
+    -- QQT_Warpigz_v3 Arkham 2.1.5: back at the stone after the UI was lost:
+    -- re-arm the empty-list window and re-open the UI (bounded).
+    if task.ui_lost then
+        task.ui_lost = false
+        if task.rearms < MAX_REARMS then
+            task.rearms = task.rearms + 1
+            tracker.glyph_trigger_time = now
+            task.last_interaction_time = now
+            interact_object(gizmo)
+            console.print(string.format('[upgrade_glyph] glyph UI lost — re-opening the Awakened Glyphstone (%d/%d)',
+                task.rearms, MAX_REARMS))
+            task.status = 'interacting with Awakened Glyphstone'
+            return
+        end
     end
     if now - task.last_interaction_time < ATTEMPT_DELAY then return end
     local glyphs = glyph_list()
