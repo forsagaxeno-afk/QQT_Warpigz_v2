@@ -2,6 +2,16 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.12] — 2026-09-29
+
+### Fixed
+
+- **WarPigs 1.1.11: the Tyrael turn-in fix, finished** (post-release review of 1.1.10).
+  - While a turn-in is given up (Tyrael not found), the Pit filler runs if "run Pit after turn-in" is on, instead of standing idle for 10 minutes; the status line shows "turn-in suspended, retry in N s".
+  - The one re-teleport to Temis is no longer cancelled by the walk toward Tyrael.
+  - The 1 min / 3 min limits count only time actually spent searching (a Rosie town trip or a SilentRaven claim no longer uses them up).
+  - When Tyrael is found, his and the player's positions are logged once (his spot is not verified live yet).
+
 ## [3.3.11] — 2026-09-28
 
 ### Fixed
