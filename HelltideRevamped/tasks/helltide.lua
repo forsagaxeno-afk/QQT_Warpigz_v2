@@ -3884,6 +3884,17 @@ local helltide_task = {
     -- then rests such drops, so its busy really drops).
     loot_hold = function(self, lp)
         local now = get_time_since_inject()
+        -- QQT_Warpigz_v3 2.6.4 (sweep H2, item loss): time in which this task
+        -- did not run (a Rosie trip, a revive, another task) is credited to
+        -- the window. After a trip the first busy tick read "busy 40 s without
+        -- progress" and HR walked off the drops at the portal spot.
+        local seen = self._loot_seen_at
+        self._loot_seen_at = now
+        local gap = seen and now - seen or 0
+        if gap >= 0.5 then
+            if self._loot_since then self._loot_since = self._loot_since + gap end
+            if self._loot_quiet then self._loot_quiet = self._loot_quiet + gap end
+        end
         if not loot_guard.busy() then
             self._loot_quiet = self._loot_quiet or now
             if now - self._loot_quiet >= 2 then
@@ -4037,6 +4048,7 @@ local helltide_task = {
         self._handlers_ran_at = nil
         self.hold_reason, self._hold_since, self._hold_logged = nil, nil, nil
         self._loot_since, self._loot_items, self._loot_capped, self._loot_quiet = nil, nil, nil, nil -- QQT_Warpigz_v3
+        self._loot_seen_at = nil -- QQT_Warpigz_v3 2.6.4
         self._town_tp_at = nil
         self._abandon_reached_town = nil
         self._trav_cleared_for = nil

@@ -1124,6 +1124,44 @@ case('3.3.3 a trip completing in town does not stamp a buff sighting (no walk ba
     eq(s.logged('Left helltide zone'), 0, 'the helltide task walked back from town')
 end)
 
+-- QQT_Warpigz_v3 2.6.4 (sweep 2026-09-28 H2, item loss): the Looter hold's
+-- 15 s window (_loot_since) was not credited for the time the helltide task
+-- did not run. After a Rosie trip the first busy tick read "busy 40 s
+-- without progress": HR farmed on at once and walked off the drops at the
+-- portal spot (a Mythic in sweep seed 5).
+case('2.6.4 after a Rosie trip the Looter hold starts afresh: the drops at the portal spot are picked', function()
+    local s = session({salvage = true, zone = 'Scos_Coast'})
+    rosie_like(s)
+    s.full = false
+    s.tick(5)
+    s.looting = true                 -- Rosie picks up; the pickup fills the bag
+    s.tick(3)
+    s.full = true                    -- the trip starts while Rosie is still busy
+    s.tick(0.2)
+    eq(#s.triggers, 1, 'trip requested')
+    s.looting = false                -- the trip holds Rosie's pickup
+    s.alfred_cb_at = s.now + 40      -- a 40 s town trip
+    local prev = s.before_tick
+    s.before_tick = function()
+        local had = s.alfred_cb_at
+        prev()
+        if had and not s.alfred_cb_at then s.looting = true end -- back: the drops at the portal spot
+    end
+    s.tick(40.5)
+    eq(s.alfred_busy, false, 'the trip completed')
+    ok(s.looting, 'Rosie busy with the drops at the portal spot')
+    local held = 0
+    for _ = 1, 80 do
+        s.tick(0.1)
+        if s.helltide.hold_reason == 'waiting for Looter to finish' then held = held + 1 end
+    end
+    eq(s.logged('without progress — farming on'), 0, 'HR farmed on at once after the trip')
+    ok(held >= 70, 'HR held for the Looter after the trip: ' .. held .. '/80 ticks')
+    -- and the hold is still bounded
+    s.tick(20)
+    eq(s.logged('without progress — farming on'), 1, 'bounded: 15 s without a new item')
+end)
+
 print(string.format('Helltide integration: %d cases, %d checks, %d failures', cases, checks, #failures))
 if #failures > 0 then error('Helltide integration failures:\n' .. table.concat(failures, '\n')) end
 print('PASS: test_integration_helltide (' .. cases .. ' cases)')
