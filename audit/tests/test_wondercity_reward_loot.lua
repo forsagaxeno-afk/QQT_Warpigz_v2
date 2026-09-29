@@ -82,6 +82,19 @@ case('W4-D the reward-loot scan asks the Looter at most once per item per tick',
     ok(worst <= 1, 'evaluate_item calls per tick for one item: ' .. worst)
 end)
 
+-- QQT_Warpigz_v3 WonderCity 2.2.9 (audit LOW b): with the Looter's pickup
+-- off nobody picks the item up; the walk to it and its 5 s stall per drop
+-- only delayed the exit.
+case('W4-E the Looter disabled: no walk to reward drops, the exit follows at once', function()
+    local h = boss_floor({{0, 3.5, MYTHIC}, {0, -4, GA2}})
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.main_toggle:set(false) -- Rosie pickup off
+    eq(h.as('Rosie', function() return h.G.LooteerPlugin.get_enabled() end), false, 'the Looter reports disabled')
+    ok(h.run_until(function() return h.opened_at ~= nil end, 30), 'the chest opened\n' .. h.tail(20))
+    ok(h.run_until(exit_cast, 30), 'the exit was cast\n' .. h.tail(30))
+    ok(h.waypoints[1].t - h.opened_at <= 6, string.format('exit within 6 s of the opening (%.1f)', h.waypoints[1].t - h.opened_at))
+    eq(h.logged('reward loot'), 0, 'no reward-loot walk')
+end)
+
 case('W4-A a Mythic 3.5 m and a GA2 4 m from the chest (pickup 2 m) are picked up before the exit cast', function()
     local h = boss_floor({{0, 3.5, MYTHIC}, {0, -4, GA2}})
     ok(h.run_until(function() return h.opened_at ~= nil end, 30), 'the chest opened\n' .. h.tail(20))
