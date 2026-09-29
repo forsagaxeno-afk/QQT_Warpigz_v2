@@ -97,7 +97,7 @@ case("user report: a checked Leoric's Crown is kept as plain Unique AND as Mythi
         'an unchecked Mythic Unique is kept (Always keep Mythics is on)')
     local n = t.lines("[Rosie] Kept Leoric's Crown: Mythic (Always keep mythics) (Mythic Unique, sno=2647147)")
     eq(n, 1, 'one keep line for the Mythic form\n' .. t.h.tail())
-    n = t.lines("[Rosie] Kept Leoric's Crown: checked in \"Uniques I keep\" (Any) (Unique, sno=2647147)") -- Rosie 1.0.28: the list moved to 2. Uniques
+    n = t.lines("[Rosie] Kept Leoric's Crown: checked in \"Uniques I keep\" (Unique, sno=2647147)") -- Rosie 1.0.28: the list moved to 2. Uniques
     eq(n, 1, 'one keep line for the plain Unique')
     t.tg.mythic_always_keep:set(false); t.h.run(1.5)
     eq(t.verdict(item(LEORIC, {ancestral = true, ga = 1, affixes = LEORIC_MYTHIC})), 'keep', 'Always keep off: the list keeps the Mythic form')

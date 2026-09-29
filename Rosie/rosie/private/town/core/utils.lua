@@ -711,8 +711,8 @@ end
 -- "1. Always keep". A checked row keeps the plain Unique AND its Mythic form,
 -- Ancestral or not; a checked name also matches another SNO of that name
 -- (the S14 re-issue of an Iconic Mythic).
---  * 'Uniques I keep' (unique_<sno>, 2. Uniques since Rosie 1.0.28, with a
---    per-row condition for the plain Unique): always used (an empty list
+--  * 'Uniques I keep' (unique_<sno>, 2. Uniques since Rosie 1.0.28; plain
+--    copies only when Ancestral while unique_ancestral_only is on): always used (an empty list
 --    keeps nothing extra; the old "Use unique/mythic filter" switch is gone).
 --  * 'Iconic Mythic items to keep' (mythic_<sno>, one row per name) and
 --    'Mythic Uniques to keep' (mythic_form_<sno>, while "Separate list for
@@ -734,17 +734,6 @@ local function listed(list, sno)
     return false
 end
 function utils.in_unique_keep_list(sno) return (listed(utils.settings.ancestral_unique, sno)) end
--- QQT_Warpigz_v3 Rosie 1.0.28 (owner): the condition of a checked Unique
--- (0 Any, 1 Ancestral only, 2 Ancestral with >= unique_cond_ga Greater
--- Affixes), or nil when the SNO is not checked in "Uniques I keep".
-function utils.unique_keep_cond(sno)
-    local on,id = listed(utils.settings.ancestral_unique, sno)
-    if not on then return nil end
-    local conds = utils.settings.unique_cond
-    local cond = type(conds) == 'table' and tonumber(conds[id]) or 0
-    if cond ~= 1 and cond ~= 2 then cond = 0 end
-    return cond
-end
 function utils.in_mythic_form_list(sno) return utils.settings.mythic_form_filter == true and listed(utils.settings.mythic_form_keep, sno) end
 function utils.in_iconic_list(sno) return listed(utils.settings.ancestral_mythic, sno) end
 function utils.is_correct_unique(item)
@@ -889,8 +878,8 @@ end
 --     takes its action (Mythic Uniques: their own action while "Separate list
 --     for Mythic Uniques" is on). Mythics never reach the rules below.
 --     Rosie 1.0.28: the checked Unique list now sits in the menu's 2. Uniques
---     with a per-row condition (Any / Ancestral only / Ancestral with N+
---     GA); it is still decided here, before the loot filter and junk.
+--     ("Keep checked Uniques only when Ancestral" optional); it is still
+--     decided here, before the loot filter and junk.
 --  3. In-game loot filter (optional).  4. Junk.  2. Uniques (GA, action).
 --  5. Legendary and lower.
 -- Returns the action (item_enum), the reason, the item class, affix count.
@@ -928,26 +917,18 @@ local function decide(item)
     end
     -- 1. Always keep
     if is_mythic and s.mythic_always_keep ~= false then return KEEP,'Mythic (Always keep mythics)',class end
-    local ga_count,ga_readable = utils.get_item_ga_count(item)
     if rarity>=6 then
-        -- QQT_Warpigz_v3 Rosie 1.0.28 (owner): a checked plain Unique is kept
-        -- only when its condition holds; otherwise it falls through to the
-        -- rules below (the GA rule and the Otherwise actions of 2. Uniques).
-        -- A Mythic form of a checked Unique is kept as before (reached only
-        -- with Always keep Mythics off).
-        local cond = utils.unique_keep_cond(item_id)
-        if cond ~= nil then
-            local n = tonumber(s.unique_cond_ga) or 2
-            local label = 'checked in "Uniques I keep" ('..(cond==1 and 'Ancestral only' or cond==2 and ('Ancestral with '..n..'+ Greater Affixes') or 'Any')..')'
-            if not is_unique then return KEEP,'checked in "Uniques I keep"',class end
-            if cond == 0 then return KEEP,label,class end
+        -- QQT_Warpigz_v3 Rosie 1.0.28 (owner): with "Keep checked Uniques only
+        -- when Ancestral" on, a checked plain Unique is kept only as an
+        -- Ancestral copy; a non-Ancestral copy falls through to the rules
+        -- below (the GA rule and the Otherwise actions of 2. Uniques). The
+        -- Mythic form of a checked Unique is kept as before (reached only
+        -- with Always keep Mythics off). Unreadable ancestry keeps it.
+        if utils.in_unique_keep_list(item_id) then
+            if not is_unique or s.unique_ancestral_only ~= true then return KEEP,'checked in "Uniques I keep"',class end
             local aok,anc = pcall(function() return item:is_ancestral() end)
-            if not aok or type(anc) ~= 'boolean' then return KEEP,label..': ancestral flag unreadable',class end
-            if anc and cond == 1 then return KEEP,label,class end
-            if anc and cond == 2 then
-                if not ga_readable then return KEEP,label..': Greater Affixes unreadable',class end
-                if ga_count >= n then return KEEP,label,class end
-            end
+            if not aok or type(anc) ~= 'boolean' then return KEEP,'checked in "Uniques I keep": ancestral flag unreadable',class end
+            if anc then return KEEP,'checked in "Uniques I keep" (Ancestral)',class end
         end
         if utils.in_iconic_list(item_id) then return KEEP,'checked in "Iconic Mythic items to keep"',class end
         if utils.in_mythic_form_list(item_id) then return KEEP,'checked in "Mythic uniques to keep"',class end
@@ -959,6 +940,7 @@ local function decide(item)
         local ip = utils.get_item_power(item)
         if ip and ip >= need_ip then return KEEP,'item power '..ip..' >= '..need_ip..' (old "Keep Uniques with Item Power" setting)',class end
     end
+    local ga_count,ga_readable = utils.get_item_ga_count(item)
     if is_mythic then
         if not ga_readable then return KEEP,'Greater Affixes unreadable',class end
         local need = tonumber(s.ancestral_mythic_ga_count) or 0
@@ -999,7 +981,7 @@ local function decide(item)
         end
         return is_ancestral and s.ancestral_item_unique or s.item_unique,
             string.format('Uniques: %s action (%s, Greater Affixes %d)',kind,
-                utils.unique_keep_cond(item_id)~=nil and 'its "Uniques I keep" condition does not hold' or 'not in a keep list',ga_count),class
+                utils.in_unique_keep_list(item_id) and 'checked in "Uniques I keep" but not Ancestral' or 'not in a keep list',ga_count),class
     end
     -- 5. Legendary, Rare, Magic, Common
     if not is_ancestral then return s.item_legendary_or_lower,'Non-Ancestral action' end
@@ -1031,7 +1013,7 @@ end
 -- One console line per distinct decision (SNO, class, action, reason) of a
 -- Unique or Mythic, and of any other item a Greater Affix rule keeps, once per
 -- QQT session (utils.log_once): "[Rosie] Kept Leoric's Crown: checked in
--- "Uniques I keep" (Any) (Mythic Unique, sno=2647147)".
+-- "Uniques I keep" (Mythic Unique, sno=2647147)".
 local function log_decision(item,action,why,class)
     if not why then return end
     -- Other gear: only a Greater Affix keep (not every default action).

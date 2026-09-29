@@ -70,11 +70,13 @@ first section that decides an item wins:
    - *Uniques I keep* (was *Unique items I always keep*; saved selections kept):
      a checked Unique is kept even when marked junk or hidden by the in-game
      filter, and pickup takes it whatever the GA sliders or the in-game filter
-     say. Under each checked row, *Keep it when*: **Any** (default: Ancestral
-     or not), **Ancestral only**, or **Ancestral with enough Greater Affixes**
-     (N = *Greater Affixes for the Ancestral condition*, shared). A copy that
-     fails its condition goes on to the rules below. Its Mythic form follows
-     *1. Always keep*.
+     say. Its Mythic form follows *1. Always keep*.
+   - *Keep checked Uniques only when Ancestral* (default off: every copy of a
+     checked Unique is kept). On: only an Ancestral copy is kept; a
+     non-Ancestral copy goes on to the rules below. Simple setup: check the
+     Uniques you want, turn this on, set both *Otherwise* actions to Salvage
+     and leave *Keep with Greater Affixes at least* at 0: only the checked
+     Ancestral Uniques are kept, every other Unique is salvaged.
    - *Keep with Greater Affixes at least* (0 = off), otherwise the Ancestral /
      Non-Ancestral action; *Uniques to salvage or sell* (Carry to town / Drop
      on the spot) is shown while *Pick up every Unique* is on.

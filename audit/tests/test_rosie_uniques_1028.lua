@@ -1,15 +1,16 @@
 -- QQT_Warpigz_v3 Rosie 1.0.28 (owner, via the Coordinator): "there is no option
 -- to keep a selected Unique only when ANCESTRAL; if you move the slider it
 -- keeps ALL Uniques; and the Unique settings are scattered over 3-4 places".
---  C  each checked Unique in "Uniques I keep" has a condition for its plain
---     Unique: Any (default, the old behaviour) / Ancestral only / Ancestral
---     with at least N Greater Affixes (one shared slider). A copy that fails
---     it falls through to the GA rule and the Otherwise actions. Its Mythic
---     form follows 1. Always keep as before.
+--  C  (owner amendment: "the slider isn't needed; just keep the selected
+--     Ancestral Uniques, the others get salvaged") one toggle "Keep checked
+--     Uniques only when Ancestral" (default off = the old behaviour). On: a
+--     checked plain Unique is kept only as an Ancestral copy; a non-Ancestral
+--     copy falls through to the GA rule and the Otherwise actions. Its Mythic
+--     form follows 1. Always keep.
 --  I  the item power slider is gone from the menu; a saved value > 0 is still
 --     honoured and shown read-only with a Reset button.
 --  M  one section "2. Uniques" right after 1. Always keep holds Pick up every
---     Unique (same widget), the list, the condition, the GA slider, the two
+--     Unique (same widget), the list, the toggle, the GA slider, the two
 --     Otherwise actions and the sorter mode; saved values keep their hashes.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
@@ -70,7 +71,7 @@ local function setup(opts)
             return 'keep'
         end)
     end
-    function t.cond(v) h.as('Rosie', function() t.gui.unique_cond(2647147):set(v) end); h.run(1.5) end
+    function t.anc(v) tg.unique_ancestral_only:set(v); h.run(1.5) end
     function t.lines(text)
         local n = 0
         for _, line in ipairs(h.log) do if tostring(line):find(text, 1, true) then n = n + 1 end end
@@ -80,53 +81,51 @@ local function setup(opts)
 end
 local function leoric(anc, ga, affixes) return item(LEORIC, {ancestral = anc, ga = ga, affixes = affixes or PLAIN}) end
 
-case('C1 Any (default): the checked plain Unique is kept, Ancestral or not (unchanged)', function()
+case('C1 toggle off (default): the checked plain Unique is kept, Ancestral or not (unchanged)', function()
     local t = setup()
+    eq(t.tg.unique_ancestral_only:get(), false, 'default off')
     eq(t.verdict(leoric(true, 0)), 'keep', 'Ancestral')
     eq(t.verdict(leoric(false, 0)), 'keep', 'non-Ancestral')
-    eq(t.lines('checked in "Uniques I keep" (Any)'), 1, 'the reason names the list and its condition\n' .. t.h.tail(6))
     t.h.assert_clean('C1')
 end)
 
-case('C2 Ancestral only: a non-Ancestral copy falls through to the Non-Ancestral action (1.0.27: kept)', function()
+case('C2 toggle on: a non-Ancestral copy falls through to the Non-Ancestral action (1.0.27: kept)', function()
     local t = setup()
-    t.cond(1)
+    t.anc(true)
     eq(t.verdict(leoric(true, 0)), 'keep', 'Ancestral kept')
     eq(t.verdict(leoric(false, 0)), 'sell', 'non-Ancestral sold (Otherwise: Non-Ancestral Uniques)')
-    eq(t.lines('checked in "Uniques I keep" (Ancestral only)'), 1, 'keep reason\n' .. t.h.tail(6))
-    eq(t.lines('its "Uniques I keep" condition does not hold'), 1, 'the fall-through reason\n' .. t.h.tail(6))
+    eq(t.lines('checked in "Uniques I keep" (Ancestral)'), 1, 'keep reason\n' .. t.h.tail(6))
+    eq(t.lines('checked in "Uniques I keep" but not Ancestral'), 1, 'the fall-through reason\n' .. t.h.tail(6))
     t.h.assert_clean('C2')
 end)
 
-case('C3 Ancestral with N+ Greater Affixes (shared slider): fails fall through; the GA rule still applies to them', function()
+case('C3 the owner\'s recipe: toggle on, both Otherwise = Salvage, GA 0: only checked Ancestral Uniques are kept', function()
     local t = setup()
-    t.cond(2)
-    t.tg.unique_cond_ga_slider:set(2); t.h.run(1.5)
-    eq(t.verdict(leoric(true, 2)), 'keep', 'Ancestral, 2 GA')
-    eq(t.verdict(leoric(true, 3)), 'keep', 'Ancestral, 3 GA')
-    eq(t.verdict(leoric(true, 1)), 'salvage', 'Ancestral, 1 GA: Otherwise: Ancestral Uniques (1.0.27: kept)')
-    eq(t.verdict(leoric(false, 3)), 'sell', 'non-Ancestral, 3 GA: sold (1.0.27: kept)')
-    eq(t.lines('checked in "Uniques I keep" (Ancestral with 2+ Greater Affixes)'), 1, 'keep reason\n' .. t.h.tail(6))
-    t.tg.unique_cond_ga_slider:set(3); t.h.run(1.5)
-    eq(t.verdict(leoric(true, 2)), 'salvage', 'N from the slider: 2 < 3')
-    -- A failed copy still meets "Keep with Greater Affixes at least".
-    t.tg.ancestral_unique_ga_count_slider:set(1); t.h.run(1.5)
-    eq(t.verdict(leoric(true, 1)), 'keep', 'kept by the section\'s GA rule after falling through')
+    t.anc(true)
+    t.tg.item_unique:set(SALVAGE); t.tg.ancestral_item_unique:set(SALVAGE); t.tg.ancestral_unique_ga_count_slider:set(0); t.h.run(1.5)
+    eq(t.verdict(leoric(true, 3)), 'keep', 'checked Ancestral')
+    eq(t.verdict(leoric(false, 3)), 'salvage', 'checked non-Ancestral')
+    local other = {name = 'Dagger_Unique_Generic_001', sno = 451091, rarity = 6,
+        affixes = {affix(3, 'Dagger_Unique_Generic_001')}}
+    eq(t.verdict(item(other, {ancestral = true, ga = 3})), 'salvage', 'unchecked Ancestral')
+    -- A failed copy still meets "Keep with Greater Affixes at least" when set.
+    t.tg.ancestral_unique_ga_count_slider:set(2); t.h.run(1.5)
+    eq(t.verdict(leoric(false, 2)), 'keep', 'kept by the section\'s GA rule after falling through')
     t.h.assert_clean('C3')
 end)
 
-case('C4 the Mythic form of a checked Unique follows 1. Always keep (a condition never drops it)', function()
+case('C4 the Mythic form of a checked Unique follows 1. Always keep (the toggle never drops it)', function()
     local t = setup()
-    t.cond(1)
+    t.anc(true)
     eq(t.verdict(leoric(false, 0, MYTHIC)), 'keep', 'Always keep Mythics on')
     t.tg.mythic_always_keep:set(false); t.tg.ancestral_item_mythic:set(SALVAGE); t.h.run(1.5)
     eq(t.verdict(leoric(false, 0, MYTHIC)), 'keep', 'Always keep Mythics off: the list keeps the Mythic form as before')
     t.h.assert_clean('C4')
 end)
 
-case('C5 pickup still takes a checked Unique whatever its condition (Ancestry is unknown on the ground)', function()
+case('C5 pickup still takes a checked Unique with the toggle on (ancestry is unknown on the ground)', function()
     local t = setup()
-    t.cond(2)
+    t.anc(true)
     local want, why = t.h.as('Rosie', function() return t.im.check_want_item(t.h.gear(leoric(false, 0)), true) end)
     eq(want, true, 'wanted')
     eq(why, "accepted: selected in 'Uniques I keep'", 'reason')
@@ -160,36 +159,30 @@ case('I1 the item power slider is not shown; a saved value > 0 is honoured, show
     eq(t.verdict(f), 'salvage', 'off: the Ancestral action')
 end)
 
-case('M1 one "2. Uniques" section right after 1. Always keep: toggle, list, condition under a checked row, sliders, actions, mode', function()
+case('M1 one "2. Uniques" section right after 1. Always keep: toggle, list, Ancestral toggle, GA slider, actions', function()
     local t = setup()
-    t.cond(1)
+    t.anc(true)
     t.h.menu_labels = {}; t.h.frame()
     local labels = t.h.menu_labels
     t.h.menu_labels = nil
     local function at(label) for i, l in ipairs(labels) do if l == label then return i end end return nil end
     local order = {'Always keep Mythics', 'Pick up every Unique (sort in the bag)',
-        "Leoric's Crown - helm  [keeps plain: Ancestral only; Mythic form: 1. Always keep]", '    Keep it when',
-        'Greater Affixes for the Ancestral condition', 'Keep with Greater Affixes at least',
-        'Otherwise: Ancestral Uniques', 'Otherwise: Non-Ancestral Uniques', 'Ancestral junk'}
+        "Leoric's Crown - helm  [keeps Ancestral plain + Mythic form]", 'Keep checked Uniques only when Ancestral',
+        'Keep with Greater Affixes at least', 'Otherwise: Ancestral Uniques', 'Otherwise: Non-Ancestral Uniques', 'Ancestral junk'}
     local last = 0
     for _, label in ipairs(order) do
         local i = at(label)
         ok(i and i > last, 'in order: ' .. label .. '\n' .. table.concat(labels, ' | '))
         last = i
     end
-    eq(at("Leoric's Crown - helm  [keeps plain: Ancestral only; Mythic form: 1. Always keep]") + 1, at('    Keep it when'),
-        'the condition is right under its checked row')
-    local n = 0
-    for _, l in ipairs(labels) do if l == '    Keep it when' then n = n + 1 end end
-    eq(n, 1, 'one condition per checked row only')
     eq(labels[2] == 'Pick up every Unique (sort in the bag)', false, 'no longer in the root menu')
 end)
 
-case('M2 saved settings survive: the toggle, the list, a condition and the old actions load by their hashes', function()
-    local t = setup({persisted = {Rosie_pickup_all_uniques = false, [P .. 'unique_cond_2647147'] = 1}})
+case('M2 saved settings survive: the toggle, the list and the Ancestral toggle load by their hashes', function()
+    local t = setup({persisted = {Rosie_pickup_all_uniques = false, [P .. 'unique_ancestral_only'] = true}})
     eq(t.tg['unique_2647147']:get(), true, 'the checked row')
-    eq(t.gui.unique_cond(2647147):get(), 1, 'its saved condition')
-    eq(t.verdict(leoric(false, 0)), 'sell', 'the saved condition decides')
+    eq(t.tg.unique_ancestral_only:get(), true, 'the saved Ancestral toggle')
+    eq(t.verdict(leoric(false, 0)), 'sell', 'it decides')
     local sorter = t.h.mod('Rosie', 'rosie.private.unique_sorter')
     eq(sorter.pick_all(), false, 'Pick up every Unique keeps its saved OFF')
 end)
