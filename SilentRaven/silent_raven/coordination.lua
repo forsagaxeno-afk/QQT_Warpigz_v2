@@ -320,7 +320,12 @@ local function bounded(kind, reason, now)
 end
 function M.third_party_reason(now)
     now = now or clock()
-    if third_call('Butler', 'is_busy') == true then
+    -- QQT_Warpigz_v3 0.2.9: Rosie's Butler stand-in (`_rosie=true`, published
+    -- while Worldstone runs) mirrors Rosie's own trip, already read through the
+    -- Alfred status (and its return-leg hand-off must not wait on itself).
+    local butler = rawget(_G, 'Butler')
+    if not (type(butler) == 'table' and rawget(butler, '_rosie') == true)
+        and third_call('Butler', 'is_busy') == true then
         local r = bounded('butler', 'butler_busy', now)
         if r then return r end
     end

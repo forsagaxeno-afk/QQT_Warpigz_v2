@@ -142,6 +142,35 @@ do
     for _=1,4 do c.tick(0.3) end
     eq(c.api.get_status().ready,false,'no text, no progress fields: not ready')
 end
+-- QQT_Warpigz_v3 0.2.9 (owner live 3.3.19): the host lists placeholder cards
+-- (sno 0, valid false) for a moment after the panel opens. They settle with the
+-- panel open (no ESC, no re-interact); cards that never fill end the run failed
+-- after MAX_ATTEMPTS, with one line per attempt and a real delay between them.
+local EMPTY={[1]={sno=0,valid=false,internal_name=''},[2]={sno=0,valid=false,internal_name=''},
+    [3]={sno=0,valid=false,internal_name=''},[4]={sno=0,valid=false,internal_name=''}}
+do
+    local c=harness();local real=c.entries;c.entries=EMPTY;c.deliver=true;eq(c.start(),true)
+    local opened
+    for _=1,40 do
+        c.tick()
+        if c.panel and not opened then opened=c.time end
+        if opened and c.time-opened>=1.2 then c.entries=real end
+        if c.result then break end
+    end
+    eq(c.result,'success','claimed on the first attempt once the cards filled')
+    eq(c.accepts,1);eq(c.escapes,0,'the panel stayed open');eq(c.interacts,1,'no re-interact')
+    eq(c.tracker.attempts,0,'run reset');eq(logged(c,'no_valid_reward'),0,'no premature no_valid_reward')
+end
+do
+    local c=harness();c.entries=EMPTY;eq(c.start(),true)
+    local t0=c.time
+    for _=1,600 do c.tick();if c.result then break end end
+    eq(c.result,'failed','cards never filled: failed');eq(c.tracker.last_reason,'reward_cards_empty')
+    eq(c.accepts,0);eq(logged(c,'reward cards still empty after 4s'),3,'one line per attempt')
+    eq(logged(c,'run finished: failed (reward_cards_empty)'),1,'a clear final line')
+    local ok_between=(c.time-t0)>=3*4+2*5;eq(ok_between,true,'4 s settle per attempt, 5 s between attempts')
+    eq(c.interacts,3,'one interaction per attempt')
+end
 -- Wrong selected index and all-invalid entries cannot accept.
 do
     local c=harness();c.wrong_select=true;c.start();c.tick();c.tick();eq(c.accepts,0,'selection mismatch stops claim')
