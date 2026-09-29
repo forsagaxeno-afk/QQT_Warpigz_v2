@@ -367,6 +367,7 @@ function M.request(caller,callback,teleport,manual)
     tracker.service_elapsed=0; tracker.pause_elapsed=0; last_tick=nil
     tracker.raven_wait=nil -- QQT_Warpigz_v3
     tracker.return_pickup=nil -- QQT_Warpigz_v3 1.0.24
+    tracker.replanned,tracker.came_back=nil,nil -- QQT_Warpigz_v3 1.0.27: see tick (sweep R1)
     tracker.mover_elapsed=0; motion.x,motion.y,motion.moved_at=nil,nil,nil -- QQT_Warpigz_v3 1.0.21
     -- QQT_Warpigz_v3 1.0.22: per-trip Navigator hold bounds and revive bound.
     local t0=get_time_since_inject()
@@ -549,6 +550,28 @@ function M.tick()
     if utils.is_in_town() then
         tracker.visited_town=true
         if lent then M.lend_pickup(false) end -- QQT_Warpigz_v3 1.0.24: a lend never outlives the outbound leg
+    elseif M.returned() then tracker.came_back=true
+    elseif tracker.visited_town and not tracker.came_back then
+        -- QQT_Warpigz_v3 1.0.27 (scenario sweep R1): another addon's teleport
+        -- took the player out of town during the service: a service that
+        -- started in town (no Town Portal leg), or one whose player lands
+        -- anywhere but where the Town Portal leads back to (Rosie leaves town
+        -- only through that portal; once back, came_back: a return-leg
+        -- pickup may cross a zone border). Nothing acted until the 240 s bound,
+        -- then a latched failure. Re-plan it once as a Town Portal trip from
+        -- where the player landed; a second strand fails the trip (never
+        -- cancel: that would block automatic trips, auto_blocked).
+        if tracker.replanned then M.finish(false,'The player left town again during the service'); return false end
+        tracker.replanned=true
+        local t0=world:get_current_zone_name()
+        console.print(string.format('[Rosie] The player left town during the service (now in %s); going back with a Town Portal',tostring(t0)))
+        utils.reset_all_task()
+        tracker.teleport=true; tracker.visited_town=false
+        tracker.return_required=not M.in_any_town()
+        tracker.request_world=world:get_world_id(); tracker.request_zone=t0; tracker.request_name=world:get_name()
+        tracker.return_missing_logged=nil
+        tracker.service_elapsed=0; tracker.mover_elapsed=0; motion.x,motion.y,motion.moved_at=nil,nil,nil
+        return false
     end
     -- QQT_Warpigz_v3: waiting for the SilentRaven hand-off (teleport.lua,
     -- bounded there) is not service time.
