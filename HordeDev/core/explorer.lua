@@ -69,6 +69,7 @@ function MinHeap:contains(value)
 end
 
 local utils = require "core.utils"
+local horde_zones = require 'core.horde_zones' -- QQT_Warpigz_v3 HordeDev 2.2.9
 local enums = require "data.enums"
 local settings = require "core.settings"
 local tracker = require "core.tracker"
@@ -784,7 +785,7 @@ on_update(function()
     local current_core_time = get_time_since_inject()
     if current_core_time - last_call_time > 0.45 then
         last_call_time = current_core_time
-        is_player_on_quest = utils.player_in_zone("S05_BSK_Prototype02") and settings.enabled
+        is_player_on_quest = horde_zones.player_inside(utils) and settings.enabled
         if not is_player_on_quest then
             return
         end

@@ -1,4 +1,5 @@
 local utils = require "core.utils"
+local horde_zones = require 'core.horde_zones' -- QQT_Warpigz_v3 HordeDev 2.2.9
 local enums = require "data.enums"
 local explorer = require "core.explorer"
 local tracker = require "core.tracker"
@@ -165,7 +166,7 @@ function walking_to_horde_task.shouldExecute()
     -- F-H1: War Plan entry never teleports to the Library or walks to the gate.
     if tracker.entry_mode == 'warplan' then return false end
     if is_loading_or_limbo() then return false end
-    return not (utils.player_in_zone("Kehj_Caldeum") or utils.player_in_zone("S05_BSK_Prototype02")) or
+    return not (utils.player_in_zone("Kehj_Caldeum") or horde_zones.player_inside(utils)) or
         (utils.player_in_zone("Kehj_Caldeum") and not near_horde_gate())
 end
 
@@ -214,7 +215,7 @@ function walking_to_horde_task.Execute()
 
     if utils.get_horde_gate() and utils.distance_to(utils.get_horde_gate()) < 25 then
         move_to(utils.get_horde_gate():get_position())
-    elseif not tracker.teleported_from_town or not (utils.player_in_zone("Kehj_Caldeum") or utils.player_in_zone("S05_BSK_Prototype02")) then
+    elseif not tracker.teleported_from_town or not (utils.player_in_zone("Kehj_Caldeum") or horde_zones.player_inside(utils)) then
         -- Do not restart the teleport channel while still in the origin zone.
         if tracker.teleported_from_town
             and current_time - walking_to_horde_task.last_teleport_time < walking_to_horde_task.teleport_wait_time then

@@ -1,4 +1,5 @@
 local utils = require "core.utils"
+local horde_zones = require 'core.horde_zones' -- QQT_Warpigz_v3 HordeDev 2.2.9
 local settings = require "core.settings"
 local tracker = require "core.tracker"
 local open_chests_task = require "tasks.open_chests"
@@ -19,7 +20,7 @@ function task.read_world()
         local bsk=lower:find("bsk",1,true)~=nil
         return {player=player,id=id,zone=zone,
             outside=zone=="Kehj_Caldeum" and not bsk,
-            inside=zone=="S05_BSK_Prototype02" and bsk}
+            inside=horde_zones.is(zone) and bsk}
     end)
     return ok and result or nil
 end

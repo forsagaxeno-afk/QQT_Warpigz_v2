@@ -25,7 +25,7 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | `Batmobile` | Shared navigation | 2.2.4 |
 | `ArkhamAsylum` | The Pit | 2.1.6 |
 | `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.4 |
-| `HordeDev` | Infernal Hordes | 2.2.8 |
+| `HordeDev` | Infernal Hordes | 2.2.9 |
 | `Reaper` | Boss lairs | 1.10.8 |
 | `WonderCity` | Kurast Undercity | 2.2.9 |
 | `SilentRaven` | Whisper reward checks in Temis | 0.2.8 |

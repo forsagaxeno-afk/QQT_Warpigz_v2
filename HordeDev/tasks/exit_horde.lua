@@ -1,4 +1,5 @@
 local utils = require "core.utils"
+local horde_zones = require 'core.horde_zones' -- QQT_Warpigz_v3 HordeDev 2.2.9
 local settings = require "core.settings"
 local tracker = require "core.tracker"
 local explorer = require "core.explorer"
@@ -7,7 +8,6 @@ local loot_guard = require "core.loot_guard"
 local warplan = require "core.warplan"
 
 local plugin_label = "infernal_horde"
-local HORDE_ZONE = "S05_BSK_Prototype02"
 local EXIT_ZONE = "Kehj_Caldeum"
 local LEAVE_RETRY_SECONDS, MAX_LEAVE_ATTEMPTS = 10, 3
 local EXIT_TIMEOUT, OUTSIDE_SETTLE, RESET_SETTLE = 60, 2, 2
@@ -27,9 +27,9 @@ local function snapshot()
         local bsk = lower:find("bsk", 1, true) ~= nil
         -- F-H1: a War Plan run is out once it is in any loaded non-Horde
         -- world (Leave Dungeon may not land at the Caldeum gate).
-        return {player=player, zone=zone, id=id, horde=zone==HORDE_ZONE, bsk=bsk, name=name,
+        return {player=player, zone=zone, id=id, horde=horde_zones.is(zone), bsk=bsk, name=name,
             outside=zone==EXIT_ZONE and not bsk
-                or (tracker.entry_mode == 'warplan' and zone ~= HORDE_ZONE and not bsk)}
+                or (tracker.entry_mode == 'warplan' and not horde_zones.is(zone) and not bsk)}
     end)
     return ok and result or nil
 end

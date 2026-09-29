@@ -82,7 +82,8 @@ local LIBRARY = 0x10D63D
 -- recorded with its time.
 local function horde(opts)
     opts = opts or {}
-    local s = {now = 100, aether = opts.aether or 0, world = 'S05_BSK_Prototype02', zone = 'S05_BSK_Prototype02',
+    local hz = opts.zone or 'S05_BSK_Prototype02' -- QQT_Warpigz_v3 HordeDev 2.2.9: S10_BSK_Pretorment too
+    local s = {now = 100, aether = opts.aether or 0, world = hz, zone = hz, horde_zone = hz,
         id = 1, pos = vec:new(0, 0, 0), actors = {}, interactions = {}, logs = {}, teleports = {}, updates = {},
         item_count = 0, dead = false, leaves = 0, resets = 0, revives = 0, keys = {}, used = 0, moves = 0,
         spells = 0, quests = {}, alfred_triggers = 0}
@@ -218,7 +219,7 @@ local function horde(opts)
         self.actors = {}
     end
     function s:bsk()
-        self.world, self.zone, self.id = 'S05_BSK_Prototype02', 'S05_BSK_Prototype02', self.id + 1
+        self.world, self.zone, self.id = self.horde_zone, self.horde_zone, self.id + 1
         self.actors = {}
     end
     function s:logged(text)
@@ -444,6 +445,39 @@ case('War Plan run in BSK: 6 waves, council, chests, Leave Dungeon, completed, n
     truthy(s.last_move == nil or s.last_move <= left_at, 'no movement after the exit')
     eq(s:logged('Waiting five seconds before selecting a compass'), 0, 'no compass cycle started')
     eq(s:logged('War Plan run: leaving through Leave Dungeon'), 1, 'Teleport exit setting ignored, logged once')
+end)
+
+-- QQT_Warpigz_v3 HordeDev 2.2.9 (owner live report, 3.3.9-3.3.14): the War
+-- Plan teleport lands in the pre-Torment Horde map, world and zone
+-- S10_BSK_Pretorment. HordeDev only knew S05_BSK_Prototype02, so the Horde
+-- never ran there.
+case('Pretorment: InfernalHordesPlugin.is_horde_zone knows both Horde maps', function()
+    local s = horde()
+    eq(type(s.P.is_horde_zone), 'function', 'is_horde_zone published')
+    eq(s.P.is_horde_zone('S05_BSK_Prototype02'), true)
+    eq(s.P.is_horde_zone('S10_BSK_Pretorment'), true)
+    eq(s.P.is_horde_zone('Kehj_Caldeum'), false)
+    eq(s.P.is_horde_zone(nil), false)
+    eq(type(s.P.horde_zones), 'table', 'horde_zones published')
+end)
+
+case('Pretorment: a War Plan run in S10_BSK_Pretorment runs the waves, council, chests and completes', function()
+    local s = horde({zone = 'S10_BSK_Pretorment'})
+    s.gui.elements.merry_go_round:set(false)
+    local arena = war_plan_arena(s, {aether = 20})
+    s.quests = {'WarPlans_QST_InfernalHordes_BSK'}
+    s.P.enable({entry = 'warplan'})
+    s:run(4)
+    eq(s:task_name(), 'Infernal Horde', 'waves run inside the pre-Torment Horde\n' .. s:tail())
+    eq(s.P.status().in_run, true)
+    s:leave_to(function(x) x:gate() end)
+    truthy(s:until_true(function() return s.leaves >= 1 end, 240), 'Leave Dungeon reached\n' .. s:tail())
+    eq(arena.wave, 6, '6 waves')
+    eq(arena.log[#arena.log], 'boss dead')
+    eq(arena.opened, 2, 'the aether was spent at the chests')
+    truthy(s:until_true(function() return s.P.status().last_result == 'completed' end, 30), 'run completed\n' .. s:tail())
+    no_compass_chain(s, 'Pretorment')
+    eq(#s.teleports, 0, 'no Library teleport')
 end)
 
 case('back-to-back War Plan hordes: each arrival in BSK gets a fresh run (re-enable or not)', function()
