@@ -149,6 +149,35 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 
 ## Auditor / critic findings
 
+### Post-release review of 3.3.20/3.3.21 (Rosie 1.0.31/1.0.32 Butler stand-in, SilentRaven 0.2.9, WarPigs 1.1.13), 2026-09-29 23:30 UTC: **OK, with one MED for Rosie**
+Method: an auditor and a critic per area, then 2 skeptics per finding. Base is 3.3.19 (d0a6821); the reviewed head is f2b7b50.
+
+**Verified:**
+- The stand-in is published only while Worldstone is loaded, the option is on, the player is alive and no real Butler exists. A real Butler, including one that loads later, always wins (B1-B3).
+- Rosie never refuses her own trip (B4).
+- 1.0.32 `foreign.real_butler()` skips `_rosie`. B7 fails on 1.0.31 and passes on 1.0.32.
+- Reload mid-trip is clean, with and without keep_loaded.
+- Every `_G.Butler` reader in the shipped folders skips the stand-in: WarPug planner, WarPigs `third_party_busy` and `wp_silent_raven`, SilentRaven coordination, Rosie foreign. HR, Arkham, WonderCity, Reaper, HordeDev and Batmobile do not read `_G.Butler`.
+- The stand-in registers no Navigator pause condition, so it does not clash with the Scavenger mimic.
+- Tests pass under Lua 5.4 and LuaJIT: test_rosie_butler_mimic_1031, test_rosie_scavenger_mimic, test_rosie_foreign_mover, test_joint_rosie, test_suite_rosie_scavenger_skip, SilentRaven q8 and q8_bounds, test_warpigs_hang_review, test_warpug_alfred_bounds.
+- All Auditor Rosie repros still pass.
+
+**Findings:**
+- **[MED] Rosie (→ Rosie): `Butler.is_busy()` has no bound, so it can freeze Worldstone.** Skeptics rated this LOW; the Auditor keeps it at MED because it reopens the freeze that 1.0.22 fixed. `butler_mimic.M.is_busy` mirrors the raw `life.busy()` (controller `busy=function() return life.busy() end`).
+  - That flag stays true while `lifecycle.tick` returns early without counting service time. The cases are a dead player, a loading screen that never ends (`[sno none]`/no world), and chat left open.
+  - 1.0.22 bounded the Navigator condition for exactly these states (`trip_active`: NAV_PULSE 5 s, NAV_HOLD_MAX 600 s). The stand-in skips that bound, so Worldstone, which stands still while `Butler.is_busy()`, is frozen again, this time through `_G.Butler`.
+  - Repro, 900 s with a dead player or open chat: the Navigator "Rosie" condition is released, but `Butler.is_busy()` is still true. With a hung load screen it is still true at 1800 s.
+  - Death is the worst case. If Worldstone gates its own revive or loop step on `Butler.is_busy()==false` and ClickRevive is not running, Rosie and Worldstone wait on each other.
+  - Fix: export `trip_active()` (or `hold_live()`) from lifecycle and configure `busy=function() return life.trip_active() end`. Add a B8 test covering a dead player, a hung load screen, open chat and a trip past 600 s.
+- [LOW] Rosie: `butler_mimic` logs publish, withdraw and yield-to-real-Butler once per module lifetime; the module-level `logged` table is never reset. After Worldstone unloads and loads again, the log no longer shows whether Rosie is posing as Butler. Fix: clear the paired key on the opposite transition.
+- [LOW] SilentRaven 0.2.9 (→ Raven): the card-settle clock `tracker.cards_empty_since` has two gaps.
+  - `hold()` does not shift it, although its comment says paused time consumes no settle timeout. It is also not cleared when the panel closes and the FSM re-interacts.
+  - After a pause of 4 s or more during the placeholder settle, or after a reopened panel, the first empty read gives up at once. That costs an ESC, one attempt and a 5 s wait. It does not hang, and the claim succeeds on attempt 2.
+  - Fix: shift `cards_empty_since` by dt in `hold()`, and clear it in INTERACT_NPC while the panel is closed. Add a test: pause with empty cards, resume, the cards fill 0.5 s later, and the claim succeeds on attempt 1 with escapes==0.
+- WarPigs 1.1.13: no findings. Its stand-in skip matches `butler_mimic`'s `_rosie` marker.
+- Live check: with Worldstone loaded, die during a Rosie trip or keep chat open. Worldstone must move again within about 10 min at most; it must not stay frozen.
+
+
 ### HelltideRevamped 2.6.6 verify (`claude/qqt-helltide@f64f2b7`), 2026-09-29 12:45 UTC: **OK to merge, release it**
 - The fix matches the owner's live report ("not standing in tears"). Within `NEAR_IN` (5 m) of a chargeable tear, once the walk made no 0.3 m progress in 1 s, `close_tears_at` steps in with `helpers.force_step`: `pathfinder.force_move_raw`, with Batmobile paused and its target cleared. The step is logged once per tear. If `force_move_raw` is missing, the Batmobile walk stays. `clear_movement()` already releases `native_movement_owned`, and the next `move_to` resumes Batmobile, so nothing stays held. The existing 15 s approach bound still covers a gizmo whose collision blocks the step. No new file-level locals.
 - The new case in `test_helltide_stalls_333` (Batmobile stops 3 m short) fails on 3.3.18 ("the tear was closed: expected 1"). On the branch, it and `test_helltide_tears_joint` pass under Lua 5.4 and LuaJIT.
