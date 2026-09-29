@@ -719,7 +719,12 @@ local function find_rift_chest_actor(name, pos)
         if skin and (skin == name or skin:match(name) or chest_label(skin) == name) then
             local ap = actor_pos(actor)
             if ap and pos_dist(ap, pos) <= 10 then
-                local d = dist(ap)
+                -- QQT_Warpigz_v3 2.6.4 (sweep H3): the chest AT the spotted
+                -- position (ranked by the player's distance, a second chest
+                -- within 10 m resolved to the opened one the player stood at:
+                -- a spot / "opened" loop until the 300 s cap). An opened one
+                -- only when no closed one is there.
+                local d = pos_dist(ap, pos) + (actor_interactable(actor) and 0 or 20)
                 if d < best_d then best, best_d = actor, d end
             end
         end
@@ -1659,7 +1664,19 @@ end
 
 -- Disable, task switch, death (helltide task): drop the pause now.
 function M.release_holds(why)
+    -- QQT_Warpigz_v3 2.6.4 (sweep H4): a pause that held Rosie's pickup back
+    -- is remembered for a moment: at :55 the town teleport fired in the same
+    -- tick, before Rosie was busy again, and the drops it held were left.
+    if stand.pause_held() then M.released_held_at = now() end
     stand.sync_pause(false, now(), why)
+end
+
+-- True within `secs` (default 4) after release_holds dropped a pause that held.
+function M.recent_release(secs)
+    local at = M.released_held_at
+    if not at then return false end
+    local age = now() - at
+    return age >= 0 and age < (secs or 4)
 end
 
 return M

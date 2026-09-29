@@ -16,7 +16,8 @@ local external = {
         -- C2 (additive): alfred_trip = WonderCity's own Alfred round trip in
         -- progress; in_run = inside/committed to an Undercity run;
         -- committed_entry = tribute used / portal opened or being entered but
-        -- not inside yet (WCY-7).
+        -- not inside yet (WCY-7); boss_fight = a live boss fight inside the
+        -- Undercity (C-boss: Rosie defers her automatic trip while it is true).
         local run = task_manager.get_run_status()
         return {
             name            = settings.plugin_label,
@@ -31,6 +32,7 @@ local external = {
             alfred_trip     = run.alfred_trip,
             in_run          = run.in_run,
             committed_entry = run.committed_entry,
+            boss_fight      = run.boss_fight, -- QQT_Warpigz_v3 WonderCity 2.2.7: contract C-boss
         }
     end,
     enable = function ()

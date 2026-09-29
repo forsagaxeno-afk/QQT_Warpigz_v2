@@ -37,16 +37,30 @@ local SKIP_BASE, SKIP_MAX = 20, 60
 local skip = {generation = nil, keys = {}}
 local approach = {key = nil, best = nil, time = nil, last = nil}
 local PROGRESS_GAP = 2 -- a longer gap (another task ran) starts a fresh window
+-- QQT_Warpigz_v3 WonderCity 2.2.7 (W2, sweep S3 F1/F2): a warp pad whose
+-- PortalSwitch (within PAD_SWITCH_RANGE m) is locked (Grand Beacon floor)
+-- no longer pulls the player back to it (pad <-> explorer thrash). The
+-- floor exit seen within check_distance is remembered per floor (skip.exit)
+-- and, once it is open again (the switch reads interactable, or out of view
+-- a Grand Beacon of this floor was lit) and no enticement is in reach, the
+-- player walks back to it instead of wandering until it passes by again.
+local PAD_SWITCH_RANGE = 4
+local function floor_skip()
+    if skip.generation ~= tracker.floor_generation then
+        skip.generation, skip.keys, skip.exit = tracker.floor_generation, {}, nil
+    end
+    return skip
+end
 local function target_key(actor)
+    if actor.get_position == nil then -- a remembered exit position (W2)
+        return tostring(tracker.floor_generation) .. '|exit:' .. string.format('%.0f:%.0f', actor:x(), actor:y())
+    end
     local pos = actor:get_position()
     return tostring(tracker.floor_generation) .. '|' .. tostring(actor:get_skin_name()) .. ':'
         .. string.format('%.0f:%.0f', pos:x(), pos:y())
 end
 local function is_skipped(actor)
-    if skip.generation ~= tracker.floor_generation then
-        skip.generation, skip.keys = tracker.floor_generation, {}
-    end
-    local entry = skip.keys[target_key(actor)]
+    local entry = floor_skip().keys[target_key(actor)]
     return entry ~= nil and get_time_since_inject() < entry.until_t
 end
 -- QQT_Warpigz_v3: set the target aside for a growing pause (see SKIP_BASE).
@@ -58,24 +72,41 @@ local function set_aside(key)
     skip.keys[key] = entry
     return pause, entry.count
 end
+-- QQT_Warpigz_v3 WonderCity 2.2.7 (W2): the PortalSwitch next to a pad.
+local function pad_switch(pad, actors)
+    local pp = pad:get_position()
+    for _, actor in pairs(actors) do
+        if actor:get_skin_name() == 'X1_Undercity_PortalSwitch'
+            and utils.distance(pp, actor) <= PAD_SWITCH_RANGE then
+            return actor
+        end
+    end
+    return nil
+end
+local function remember_exit(actor, open, dist)
+    if dist > settings.check_distance then return end
+    local state = floor_skip()
+    state.exit = state.exit or {}
+    state.exit.pos, state.exit.open = actor:get_position(), open
+end
 local get_portal = function ()
     local local_player = get_local_player()
     if not local_player then return end
     local range = settings.rush_boss_portal and RUSH_PORTAL_RANGE or settings.check_distance
     local actors = actors_manager:get_ally_actors()
     for _, actor in pairs(actors) do
-        if actor:is_interactable() then
-            local actor_name = actor:get_skin_name()
-            if actor_name == 'X1_Undercity_PortalSwitch' and not is_skipped(actor) then
-                local dist = utils.distance(local_player, actor)
-                if dist <= range then
-                    if settings.rush_boss_portal and dist > settings.check_distance
-                        and rush_logged_run ~= tracker.undercity_start_time then
-                        rush_logged_run = tracker.undercity_start_time
-                        console.print(string.format('[WonderCity:portal] portal open %.0fm away - taking it (Take the boss portal as soon as it opens)', dist))
-                    end
-                    return actor
+        local actor_name = actor:get_skin_name()
+        if actor_name == 'X1_Undercity_PortalSwitch' then
+            local open = actor:is_interactable() == true
+            local dist = utils.distance(local_player, actor)
+            remember_exit(actor, open, dist) -- QQT_Warpigz_v3 WonderCity 2.2.7 (W2)
+            if open and not is_skipped(actor) and dist <= range then
+                if settings.rush_boss_portal and dist > settings.check_distance
+                    and rush_logged_run ~= tracker.undercity_start_time then
+                    rush_logged_run = tracker.undercity_start_time
+                    console.print(string.format('[WonderCity:portal] portal open %.0fm away - taking it (Take the boss portal as soon as it opens)', dist))
                 end
+                return actor
             end
         end
     end
@@ -90,11 +121,56 @@ local get_portal_warp_pad = function ()
         if actor_name == 'X1_Undercity_WarpPad' and not is_skipped(actor) then
             local dist = utils.distance(local_player, actor)
             if dist <= settings.check_distance then
-                return actor
+                -- QQT_Warpigz_v3 WonderCity 2.2.7 (W2): a pad whose switch is
+                -- locked (Grand Beacon not lit yet) is not a way down now, and
+                -- pad and switch are set aside as a pair (harness B7: the pad
+                -- alone pulled the player back to a switch set aside, 104
+                -- portal <-> explorer switches in 15 s).
+                local switch = pad_switch(actor, actors)
+                local open = switch == nil or (switch:is_interactable() == true and not is_skipped(switch))
+                if switch == nil then remember_exit(actor, nil, dist) end
+                if open then return actor end
             end
         end
     end
     return nil
+end
+-- QQT_Warpigz_v3 WonderCity 2.2.7 (W2): a Grand Beacon of this floor lit.
+local function beacon_lit()
+    local prefix = tostring(tracker.floor_generation) .. '|X1_Undercity_Enticements_SpiritBeaconSwitch'
+    for key, state in pairs(tracker.enticement) do
+        if state == true and type(key) == 'string' and key:sub(1, #prefix) == prefix then return true end
+    end
+    return false
+end
+-- The remembered floor exit to walk back to (a position), or nil.
+local function exit_recall()
+    local state = floor_skip()
+    local exit = state.exit
+    if exit == nil then return nil end
+    local player = get_local_player()
+    if not player or utils.distance(player, exit.pos) <= settings.check_distance then return nil end
+    local visible = nil
+    for _, actor in pairs(actors_manager:get_ally_actors()) do
+        if actor:get_skin_name() == 'X1_Undercity_PortalSwitch' and utils.distance(exit.pos, actor) <= PAD_SWITCH_RANGE then
+            visible = actor
+            break
+        end
+    end
+    local now = get_time_since_inject()
+    for _, entry in pairs(state.keys) do
+        if now < entry.until_t then return nil end -- the exit (pad/switch) is set aside: explore meanwhile
+    end
+    local open
+    if visible then open = visible:is_interactable() == true
+    else open = exit.open ~= false or beacon_lit() end
+    if not open or utils.get_closest_enticement() ~= nil then return nil end
+    if exit.logged ~= true then
+        exit.logged = true
+        console.print(string.format('[WonderCity:portal] floor exit open - walking back to it (%.0fm)',
+            utils.distance(player, exit.pos)))
+    end
+    return exit.pos
 end
 
 local boss_room_scan_last_run = nil
@@ -125,7 +201,8 @@ task.shouldExecute = function ()
     return utils.player_in_undercity() and
         (get_portal() ~= nil or
         (get_portal_warp_pad() ~= nil and utils.distance(get_local_player(), get_portal_warp_pad()) > 2)
-        or task.portal_found or
+        or exit_recall() ~= nil or -- QQT_Warpigz_v3 WonderCity 2.2.7 (W2)
+        task.portal_found or
         task.portal_exit + 1 >= get_time_since_inject())
 end
 task.Execute = function ()
@@ -144,6 +221,8 @@ task.Execute = function ()
             return
         elseif warp_pad ~= nil and utils.distance(local_player, warp_pad) > 2 then
             target = warp_pad
+        else
+            target = exit_recall() -- QQT_Warpigz_v3 WonderCity 2.2.7 (W2)
         end
     elseif utils.distance(local_player, portal) < 2 then
         task.portal_found = true
