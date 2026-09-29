@@ -2,6 +2,16 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.15] — 2026-09-29
+
+### Fixed
+
+- **Infernal Hordes below Torment (HordeDev 2.2.9 + WarPigs 1.1.12)** (live report: the War Plan teleport landed in the Horde, but WarPigs said "not inside the Horde", re-teleported 3 times and then flew to Temis every minute; the Horde never ran).
+  - The pre-Torment Horde map `S10_BSK_Pretorment` counts as the Horde everywhere, like `S05_BSK_Prototype02`; HordeDev publishes one list (`InfernalHordesPlugin.is_horde_zone`) that WarPigs uses.
+  - Not verified live yet: whether the pre-Torment arena has the same layout (walk routes, council door, chest room). Please send one full pre-Torment Horde log.
+- **WonderCity 2.2.9**: a Rosie trip right after a cut exit cast resumes the run; no reward-loot walk when Rosie's pickup is off; `boss_fight` is reported only while WonderCity is enabled.
+- **Batmobile 2.2.5**: the `[unstuck]` replan / EXHAUSTED lines also follow the logging setting (set Batmobile logging to Info when you send movement logs).
+
 ## [3.3.14] — 2026-09-29
 
 ### Fixed
