@@ -587,6 +587,12 @@ local function hour_end_session(opts)
     looter.is_actively_looting = function()
         return s.loot_item ~= nil and next(s.pauses) == nil and s.now - s.resumed_at >= 0.5
     end
+    -- the drop as a ground item (the tear loot module scans actors_manager.get_all_items)
+    s.env.actors_manager.get_all_items = function()
+        if not s.loot_item then return {} end
+        local pos = s.loot_item
+        return {{get_position = function() return pos end, get_id = function() return 991 end}}
+    end
     s.minute = 54
     s.actors = {actor(SKIN.normal_starter, 30, 2), actor(SKIN.hold, 30, 0)}
     local t = actor(SKIN.glint, 32, 0, {progress = 0})
@@ -615,6 +621,20 @@ case('2.6.4: at :55 the drop HR\'s own tear pause held back is picked before the
     ok(first and picked_at and picked_at <= first.at,
         string.format('picked (%.1f) before the teleport (%.1f)', picked_at or -1, first and first.at or -1))
     ok(first and first.at - t55 <= 25, 'left within 25 s')
+end)
+
+-- QQT_Warpigz_v3 2.6.5 (review of 2.6.4, c): the 4 s wait after HR drops its
+-- own tear pause only when a wanted drop lies on the ground.
+case('2.6.5: at :55 in a tear with nothing on the ground the town teleport fires at once', function()
+    local s = hour_end_session()
+    s.tick(15)
+    eq(state(s), 'RIFT_CLOSE_TEARS', 'standing in the tear at :54')
+    ok(next(s.pauses) ~= nil, "Rosie's pickup is paused")
+    local t55 = s.now
+    s.minute, s.in_helltide = 55, false
+    s.tick(10)
+    ok(s.teleports[1] and s.teleports[1].at - t55 <= 2,
+        string.format('teleported %.1f s after :55', s.teleports[1] and s.teleports[1].at - t55 or -1))
 end)
 
 case('2.6.4: at :55 without a Looter pause (no Rosie) the town teleport still fires at once', function()

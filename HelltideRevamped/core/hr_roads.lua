@@ -104,8 +104,11 @@ end
 -- QQT_Warpigz_v3 2.6.4 (sweep H1): the recorded loops pass the same place
 -- several times. One candidate per pass ("lap"): the loop points within
 -- max_d, grouped into runs of consecutive indices (a gap of more than
--- LAP_GAP points starts another lap), the nearest point of each run that
--- `skip` does not reject. List of {i, d}, nearest first, at most LAP_MAX.
+-- LAP_GAP points starts another lap): the nearest point of each run that
+-- `skip` does not reject, and both ends of the run. List of {i, d}, nearest
+-- first, at most LAP_MAX * 3; with `extra`, only points within `extra`
+-- metres of the nearest one (another lap much further away may be across
+-- what the loop goes round: a hairpin).
 M.LAP_GAP, M.LAP_MAX, M.LAP_EXTRA = 6, 8, 30
 local function lap_points(L, x, y, max_d, skip, extra)
     local r = math.ceil(max_d / M.GRID)
@@ -208,7 +211,10 @@ end
 -- ── planning ─────────────────────────────────────────────────────────────
 -- Road cost (metres) from the player to the target, or the straight
 -- distance when the loop cannot be used. Second value: the route plan.
-local start_cache = {x = nil, y = nil, L = nil, starts = nil}
+local start_cache = {x = nil, y = nil, L = nil, gen = nil, starts = nil}
+-- QQT_Warpigz_v3 2.6.5 (review of 2.6.4): exit candidates per target (the
+-- chest order plans every known chest every pick).
+local exit_cache = {L = nil, n = 0, by = {}}
 
 local function crosses_out(L, i, target)
     local fence = tracker.hr_fence
@@ -229,9 +235,17 @@ function M.plan(target, player, exit_idx)
     -- points were often on different laps: 2,179 m of road for a 270 m trip,
     -- and the cost jumped when a step moved the start to another lap).
     local c = start_cache
-    if c.L ~= L or c.x == nil or math.abs(c.x - px) > 0.5 or math.abs(c.y - py) > 0.5 then
-        c.L, c.x, c.y = L, px, py
-        c.starts = lap_points(L, px, py, M.ROAD_MAX)
+    -- QQT_Warpigz_v3 2.6.5 (review of 2.6.4): a start whose straight leg
+    -- from the player crosses a learned out cell (the Helltide border) is
+    -- not a start. No distance guard on this side: the lap 30-40 m away
+    -- often gives the short road, and dropping it brought the chest-order
+    -- flip back (jirandai). Recomputed after 2 m of walking (0.5 m missed
+    -- the cache on every walking tick) or when the fence learns.
+    local fence = tracker.hr_fence
+    local gen = fence and fence.gen or 0
+    if c.L ~= L or c.gen ~= gen or c.x == nil or math.abs(c.x - px) > 2 or math.abs(c.y - py) > 2 then
+        c.L, c.gen, c.x, c.y = L, gen, px, py
+        c.starts = lap_points(L, px, py, M.ROAD_MAX, function(i) return crosses_out(L, i, player) end)
     end
     local starts = c.starts
     if #starts == 0 then return nil end
@@ -239,7 +253,14 @@ function M.plan(target, player, exit_idx)
     if valid_exit(L, exit_idx, tx, ty) then
         exits = {{i = exit_idx, d = d2(L.xs[exit_idx], L.ys[exit_idx], tx, ty)}}
     else
-        exits = lap_points(L, tx, ty, M.OFFROAD_MAX, function(i) return crosses_out(L, i, target) end, M.LAP_EXTRA)
+        local ec = exit_cache
+        if ec.L ~= L or ec.gen ~= gen or ec.n > 128 then ec.L, ec.gen, ec.n, ec.by = L, gen, 0, {} end
+        local key = floor(tx) .. ',' .. floor(ty)
+        exits = ec.by[key]
+        if not exits then
+            exits = lap_points(L, tx, ty, M.OFFROAD_MAX, function(i) return crosses_out(L, i, target) end, M.LAP_EXTRA)
+            ec.by[key], ec.n = exits, ec.n + 1
+        end
     end
     local best
     for _, s in ipairs(starts) do

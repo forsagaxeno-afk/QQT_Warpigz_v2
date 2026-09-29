@@ -13,6 +13,7 @@ local settings = require "core.settings"
 local tracker = require "core.tracker"
 
 local M = {
+    gen = 0, -- QQT_Warpigz_v3 2.6.5: bumped on every change of the learned cells
     CELL = 20,
     MAX_CELLS = 4000,
     SAMPLE_EVERY = 2,
@@ -64,6 +65,10 @@ local function bump(z, list, k)
     if n < M.CAP then
         list[k] = n + 1
         z.dirty = true
+        -- QQT_Warpigz_v3 2.6.5: road caches follow the fence; only a change
+        -- that can flip a cell's out status (every inside sample bumped it,
+        -- so the caches lived about 2 s).
+        if list == z.out or (z.out[k] or 0) > 0 then M.gen = M.gen + 1 end
     end
     z.any = true
     return true
@@ -191,6 +196,7 @@ local function parse(key, parts)
     end
     list[k] = math.min(M.CAP, floor(n))
     z.any = true
+    M.gen = M.gen + 1
 end
 
 local function lines(key, out)
@@ -216,8 +222,9 @@ atlas.register_section({'in', 'out'}, {
         local z = data(key)
         z.inn, z.out, z.count, z.dirty = {}, {}, 0, true
         z.any = next(z.seed) ~= nil
+        M.gen = M.gen + 1
     end,
-    reset_all = function() zones, st = {}, {} end,
+    reset_all = function() zones, st = {}, {}; M.gen = M.gen + 1 end,
 })
 
 return M
