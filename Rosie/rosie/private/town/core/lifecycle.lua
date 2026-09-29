@@ -367,7 +367,7 @@ function M.request(caller,callback,teleport,manual)
     tracker.service_elapsed=0; tracker.pause_elapsed=0; last_tick=nil
     tracker.raven_wait=nil -- QQT_Warpigz_v3
     tracker.return_pickup=nil -- QQT_Warpigz_v3 1.0.24
-    tracker.replanned,tracker.came_back=nil,nil -- QQT_Warpigz_v3 1.0.27: see tick (sweep R1)
+    tracker.replanned,tracker.came_back,tracker.portal_taken=nil,nil,nil -- QQT_Warpigz_v3 1.0.27: see tick (sweep R1)
     tracker.mover_elapsed=0; motion.x,motion.y,motion.moved_at=nil,nil,nil -- QQT_Warpigz_v3 1.0.21
     -- QQT_Warpigz_v3 1.0.22: per-trip Navigator hold bounds and revive bound.
     local t0=get_time_since_inject()
@@ -551,13 +551,17 @@ function M.tick()
         tracker.visited_town=true
         if lent then M.lend_pickup(false) end -- QQT_Warpigz_v3 1.0.24: a lend never outlives the outbound leg
     elseif M.returned() then tracker.came_back=true
-    elseif tracker.visited_town and not tracker.came_back then
+    elseif tracker.visited_town and not tracker.came_back and not tracker.portal_taken
+        and not tracker.teleport_done and not tracker.teleport_failed then
         -- QQT_Warpigz_v3 1.0.27 (scenario sweep R1): another addon's teleport
         -- took the player out of town during the service: a service that
         -- started in town (no Town Portal leg), or one whose player lands
         -- anywhere but where the Town Portal leads back to (Rosie leaves town
         -- only through that portal; once back, came_back: a return-leg
-        -- pickup may cross a zone border). Nothing acted until the 240 s bound,
+        -- pickup may cross a zone border). Not once the return portal was
+        -- taken (portal_taken, teleport.lua) or the portal leg ended: a
+        -- portal landing in another subzone ends as "return portal missing"
+        -- (Coordinator review). Nothing acted until the 240 s bound,
         -- then a latched failure. Re-plan it once as a Town Portal trip from
         -- where the player landed; a second strand fails the trip (never
         -- cancel: that would block automatic trips, auto_blocked).

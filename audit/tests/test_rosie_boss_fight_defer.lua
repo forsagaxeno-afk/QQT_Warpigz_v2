@@ -78,6 +78,39 @@ case('B3 a farm plugin request is not held by the boss field', function()
     h.assert_clean('B3')
 end)
 
+-- Coordinator review of 1.0.27 (MED): the fight clock kept an old `since`
+-- when the fight ended unseen (a farm plugin's trip ran through it): the next
+-- fight's automatic trip hit the cap on its first pulse.
+case('B5 a fight that ended during a farm plugin\'s trip: the next fight holds the automatic trip again', function()
+    local h, boss = new('WonderCityPlugin', 'get_status')
+    h.run(10) -- the automatic trip is held
+    eq(st(h).running, false, 'held')
+    local done
+    eq(h.as(CONSUMER, function()
+        return h.G.AlfredTheButlerPlugin.trigger_tasks_with_teleport('Consumer', function(err) done = err or 'ok' end)
+    end), true, 'the farm plugin trip is accepted during the fight')
+    ok(h.run_until(function() return done ~= nil end, 200), 'the farm trip ends')
+    boss.live = false -- the fight ended while Rosie did not look
+    h.run(120)
+    for i = 1, 25 do h.inventory[i] = h.gear() end
+    boss.live = true -- a new fight, the bag full again
+    local t0 = h.now
+    h.run(20)
+    eq(st(h).running, false, 'the new fight holds the trip (first 1.0.27 build: the trip at once)\n' .. h.tail(8))
+    eq(h.logged('reported a live boss fight for'), 0, 'no cap line')
+    boss.live = false
+    ok(h.run_until(function() return st(h).running == true end, 3), 'the trip after the kill\n' .. h.tail(8))
+    h.assert_clean('B5')
+end)
+
+case('B6 Arkham\'s field also covers the glyph upgrade after the kill: its hold is capped at 210 s', function()
+    local h = new('ArkhamAsylumPlugin', 'get_status')
+    h.run(200)
+    eq(st(h).running, false, 'held for the glyph upgrade (first 1.0.27 build: 90 s)')
+    ok(h.run_until(function() return st(h).running == true end, 15), 'the trip after 210 s\n' .. h.tail(8))
+    eq(h.logged('ArkhamAsylum has reported a live boss fight for 210s'), 1, 'the cap line')
+end)
+
 case('B4 control: a status without boss_fight (or one that raises) does not hold the automatic trip', function()
     local h = J.new({rosie = true, dirs = {}, place = 'undercity'})
     eq(h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end), true)

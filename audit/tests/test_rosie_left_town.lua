@@ -75,6 +75,26 @@ case('L2 a second strand ends the trip as a failure (bounded, no second re-plan)
     h.assert_clean('L2')
 end)
 
+-- Coordinator review of 1.0.27 (LOW): a return portal that lands in another
+-- subzone than the one recorded ended as "return portal missing: town service
+-- completed" (1.0.26); the first 1.0.27 build re-planned it (two more casts
+-- and a failed trip). No re-plan once the return portal was taken.
+case('L4 the return portal lands in another subzone: no re-plan, the service completes as on 1.0.26', function()
+    local h = J.new({rosie = true, dirs = {}, place = 'pit'})
+    h.assert_clean('load')
+    eq(h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end), true)
+    h.frame()
+    h.inventory = {}
+    for _ = 1, 25 do h.inventory[#h.inventory + 1] = h.gear({locked = true}) end
+    local r = trip(h)
+    ok(h.run_until(function() return h.place == h.P.temis end, 40), 'in town')
+    h.mod('Rosie', 'rosie.private.town.core.tracker').request_zone = 'PIT_Subzone_Next' -- the cast was recorded in the next subzone
+    ok(h.run_until(function() return r.done end, 300), 'the trip ends\n' .. h.tail(12))
+    eq(h.logged('left town during the service'), 0, 'no re-plan (first 1.0.27 build: re-planned)\n' .. h.tail(12))
+    eq(r.err, nil, 'the service completed\n' .. h.tail(12))
+    eq(#h.inventory, 0, 'served')
+end)
+
 case('L3 control: an in-town service the player stays for is not re-planned', function()
     local h = new()
     local r = trip(h)

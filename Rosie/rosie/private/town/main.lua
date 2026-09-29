@@ -40,27 +40,35 @@ end
 
 -- QQT_Warpigz_v3 1.0.27 (contract C-boss, scenario sweep §2.4): an activity
 -- that publishes boss_fight=true (WonderCity/Arkham get_status(), Reaper
--- status()) holds Rosie's automatic trip, at most BOSS.max s per fight (a
--- Town Portal cast in melee, glyph chances lost). Manual, keybind and farm
--- plugin requests are not held. Returns the activity's name while it holds.
-local BOSS={max=90,since=nil,capped=false,list={{'WonderCityPlugin','get_status','WonderCity'},
-    {'ArkhamAsylumPlugin','get_status','ArkhamAsylum'},{'ReaperPlugin','status','Reaper'}}}
+-- status()) holds Rosie's automatic trip, at most p[4] s per fight (a Town
+-- Portal cast in melee, glyph chances lost; Arkham's field also covers the
+-- glyph upgrade after the kill, bounded by its own clocks at about 210 s).
+-- Manual, keybind and farm plugin requests are not held. Returns the
+-- activity's name while it holds.
+-- QQT_Warpigz_v3 1.0.27 (Coordinator review, MED): the fight clock restarts
+-- when boss_hold was not read for BOSS.gap s (a farm plugin's trip, no need,
+-- a busy Rosie): a fight that ended unseen no longer leaves an old `since`
+-- (or `capped`) that let the next fight's trip start at once.
+local BOSS={gap=2,since=nil,capped=false,read=nil,list={{'WonderCityPlugin','get_status','WonderCity',90},
+    {'ArkhamAsylumPlugin','get_status','ArkhamAsylum',210},{'ReaperPlugin','status','Reaper',90}}}
 local function boss_hold(now)
-    local who=nil
+    if BOSS.read and (now<BOSS.read or now-BOSS.read>BOSS.gap) then BOSS.since,BOSS.capped=nil,false end
+    BOSS.read=now
+    local who,max=nil,nil
     for _,p in ipairs(BOSS.list) do
         local api=rawget(_G,p[1])
         local fn=type(api)=='table' and api[p[2]]
         if type(fn)=='function' then
             local ok,st=pcall(fn)
-            if ok and type(st)=='table' and st.boss_fight==true then who=p[3]; break end
+            if ok and type(st)=='table' and st.boss_fight==true then who,max=p[3],p[4]; break end
         end
     end
     if not who then BOSS.since,BOSS.capped=nil,false; return nil end
     BOSS.since=BOSS.since or now
     if BOSS.capped then return nil end
-    if now-BOSS.since<BOSS.max then return who end
+    if now-BOSS.since<max then return who end
     BOSS.capped=true
-    console.print(string.format('[Rosie] %s has reported a live boss fight for %ds; starting the town trip',who,BOSS.max))
+    console.print(string.format('[Rosie] %s has reported a live boss fight for %ds; starting the town trip',who,max))
     return nil
 end
 
