@@ -1,4 +1,4 @@
-# HelltideRevamped: session notes (current 2.6.4)
+# HelltideRevamped: session notes (current 2.6.5)
 
 ## Map
 - `tasks/helltide.lua`: the main state machine, about 186 file-level locals. **Add no new file-level locals.**
@@ -21,6 +21,8 @@
 - 2.6.3 (Coordinator, suite 3.3.6): WarRoom archived by the owner. The "Web dashboard" tooltip no longer points to WarRoom (no viewer page ships now); `hr_dashboard.warroom_path()` / `warroom_on()` stay as an optional, harmless integration (nil without `_G.QQT_WarRoom`). No behaviour change.
 
 - 2.6.4 (scenario sweep 2026-09-28, H1-H5): road routes take one start and one exit per lap of the self-crossing patrol loop and the cheapest pair (exits on another lap only within 30 m of the nearest one); `loot_hold` credits the time the task did not run (no "farming on" right after a Rosie trip, drops at the portal spot are picked); rupture chests resolve to the chest at the spotted position (two chests 8 m apart are both opened); at :55 search waits up to 4 s after HR dropped its own tear pause so Rosie picks the drops it held; Advanced "Debug log" (off) gates the periodic [PATROL]/[NAV]/[CHEST RECALL]/[HELLTIDE CHEST]/[FARM CHEST]/[TRAVERSAL]/[CHECK_EVENTS] lines.
+
+- 2.6.5 (review of 2.6.4): a gap of 2 s or more in `loot_hold` starts a new Looter episode (a cap that fired before a trip no longer makes HR leave the portal-spot drops); road starts get the hairpin guard (another lap only within 30 m of the nearest) and the Helltide border check, recomputed after 2 m; exit candidates cached per target (reset on a loop change or when the fence learns, `hr_fence.gen`); the :55 wait after HR drops its tear pause only when a wanted drop is within 30 m (`hr_tear_loot.wanted_near`).
 
 ## Open / live checks
 - The move-on numbers (25 s / 45 m / 50 m); whether 2000 cinders is reachable in a typical Helltide hour; the map orientation and overlay fit.

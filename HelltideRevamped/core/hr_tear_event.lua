@@ -1667,7 +1667,12 @@ function M.release_holds(why)
     -- QQT_Warpigz_v3 2.6.4 (sweep H4): a pause that held Rosie's pickup back
     -- is remembered for a moment: at :55 the town teleport fired in the same
     -- tick, before Rosie was busy again, and the drops it held were left.
-    if stand.pause_held() then M.released_held_at = now() end
+    -- QQT_Warpigz_v3 2.6.5 (review of 2.6.4): only when a wanted drop lies
+    -- near the player (the wait was 4 s even with nothing on the ground).
+    if stand.pause_held() then
+        local okp, p = pcall(get_player_position)
+        if okp and p and loot.wanted_near(p, 30) then M.released_held_at = now() end
+    end
     stand.sync_pause(false, now(), why)
 end
 
