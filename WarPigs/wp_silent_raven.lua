@@ -182,7 +182,12 @@ local function companions_clear(advisory_idle, admitted_alfred, gate)
     local scavenger = _G.Scavenger
     if not (type(scavenger) == 'table' and rawget(scavenger, '_rosie') == true)
         and call(scavenger, 'is_busy') == true then return false, 'scavenger_busy' end
-    if call(_G.Butler, 'is_busy') == true then return false, 'butler_busy' end
+    -- QQT_Warpigz_v3 1.1.13: skip Rosie's Butler stand-in (`_rosie=true`,
+    -- published while Worldstone runs): its is_busy mirrors Rosie's own trip,
+    -- which the Alfred reading above already covers.
+    local butler = _G.Butler
+    if not (type(butler) == 'table' and rawget(butler, '_rosie') == true)
+        and call(butler, 'is_busy') == true then return false, 'butler_busy' end
     local creator = _G.WarPugPlugin
     if creator then
         local s = call(creator, 'status')
