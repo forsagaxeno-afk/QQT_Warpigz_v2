@@ -2,6 +2,8 @@
 
 Offline tests cannot run Diablo IV. In the next real QQT session, look for these lines (copy the surrounding log if something differs). Produced by the round-5 critic; updated for the two blocker fixes in b9da34f.
 
+- **Before sending movement/navigation logs (Batmobile 2.2.4+):** set Batmobile logging to Info; with the default (Disabled) the `[nav] STUCK` / PARTIAL PATH lines are not printed.
+
 - SETUP 1. WarPigs: 'Hordes: enter via War Plan teleport (no compass)' ON, 'Allow compass entry if the War Plan teleport fails' OFF. Write down the 'Use teleport' setting. Note the Infernal Compass count before and after the session; it must not change. Keep the full console log from WarPigs' first line to the last turn-in. For the pause tests, give HordeDev, ArkhamAsylum and WonderCity a real hotkey with 'Use keybind' on.
 - SETUP 2. Grep the whole log once. These must be 0: 'Lua error', 'disable_when error', 'deliver error', 'enable() of', '[WarPigs] cannot confirm disable', 'threw'.
 - HORDE H1 LANDING, the most important check. - 'Use teleport' OFF: '[WarPigs] War Plan Horde entry: warplan.teleport_to_activity() called (teleport 1 of 3, round 1) — world=<from> zone=<from>'. - 'Use teleport' ON: the preamble lines, then '[WarPigs] warplan.teleport_to_activity() called — world=Sanctuary_Eastern_Continent zone=Skov_Temis check_in=6.0s' and '[WarPigs] teleport confirmed (world/zone world=<W> zone=<Z>) — releasing enable gate'. - In both cases, then '[WarPigs] War Plan Horde entry: War Plan teleport arrived — landed world=<W> zone=<Z>, inside the Horde' or '... the via-Temis warplan teleport arrived — landed world=<W> zone=<Z>, inside the Horde'. - Copy W and Z exactly. Expected: W contains 'BSK' and Z = 'S05_BSK_Prototype02'.

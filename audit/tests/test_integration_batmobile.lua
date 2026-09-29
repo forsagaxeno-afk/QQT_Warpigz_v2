@@ -750,6 +750,9 @@ case('a caller yield does not count toward the partial-path no-progress window',
     local function run(yield)
         local h = harness({find_path = function(a) return {a, v(a:x() + 0.5, a:y())}, true end})
         local ext, nav = h.ext, h.nav
+        -- QQT_Warpigz_v3 Batmobile 2.2.4: the STUCK line honours the logging
+        -- combo; Debug prints every one, so the count below can fail.
+        h.env.require('core.settings').log_level = 2
         nav.update_trap_state = function() end
         -- HR chest approach: paused custom goal, partial paths, no progress yet
         ext.pause('helltide_revamped'); ext.set_target('helltide_revamped', v(40, 0))

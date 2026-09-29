@@ -1,6 +1,6 @@
 {
   "project": "QQT_Warpigz_v3",
-  "version": "3.3.13",
+  "version": "3.3.14",
   "first_release": "2.0.0",
   "components": {
     "WarPigs": "1.1.11",
@@ -12,6 +12,6 @@
     "Reaper": "1.10.8",
     "WonderCity": "2.2.9",
     "SilentRaven": "0.2.8",
-    "Rosie": "1.0.26"
+    "Rosie": "1.0.27"
   }
 }
