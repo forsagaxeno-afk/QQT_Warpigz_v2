@@ -576,10 +576,21 @@ case('N20 a Navigator that keeps reporting busy after stop() (3 s, or for good):
             'linger ' .. linger .. ': the watchdog line (1.0.28: none, a lingering busy reading disarmed it)\n' .. rosie_tail(r.h))
     end
 end)
-case('N21 guard: Worldstone navigating again after the stop (idle, then busy) still disarms the watchdog', function()
-    local r = run({label = 'N21 ignore + stop, renav idle', model = 'ignore', look = 6, nav_last = true, limit = 40})
-    eq(r.h.logged('[Rosie pickup] Navigator has stayed idle'), 0, 'no watchdog line while Worldstone navigates again\n' .. rosie_tail(r.h))
-    ok(r.portal_t ~= nil, 'the portal is reached')
+-- Coordinator review of the first 1.0.29 build (c63b8b3): Worldstone
+-- navigating again within the 0.5 s settle was never read idle, so every busy
+-- reading counted as lingering and the watchdog switched the stops off while
+-- the player travelled (the N6 model, renav at_once). A busy reading with the
+-- player walking to a foreign destination disarms it now.
+case('N21 guard: Worldstone navigating again after the stop (idle then busy, or at once) disarms the watchdog', function()
+    for _, renav in ipairs({'idle', 'at_once'}) do
+        for _, fdt in ipairs({0.1, 0.05}) do
+            local r = run({label = 'N21 ignore + stop, renav ' .. renav .. ', frame ' .. fdt, model = 'ignore', look = 6, nav_last = true,
+                renav = renav, limit = 40, fdt = fdt})
+            eq(r.h.logged('[Rosie pickup] Navigator has stayed idle'), 0, 'renav ' .. renav .. ', frame ' .. fdt
+                .. ': no watchdog line while Worldstone navigates again (first 1.0.29 build: at_once printed it)\n' .. rosie_tail(r.h))
+            ok(r.portal_t ~= nil, 'the portal is reached')
+        end
+    end
 end)
 
 print(string.format('rosie nav hold 1.0.25: %d checks, %d failures', checks, #failures))

@@ -374,7 +374,7 @@ local function cast_now(now)
         G.cast_seen=true;G.cast_at=now
         if not CAST_LOG.seen[spell] and CAST_LOG.n<CAST_LOG.max then
             CAST_LOG.seen[spell]=true;CAST_LOG.n=CAST_LOG.n+1
-            console.print(string.format('[Rosie pickup] Active spell id %d counts as a cast (logged once per id)',spell))
+            console.print(string.format('[Rosie pickup] Active spell id %s counts as a cast (logged once per id)',tostring(spell))) -- %s: a non-integer id
         end
     end
     return on,spell
@@ -664,7 +664,7 @@ end
 -- The watchdog reads Navigator fresh (M.nav_watch): the 0.25 s nav_live
 -- cache still held the reading from before the stop.
 NAVSTOP={after=1.2,moved=1.0,gap=1.0,per_episode=5,idle=5,count=0,last=nil,logged=false,off=false,watch=nil,idle_from=nil,saw_idle=false,
-    span=0.5,gain=0.5,settle=0.5}
+    span=0.5,gain=0.5,settle=0.5,travel=3}
 -- QQT_Warpigz_v3 1.0.29 (post-release review): the fight guard of the stop
 -- and of the grace (foreign_move): a player cast within FIGHT.cast s or a
 -- counted enemy within fight_radius m (a rotation or orbwalker moves the
@@ -703,6 +703,8 @@ function M.nav_stop(e,item,now)
     e.nav_stopped=true
     NAVSTOP.count,NAVSTOP.last=NAVSTOP.count+1,now
     NAVSTOP.watch,NAVSTOP.idle_from,NAVSTOP.saw_idle=now,nil,false
+    NAVSTOP.travelled,NAVSTOP.moved_at=0,nil -- QQT_Warpigz_v3 1.0.29: see M.nav_watch
+    NAVSTOP.rd0=type(st.remaining_distance)=='number' and st.remaining_distance==st.remaining_distance and st.remaining_distance or nil -- QQT_Warpigz_v3 1.0.29
     local line=M.nav_diag(e,now)
     pcall(nav.stop)
     if not NAVSTOP.logged then
@@ -711,6 +713,23 @@ function M.nav_stop(e,item,now)
             item_name(item),NAVSTOP.per_episode,line))
     end
     return true
+end
+-- QQT_Warpigz_v3 1.0.29: Navigator moves the player again after a stop
+-- (see M.nav_watch).
+function M.nav_moving(now)
+    local player=Utils.host_call(rawget(_G,'get_local_player'))
+    local dest,here=xy(Utils.call(player,'get_move_destination')),here_xy()
+    if dest and here and flat(dest,here)>1 and player_moving(now,here) then
+        local st=Utils.host_call(G.movement.status)
+        local sent=type(st)=='table' and st.sent
+        if not (type(sent)=='table' and type(sent.x)=='number' and flat(dest,sent)<=YIELD.sent) then return true end
+    end
+    if movement_owned or not NAVSTOP.rd0 then return false end
+    local nav=rawget(_G,'Navigator')
+    if type(nav)~='table' or type(nav.get_status)~='function' then return false end
+    local ok,st=pcall(nav.get_status)
+    local rd=ok and type(st)=='table' and st.remaining_distance
+    return type(rd)=='number' and rd==rd and NAVSTOP.rd0-rd>=NAVSTOP.gain
 end
 -- Every pulse (pickup/main.lua): the watchdog after a Rosie stop (see NAVSTOP).
 -- QQT_Warpigz_v3 1.0.26 (review round 3): only a reading taken NAVSTOP.settle
@@ -722,12 +741,27 @@ function M.nav_watch(now)
     if now<NAVSTOP.watch then NAVSTOP.watch,NAVSTOP.idle_from=nil,nil;return end -- the clock went back
     if now-NAVSTOP.watch<NAVSTOP.settle then return end
     if not (NAVLIVE.at and NAVLIVE.at>=NAVSTOP.watch+NAVSTOP.settle and NAVLIVE.at<=now) then NAVLIVE.at=nil end -- a fresh read
-    -- QQT_Warpigz_v3 1.0.29 (post-release review): only an idle -> busy
+    -- QQT_Warpigz_v3 1.0.29 (post-release review): an idle -> busy
     -- transition after the stop disarms it (something navigated again). A
     -- Navigator that keeps reporting busy for a while after stop() is not a
-    -- new request; that reading counts toward the idle clock like an idle one.
+    -- new request: a busy reading counts toward the idle clock like an idle
+    -- one while Navigator shows no motion (Coordinator review: Worldstone
+    -- navigating again within NAVSTOP.settle s was never seen idle, and the
+    -- watchdog switched the stops off while the player travelled). Motion:
+    -- the player walks toward a destination that is not Rosie's own, or,
+    -- while Rosie does not hold the movement, remaining_distance fell by
+    -- NAVSTOP.gain m or more since the stop. A motion reading restarts the
+    -- idle clock; NAVSTOP.travel s of it in all disarm the watchdog (the
+    -- command still in flight at the stop walks the player on for a moment).
     local live=nav_live(now)
     if live and NAVSTOP.saw_idle then NAVSTOP.watch,NAVSTOP.idle_from,NAVSTOP.saw_idle=nil,nil,false;return end
+    if live and M.nav_moving(now) then
+        if NAVSTOP.moved_at and now>=NAVSTOP.moved_at and now-NAVSTOP.moved_at<=0.5 then NAVSTOP.travelled=(NAVSTOP.travelled or 0)+now-NAVSTOP.moved_at end
+        NAVSTOP.moved_at,NAVSTOP.idle_from=now,nil
+        if (NAVSTOP.travelled or 0)>=NAVSTOP.travel then NAVSTOP.watch,NAVSTOP.idle_from,NAVSTOP.saw_idle=nil,nil,false end
+        return
+    end
+    NAVSTOP.moved_at=nil
     if not live then NAVSTOP.saw_idle=true end
     local held=false
     if type(M.nav_held)=='function' then local ok,h=pcall(M.nav_held,now);held=ok and h==true end
@@ -735,8 +769,8 @@ function M.nav_watch(now)
     NAVSTOP.idle_from=NAVSTOP.idle_from or now
     if now-NAVSTOP.idle_from<NAVSTOP.idle then return end
     NAVSTOP.watch,NAVSTOP.idle_from,NAVSTOP.off,NAVSTOP.saw_idle=nil,nil,true,false
-    console.print(string.format('[Rosie pickup] Navigator has stayed idle %ds since Rosie stopped its request and nothing navigated again; Rosie will not stop Navigator again this session%s',
-        NAVSTOP.idle,M.nav_diag(nil,now)))
+    console.print(string.format('[Rosie pickup] Navigator has stayed idle %ds since Rosie stopped its request and nothing navigated again%s; Rosie will not stop Navigator again this session%s',
+        NAVSTOP.idle,live and ' (it still reports busy but does not move)' or '',M.nav_diag(nil,now)))
 end
 -- QQT_Warpigz_v3 1.0.26 (review round 3): at live frame rates a Navigator
 -- that ignores the hold and has no stop() can carry the player out of the
