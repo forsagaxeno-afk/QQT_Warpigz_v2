@@ -101,6 +101,77 @@ local function nearest(L, x, y, max_d, skip)
     end
     return best, best_d
 end
+-- QQT_Warpigz_v3 2.6.4 (sweep H1): the recorded loops pass the same place
+-- several times. One candidate per pass ("lap"): the loop points within
+-- max_d, grouped into runs of consecutive indices (a gap of more than
+-- LAP_GAP points starts another lap), the nearest point of each run that
+-- `skip` does not reject. List of {i, d}, nearest first, at most LAP_MAX.
+M.LAP_GAP, M.LAP_MAX, M.LAP_EXTRA = 6, 8, 30
+local function lap_points(L, x, y, max_d, skip, extra)
+    local r = math.ceil(max_d / M.GRID)
+    local gx, gy = floor(x / M.GRID), floor(y / M.GRID)
+    local near = {}
+    for dx = -r, r do
+        for dy = -r, r do
+            local cell = L.grid[gkey(gx + dx, gy + dy)]
+            if cell then
+                for _, i in ipairs(cell) do
+                    local d = d2(L.xs[i], L.ys[i], x, y)
+                    if d <= max_d then near[#near + 1] = {i = i, d = d} end
+                end
+            end
+        end
+    end
+    if #near == 0 then return {} end
+    table.sort(near, function(a, b) return a.i < b.i end)
+    -- runs of consecutive indices; the last run joins the first across the wrap
+    local runs, cur = {}, {near[1]}
+    for k = 2, #near do
+        if near[k].i - near[k - 1].i > M.LAP_GAP then
+            runs[#runs + 1] = cur
+            cur = {}
+        end
+        cur[#cur + 1] = near[k]
+    end
+    runs[#runs + 1] = cur
+    if #runs > 1 and near[1].i + L.n - near[#near].i <= M.LAP_GAP then
+        for _, e in ipairs(runs[#runs]) do runs[1][#runs[1] + 1] = e end
+        runs[#runs] = nil
+    end
+    -- Per lap: its nearest point and both ends of the run (walking a little
+    -- further along the lap can save more road than it costs).
+    local out = {}
+    for _, run in ipairs(runs) do
+        local keep = {run[1], run[#run]}
+        table.sort(run, function(a, b) return a.d < b.d end)
+        table.insert(keep, 1, run[1])
+        local seen = {}
+        for _, e in ipairs(keep) do
+            if not seen[e.i] then
+                seen[e.i] = true
+                if not (skip and skip(e.i)) then
+                    out[#out + 1] = {i = e.i, d = e.d}
+                elseif e == keep[1] then
+                    -- the nearest point crosses out: the nearest one that does not
+                    for _, alt in ipairs(run) do
+                        if not seen[alt.i] and not skip(alt.i) then
+                            seen[alt.i] = true
+                            out[#out + 1] = {i = alt.i, d = alt.d}
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+    table.sort(out, function(a, b) return a.d < b.d end)
+    -- Another lap only when it is about as close as the nearest one: a much
+    -- longer straight leg may cross what the loop goes round (a hairpin).
+    local reach = out[1] and out[1].d + (extra or max_d) or 0
+    while #out > 0 and (#out > M.LAP_MAX * 3 or out[#out].d > reach) do out[#out] = nil end
+    return out
+end
+
 M.nearest_index = function(pos, max_d)
     local L = M.loop()
     local x, y = pos_xy(pos)
@@ -137,7 +208,7 @@ end
 -- ── planning ─────────────────────────────────────────────────────────────
 -- Road cost (metres) from the player to the target, or the straight
 -- distance when the loop cannot be used. Second value: the route plan.
-local start_cache = {x = nil, y = nil, L = nil, i = nil, d = nil}
+local start_cache = {x = nil, y = nil, L = nil, starts = nil}
 
 local function crosses_out(L, i, target)
     local fence = tracker.hr_fence
@@ -152,28 +223,37 @@ function M.plan(target, player, exit_idx)
     local tx, ty = pos_xy(target)
     local px, py = pos_xy(player)
     if not L or not tx or not px then return nil end
-    -- The player's loop point is shared by every candidate of one pick.
+    -- The player's loop points are shared by every candidate of one pick.
+    -- QQT_Warpigz_v3 2.6.4 (sweep H1): one start per lap near the player and
+    -- one exit per lap near the chest, the cheapest pair (the single nearest
+    -- points were often on different laps: 2,179 m of road for a 270 m trip,
+    -- and the cost jumped when a step moved the start to another lap).
     local c = start_cache
     if c.L ~= L or c.x == nil or math.abs(c.x - px) > 0.5 or math.abs(c.y - py) > 0.5 then
         c.L, c.x, c.y = L, px, py
-        c.i, c.d = nearest(L, px, py, M.ROAD_MAX)
+        c.starts = lap_points(L, px, py, M.ROAD_MAX)
     end
-    local i0, d0 = c.i, c.d
-    if not i0 then return nil end
-    local i1
-    if valid_exit(L, exit_idx, tx, ty) then i1 = exit_idx end
-    if not i1 then
-        i1 = nearest(L, tx, ty, M.OFFROAD_MAX)
-        if i1 and crosses_out(L, i1, target) then
-            i1 = nearest(L, tx, ty, M.OFFROAD_MAX, function(i) return crosses_out(L, i, target) end)
+    local starts = c.starts
+    if #starts == 0 then return nil end
+    local exits
+    if valid_exit(L, exit_idx, tx, ty) then
+        exits = {{i = exit_idx, d = d2(L.xs[exit_idx], L.ys[exit_idx], tx, ty)}}
+    else
+        exits = lap_points(L, tx, ty, M.OFFROAD_MAX, function(i) return crosses_out(L, i, target) end, M.LAP_EXTRA)
+    end
+    local best
+    for _, s in ipairs(starts) do
+        for _, e in ipairs(exits) do
+            local dir, road = shorter(L, s.i, e.i)
+            local cost = s.d + road + e.d
+            if not best or cost < best.cost then
+                best = {i0 = s.i, i1 = e.i, dir = dir, road = road, offroad = e.d, cost = cost}
+            end
         end
     end
-    if not i1 then return nil end
-    local offroad = d2(L.xs[i1], L.ys[i1], tx, ty)
-    if offroad > M.OFFROAD_MAX then return nil end
-    local dir, road = shorter(L, i0, i1)
-    return {i0 = i0, i1 = i1, dir = dir, offroad = offroad, road = road, cost = d0 + road + offroad,
-        mode = 'road', cursor = i0, tried = {i1}, target = target, tx = tx, ty = ty}
+    if not best or best.offroad > M.OFFROAD_MAX then return nil end
+    return {i0 = best.i0, i1 = best.i1, dir = best.dir, offroad = best.offroad, road = best.road,
+        cost = best.cost, mode = 'road', cursor = best.i0, tried = {best.i1}, target = target, tx = tx, ty = ty}
 end
 
 function M.cost(target, player, exit_idx)

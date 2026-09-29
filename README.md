@@ -24,7 +24,7 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | `WarPug` | War Plan selection and creation | 1.0.17 |
 | `Batmobile` | Shared navigation | 2.2.3 |
 | `ArkhamAsylum` | The Pit | 2.1.4 |
-| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.3 |
+| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.4 |
 | `HordeDev` | Infernal Hordes | 2.2.7 |
 | `Reaper` | Boss lairs | 1.10.6 |
 | `WonderCity` | Kurast Undercity | 2.2.6 |
