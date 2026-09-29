@@ -25,6 +25,7 @@ local settings = {
     maiden_disable_cinders = 0,
     manage_orbwalker = false,
     draw_chest_status = false,
+    debug_log = false, -- QQT_Warpigz_v3 2.6.4: periodic debug lines
     -- Run mode (core/hr_mode.lua): 0 = Warplan, 1 = Farm (default, manual use;
     -- an external enable / WarPigs adoption always runs Warplan).
     mode = 1,
@@ -103,7 +104,7 @@ local setting_controls = {
     kill_monsters_rarity = "kill_monsters_rarity", experimental_explorer = "experimental_explorer_toggle",
     farm_cinder_threshold = "farm_cinder_threshold", do_maiden = "do_maiden_toggle",
     maiden_disable_cinders = "maiden_disable_cinders", manage_orbwalker = "manage_orbwalker",
-    draw_chest_status = "draw_chest_status",
+    draw_chest_status = "draw_chest_status", debug_log = "debug_log_toggle",
     mode = "mode", hunt_rift = "hunt_rift_toggle",
     rupture_replace_local_events = "rupture_replace_local_events",
     rupture_prioritize_surging = "rupture_prioritize_surging",
@@ -202,6 +203,7 @@ function settings:update_settings()
     settings.maiden_disable_cinders = gui.elements.maiden_disable_cinders:get()
     settings.manage_orbwalker = gui.elements.manage_orbwalker:get()
     settings.draw_chest_status = gui.elements.draw_chest_status:get()
+    settings.debug_log = gui.elements.debug_log_toggle:get() == true -- QQT_Warpigz_v3 2.6.4
     for _, name in ipairs(synced_controls) do
         local el = gui.elements[setting_controls[name]]
         if el then

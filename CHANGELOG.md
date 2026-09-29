@@ -2,6 +2,35 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.13] — 2026-09-29
+
+Fixes from the scenario sweep (about 269 emulated hours of the owner's setups; report `audit/reviews/sweep_2026-09-28.md`).
+
+### Fixed
+
+- **HelltideRevamped 2.6.4**
+  - Chest trips take the short road: the planner compares one entry and one exit per lap instead of only the nearest road point, so the chest order no longer flips and cinders are not left unspent at :55.
+  - After a Rosie trip the bot no longer farms on at once and walks away from drops at the portal spot (item loss, Mythic included).
+  - Two rupture chests close together: each is opened once (no loop between them).
+  - At :55 no town teleport in the same moment HR releases its own tear pause, so drops held back by it are picked first.
+  - New "Debug log" switch for the periodic [PATROL]/[NAV]/[CHEST RECALL] lines (off by default).
+- **HordeDev 2.2.8**
+  - The victory lap after the last wave no longer freezes in the centre.
+  - A chest with 0 aether is not retried 15 times; the "Movement spell on cooldown" spam is summarised.
+- **WonderCity 2.2.7**
+  - A Rosie trip during the exit delay no longer makes the return a new run that re-explores the finished Undercity.
+  - Warp pads wait for a locked PortalSwitch (Grand Beacon) and the exit is remembered once the beacon is lit.
+  - Reward loot a few metres from the exit is walked to before leaving (bounded); the exit re-cast waits while enemies are close; no 10 s re-check of an opened chest after a trip.
+- **Reaper 1.10.7**
+  - The walk to the boss chest waits while the looter picks up the boss drops (a Mythic was dragged out of range).
+  - Enabled or reloaded mid-fight on the last key, Reaper joins the fight instead of leaving the live boss; no actor reads during a loading screen.
+- **ArkhamAsylum 2.1.5**
+  - A glyph screen lost to a death, an evade or a loading screen is re-opened (up to 3 times) instead of skipping the upgrade.
+  - The back portal is remembered across slow loads and reloads (`back_portals.txt` in the plugin folder), so the bot no longer goes back up a floor.
+  - Boss loot piles near the exit are swept (at most 20 s) before leaving.
+- **Batmobile 2.2.4**: the per-attempt navigator lines (STUCK, PARTIAL PATH) follow the logging setting. Set Batmobile logging to Info when you send movement logs.
+- WonderCity, ArkhamAsylum and Reaper publish `boss_fight` in their status (for Rosie's coming boss-fight wait).
+
 ## [3.3.12] — 2026-09-29
 
 ### Fixed

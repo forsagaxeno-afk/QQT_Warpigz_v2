@@ -6,7 +6,7 @@
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v3.3.12.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
+**Current release: v3.3.13.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
 
 **New here? Read the [step-by-step user guide](docs/GUIDE_EN.md)** (install, setup, WarPigs automation or one activity by hand, troubleshooting).
 
@@ -22,9 +22,9 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | --- | --- | --- |
 | `WarPigs` | Master orchestrator and town handoffs | 1.1.11 |
 | `WarPug` | War Plan selection and creation | 1.0.17 |
-| `Batmobile` | Shared navigation | 2.2.3 |
+| `Batmobile` | Shared navigation | 2.2.4 |
 | `ArkhamAsylum` | The Pit | 2.1.6 |
-| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.3 |
+| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.4 |
 | `HordeDev` | Infernal Hordes | 2.2.8 |
 | `Reaper` | Boss lairs | 1.10.8 |
 | `WonderCity` | Kurast Undercity | 2.2.8 |

@@ -1,4 +1,4 @@
-# Batmobile: session notes (current 2.2.2)
+# Batmobile: session notes (current 2.2.4)
 
 The shared movement / navigation core: explorer, pathfinding, long paths, the movement-skill catalog (evade, Warlock Rampage) and freeroam. Most activity plugins move through `BatmobilePlugin` (`set_target` / `move` / `pause` / `resume` / `stop_long_path` / `is_paused` / `get_owner`).
 
@@ -8,6 +8,8 @@ The shared movement / navigation core: explorer, pathfinding, long paths, the mo
 - The third-party **Navigator** (with Worldstone) is a different navigator and not ours.
 
 ## History
+- 2.2.4 (scenario sweep 2026-09-28, §2.5 B1; test B10): the per-attempt `[nav] STUCK`, `PARTIAL PATH REJECTED` and both `PARTIAL PATH SKIPPED` lines go through `nav_log` (Disabled: none, Info: one per 5 s with `(+N similar)`, Debug: every line). A wedged paused caller printed 236 STUCK lines in 60 s. `test_batmobile_nav_recovery.lua` N5 now reads STUCK at Info.
+- 2.2.3 (Coordinator, 3.3.x): freeroam does not double-wait for Rosie's pickup (see CHANGELOG).
 - 2.2.2 (self-review "the bot goes back and forth", `test_batmobile_oscillation.lua`):
   - **Path look-ahead jitter.** A node closer than `movement_step` (4 u) was skipped but stayed `path[1]`. Walking on to the next node took the player back beyond 4 u of it, so the next tick walked back: an endless back and forth on the 4 u ring that never read as STUCK (position kept changing). Hit a node left behind by a Looter/fight detour, the unstuck side-step node, and hairpin corners. Now skipped nodes are dropped once a later node is walked to; the look-ahead skips only when that node is in straight reach (`in_straight_reach`, first 6 u sampled like the string-pull), else the path is followed node by node; the unstuck side-step (`side_step_node`) is walked to until reached. Offline sim: an open room with a pillar now finishes exploring (before: stuck at an unstuck node forever).
   - **Auditor round (audit/reviews/repro_batmobile_full.lua R1–R6; tests B4–B9):**
