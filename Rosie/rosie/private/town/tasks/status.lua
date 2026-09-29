@@ -53,9 +53,10 @@ function task.Execute()
             -- QQT_Warpigz_v3 (Q5): items the stash skipped this trip (not
             -- confirmed or unreadable) may go on the next trip: a retryable
             -- failure (cooldown, fail streak), never the permanent latch.
+            -- QQT_Warpigz_v3 1.0.25 (stash passes): the stash did not take them.
             local skipped=tracker.stash_skipped
             if type(skipped)=='table' and #skipped>0 then
-                lifecycle.finish(false,'Stash skipped '..#skipped..' item(s) it could not confirm ('
+                lifecycle.finish(false,'Stash left '..#skipped..' item(s) in the bag ('
                     ..table.concat(skipped,', ')..'); bag needs remain')
                 return
             end

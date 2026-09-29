@@ -3,6 +3,8 @@
 # and LuaJIT (QQT's runtime). If the version in VERSION has no release yet, it
 # builds the installable package (scripts/ + docs) and creates release vX.Y.Z
 # on the pushed commit. A push that does not bump VERSION publishes nothing.
+# Only pushes to main and the release branch publish; other claude/** branches
+# run the checks and the suite only.
 # Pre-release versions (X.Y.Z-rc.N) are created as private drafts.
 name: Release
 
@@ -39,6 +41,9 @@ jobs:
         run: python3 audit/build_release.py --out dist
 
       - name: Remove withdrawn releases
+        # Only the release branch (and main) publish: a plugin branch based on
+        # a release commit carries the same VERSION and must not publish it.
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/qqt-diablo4-plugins-orchestrator-4439v5'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -50,6 +55,9 @@ jobs:
           done
 
       - name: Publish release for a new version
+        # Only the release branch (and main) publish: a plugin branch based on
+        # a release commit carries the same VERSION and must not publish it.
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/qqt-diablo4-plugins-orchestrator-4439v5'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

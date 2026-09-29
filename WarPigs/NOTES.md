@@ -1,11 +1,17 @@
-# WarPigs + WarPug: session notes (WarPigs 1.1.9, WarPug 1.0.17)
+# WarPigs + WarPug: session notes (WarPigs 1.1.10, WarPug 1.0.17)
 
 WarPigs is the orchestrator: it runs a War Plan (Pit, Helltide, Undercity, Hordes, bosses, Whispers) by driving the activity plugins through their APIs, and it calls Rosie for town trips. WarPug is the War Plan creator (planner).
 
 - `WarPigs/core/orchestrator.lua`: step machine; `core/external.lua`: the API, plus `WarPigsPlugin.peek()` (side-effect free; written for WarRoom, archived since 3.3.6).
 - Event bus: step_start / step_done are edges (`emitted_matches`), so they are not repeated per tick.
 - Joint tests: `audit/tests/test_joint_suite.lua`, `test_integration_warpug.lua`, `test_warpug.lua`, `test_activity_lease_joint.lua`.
-- Hang/loop regressions: `audit/tests/test_warpigs_hang_review.lua` (H1–H8), `test_warpug_alfred_bounds.lua` (P1–P4); teleport casts: `test_warpigs_teleport_casts.lua` (C1–C3).
+- Hang/loop regressions: `audit/tests/test_warpigs_hang_review.lua` (H1–H8), `test_warpug_alfred_bounds.lua` (P1–P4); teleport casts: `test_warpigs_teleport_casts.lua` (C1–C3); Tyrael turn-in: `test_warpigs_turnin_tyrael.lua` (Y1–Y2).
+
+## 1.1.10 turn-in: Tyrael not in the actor list (2026-09-28, live 3.3.5)
+Live: `[WarPigs:turn_in] NPC not found … Looking for: NPC_QST_X2_Tyrael_NonCombat` every 4 s for 800+ s, the bot stood in Temis. APPROACH_NPC returned without moving.
+- The turn-in walks toward Tyrael's known position (`hunt.TYRAEL` 2574,-484, via the Temis wall route) so he streams in; after 60 s without him it re-teleports to Temis once; after 180 s it gives the turn-in up for 600 s (`M.suspended`). The orchestrator treats a suspended task quest as not matched (`dispatch.task_suspended`), so the next War Plan step runs; the suspension is not a completed turn-in (no pit-filler arm, no R6 re-arm). Retried after 600 s.
+- 'NPC not found' logged once per episode; the candidate dump at most every 30 s (was 4 s).
+Live check: a turn-in where Tyrael is out of range walks toward the War Plan table and interacts; if he never appears, one re-teleport, then `giving the turn-in up for 600s; WarPigs continues`.
 
 ## 1.1.9 Undercity teleport storm (2026-09-28, audit/reviews/undercity_teleports_2026-09-28.md)
 Fixed (each with a test that fails on 1.1.8):

@@ -130,6 +130,26 @@ function Utils.walkable_near(x,y,z,reach)
 end
 -- QQT_Warpigz_v3 (Q1 review): a live enemy within `radius` m of the player
 -- (the fight that swallows pickup interactions and moves). false when unknown.
+-- QQT_Warpigz_v3 1.0.25 (Discord, chest loot left silently): the host list
+-- also holds actors the rotation never fights (1-HP apparitions and totems,
+-- untargetable actors, monsters on another floor); each one held chest drops
+-- beyond 3 m for up to 45 s. An actor counts only with more than 1 HP, not
+-- untargetable and within ENEMY_DZ m of the player's height, like WarPigs
+-- orchestrator.lua and ArkhamAsylum kill_monster.lua. Also returns the
+-- nearest counted actor and its distance (the fight hold's log line).
+local ENEMY_DZ=5
+function Utils.valid_enemy(a,origin,radius)
+    if Utils.call(a,'is_dead')==true then return nil end
+    local hp=Utils.call(a,'get_current_health')
+    if type(hp)=='number' and hp<=1 then return nil end
+    if Utils.call(a,'is_untargetable')==true then return nil end
+    local p=Utils.call(a,'get_position')
+    local d=Utils.call(origin,'dist_to_ignore_z',p)
+    if type(d)~='number' or d>radius then return nil end
+    local z0,z1=Utils.call(origin,'z'),Utils.call(p,'z')
+    if type(z0)=='number' and type(z1)=='number' and math.abs(z1-z0)>ENEMY_DZ then return nil end
+    return d
+end
 function Utils.enemy_near(radius)
     local ts=rawget(_G,'target_selector')
     if type(ts)~='table' or type(ts.get_near_target_list)~='function' then return false end
@@ -137,11 +157,38 @@ function Utils.enemy_near(radius)
     if not origin then return false end
     local ok,list=pcall(ts.get_near_target_list,origin,radius)
     if not ok or type(list)~='table' then return false end
+    local best,best_d
     for _,a in pairs(list) do
-        local d=Utils.call(origin,'dist_to_ignore_z',Utils.call(a,'get_position'))
-        if type(d)=='number' and d<=radius and Utils.call(a,'is_dead')~=true then return true end
+        local d=Utils.valid_enemy(a,origin,radius)
+        if d and (not best_d or d<best_d) then best,best_d=a,d end
     end
+    if best then return true,best,best_d end
     return false
+end
+-- QQT_Warpigz_v3 1.0.25 (review): the fight hold's engaged rule
+-- (pickup.lua) asks whether a counted enemy within `radius` m is an elite,
+-- champion or boss, or lies within `toward` m of the point `dest` another
+-- mover takes the player to. Returns the reason ('elite'/'toward'), the actor
+-- and its distance, or nil.
+function Utils.enemy_engaging(radius,dest,toward)
+    local ts=rawget(_G,'target_selector')
+    if type(ts)~='table' or type(ts.get_near_target_list)~='function' then return nil end
+    local origin=Utils.call(Utils.host_call(rawget(_G,'get_local_player')),'get_position')
+    if not origin then return nil end
+    local ok,list=pcall(ts.get_near_target_list,origin,radius)
+    if not ok or type(list)~='table' then return nil end
+    for _,a in pairs(list) do
+        local d=Utils.valid_enemy(a,origin,radius)
+        if d then
+            if Utils.call(a,'is_elite')==true or Utils.call(a,'is_champion')==true or Utils.call(a,'is_boss')==true then return 'elite',a,d end
+            if dest then
+                local p=Utils.call(a,'get_position')
+                local x,y=Utils.call(p,'x'),Utils.call(p,'y')
+                if type(x)=='number' and type(y)=='number' and math.sqrt((x-dest.x)^2+(y-dest.y)^2)<=toward then return 'toward',a,d end
+            end
+        end
+    end
+    return nil
 end
 function Utils.bag_state(bag)
     local items=Utils.bag_items(bag)

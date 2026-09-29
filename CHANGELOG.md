@@ -2,6 +2,36 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.11] — 2026-09-28
+
+### Fixed
+
+- **Rosie 1.0.26: pickup next to Worldstone/Navigator and at close range** (live 3.3.5: Royal gems left behind under Worldstone; Discord: chest loot ignored until the player steps 2-3 m away).
+  - While Rosie walks to a drop, Navigator gets a short grace (2.5 s per drop) instead of taking the player away at once; if Navigator keeps pulling the player off a drop, Rosie stops it at most once per drop (5 per pickup episode) and logs why.
+  - The fight hold starts only when you are really fighting (a cast, or an enemy that is alive, targetable and on your floor within 10 m), not next to a passive monster; one line per wait says it.
+  - Close range: a drop 1-3 m away that does not come into the bag after a few interactions makes Rosie step in (at most 1.2 s); in the 2-3 m band interacting alternates with a short walk. A drop counts as taken only when it really left the ground from 1.1 m or closer.
+  - New one-line reasons when pickup waits: Scavenger busy, Orbwalker outside Clear mode, the fight hold.
+
+## [3.3.10] — 2026-09-28
+
+### Fixed
+
+- **WarPigs 1.1.10: no more endless "NPC not found … Tyrael" in Temis** (live log since 3.3.5: the line every 4 s for 800+ s while the bot stood still).
+  - When Tyrael is not loaded yet, WarPigs walks toward his spot next to the War Plan table so he loads.
+  - After 60 s it re-teleports to the Temis waypoint once; after 3 minutes it gives the turn-in up for 10 minutes and continues with the next War Plan step, then tries again.
+  - "NPC not found" is logged once per episode; the nearby-actor dump at most every 30 s.
+  - Note: the v3.3.9 package already carried WarPigs 1.1.10 (CI published it from the WarPigs branch). CI now publishes only from the release branch.
+
+## [3.3.9] — 2026-09-28
+
+### Fixed
+
+- **Rosie 1.0.25: the stash deposit from BetterAlfred** (owner request; live: the first item of every visit, often a Mythic, stayed in the bag, trip after trip).
+  - The stash counts as open only when it has finished loading (its item count stays the same for 0.5 s, or the game reports the stash screen), so no item is sent while the game would drop it.
+  - Every second Rosie sends every item that should be stashed; whatever did not move is simply sent again next pass. No item is skipped for the whole trip any more after one lost move.
+  - Rosie still decides what goes in (Mythics, keep lists, talismans, materials and socketables by your settings), still closes the panel it opened with Escape, and the stash pull is unchanged.
+  - "Stash full" now comes from the game: only when deposits are really refused, or at 350 items, and the log names what stayed in the bag.
+
 ## [3.3.8] — 2026-09-28
 
 Two live reports: "again about 5 teleports before entering the Undercity" and "SilentRaven is manual now???".

@@ -48,7 +48,18 @@ local TELEPORT_DEBOUNCE_S     = 6.0
 local last_teleport_time      = -math.huge
 local stuck_not_in_town_since = nil
 
-local DIAG_INTERVAL = 4.0  -- seconds between "NPC not found" diagnostic dumps
+local DIAG_INTERVAL = 30.0 -- seconds between "NPC not found" diagnostic dumps (QQT_Warpigz_v3 1.1.10: was 4 s)
+
+-- QQT_Warpigz_v3 1.1.10: Tyrael not in the actor list while the player is in
+-- Temis (live: 'NPC not found' every 4 s for 800+ s, the bot stood still).
+-- Walk toward his known position so he streams in; after RETELEPORT_S
+-- re-teleport to the Temis waypoint once; after GIVE_UP_S give the turn-in up
+-- for RETRY_AFTER_S (M.suspended) so WarPigs continues, then retry.
+local hunt = {
+    TYRAEL = {2574.0, -484.0, 31.5},   -- Tyrael in Temis (joint_host, next to the War Plan table)
+    RETELEPORT_S = 60.0, GIVE_UP_S = 180.0, RETRY_AFTER_S = 600.0,
+    since = nil, reteleported = false, logged = false, retry_at = nil,
+}
 
 local function log(msg) console.print('[WarPigs:turn_in] ' .. msg) end
 local function now() return get_time_since_inject() end
@@ -191,6 +202,7 @@ end
 -- When the exact NPC name isn't found, dump nearby candidates so the user
 -- can correct NPC_NAME if the in-game skin differs from what we expect.
 local function diagnose_missing_npc()
+    -- QQT_Warpigz_v3 1.1.10: the full dump at most every DIAG_INTERVAL.
     if (now() - last_diag) < DIAG_INTERVAL then return end
     last_diag = now()
     local actors = actors_manager.get_all_actors()
@@ -227,6 +239,7 @@ function M.tick(active, ctx)
         stuck_not_in_town_since = nil
         alfred_wait_logged      = false
         hold_logged             = nil
+        hunt.since, hunt.reteleported, hunt.logged = nil, false, false -- QQT_Warpigz_v3 1.1.10
         return
     end
 
@@ -344,8 +357,40 @@ function M.tick(active, ctx)
         end
         local npc = find_npc()
         if not npc then
+            -- QQT_Warpigz_v3 1.1.10: walk toward Tyrael, bounded (see `hunt`).
+            local t = now()
+            hunt.since = hunt.since or t
+            if not hunt.logged then
+                hunt.logged = true
+                log('NPC not found (' .. NPC_NAME .. ') — walking toward Tyrael so he loads')
+            end
             diagnose_missing_npc()
+            if t - hunt.since >= hunt.GIVE_UP_S then
+                log(string.format('Tyrael still not found after %.0fs — giving the turn-in up for %.0fs; WarPigs continues',
+                    t - hunt.since, hunt.RETRY_AFTER_S))
+                hunt.retry_at = t + hunt.RETRY_AFTER_S
+                hunt.since, hunt.reteleported, hunt.logged = nil, false, false
+                set_state(STATE.IDLE)
+                return
+            end
+            if t - hunt.since >= hunt.RETELEPORT_S and not hunt.reteleported
+                and (t - last_teleport_time) >= TELEPORT_DEBOUNCE_S and not teleport_held(ctx)
+            then
+                hunt.reteleported = true
+                log(string.format('Tyrael not found for %.0fs — re-teleporting to the Temis waypoint once', t - hunt.since))
+                teleport_to_waypoint(TEMIS_WP)
+                last_teleport_time = t
+                set_state(STATE.TELEPORTING)
+                return
+            end
+            local pp = get_player_position()
+            local target = vec3 and vec3.new and vec3:new(hunt.TYRAEL[1], hunt.TYRAEL[2], hunt.TYRAEL[3])
+            if pp and target then route.move(pp, target, t) end
             return
+        end
+        if hunt.since then
+            log(string.format('Tyrael found after %.0fs', now() - hunt.since))
+            hunt.since, hunt.reteleported, hunt.logged = nil, false, false
         end
 
         local pos = npc:get_position()
@@ -367,5 +412,13 @@ function M.tick(active, ctx)
 end
 
 function M.get_state() return state end
+
+-- QQT_Warpigz_v3 1.1.10: true while a given-up turn-in waits for its retry;
+-- the orchestrator then treats the quest as not matched (WarPigs continues).
+function M.suspended(t)
+    if hunt.retry_at and (t or now()) < hunt.retry_at then return true end
+    hunt.retry_at = nil
+    return false
+end
 
 return M

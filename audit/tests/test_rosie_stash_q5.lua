@@ -18,7 +18,23 @@
 --   partial the stash stack holds 50; a 5-stack merges 2 into a 48-stack,
 --           3 stay in the bag until the next command opens a new stash stack;
 --   refuse  one SNO never moves (host returns true);
---   stale   one SNO lands in the stash but the bag list keeps it.
+--   stale   one SNO lands in the stash but the bag list keeps it (a later
+--           move of that stack does nothing: the game already took it).
+-- QQT_Warpigz_v3 1.0.25 (stash passes): the stash now works in passes
+-- (tasks/stash.lua). Every second one pass sends every stashable item; the
+-- bag decides what moved and the rest is sent again. There is no per-item
+-- wait (the 3.x ITEM_WAIT 8 s, 3 attempts per item and MAX_SKIPS 3 items in a
+-- row are gone): the step ends when nothing is left, or after AFTER_DEPOSIT
+-- (3) idle passes once anything moved (the rest is skipped for the trip), or
+-- after FIRST_WAIT + SECOND_WAIT (12 + 5) idle passes with nothing moved
+-- ("The stash took nothing in 17 passes", retryable). Q5-4, Q5-5, Q5-9,
+-- Q5-14 and Q5-16 were adjusted to those bounds.
+-- QQT_Warpigz_v3 1.0.25 (review 2): once anything moved, the AFTER_DEPOSIT
+-- window starts only from pass FIRST_WAIT (12): a receipt early in a long
+-- stash load no longer ends the step while the list still loads. After 3
+-- quiet passes a pass sends only THIN (2) items in turn. Q5-4, Q5-5 (12
+-- commands for the one leftover rune) and Q5-14 (2 + 23 x 4 + 2 x 8) were
+-- adjusted to those bounds.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
 local checks, failures = 0, {}
@@ -84,6 +100,7 @@ local function socket_host(h, mode)
         local at
         for i, x in ipairs(h.socketables) do if x == item then at = i end end
         if not at then return false end
+        if h.stale_done and h.stale_done[item] then return true end -- the game: that stack already left the bag
         if mode.refuse == item.sno then return true end
         local into
         for _, s in ipairs(h.stash) do
@@ -99,7 +116,7 @@ local function socket_host(h, mode)
             h.stash[#h.stash + 1] = copy
         end
         h.stashed[#h.stashed + 1] = item
-        if mode.stale == item.sno then return true end -- the bag list keeps the moved stack
+        if mode.stale == item.sno then h.stale_done = h.stale_done or {}; h.stale_done[item] = true; return true end -- the bag list keeps the moved stack
         item.stack = item.stack - moved
         if item.stack <= 0 then table.remove(h.socketables, at) end
         return true
@@ -186,17 +203,17 @@ case('Q5-4 one rune the stash never takes: skipped once for this trip, every oth
     expect_serviced(h, done, 'Q5-4')
     eq(left(h), 3, 'only the refused rune stays in the bag')
     eq(h.logged('Skipped Rune_Condition_Summons'), 1, 'the skip is logged once\n' .. h.tail(30))
-    ok(h.socket_moves[RUNE] <= 3, 'bounded commands for the refused rune: ' .. tostring(h.socket_moves[RUNE]))
+    ok(h.socket_moves[RUNE] <= 12, 'bounded commands for the refused rune (one per pass up to pass FIRST_WAIT): ' .. tostring(h.socket_moves[RUNE]))
     eq(h.logged('did not open'), 0, 'no stash-window failure')
 end)
 
-case('Q5-5 the stash receives the rune but the bag list keeps it: no second command, skipped once', function()
+case('Q5-5 the stash receives the rune but the bag list keeps it: re-sent only until the stall, skipped once', function()
     local h = live_host({stale = RUNE})
     local done = trip(h)
     print('   Q5-5 result: ' .. reason(done))
     expect_serviced(h, done, 'Q5-5')
     eq(left(h) - left(h, RUNE), 0, 'every gem stashed')
-    eq(h.socket_moves[RUNE], 1, 'never a second command while the first is unresolved')
+    ok(h.socket_moves[RUNE] <= 12, 'the stale stack is re-sent at most until the stall (pass FIRST_WAIT): ' .. tostring(h.socket_moves[RUNE]))
     eq(h.logged('Skipped Rune_Condition_Summons'), 1, 'the skip is logged once\n' .. h.tail(30))
 end)
 
@@ -230,7 +247,7 @@ case('Q5-7 an item whose checks raise is skipped; the stash goes on with the res
     eq(h.logged('its checks raised'), 1, 'the unreadable item is logged once (no per-tick spam)')
 end)
 
-case('Q5-9 bounded: three different items refused in a row fail the step (full or closed stash), not a latch', function()
+case('Q5-9 bounded: every item refused fails the step after 12 + 5 idle passes (full or closed stash), not a latch', function()
     local h = live_host({gems = 0})
     local lm, refused = h.G.loot_manager, 0
     local move = lm.move_item_to_stash
@@ -242,11 +259,13 @@ case('Q5-9 bounded: three different items refused in a row fail the step (full o
     local done = trip(h)
     print('   Q5-9 result: ' .. reason(done) .. ' commands=' .. refused)
     ok(done[1] ~= nil, 'the step fails')
-    -- QQT_Warpigz_v3 (Q5 review): the MAX_SKIPS bound is what ends the step
-    -- (each skipped item gets its own interactions), not the 4-interaction cap.
-    ok(reason(done):find('3 items in a row were not accepted', 1, true) ~= nil, 'the MAX_SKIPS reason: ' .. reason(done))
+    -- QQT_Warpigz_v3 1.0.25 (stash passes): the idle-pass bound ends the
+    -- step (the vendor screen still reads open after 12 passes: 5 more, no
+    -- re-interaction), not the 4-interaction cap; never stash_full.
+    ok(reason(done):find('The stash took nothing in 17 passes', 1, true) ~= nil, 'the stall reason: ' .. reason(done))
     eq(h.logged('did not open'), 0, 'not the 4-interaction cap')
-    ok(refused <= 9, 'bounded deposit commands: ' .. refused)
+    ok(refused <= 25 * 17, 'bounded deposit commands (FIRST_WAIT + SECOND_WAIT passes): ' .. refused)
+    eq(tracker(h).stash_full, false, 'not the stash_full latch')
     eq(tracker(h).fail_permanent, false, 'retryable, not latched after one trip')
     eq(h.logged('Transfer confirmation timed out'), 0, 'no confirmation timeout')
 end)
@@ -327,7 +346,7 @@ case('Q5-13 a socketable whose get_name() raises is still stashed (the name is o
     eq(h.logged('Item metadata unavailable'), 0, 'no metadata failure')
 end)
 
-case('Q5-14 the stash accepts 2 stacks, then refuses everything: MAX_SKIPS ends the step, bounded commands', function()
+case('Q5-14 the stash accepts 2 stacks, then refuses everything: the idle passes end the step at pass 12, bounded commands', function()
     local h = live_host({gems = 24})
     local lm, commands, accepted = h.G.loot_manager, 0, 0
     local move = lm.move_item_to_stash
@@ -342,10 +361,13 @@ case('Q5-14 the stash accepts 2 stacks, then refuses everything: MAX_SKIPS ends 
     local t0 = h.now
     local done = trip(h, 300)
     print(string.format('   Q5-14 result: %s commands=%d seconds=%.0f', reason(done), commands, h.now - t0))
-    ok(done[1] ~= nil, 'the step fails')
-    ok(reason(done):find('3 items in a row were not accepted', 1, true) ~= nil, 'the MAX_SKIPS reason: ' .. reason(done))
-    ok(commands <= 2 + 9, 'at most N+9 deposit commands: ' .. commands)
-    eq(h.logged('timed out'), 0, 'ended by MAX_SKIPS, not by a service timeout')
+    eq(done[1], nil, 'the step ends once the passes move nothing (the bag need is gone): ' .. reason(done))
+    eq(tracker(h).stash_done, true, 'stash step done, not failed')
+    eq(h.logged('Skipped Gem_Ruby_0'), 5, 'five per-item skip lines, then a summary\n' .. h.tail(12))
+    -- Pass 1 sends all 25 (2 move), passes 2-4 send the 23 left, passes 5-12
+    -- only THIN=2 each; the step ends at pass 12 (FIRST_WAIT).
+    ok(commands <= 2 + 23 * 4 + 2 * 8, 'at most 2 + 23 x 4 + 2 x 8 deposit commands: ' .. commands)
+    eq(h.logged('timed out'), 0, 'ended by the idle-pass bound, not by a service timeout')
     eq(tracker(h).fail_permanent, false, 'retryable')
 end)
 
@@ -361,10 +383,12 @@ case('Q5-15 the stash stack of the SNO is unreadable when the command is sent: t
     eq(h.logged('Skipped'), 0, 'nothing skipped')
 end)
 
-case('Q5-16 a bag whose count stays unreadable for 8 s: that item is skipped once, the stash goes on', function()
+case('Q5-16 a same-SNO bag entry whose count is unreadable: the readable stack is stashed, the other passed over', function()
     local h = live_host({gems = 23})
-    -- A second rune stack whose stack count cannot be read: the bag count of
-    -- the rune SNO is unknown, so the readable rune stack cannot be confirmed.
+    -- A second rune stack whose stack count cannot be read. QQT_Warpigz_v3
+    -- 1.0.25 (stash passes): it is left out of the rune's bag
+    -- quantity (it no longer voids it), so the readable stack is sent and
+    -- confirmed; the unreadable one is passed over, logged once.
     local ghost = socketable(h, 'Rune_Condition_Summons', RUNE, 1)
     function ghost:get_stack_count() return nil end
     table.insert(h.socketables, 2, ghost)
@@ -372,8 +396,10 @@ case('Q5-16 a bag whose count stays unreadable for 8 s: that item is skipped onc
     print('   Q5-16 result: ' .. reason(done) .. ' gems_left=' .. gems_left(h))
     expect_serviced(h, done, 'Q5-16')
     eq(gems_left(h), 0, 'every gem stashed')
-    eq(h.logged('bag contents unreadable for 8s'), 1, 'the unreadable bag count skips the rune once')
-    eq(h.socket_moves[RUNE], nil, 'no command for an item whose bag count cannot confirm it')
+    eq(h.logged('bag contents unreadable'), 0, 'no per-item bag wait')
+    eq(h.socket_moves[RUNE], 1, 'the readable rune stack is sent once and stashed')
+    eq(left(h, RUNE), 1, 'only the unreadable stack stays')
+    eq(h.logged('SNO or stack count unreadable'), 1, 'the unreadable stack is passed over, logged once')
 end)
 
 case('Q5-17 an item whose SNO turns unreadable between selection and the command never fails the stash', function()

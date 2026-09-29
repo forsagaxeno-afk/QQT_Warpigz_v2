@@ -1,5 +1,5 @@
 local plugin_label   = 'war_pigs'
-local plugin_version = '1.1.9'
+local plugin_version = '1.1.10'
 console.print('Lua Plugin - WarPigs - v' .. plugin_version)
 
 local gui = {}
