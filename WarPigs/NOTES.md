@@ -1,4 +1,4 @@
-# WarPigs + WarPug: session notes (WarPigs 1.1.12, WarPug 1.0.17)
+# WarPigs + WarPug: session notes (WarPigs 1.1.13, WarPug 1.0.17)
 
 WarPigs is the orchestrator: it runs a War Plan (Pit, Helltide, Undercity, Hordes, bosses, Whispers) by driving the activity plugins through their APIs, and it calls Rosie for town trips. WarPug is the War Plan creator (planner).
 
@@ -6,6 +6,9 @@ WarPigs is the orchestrator: it runs a War Plan (Pit, Helltide, Undercity, Horde
 - Event bus: step_start / step_done are edges (`emitted_matches`), so they are not repeated per tick.
 - Joint tests: `audit/tests/test_joint_suite.lua`, `test_integration_warpug.lua`, `test_warpug.lua`, `test_activity_lease_joint.lua`.
 - Hang/loop regressions: `audit/tests/test_warpigs_hang_review.lua` (H1–H8), `test_warpug_alfred_bounds.lua` (P1–P4); teleport casts: `test_warpigs_teleport_casts.lua` (C1–C3); Tyrael turn-in: `test_warpigs_turnin_tyrael.lua` (Y1–Y6).
+
+## 1.1.13 Rosie's Butler stand-in (2026-09-29)
+Rosie publishes `_G.Butler` with `_rosie=true` while Worldstone runs and no real Butler is loaded; its is_busy mirrors Rosie's own trip. The SilentRaven bridge (`wp_silent_raven.lua` companions_clear) read `Butler.is_busy()` without the `_rosie` skip, so a Rosie trip held/cancelled the Whisper request as `butler_busy`. Now skipped, like the Scavenger stand-in (1.1.8). Already skipping: `dispatch.third_party_busy` (orchestrator companion_hold) and WarPug `third_party_busy`; confirmed by tests (H9, P5).
 
 ## 1.1.12 pre-Torment Horde map (2026-09-29, owner live log 3.3.9..3.3.14)
 The War Plan Horde teleport lands in world=S10_BSK_Pretorment zone=S10_BSK_Pretorment. `dispatch.inside_horde()` (the one place every Horde decision uses: landing, arrived_when, in-place/adoption, W5-2/W5-3, run_finished) knew only S05_BSK_Prototype02, so it logged "landed in a BSK zone HordeDev does not know", re-teleported 3x from inside and never started HordeDev.

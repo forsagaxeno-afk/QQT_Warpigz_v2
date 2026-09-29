@@ -356,6 +356,33 @@ case('H6 the Whisper bridge waits for a busy Butler before walking', function()
     truthy(f.until_true(function() return f.sr_triggers == 1 end, 15), 'Whisper check after the Butler trip')
 end)
 
+-- ── H9 (1.1.13: Rosie's Butler stand-in) ──────────────────────────────────
+case("H9 Rosie's Butler stand-in (_rosie) never blocks or cancels the Whisper request; a real Butler still does", function()
+    local f = fixture({whispers = true})
+    f.sr()
+    local busy = true
+    f.e.Butler = {_rosie = true, is_busy = function() return busy end}
+    truthy(f.until_true(function() return f.sr_triggers == 1 end, 15), 'Whisper check starts with a busy _rosie Butler')
+    f.sr_status.running, f.sr_status.pending = true, false
+    f.run(5)
+    eq(f.sr_status.running, true, 'the running request is not cancelled by the stand-in')
+    eq(f.logged('butler_busy'), 0)
+    local g = fixture({whispers = true})
+    g.sr()
+    g.e.Butler = {is_busy = function() return true end}   -- a real Butler
+    g.run(15)
+    eq(g.sr_triggers, 0, 'a real busy Butler still holds the Whisper walk')
+end)
+
+case("H9 the outgoing teleport does not wait for Rosie's Butler stand-in", function()
+    local f = fixture({teleport = true, zone = 'Kehj_Somewhere', town = false})
+    f.plugin('ArkhamAsylumPlugin')
+    f.e.Butler = {_rosie = true, is_busy = function() return true end}
+    f.quests = {'WarPlans_QST_ThePit'}
+    truthy(f.until_true(function() return f.waypoints > 0 end, 10), 'via-Temis teleport not held by the stand-in')
+    eq(f.logged('Butler town trip in progress'), 0)
+end)
+
 -- ── H7 (Auditor LOW: HR reloaded while owned) ──────────────────────────────
 case('H7 HelltideRevamped reloaded while WarPigs owns it: War Plan mode re-asserted', function()
     local f = fixture({zone = 'Hawe_Verge', town = false})
@@ -390,4 +417,4 @@ end)
 if #failures > 0 then
     error('WarPigs hang review failures:\n  ' .. table.concat(failures, '\n  '))
 end
-print('PASS WarPigs hang review: ' .. checks .. ' checks (H1 unclearable hard need, H2 latched live Alfred, H3 turn-in yield, H4 unreadable SilentRaven, H5 busy-time budget, H6 Scavenger/Butler, H7 HR reload, H8 pure status)')
+print('PASS WarPigs hang review: ' .. checks .. ' checks (H1 unclearable hard need, H2 latched live Alfred, H3 turn-in yield, H4 unreadable SilentRaven, H5 busy-time budget, H6 Scavenger/Butler, H7 HR reload, H8 pure status, H9 Rosie Butler stand-in)')

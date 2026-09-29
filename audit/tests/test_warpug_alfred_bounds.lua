@@ -126,5 +126,12 @@ do -- P4
     equal(selections_after(g, 30) > 0, true, 'P4 bounded at 180 s')
     Butler = nil
 end
+do -- P5 (WarPigs 1.1.13): Rosie's Butler stand-in (_rosie) never holds a new session
+    local f = fixture()
+    Scavenger = nil
+    Butler = { _rosie = true, is_busy = function() return true end }
+    equal(selections_after(f, 10) > 0, true, 'P5 a _rosie Butler does not hold planning')
+    Butler = nil
+end
 AlfredTheButlerPlugin, Scavenger, Butler = nil, nil, nil
-print('PASS WarPug Alfred / third-party bounds (P1 stuck, P2 hard hold, P3 stuck retry, P4 Scavenger/Butler)')
+print('PASS WarPug Alfred / third-party bounds (P1 stuck, P2 hard hold, P3 stuck retry, P4 Scavenger/Butler, P5 Rosie Butler stand-in)')
