@@ -63,6 +63,34 @@ local function exit_waypoint()
     return waypoint
 end
 
+-- QQT_Warpigz_v3 WonderCity 2.2.7 (W3, sweep S3 F9): the exit cast had no
+-- enemy check and no cap: with a pack next to the player the rotation's
+-- evade broke the channel and the exit re-cast every 5 s into the fight.
+--  * a non-forced exit holds while a live enemy is within ENEMY_RANGE m, at
+--    most ENEMY_HOLD s from exit_trigger_time (then it casts anyway);
+--  * after MAX_CASTS casts without a world change it backs off BACKOFF s
+--    (one log line per back-off), then starts counting again.
+-- Every cast counts (a pickup break too), and a back-off never parks the
+-- exit for good.
+local EXIT = {ENEMY_RANGE = 8, ENEMY_HOLD = 20, MAX_CASTS = 4, BACKOFF = 30}
+local casts = {n = 0, backoff_until = nil}
+local function enemy_near()
+    local player = get_local_player()
+    if not player then return false end
+    local ok, near = pcall(function()
+        local pp = player:get_position()
+        for _, enemy in pairs(target_selector.get_near_target_list(pp, EXIT.ENEMY_RANGE) or {}) do
+            local hp = enemy:get_current_health()
+            if type(hp) == 'number' and hp > 0 and not (enemy.is_dead and enemy:is_dead())
+                and utils.distance(pp, enemy) <= EXIT.ENEMY_RANGE then
+                return true
+            end
+        end
+        return false
+    end)
+    return ok and near == true
+end
+
 local exit_with_debounce = function (delay)
     if tracker.exit_trigger_time + settings.exit_undercity_delay >= get_time_since_inject() then
         local wait_time = tracker.exit_trigger_time + settings.exit_undercity_delay - get_time_since_inject()
@@ -85,7 +113,30 @@ local exit_with_debounce = function (delay)
                 (settings.exit_mode == 1 and 'teleport' or 'reset') .. ' to complete'
             return
         end
+        -- QQT_Warpigz_v3 WonderCity 2.2.7 (W3): cast cap + back-off.
+        local now = get_time_since_inject()
+        if casts.backoff_until ~= nil then
+            if now < casts.backoff_until then
+                task.status = string.format('%s exit re-cast back-off %.0fs', status_enum['WAITING'], casts.backoff_until - now)
+                return
+            end
+            casts.n, casts.backoff_until = 0, nil
+        end
+        if casts.n >= EXIT.MAX_CASTS then
+            casts.backoff_until = now + EXIT.BACKOFF
+            console.print(string.format('[WonderCity] exit cast %d times without leaving the Undercity - backing off %ds',
+                casts.n, EXIT.BACKOFF))
+            task.status = status_enum['WAITING'] .. ' exit re-cast back-off'
+            return
+        end
+        -- QQT_Warpigz_v3 WonderCity 2.2.7 (W3): no cast into a fight (bounded).
+        if not utils.exit_forced() and now - tracker.exit_trigger_time < EXIT.ENEMY_HOLD and enemy_near() then
+            task.status = status_enum['WAITING'] .. ' for nearby enemies to die'
+            return
+        end
+        casts.n = casts.n + 1
         task.debounce_time = get_time_since_inject()
+        tracker.exit_cast_time = task.debounce_time -- QQT_Warpigz_v3 WonderCity 2.2.7 (W1): the leave is final
         task.status = status_enum['EXIT']
         if settings.exit_mode == 1 then
             console.print('teleport out')
@@ -134,6 +185,9 @@ task.Execute = function ()
     end
 end
 
-task.reset = function () task.debounce_time = nil; exit_plan.trigger, exit_plan.waypoint = nil, nil end
+task.reset = function ()
+    task.debounce_time = nil; exit_plan.trigger, exit_plan.waypoint = nil, nil
+    casts.n, casts.backoff_until = 0, nil -- QQT_Warpigz_v3 WonderCity 2.2.7 (W3): a world change
+end
 
 return task
