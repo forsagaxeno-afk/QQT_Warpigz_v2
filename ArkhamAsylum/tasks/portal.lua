@@ -170,21 +170,30 @@ local function back_store_get(key)
     end
     return e
 end
+-- QQT_Warpigz_v3 Arkham 2.1.6 (3.3.13 review #4): also requires a second
+-- portal on the floor at least BACK_PORTAL_RADIUS from the candidate. Floor 1
+-- has only its descend portal, which a load next to it took as the back one.
 local function nearest_portal_within(pos, radius, min_d)
     local best, best_d = nil, radius
+    local all = {}
     local ok = pcall(function()
         for _, actor in pairs(actors_manager:get_all_actors() or {}) do
             local name = actor:get_skin_name()
             if type(name) == 'string' and name:match('Portal_Dungeon') and not name:match('Light_NoShadows')
                 and actor:is_interactable()
             then
-                local d = utils.distance(pos, actor:get_position())
-                if d <= best_d and d >= (min_d or 0) then best, best_d = actor, d end
+                local apos = actor:get_position()
+                all[#all + 1] = apos
+                local d = utils.distance(pos, apos)
+                if d <= best_d and d >= (min_d or 0) then best, best_d = apos, d end
             end
         end
     end)
     if not ok or not best then return nil end
-    return best:get_position(), best_d
+    for _, other in ipairs(all) do
+        if utils.distance(best, other) >= BACK_PORTAL_RADIUS then return best, best_d end
+    end
+    return nil
 end
 -- Portal task engages at a larger radius than settings.check_distance (12). The explorer
 -- doesn't seek portal actors directly — it picks walkable-tile frontiers — so the bot can
