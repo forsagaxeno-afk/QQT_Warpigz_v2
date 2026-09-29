@@ -1,6 +1,7 @@
 # 0.2.9 — reward cards that fill in late (owner live, 3.3.19)
 
 - The reward panel may list its cards as empty placeholders (no SNO, `valid=false`) for a moment after it opens. SilentRaven no longer declares `no_valid_reward` on the first frame: it keeps the panel open and re-reads the cards for up to 4 s. Cards that stay empty end the attempt with `reward cards still empty after 4s (…); attempt N of 3, retrying in 5s` and one reward dump (host API state included), the next attempt waits 5 s, and after 3 attempts the run ends `failed (reward_cards_empty)`. The host's `pick_and_accept` is not used as a fallback (its index convention is unverified); the dump shows whether it exists.
+- Rosie's Butler stand-in (`_G.Butler` with `_rosie=true`, published while Worldstone runs) is skipped like its Scavenger stand-in: it mirrors Rosie's own trip, so it no longer holds auto-fire, the keybind or the claim trip; a real Butler still does.
 
 # 0.2.8 — "SilentRaven is manual now" (QQT_Warpigz_v3, after 3.3.6)
 
