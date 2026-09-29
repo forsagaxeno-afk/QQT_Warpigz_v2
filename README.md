@@ -20,7 +20,7 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 
 | Folder | Role | Component version |
 | --- | --- | --- |
-| `WarPigs` | Master orchestrator and town handoffs | 1.1.11 |
+| `WarPigs` | Master orchestrator and town handoffs | 1.1.12 |
 | `WarPug` | War Plan selection and creation | 1.0.17 |
 | `Batmobile` | Shared navigation | 2.2.4 |
 | `ArkhamAsylum` | The Pit | 2.1.6 |
