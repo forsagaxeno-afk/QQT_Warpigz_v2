@@ -19,10 +19,11 @@ local external = {
         -- not inside yet (WCY-7); boss_fight = a live boss fight inside the
         -- Undercity (C-boss: Rosie defers her automatic trip while it is true).
         local run = task_manager.get_run_status()
+        local enabled = settings.enabled and settings.get_keybind_state()
         return {
             name            = settings.plugin_label,
             version         = settings.plugin_version,
-            enabled         = settings.enabled and settings.get_keybind_state(),
+            enabled         = enabled,
             task            = msg,
             boss_dead_observed = tracker.boss_kill_time ~= nil,
             reward_seen = tracker.reward_seen,
@@ -32,7 +33,8 @@ local external = {
             alfred_trip     = run.alfred_trip,
             in_run          = run.in_run,
             committed_entry = run.committed_entry,
-            boss_fight      = run.boss_fight, -- QQT_Warpigz_v3 WonderCity 2.2.7: contract C-boss
+            -- QQT_Warpigz_v3 WonderCity 2.2.7: contract C-boss; 2.2.9: only while enabled (audit LOW c)
+            boss_fight      = (enabled and run.boss_fight) == true,
         }
     end,
     enable = function ()

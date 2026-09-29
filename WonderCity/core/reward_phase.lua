@@ -206,6 +206,11 @@ reward_phase.reward_loot_target = function ()
     if not tracker.done or not tracker.reward_opened_time or not utils.player_in_undercity() then return nil end
     local looter = LooteerPlugin
     if type(looter) ~= 'table' or type(looter.evaluate_item) ~= 'function' then return nil end
+    -- QQT_Warpigz_v3 WonderCity 2.2.9 (audit LOW b): pickup off, nobody takes it.
+    if type(looter.get_enabled) == 'function' then
+        local oke, en = pcall(looter.get_enabled)
+        if oke and en == false then return nil end
+    end
     local state, now = rloot_state(), get_time_since_inject()
     if now - tracker.reward_opened_time > RL.CAP then
         if not state.capped then

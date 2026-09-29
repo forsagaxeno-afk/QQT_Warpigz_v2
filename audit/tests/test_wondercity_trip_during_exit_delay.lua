@@ -91,5 +91,24 @@ case('W1 an exit that was CAST is final: a trip after the cast is not resumed', 
     eq(#h.errors, 0, 'no host errors')
 end)
 
+-- QQT_Warpigz_v3 WonderCity 2.2.9 (audit LOW a): an exit cast that did not
+-- take us out (the channel was cut) is not a final leave: a Rosie trip that
+-- then takes over inside the Undercity resumes the finished run on return.
+case('W1-C a cut exit cast followed by a Rosie trip: the run resumes on return', function()
+    local h = boss_floor()
+    h.mod('WonderCity', 'gui').elements.exit_undercity_delay:set(0)
+    ok(h.run_until(function() return #h.waypoints > 0 end, 40), 'the exit was cast\n' .. h.tail(30))
+    h.travel, h.casting = nil, false -- the channel is cut: still inside
+    local start = h.tracker.undercity_start_time
+    h.inventory = h.inventory or {}
+    for _ = 1, 33 do h.inventory[#h.inventory + 1] = h.gear() end
+    ok(h.run_until(function() return h.place.key == 'temis' end, 30), 'a trip left the Undercity\n' .. h.tail(30))
+    ok(h.run_until(function() return h.place.key == 'undercity' end, 200), 'back in the Undercity\n' .. h.tail(40))
+    eq(h.logged('for an Alfred trip — the run resumes on return'), 1, 'the trip leave after a cut exit cast is resumable')
+    ok(h.tracker.done, 'the opened reward chest is remembered')
+    eq(h.tracker.undercity_start_time, start, 'the run deadline is not restarted')
+    eq(#h.errors, 0, 'no host errors')
+end)
+
 if #failures > 0 then error(#failures .. ' WonderCity trip-in-exit-delay case(s) failed:\n' .. table.concat(failures, '\n')) end
 print('WonderCity trip in exit delay: ' .. checks .. ' checks')

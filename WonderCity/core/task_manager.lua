@@ -154,8 +154,14 @@ task_manager.execute_tasks = function ()
         current_task = entry_task
         return
     end
-    local transition = tracker.observe_world(alfred_owns_control()
-        or (alfred_task.own_trip ~= nil and alfred_task.own_trip()))
+    local trip_owns = alfred_owns_control() or (alfred_task.own_trip ~= nil and alfred_task.own_trip())
+    -- QQT_Warpigz_v3 WonderCity 2.2.9 (audit LOW a): a trip holding control
+    -- while we are still in the Undercity means our exit cast (if any) did
+    -- not take us out; the leave will be the trip's, so the run resumes.
+    if trip_owns and tracker.exit_cast_time ~= nil and tracker.in_undercity and utils.player_in_undercity() then
+        tracker.exit_cast_time = nil
+    end
+    local transition = tracker.observe_world(trip_owns)
     if transition then
         -- 'resume' (same Undercity after an Alfred trip, CRT-1) keeps state.
         if transition == 'run' or transition == 'floor' then pending_navigation_reset = true end
