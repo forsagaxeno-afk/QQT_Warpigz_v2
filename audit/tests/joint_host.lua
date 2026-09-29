@@ -40,6 +40,10 @@
 --     seeded death / drop (Mythic, also inside a travel channel) / Limbo /
 --     plugin reload / full bag / lazy stash / elite pack / path obstacle.
 --   opts.virtual_os_clock (default with chaos): deterministic os.clock().
+--   opts.persist_widgets: a reloaded plugin's keyed widgets keep their values
+--     (QQT's menu store), instead of loading their defaults again.
+--   opts.target_range: target_selector.get_near_target_list(pos, range)
+--     returns only the enemies within `range` of `pos`.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = {}
 
@@ -742,9 +746,20 @@ function J.new(opts)
     if opts.rosie and not opts.shipped_defaults and persisted.Rosie_pickup_all_uniques == nil then
         persisted.Rosie_pickup_all_uniques = false
     end
+    -- Sweep: opts.persist_widgets = true models QQT's menu store across a
+    -- script reload (h.reload, chaos 'reload'): a keyed widget created again
+    -- loads the value its predecessor holds now, not its default (sliders
+    -- too). Default off: the older reload scenarios keep their behaviour.
+    local live = opts.persist_widgets and {} or nil
+    h.live_widgets = live
     local function stored(key, default)
+        if live and key ~= nil and live[key] then return live[key].v end
         if key == nil or persisted[key] == nil then return default end
         return persisted[key]
+    end
+    local function keep(key, w)
+        if live and key ~= nil then live[key] = w end
+        return w
     end
     -- Sweep: every checkbox is registered by its hash key (h.checkboxes[key]
     -- = {w, owner}) and each plugin's '*main_toggle' by folder (h.toggles),
@@ -752,7 +767,7 @@ function J.new(opts)
     -- without calling a plugin getter (several are not read-only).
     h.checkboxes, h.toggles = {}, {}
     host('checkbox', {new = function(_, d, key)
-        local w = widget(stored(key, d == true))
+        local w = keep(key, widget(stored(key, d == true)))
         local owner = loading or context
         if type(key) == 'string' then
             h.checkboxes[key] = {w = w, owner = owner and owner.name or '-'}
@@ -760,9 +775,15 @@ function J.new(opts)
         end
         return w
     end})
-    host('combo_box', {new = function(_, d, key) return widget(stored(key, d or 0)) end})
-    host('slider_int', {new = function(_, _, _, d) return widget(d) end})
-    host('slider_float', {new = function(_, _, _, d) return widget(d) end})
+    host('combo_box', {new = function(_, d, key) return keep(key, widget(stored(key, d or 0))) end})
+    host('slider_int', {new = function(_, _, _, d, key)
+        if live then return keep(key, widget(stored(key, d))) end
+        return widget(d)
+    end})
+    host('slider_float', {new = function(_, _, _, d, key)
+        if live then return keep(key, widget(stored(key, d))) end
+        return widget(d)
+    end})
     host('tree_node', {new = function() return widget(false) end})
     host('button', {new = function() local w = widget(false); function w:render() return false end; return w end})
     host('input_text', {new = function(_, d) return widget(d or '') end})
@@ -1140,10 +1161,18 @@ function J.new(opts)
     host('evade', {register_circular_spell = function() end, is_dangerous_position = function() return false end})
     host('danger_level', {low = 1, medium = 2, high = 3})
     host('target_selector', {
-        get_near_target_list = function(_, range)
+        -- Sweep: opts.target_range = true honours (pos, range) as the game
+        -- does; by default every living enemy of the place is returned (the
+        -- older scenarios rely on it). Without it a pack 100 m away counts as
+        -- "an enemy near the player" for every plugin that asks.
+        get_near_target_list = function(pos, range)
             local out = {}
+            local ranged = opts.target_range and type(range) == 'number' and type(pos) == 'table' and pos.x
             for _, a in ipairs(actors_here()) do
-                if a.enemy and (a.health or 100) > 0 then out[#out + 1] = a end
+                if a.enemy and (a.health or 100) > 0
+                    and (not ranged or (a.pos and a.pos:dist_to_ignore_z(pos) <= range)) then
+                    out[#out + 1] = a
+                end
             end
             return out
         end,
