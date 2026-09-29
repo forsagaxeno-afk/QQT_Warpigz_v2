@@ -658,6 +658,48 @@ case('W5-3 a landing in a BSK zone HordeDev does not know keeps the backoff; the
     eq(h2.args[1], 'none'); eq(g.logged('landed in a BSK zone'), 0)
 end)
 
+-- ── WarPigs 1.1.12: the pre-Torment Horde map (owner live log, 3.3.9..3.3.14) ──
+-- The War Plan Horde teleport lands in world=S10_BSK_Pretorment
+-- zone=S10_BSK_Pretorment. 1.1.11 knew only S05_BSK_Prototype02: it logged
+-- "landed in a BSK zone HordeDev does not know", re-teleported 3x from inside
+-- the Horde and never started HordeDev. Fails on 1.1.11.
+case('P1 a War Plan landing in S10_BSK_Pretorment is inside the Horde: HordeDev enabled, no re-teleport', function()
+    local f = fixture()
+    local horde = f.horde()
+    f.warplan_to(function() f.set_zone('S10_BSK_Pretorment', 'S10_BSK_Pretorment', false) end)
+    f.quests = {HORDE}
+    truthy(f.until_true(function() return horde.enables == 1 end, 15), 'HordeDev enabled after the Pretorment landing\n' .. f.dump())
+    eq(horde.args[1], 'warplan', 'War Plan mode')
+    f.run(60)
+    eq(f.teleports, 1, 'one War Plan teleport, no re-teleport from inside the Horde')
+    eq(f.logged('HordeDev does not know'), 0, 'not an unknown BSK zone')
+    eq(horde.enables, 1)
+end)
+
+case('P2 cold start inside the Pretorment Horde: enabled in place, no teleport', function()
+    local f = fixture()
+    local horde = f.horde()
+    f.set_zone('S10_BSK_Pretorment', 'S10_BSK_Pretorment', false)
+    f.quests = {HORDE}
+    truthy(f.until_true(function() return horde.enables == 1 end, 10), 'enabled in place')
+    eq(f.teleports, 0, 'no War Plan teleport out of the Horde')
+end)
+
+case('P3 HordeDev.is_horde_zone decides when published; the local list is the fallback', function()
+    local f = fixture()
+    local horde = f.horde()
+    horde.is_horde_zone = function(zone) return zone == 'S20_BSK_Future' end
+    f.warplan_to(function() f.set_zone('S20_BSK_Future', 'S20_BSK_Future', false) end)
+    f.quests = {HORDE}
+    truthy(f.until_true(function() return horde.enables == 1 end, 15), 'HordeDev answer accepted')
+    local g = fixture()
+    local h2 = g.horde()
+    h2.is_horde_zone = function() error('broken export') end
+    g.warplan_to(function() g.set_zone('S10_BSK_Pretorment', 'S10_BSK_Pretorment', false) end)
+    g.quests = {HORDE}
+    truthy(g.until_true(function() return h2.enables == 1 end, 15), 'a throwing export falls back to the local list')
+end)
+
 -- ── part B: the joint host (all nine real plugins) ──────────────────────────
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
 local WP, PUG, SR, HD = 'WarPigs', 'WarPug', 'SilentRaven', 'HordeDev'

@@ -1814,6 +1814,13 @@ end
 -- the status line and logged (rate-limited), and the teleport is retried
 -- after HORDE_WARPLAN_BACKOFF. With the setting off nothing here runs.
 dispatch.HORDE_ZONE            = 'S05_BSK_Prototype02'
+-- QQT_Warpigz_v3 1.1.12: every zone that is "inside the Horde". Owner live
+-- report (3.3.9..3.3.14): the War Plan Horde teleport lands in
+-- world=S10_BSK_Pretorment zone=S10_BSK_Pretorment (the pre-Torment Horde
+-- map); only S05_BSK_Prototype02 was known, so WarPigs re-teleported 3x from
+-- inside the Horde and never started it. HordeDev's own answer wins when it
+-- publishes InfernalHordesPlugin.is_horde_zone(zone) (dispatch.is_horde_zone).
+dispatch.HORDE_ZONES           = {S05_BSK_Prototype02 = true, S10_BSK_Pretorment = true}
 dispatch.HORDE_WARPLAN_TRIES   = 3
 dispatch.HORDE_WARPLAN_BACKOFF = 60.0
 dispatch.HORDE_CAST_CAP        = 15.0    -- never trust a stuck teleport cast longer than this
@@ -1858,13 +1865,25 @@ function dispatch.hwe_miss_reason()
         H.missed, tostring(H.landing))
 end
 
--- Alive, in a loaded BSK world and in the Horde zone (HordeDev's own test).
+-- QQT_Warpigz_v3 1.1.12: HordeDev's is_horde_zone(zone) when it publishes one
+-- (a boolean answer), else the local HORDE_ZONES list.
+function dispatch.is_horde_zone(zone)
+    if type(zone) ~= 'string' then return false end
+    local p = _G.InfernalHordesPlugin
+    if type(p) == 'table' and type(p.is_horde_zone) == 'function' then
+        local ok, answer = pcall(p.is_horde_zone, zone)
+        if ok and type(answer) == 'boolean' then return answer end
+    end
+    return dispatch.HORDE_ZONES[zone] == true
+end
+
+-- Alive, in a loaded BSK world and in a Horde zone (HordeDev's own test).
 function dispatch.inside_horde()
     local ok, inside = pcall(function()
         local lp = get_local_player()
         if not lp or lp:is_dead() then return false end
         local w = get_current_world()
-        return w ~= nil and w:get_current_zone_name() == dispatch.HORDE_ZONE
+        return w ~= nil and dispatch.is_horde_zone(w:get_current_zone_name())
     end)
     return ok and inside == true and in_bsk_world()
 end
