@@ -1,4 +1,5 @@
 local utils = require "core.utils"
+local horde_zones = require 'core.horde_zones' -- QQT_Warpigz_v3 HordeDev 2.2.9
 local enums = require "data.enums"
 local settings = require "core.settings"
 local navigation = require "core.navigation"
@@ -720,7 +721,7 @@ local horde_last_execute = nil
 local task = {
     name = "Infernal Horde",
     shouldExecute = function()
-        if not utils.player_in_zone("S05_BSK_Prototype02") then
+        if not horde_zones.player_inside(utils) then
             horde_settle_logged = false
             return false
         end

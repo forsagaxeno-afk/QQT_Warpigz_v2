@@ -9,9 +9,9 @@
 -- The mode lives in tracker.entry_mode (runtime only, never persisted).
 local tracker = require 'core.tracker'
 local utils = require 'core.utils'
+local horde_zones = require 'core.horde_zones' -- QQT_Warpigz_v3 HordeDev 2.2.9
 local enums = require 'data.enums'
 
-local HORDE_ZONE = 'S05_BSK_Prototype02'
 local QUEST = 'WarPlans_QST_InfernalHordes'
 
 local M = {
@@ -51,13 +51,13 @@ function M.set_mode(mode)
     tracker.entry_mode = new
 end
 
--- Inside the Horde: zone S05_BSK_Prototype02 in a loaded BSK world.
+-- Inside the Horde: a Horde zone (core.horde_zones) in a loaded BSK world.
 function M.inside_bsk()
     local ok, inside = pcall(function()
         local w = get_current_world()
         if not w then return false end
         local name, zone = w:get_name(), w:get_current_zone_name()
-        if type(name) ~= 'string' or zone ~= HORDE_ZONE then return false end
+        if type(name) ~= 'string' or not horde_zones.is(zone) then return false end
         local lower = name:lower()
         if lower:find('loading', 1, true) or lower:find('limbo', 1, true) then return false end
         return lower:find('bsk', 1, true) ~= nil

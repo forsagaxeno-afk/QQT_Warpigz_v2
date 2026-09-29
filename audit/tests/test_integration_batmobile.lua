@@ -381,6 +381,7 @@ case('paused unstuck keeps the caller waypoint and never writes explorer.visited
     local h = harness({find_path = function(a, b) return {a, v(a:x() + 4, a:y()), b}, false end,
         explorer_target = v(-35, 10)})
     local ext, nav = h.ext, h.nav
+    h.env.require('core.settings').log_level = 2   -- Batmobile 2.2.5: [unstuck] lines honour the logging combo
     nav.update_trap_state = function() end
     ext.pause('infernal_horde'); ext.set_target('infernal_horde', v(10, 0), false)
     for _ = 1, 40 do h.adv(0.1); ext.update('infernal_horde'); ext.move('infernal_horde') end  -- blocked 4 s

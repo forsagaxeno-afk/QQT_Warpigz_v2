@@ -4,6 +4,7 @@ local settings     = require "core.settings"
 local tracker = require "core.tracker"
 local movement = require "core.movement"
 local utils        = require "core.utils"
+local horde_zones = require 'core.horde_zones' -- QQT_Warpigz_v3 HordeDev 2.2.9
 local loot_guard   = require "core.loot_guard"
 local meteor       = require "Meteor"
 local exit_horde_task = require "tasks.exit_horde"
@@ -13,7 +14,6 @@ local open_chests_task = require "tasks.open_chests"
 local alfred_task = require "tasks.alfred"
 local warplan = require "core.warplan"
 local activity_lease = require "core.activity_lease" -- QQT_Warpigz_v3
-local HORDE_ZONE = "S05_BSK_Prototype02"
 
 local local_player, player_position
 local was_active = false
@@ -51,7 +51,7 @@ local function run_in_progress()
     if alfred_task.trip_in_progress and alfred_task.trip_in_progress() then return true end
     local chest_state = open_chests_task.current_state
     if chest_state ~= nil and chest_state ~= "INIT" and not tracker.finished_chest_looting then return true end
-    return utils.player_in_zone(HORDE_ZONE)
+    return horde_zones.player_inside(utils)
 end
 
 -- R8: an enable() while main_toggle is already on and a healthy run is in
@@ -93,7 +93,7 @@ local function keep_run_on_enable(mode)
     -- the next horde's chests).
     if warplan.completed then return false end
     local own_trip = alfred_task.trip_in_progress ~= nil and alfred_task.trip_in_progress()
-    if not (transaction_pending() or own_trip or utils.player_in_zone(HORDE_ZONE) or own_salvage_trip(mode)) then
+    if not (transaction_pending() or own_trip or horde_zones.player_inside(utils) or own_salvage_trip(mode)) then
         return false
     end
     if mode == 'warplan' and (tracker.sigil_activation_pending or tracker.horde_entry_pending) then return false end
@@ -204,7 +204,7 @@ local ABANDON_SETTLE_S = 2
 local abandoned_since = nil
 local function abandoned_run()
     if transaction_pending() or tracker.horde_opened ~= true or warplan.active() then return false end
-    if world_unloaded() or utils.player_in_zone(HORDE_ZONE) then return false end
+    if world_unloaded() or horde_zones.player_inside(utils) then return false end
     if alfred_task.trip_in_progress() or builtin_salvage_pending() then return false end
     return not loot_guard.alfred_may_own_movement(true)
 end
@@ -440,6 +440,11 @@ end
 
 -- Set Global access for other plugins
 InfernalHordesPlugin = {
+    -- QQT_Warpigz_v3 HordeDev 2.2.9: the Infernal Horde maps (compass map
+    -- S05_BSK_Prototype02, War Plan pre-Torment map S10_BSK_Pretorment), so
+    -- WarPigs and HordeDev agree on "inside the Horde".
+    horde_zones = horde_zones.ZONES,
+    is_horde_zone = function (zone) return horde_zones.is(zone) end,
     -- F-H1: enable(opts); opts.entry == 'warplan' selects War Plan entry (the
     -- War Plan teleport already entered the Horde: no compass, no Library,
     -- one run). enable() without options is the compass/farming mode.

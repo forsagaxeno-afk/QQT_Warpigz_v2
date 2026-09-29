@@ -16,7 +16,8 @@
 --   B8 a paused caller pressed against a big target: no STUCK/Evade spam (R5)
 --   B9 freeroam also yields to a busy Scavenger (Navigator's looter)
 -- Scenario sweep 2026-09-28 (audit/reviews/sweep_2026-09-28.md §2.5):
---   B10 STUCK / PARTIAL PATH REJECTED honour the logging combo (2.2.4)
+--   B10 STUCK / PARTIAL PATH REJECTED / SKIPPED (2.2.4) and the [unstuck]
+--       replan / EXHAUSTED lines (2.2.5) honour the logging combo
 -- Runs under Lua 5.4 and LuaJIT.
 local root = assert(SUITE_ROOT, 'SUITE_ROOT is required') .. '/Batmobile/'
 local checks, cases, failures = 0, 0, {}
@@ -427,24 +428,44 @@ case('B9 freeroam holds for a busy Scavenger like for a busy Looter', function()
     ok(moves_with(true) == 0, 'freeroam waits while Scavenger is busy')
 end)
 
--- ── B10 (sweep B1) ──────────────────────────────────────────────────────
-case('B10 STUCK and PARTIAL PATH REJECTED lines honour the logging combo', function()
-    local function run(level, pattern)
+-- ── B10 (sweep B1; 2.2.5 Auditor LOWs) ──────────────────────────────────
+case('B10 per-attempt navigator lines honour the logging combo', function()
+    -- mode: stuck (paused caller wedged), explore_stuck (explorer target
+    -- wedged), rejected / skipped_full / skipped_wall (explorer frontier behind
+    -- a cliff re-picked every 0.5 s).
+    local function run(level, mode, pattern)
+        local long_partial = mode == 'skipped_full' or mode == 'skipped_wall'
         local h = harness({blocked = function() return true end, explorer_target = v(30, 0),
+            walkable = function(_, y) return mode ~= 'skipped_wall' or math.abs(y) < 2 end,
             find_path = function(a, b, custom)
                 if custom then return {a, b}, false end
+                if long_partial then                           -- 5 nodes: not "too short"
+                    return {a, v(a:x() + 1, a:y()), v(a:x() + 2, a:y()), v(a:x() + 3, a:y()),
+                        v(a:x() + 4, a:y())}, true
+                end
                 return {a, v(a:x() + 1, a:y())}, true            -- a 2-node partial toward a far goal
             end})
-        h.env.require('core.settings').log_level = level
+        local settings = h.env.require('core.settings')
+        settings.log_level = level
+        settings.require_full_path_explore = mode == 'skipped_full'
+        settings.wall_path, settings.wall_path_dist = mode == 'skipped_wall', 4
         h.nav.update_trap_state = function() end
-        if pattern == '[nav] STUCK' then
+        if mode == 'stuck' then
             for _ = 1, 600 do                                  -- 60 s wedged, paused caller
                 h.now = h.now + 0.1
                 h.ext.pause('helltide_revamped'); h.ext.set_target('helltide_revamped', v(40, 0))
                 h.ext.move('helltide_revamped')
             end
+        elseif mode == 'explore_stuck' then
+            h.ext.resume('helltide_revamped')
+            for _ = 1, 600 do
+                h.now = h.now + 0.1
+                if h.nav.target == nil then h.nav.target = v(30, 0) end
+                h.nav.path = #h.nav.path > 0 and h.nav.path or {v(30, 0)}
+                h.nav.pathfind_replan_cooldown = h.now + 10       -- keep walking the stale path
+                h.ext.move('helltide_revamped')
+            end
         else
-            -- an explorer frontier behind a cliff re-picked every 0.5 s
             h.ext.resume('helltide_revamped')
             for _ = 1, 120 do
                 h.now = h.now + 0.5
@@ -456,12 +477,21 @@ case('B10 STUCK and PARTIAL PATH REJECTED lines honour the logging combo', funct
         end
         return h.logged(pattern), h.logged('similar)')
     end
-    for _, pattern in ipairs({'[nav] STUCK', '[nav] PARTIAL PATH REJECTED'}) do
-        local debug = run(2, pattern)
-        local info, similar = run(1, pattern)
-        local off = run(0, pattern)
+    local cases_ = {
+        {'stuck', '[nav] STUCK'},
+        {'stuck', 'replanning, target kept'},
+        {'explore_stuck', '[unstuck] EXHAUSTED'},
+        {'rejected', '[nav] PARTIAL PATH REJECTED'},
+        {'skipped_full', 'PARTIAL PATH SKIPPED (require_full_path_explore'},
+        {'skipped_wall', 'PARTIAL PATH SKIPPED (wall_path'},
+    }
+    for _, c in ipairs(cases_) do
+        local mode, pattern = c[1], c[2]
+        local debug = run(2, mode, pattern)
+        local info, similar = run(1, mode, pattern)
+        local off = run(0, mode, pattern)
         ok(debug > 12, pattern .. ': the scenario repeats (Debug lines=' .. debug .. ')')
-        ok(info >= 1 and info <= 12, pattern .. ': Info lines in 60 s=' .. info .. ' (was ' .. debug .. ')')
+        ok(info >= 1 and info <= 12, pattern .. ': Info lines in 60 s=' .. info .. ' (Debug ' .. debug .. ')')
         ok(similar >= 1, pattern .. ': Info appends (+N similar)')
         ok(off == 0, pattern .. ': Disabled prints nothing (got ' .. off .. ')')
     end

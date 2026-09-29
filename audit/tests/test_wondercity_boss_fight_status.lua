@@ -72,5 +72,16 @@ case('C-boss outside the Undercity boss_fight is false; the field is always a bo
     eq(status(h).boss_fight, false)
 end)
 
+-- QQT_Warpigz_v3 WonderCity 2.2.9 (audit LOW c): a disabled WonderCity does
+-- not hold Rosie's trip (Arkham and Reaper gate the field the same way).
+case('C-boss a disabled WonderCity reports no boss fight', function()
+    local h = boss_floor()
+    h.run(1)
+    eq(status(h).boss_fight, true, 'enabled: a live boss is a boss fight')
+    h.mod('WonderCity', 'gui').elements.main_toggle:set(false)
+    h.run(0.5)
+    eq(status(h).boss_fight, false, 'disabled: no boss fight')
+end)
+
 if #failures > 0 then error(#failures .. ' WonderCity boss_fight case(s) failed:\n' .. table.concat(failures, '\n')) end
 print('WonderCity boss_fight: ' .. checks .. ' checks')

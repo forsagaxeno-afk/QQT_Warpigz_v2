@@ -3,6 +3,15 @@ local plugin_label = "infernal_horde" -- change to your plugin name
 local settings = require 'core.settings'
 local tracker = require "core.tracker"
 local utils = require "core.utils"
+-- QQT_Warpigz_v3 HordeDev 2.2.9: the Horde maps, as core/horde_zones.lua
+-- (this task loads with core.settings/tracker/utils only; keep both in step).
+local HORDE_MAPS = {'S05_BSK_Prototype02', 'S10_BSK_Pretorment'}
+local function in_horde()
+    for _, zone in ipairs(HORDE_MAPS) do
+        if utils.player_in_zone(zone) then return true end
+    end
+    return false
+end
 -- need use_alfred to enable
 -- settings.use_alfred = true
 
@@ -16,7 +25,6 @@ local task = {
     hold_reason = nil, -- C6: why this task currently holds the queue (status text)
 }
 
-local HORDE_ZONE = "S05_BSK_Prototype02"
 -- C1 / HRD-6: an unreadable status (missing get_status, throw, non-table,
 -- non-boolean enabled) holds at most UNKNOWN_GRACE, then Alfred counts as
 -- unavailable (not busy) with one log line.
@@ -134,7 +142,7 @@ local function complete(token)
     retry_after = -math.huge
     -- HRD-5: a mid-Horde trip whose callback arrives while the player is still
     -- outside the Horde has not returned yet; see awaiting_return().
-    if trip.from_bsk and not utils.player_in_zone(HORDE_ZONE) then
+    if trip.from_bsk and not in_horde() then
         trip.returning_since, trip.logged = now, false
     end
     trip.from_bsk = false
@@ -147,7 +155,7 @@ end
 -- reported as a fault (status().fault) instead of stalling silently.
 local function awaiting_return(status)
     if not trip.returning_since then return false end
-    if utils.player_in_zone(HORDE_ZONE) or not tracker.has_salvaged then
+    if in_horde() or not tracker.has_salvaged then
         trip.returning_since = nil
         return false
     end
@@ -185,7 +193,7 @@ local function trigger_alfred()
     local token = generation
     task.status = status_enum.WAITING
     request_plugin, request_started, quiet_since = a, get_time_since_inject(), nil
-    trip.from_bsk, trip.returning_since = utils.player_in_zone(HORDE_ZONE), nil
+    trip.from_bsk, trip.returning_since = in_horde(), nil
     local ok, accepted = pcall(a.trigger_tasks_with_teleport, plugin_label, function() complete(token) end)
     if ok and accepted == false then
         if token == generation and task.status == status_enum.WAITING then retire_request() end

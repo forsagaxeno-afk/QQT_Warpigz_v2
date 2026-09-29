@@ -747,7 +747,8 @@ end
 -- path instead so the next tick replans from the current spot; the caller's
 -- own no-progress logic decides when the goal is unreachable.
 local function replan_caller_target(reason)
-    console.print('[unstuck] ' .. reason .. ' for caller-owned target ' ..
+    -- QQT_Warpigz_v3 2.2.5: honours the logging combo (Auditor LOW on 2.2.4).
+    nav_log('unstuck_replan', true, '[unstuck] ' .. reason .. ' for caller-owned target ' ..
         (navigator.target and utils.vec_to_string(navigator.target) or 'nil') ..
         ' (paused=' .. tostring(navigator.paused) .. ') — replanning, target kept')
     navigator.path = {}
@@ -765,7 +766,8 @@ local unstuck = function (local_player)
         return
     end
     if navigator.unstuck_count >= 5 then
-        console.print('[unstuck] EXHAUSTED (' .. navigator.unstuck_count .. ' attempts), blacklisting 16x16 area around ' .. (navigator.last_pos and utils.vec_to_string(navigator.last_pos) or 'nil'))
+        -- QQT_Warpigz_v3 2.2.5: honours the logging combo (Auditor LOW on 2.2.4).
+        nav_log('unstuck_exhausted', true, '[unstuck] EXHAUSTED (' .. navigator.unstuck_count .. ' attempts), blacklisting 16x16 area around ' .. (navigator.last_pos and utils.vec_to_string(navigator.last_pos) or 'nil'))
         local pos = navigator.last_pos
         if pos then
             local step = settings.step or 2
@@ -2083,6 +2085,7 @@ navigator.move = function ()
             and navigator.last_trav == nil
             and (navigator.trav_delay == nil or get_time_since_inject() > navigator.trav_delay)
         then
+            -- QQT_Warpigz_v3 2.2.4: honours the logging combo (sweep B1).
             nav_log('partial_rejected', true, '[nav] PARTIAL PATH REJECTED (plen=' .. #result ..
                 ' dist=' .. string.format('%.1f', dist_to_target) ..
                 ') — too short to make progress, falling through to failure')
@@ -2100,6 +2103,7 @@ navigator.move = function ()
             and (navigator.trav_delay == nil or get_time_since_inject() > navigator.trav_delay)
             and settings.require_full_path_explore
         then
+            -- QQT_Warpigz_v3 2.2.4: honours the logging combo (sweep B1).
             nav_log('partial_skipped', true, '[nav] PARTIAL PATH SKIPPED (require_full_path_explore plen=' ..
                 #result .. ' dist=' .. string.format('%.1f', dist_to_target) .. ')')
             result = {}
@@ -2136,6 +2140,7 @@ navigator.move = function ()
                 end
             end
             if near_wall then
+                -- QQT_Warpigz_v3 2.2.4: honours the logging combo (sweep B1).
                 nav_log('partial_wall', true, '[nav] PARTIAL PATH SKIPPED (wall_path endpoint within ' ..
                     string.format('%.1f', radius) .. 'u of unwalkable; plen=' ..
                     #result .. ' dist=' .. string.format('%.1f', dist_to_target) .. ')')

@@ -1,16 +1,16 @@
 {
   "project": "QQT_Warpigz_v3",
-  "version": "3.3.14",
+  "version": "3.3.15",
   "first_release": "2.0.0",
   "components": {
-    "WarPigs": "1.1.11",
+    "WarPigs": "1.1.12",
     "WarPug": "1.0.17",
-    "Batmobile": "2.2.4",
+    "Batmobile": "2.2.5",
     "ArkhamAsylum": "2.1.6",
     "HelltideRevamped": "2.6.4",
-    "HordeDev": "2.2.8",
+    "HordeDev": "2.2.9",
     "Reaper": "1.10.8",
-    "WonderCity": "2.2.8",
+    "WonderCity": "2.2.9",
     "SilentRaven": "0.2.8",
     "Rosie": "1.0.28"
   }

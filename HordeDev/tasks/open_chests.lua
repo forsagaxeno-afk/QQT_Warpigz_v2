@@ -1,4 +1,5 @@
 local utils = require "core.utils"
+local horde_zones = require 'core.horde_zones' -- QQT_Warpigz_v3 HordeDev 2.2.9
 local settings = require "core.settings"
 local enums = require "data.enums"
 local tracker = require "core.tracker"
@@ -141,7 +142,7 @@ open_chests_task = {
     state_before_pause = nil,
     
     shouldExecute = function()
-        local in_correct_zone = utils.player_in_zone("S05_BSK_Prototype02")
+        local in_correct_zone = horde_zones.player_inside(utils)
     
         if not in_correct_zone then
             return false

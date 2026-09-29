@@ -15,6 +15,7 @@ local function load_explorer()
     ['data.enums'] = {},
     ['core.settings'] = settings,
     ['core.tracker'] = {pit_start_time = 0},
+    ['core.horde_zones'] = assert(loadfile(root .. 'core/horde_zones.lua'))(),
   }
   local vec = {}
   vec.__index = vec
