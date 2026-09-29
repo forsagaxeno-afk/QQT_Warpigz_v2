@@ -38,6 +38,32 @@ local function auto_wait(why)
         tostring(tracker.inventory_count),tostring(settings.max_inventory),tostring(tracker.talisman_inventory_count),why))
 end
 
+-- QQT_Warpigz_v3 1.0.27 (contract C-boss, scenario sweep §2.4): an activity
+-- that publishes boss_fight=true (WonderCity/Arkham get_status(), Reaper
+-- status()) holds Rosie's automatic trip, at most BOSS.max s per fight (a
+-- Town Portal cast in melee, glyph chances lost). Manual, keybind and farm
+-- plugin requests are not held. Returns the activity's name while it holds.
+local BOSS={max=90,since=nil,capped=false,list={{'WonderCityPlugin','get_status','WonderCity'},
+    {'ArkhamAsylumPlugin','get_status','ArkhamAsylum'},{'ReaperPlugin','status','Reaper'}}}
+local function boss_hold(now)
+    local who=nil
+    for _,p in ipairs(BOSS.list) do
+        local api=rawget(_G,p[1])
+        local fn=type(api)=='table' and api[p[2]]
+        if type(fn)=='function' then
+            local ok,st=pcall(fn)
+            if ok and type(st)=='table' and st.boss_fight==true then who=p[3]; break end
+        end
+    end
+    if not who then BOSS.since,BOSS.capped=nil,false; return nil end
+    BOSS.since=BOSS.since or now
+    if BOSS.capped then return nil end
+    if now-BOSS.since<BOSS.max then return who end
+    BOSS.capped=true
+    console.print(string.format('[Rosie] %s has reported a live boss fight for %ds; starting the town trip',who,BOSS.max))
+    return nil
+end
+
 local function update_locals()
     local_player = get_local_player()
 end
@@ -113,6 +139,8 @@ local function main_pulse()
                 auto_wait(held)
                 return
             end
+            local boss=boss_hold(now) -- QQT_Warpigz_v3 1.0.27: C-boss
+            if boss then auto_wait(boss..' is in a live boss fight'); return end
             if lifecycle.auto_blocked() then auto_wait('last trip '..tostring(tracker.outcome)..': '..tostring(tracker.failure_reason))
             else
                 -- QQT_Warpigz_v3 1.0.22: the override is logged, and a foreign
