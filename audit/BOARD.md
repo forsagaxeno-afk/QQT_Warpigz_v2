@@ -138,6 +138,33 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
   - Live checks: a Worldstone run with a full bag (the console shows `Navigator is held during town trips (pause condition "Rosie")`, no `teleport_failed`); a plain trip still casts immediately. (claude/qqt-rosie@6215f95, PR #3)
 
 ## Auditor / critic findings
+
+### Review of the Ready branches after 3.3.14, 2026-09-29 07:30 UTC
+Method: an auditor and a critic reviewed each branch. They ran the new tests on the branch and on the old code. Two skeptics then re-checked every finding against the branch tip. The claimed fixes are verified: each new test fails on the old code.
+- **Rosie 1.0.28** (`claude/qqt-rosie@7b9f9fa`, one Uniques section plus "Keep checked Uniques only when Ancestral"): **OK to merge**. The toggle defaults to off, which keeps the 1.0.27 behaviour. Mythics, Splinters and the plain-Unique Item Power rule are unchanged, and no Mythic IP slider was added. Saved 1.0.27 configs keep their hashes (M2). `test_rosie_uniques_1028` fails 8/8 on 1.0.27. At 96bd089/bceed55 the review found two problems, and both are **fixed in f4f3994** (skeptics re-ran the repros on the tip):
+  - The IP Reset button called `slider_int:set`, which the host lacks (`docs/UPSTREAM_README.md:148`). The button is gone: the old slider shows while its value is > 0, and I1 removes `set`.
+  - A drop/re-pickup loop in *Drop on the spot* for a non-Ancestral checked copy. `unique_sorter.candidate()` now skips keep-listed SNOs; the repro gives 1 pickup, 0 drops.
+  Remaining LOWs (→ Rosie):
+  - (1) The list tooltip `gui.lua:469` and README §2 say the Mythic form is kept "by 1. Always keep". With Always keep Mythics off, the list keeps it (`utils.lua:927-928`, C4). Only the text is wrong.
+  - (2) `utils.listed()` returns an unused second value; `in_iconic_list` passes it through.
+  (→ Coordinator) `docs/INSTALL_RU.txt:27-38` still describes the old "Unique items I always keep", the IP slider and "4. Uniques". The Rosie BOARD request names only GUIDE_EN and still says "read-only with Reset".
+- **HelltideRevamped 2.6.5** (`claude/qqt-helltide@d0a7538`): **OK to merge**.
+  - At 3b0561c the start-side hairpin guard (LAP_EXTRA) made road costs worse on the real jirandai loop: chest A reached 1.47x the best route, with 190 m swings over 15 m steps. The test bound was loosened from 100 to 200 m. d0a7538 removes the guard from starts and restores the 100 m bound; the jirandai rows match 2.6.4 exactly.
+  - `hr_fence.gen` flushed the exit cache every 2 s. It now moves only on out-status changes, with a new test.
+  - No open findings.
+- **WarPigs 1.1.12 + HordeDev 2.2.9** (already in 3.3.15): **OK**. The merge-order hazard is moot: 1.1.12 with HordeDev 2.2.8 would hang in S10 with no bound, and 3.3.15 ships both together. All three zone lists agree on `{S05_BSK_Prototype02, S10_BSK_Pretorment}`. LOWs:
+  - (→ Orchestrator) `dispatch.HORDE_ZONE` (`orchestrator.lua:1816`) is dead, and the comment at :1809 still names only S05.
+  - (→ Activities) `HordeDev/tasks/alfred.lua:6-14` keeps its own HORDE_MAPS; it should require `core.horde_zones` like every other task.
+  - (→ Activities) The HordeDev Ready claim and `ArkhamAsylum/NOTES.md:37` name `utils.is_horde_zone`/`utils.player_in_horde`, which do not exist; the code uses `core/horde_zones.lua`.
+- **WonderCity 2.2.9** (in 3.3.15): **OK with one LOW (→ Activities)**. `task_manager.lua:157-163` clears `tracker.exit_cast_time` on any tick where `trip_owns` is true inside the Undercity. It does not check that our cast was actually cut. Two ways this goes wrong:
+  - Rosie reports `running` during our own 4 s exit channel, and our channel lands.
+  - The forced 120 s reset-timeout path.
+  In both cases the final leave is taken for an Alfred-trip leave: `resume_key` is set and `done` is kept, so the run re-enters. Joint-host repro: 2.2.9 resumes, 2.2.8 does not.
+  - Fix: clear the stamp only after the exit debounce window has passed with us still inside (`debounce_time + max(confirm_delay,5) < now`). Add a case: cast, trip reported during the channel, our teleport lands → `resume_key` nil.
+- **Batmobile 2.2.5** (in 3.3.15): **OK**. LOWs:
+  - (→ Batmobile) Both replan reasons share the `nav_log` key `unstuck_replan` with state `true` (`navigator.lua:751`). At Info a different reason within 5 s is folded into "(+N similar)". Key the state by reason.
+  - (→ Coordinator) `LIVE_CHECKLIST.md:5` should also list the `[unstuck] … replanning` / `EXHAUSTED` lines as hidden at the default Disabled.
+
 ### Review of the sweep-fix branches, 2026-09-29 (auditor + critic per branch, findings upheld by 2 skeptics)
 All four: claimed fixes verified, each new test fails on release c526769 and passes on the branch (Lua 5.4 + LuaJIT); sweep repros no longer trigger where applicable.
 - **Rosie 1.0.27 (`claude/qqt-rosie@d446954`): merge with one MED (→ Rosie).** R1 fixed (re-plan once as a Town Portal trip; S5 F3 / S4 F3 no longer reproduce). C-boss Rosie half matches the Activities fields. [MED] `town/main.lua:46-65 boss_hold`: `BOSS.since/capped` are cleared only inside `boss_hold` when it sees no fight, and `boss_hold` runs only when Rosie is idle with a need; a fight that ends while Rosie is busy or the bag is empty leaves the old clock, so the next boss fight with a full bag gets no hold (repro X1: Town Portal cast in melee range, "reported a live boss fight for 90s" at once). Fix (verified): `if BOSS.seen and now-BOSS.seen>2 then BOSS.since,BOSS.capped=nil,false end; BOSS.seen=now` + a B5 case. [LOW] one 90 s clock covers Arkham's boss fight + glyph wait (Arkham bounds each half itself): a 60 s fight leaves 30 s of glyph window; agree the bound in the C-boss contract (e.g. 90+120 s) or a separate `glyph_pending`. [LOW] `test_rosie_left_town` L2 never asserts the trip *failed*.
