@@ -538,6 +538,37 @@ case('audit: a living Realmwalker near a finished site (Fight Realmwalker off) d
     eq(s.logged('rupture complete'), 0, 'never counted complete')
 end)
 
+-- QQT_Warpigz_v3 2.6.4 (sweep 2026-09-28 H3): two Pandemonium chests within
+-- 10 m. find_rift_chest_actor resolved the spotted chest as the same-skin
+-- actor nearest the PLAYER: the opened one the player stood at. It read
+-- "opened" and the second chest was spotted again every few seconds until
+-- the 300 s cap (Rosie's pickup paused meanwhile); it was never opened.
+case('2.6.4: two rupture chests 8 m apart are both opened (no spot / "opened" loop)', function()
+    local s = session()
+    s.actors = {actor(SKIN.normal_starter, 30, 2), actor(SKIN.hold, 30, 0)}
+    local t = actor(SKIN.glint, 32, 0, {progress = 0})
+    t.close_s = 5
+    s.tears = {t}
+    s.actors[#s.actors + 1] = t
+    local a, b
+    s.before_tick = function()
+        if s.closed == 1 and not a then
+            a = actor(SKIN.chest, 31, 1)
+            b = actor(SKIN.chest, 39, 3)
+            s.actors[#s.actors + 1] = a
+            s.actors[#s.actors + 1] = b
+        end
+        for _, x in ipairs(s.interactions) do
+            if x.interactable and (x == a or x == b) then x.interactable = false; x.opened_at = s.now end
+        end
+    end
+    s.tick(70)
+    ok(a and a.opened_at, 'chest A opened')
+    ok(b and b.opened_at, 'chest B, 8 m from A, opened too')
+    ok(s.logged('spotted (dist=') <= 3, s.logged('spotted (dist=') .. ' "spotted" lines')
+    eq(s.logged('took longer than 300s'), 0)
+end)
+
 print(string.format('Helltide stalls: %d cases, %d checks, %d failures', cases, checks, #failures))
 if #failures > 0 then error('Helltide stalls failures:\n' .. table.concat(failures, '\n')) end
 print('PASS: test_helltide_stalls_333 (' .. cases .. ' cases)')

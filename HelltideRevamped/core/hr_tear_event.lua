@@ -719,7 +719,12 @@ local function find_rift_chest_actor(name, pos)
         if skin and (skin == name or skin:match(name) or chest_label(skin) == name) then
             local ap = actor_pos(actor)
             if ap and pos_dist(ap, pos) <= 10 then
-                local d = dist(ap)
+                -- QQT_Warpigz_v3 2.6.4 (sweep H3): the chest AT the spotted
+                -- position (ranked by the player's distance, a second chest
+                -- within 10 m resolved to the opened one the player stood at:
+                -- a spot / "opened" loop until the 300 s cap). An opened one
+                -- only when no closed one is there.
+                local d = pos_dist(ap, pos) + (actor_interactable(actor) and 0 or 20)
                 if d < best_d then best, best_d = actor, d end
             end
         end
