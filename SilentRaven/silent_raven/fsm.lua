@@ -28,6 +28,11 @@ local YIELD_STATES = { START = true, WAIT_RETRY = true, WALK_NPC = true, INTERAC
 -- R15: a continuation guard answering (false, 'yield:<reason>') pauses the
 -- request instead of revoking it.
 local YIELD_PREFIX = 'yield:'
+-- QQT_Warpigz_v3 0.2.9 (owner live 3.3.19): the host lists the reward cards
+-- as empty placeholders (sno 0, valid false) for a moment after the panel
+-- opens. They are re-read for up to CARD_SETTLE_S with the panel kept open;
+-- still empty, the attempt ends and the next one waits EMPTY_RETRY_S.
+local CARD_SETTLE_S, EMPTY_RETRY_S, RETRY_WAIT_S = 4, 5, 1.5
 -- Automatic reward dumps: one per run, a few per session.
 local AUTO_DUMP_LIMIT = 5
 local session = { dumps = 0 }
@@ -189,6 +194,17 @@ local function receipt_diagnostics(entry, count, snapshot)
     table.sort(changed)
     log.info('bag diff since accept (all lists): ' .. (#changed > 0 and table.concat(changed, ', ') or 'no change'))
 end
+-- True when the panel lists no card yet, or only placeholders (no SNO).
+local function cards_empty(entries)
+    local n = 0
+    for _, entry in pairs(entries) do
+        if type(entry) == 'table' then
+            n = n + 1
+            if rewards.entry_sno(entry) then return false end
+        end
+    end
+    return true, n
+end
 local function retry(reason, now)
     tracker.last_reason = reason
     -- ESC only for a panel we can see: with nothing open, D4 opens the game menu.
@@ -205,6 +221,7 @@ end
 local function begin_walk(now)
     tracker.attempts = tracker.attempts + 1
     tracker.interacts_fired, tracker.interact_npc, tracker.last_interact_t = 0, nil, nil
+    tracker.cards_empty_since = nil -- QQT_Warpigz_v3 0.2.9
     tracker.walk_intermediate = whispers.choose_intermediate()
     tracker.walk_via_done, tracker.walk_kind, tracker.walk_best = false, nil, nil
     tracker.walk_progress_t, tracker.walk_stalls = nil, 0
@@ -380,6 +397,20 @@ local function claim(settings, now)
     if not whispers.has_quest_reward_api() then retry('reward_api_unavailable', now); return end
     local ok, entries = pcall(quest_reward.enumerate)
     if not ok or type(entries) ~= 'table' then retry('rewards_unavailable', now); return end
+    -- QQT_Warpigz_v3 0.2.9: placeholder cards settle with the panel open (no
+    -- ESC, no re-interact); only then is the attempt given up.
+    local empty, n = cards_empty(entries)
+    if empty then
+        tracker.cards_empty_since = tracker.cards_empty_since or now
+        if now - tracker.cards_empty_since < CARD_SETTLE_S then return end
+        log.info(string.format('reward cards still empty after %ds (%d cards without an SNO); attempt %d of %d%s',
+            CARD_SETTLE_S, n or 0, tracker.attempts, MAX_ATTEMPTS,
+            tracker.attempts < MAX_ATTEMPTS and string.format(', retrying in %ds', EMPTY_RETRY_S) or ''))
+        diagnose('reward_cards_empty') -- the host API state (pick_and_accept included) and every card
+        tracker.retry_delay = EMPTY_RETRY_S
+        retry('reward_cards_empty', now); return
+    end
+    tracker.cards_empty_since = nil
     local index = rewards.pick_best_index(entries, settings)
     local entry = index ~= nil and entries[index] or nil
     local sno = rewards.entry_sno(entry)
@@ -506,7 +537,8 @@ function M.tick(settings)
     end
     if tracker.state == 'SELECT_VERIFY' then verify_selection(now); return end
     if tracker.state == 'WAIT_RETRY' then
-        if now - tracker.state_t < 1.5 then return end
+        if now - tracker.state_t < (tracker.retry_delay or RETRY_WAIT_S) then return end
+        tracker.retry_delay = nil
         transition('START', now)
     end
     if tracker.state == 'START' then

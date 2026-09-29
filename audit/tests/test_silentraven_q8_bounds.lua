@@ -716,6 +716,30 @@ case('R2 a Scavenger yield mid-claim releases the Navigator pause', function()
     ok(released, 'Navigator was released during the Scavenger yield')
 end)
 
+-- QQT_Warpigz_v3 0.2.9: Rosie's Butler stand-in (`_rosie=true`) mirrors
+-- Rosie's own trip: it holds neither auto-fire nor the claim trip; a real
+-- Butler still holds both.
+case('B3 Rosie\'s Butler stand-in never holds; a real Butler does', function()
+    local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    h.G.Butler = {_rosie = true, is_busy = function() return true end}
+    h.bounty_ready = true
+    ok(h.run_until(function() return h.logged('[SilentRaven] run finished: success') == 1 end, 20),
+        'the claim ran next to a busy stand-in\n' .. h.tail(20))
+    eq(h.logged('butler_busy'), 0, 'never held for the stand-in')
+    local h2 = host({rosie = false, dirs = {SR}})
+    local stub = stub_town(h2)
+    h2.G.Butler = {_rosie = true, is_busy = function() return true end}
+    h2.bounty_ready = true
+    ok(h2.run_until(function() return #stub.calls == 1 end, 80), 'the claim trip is not held by the stand-in\n' .. h2.tail(20))
+    local h3 = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
+    h3.mod(SR, 'silent_raven.gui').elements.main_toggle:set(true)
+    h3.G.Butler = {is_busy = function() return true end}
+    h3.bounty_ready = true
+    h3.run(10)
+    eq(h3.logged('[SilentRaven] claiming the Whisper reward'), 0, 'a real Butler still holds')
+end)
+
 -- QQT_Warpigz_v3 0.2.8 (RC3): a Looter blip during the claim keeps Navigator
 -- paused (only a Butler / town-priority Navigator yield releases it), so the
 -- loop's walk never resumes and holds the yield until its 120 s timeout.
