@@ -1266,6 +1266,21 @@ end
 tracker.tear_event.bind({
     move_to = move_to,
     clear_movement = clear_movement,
+    -- QQT_Warpigz_v3 2.6.6 (owner live: "not standing in tears"): the last
+    -- metres into a tear's charge circle. Batmobile's path ends on the
+    -- walkable node next to the gizmo, 1-3 m off it, and reports the goal
+    -- reached; a direct step (Batmobile held, its goal dropped) walks in.
+    -- false: no direct move on this host (the caller keeps the Batmobile walk).
+    force_step = function(pos)
+        if type(pathfinder.force_move_raw) ~= "function" then return false end
+        if BatmobilePlugin then
+            BatmobilePlugin.pause(plugin_label)
+            BatmobilePlugin.clear_target(plugin_label)
+        end
+        native_movement_owned = true
+        pathfinder.force_move_raw(pos)
+        return true
+    end,
     get_actors = get_cached_actors,
     get_kill_target = get_kill_target,
 })

@@ -109,7 +109,9 @@ local function session(opts)
     env.loot_manager = {get_all_items_chest_sort_by_distance = function() return s.loot end,
         any_item_around = function() return false end}
     env.utility = {set_height_of_valid_position = function(p) return p end, is_point_walkeable = function() return true end}
-    env.pathfinder = {request_move = function() end, clear_stored_path = function() end}
+    -- force_move_raw: one direct step toward the point (the host walks straight to it)
+    env.pathfinder = {request_move = function() end, clear_stored_path = function() end,
+        force_move_raw = function(p) s.forced = p; s.force_moves = (s.force_moves or 0) + 1 end}
     env.teleport_to_waypoint = function() end
     env.interact_object = function(a) s.interactions[#s.interactions + 1] = a end
     env.revive_at_checkpoint = function() s.revives = (s.revives or 0) + 1 end
@@ -198,8 +200,14 @@ local function session(opts)
         dt = dt or 0.1
         for _ = 1, math.floor(seconds / dt + 0.5) do
             s.now = s.now + dt
-            if bm.target and not s.frozen then
-                step_to(bm.target.get_position and bm.target:get_position() or bm.target, dt)
+            if s.forced and not s.frozen then
+                step_to(s.forced, dt)
+                s.forced = nil
+            elseif bm.target and not s.frozen then
+                local goal = bm.target.get_position and bm.target:get_position() or bm.target
+                -- s.bm_reach: Batmobile's path ends this far from the goal
+                -- (the nearest walkable node next to a gizmo): arrived.
+                if not s.bm_reach or s.pos:dist_to(goal) > s.bm_reach then step_to(goal, dt) end
             end
             if s.loot_item and next(s.pauses) == nil then
                 if s.pos:dist_to(s.loot_item) > 0.5 then step_to(s.loot_item, dt) else s.loot_item = nil end
@@ -645,6 +653,26 @@ case('2.6.4: at :55 without a Looter pause (no Rosie) the town teleport still fi
     s.minute, s.in_helltide = 55, false
     s.tick(10)
     ok(s.teleports[1] and s.teleports[1].at - t55 <= 2, 'the idle town teleport fires without a wait')
+end)
+
+-- QQT_Warpigz_v3 2.6.6 (owner live, 3.3.16+: "not standing in tears to close
+-- those"): RIFT_CLOSE_TEARS for 50+ s, the tear bar next to the player,
+-- move_to through Batmobile 4-8 times a second. Batmobile's path ends on the
+-- walkable node next to the tear gizmo, 1-3 m off it, and reports the goal
+-- reached: the player never stood in the charge circle. The last metres into
+-- the circle are a direct move.
+case('2.6.6: Batmobile stops 3 m short of the tear: HR walks into the circle itself and the tear closes', function()
+    local s = session()
+    s.bm_reach = 3
+    s.actors = {actor(SKIN.normal_starter, 30, 2), actor(SKIN.hold, 30, 0)}
+    local t = actor(SKIN.glint, 32, 0, {progress = 0})
+    t.close_s = 5
+    s.tears = {t}
+    s.actors[#s.actors + 1] = t
+    s.tick(40)
+    eq(s.closed, 1, 'the tear was closed (the player stood in its circle)')
+    ok((s.force_moves or 0) > 0, 'the last metres were a direct move')
+    ok(s.inside >= 4, string.format('%.1fs inside the circle', s.inside))
 end)
 
 print(string.format('Helltide stalls: %d cases, %d checks, %d failures', cases, checks, #failures))
