@@ -1096,6 +1096,37 @@ rule('WC-exit-recast-after-pickup-break', 'expected', 'TELEPORT', function(hit, 
     end
     return #times > 0
 end, "Rosie's pickup of a drop that fell in WonderCity's exit channel broke it; one re-cast per break")
+-- FINDING: WonderCity casts its exit teleport with enemies in range (the
+-- reward phase does not wait for a fight to end); the rotation's evade breaks
+-- the channel and exit_undercity re-casts every 5 s (exit_with_debounce,
+-- no cap and no enemy check) until one channel survives.
+rule('WC-exit-recast-rotation', 'finding', 'TELEPORT', function(hit, ctx)
+    local times = {}
+    local list = (hit.detail:match('%(max %d+%): (.*)$') or ''):gsub(' {scene.*$', '')
+    for item in list:gmatch('[^;]+') do
+        local t = tonumber(item:match('t=([%d%.]+)'))
+        if item:find('waypoint->kurast by WonderCity', 1, true) and t then
+            for _, c in ipairs(ctx.h.tp_log) do
+                if math.abs(c.t - t) < 0.06 and c.task ~= 'exit_undercity' then return false end
+            end
+            times[#times + 1] = t
+        elseif not (item:find('town_portal->temis by Rosie', 1, true) and #times > 0) and not item:find('...', 1, true) then
+            return false
+        end
+    end
+    local rotation = 0
+    for i = 1, #times - 1 do
+        local broken = false
+        for _, e in ipairs(ctx.h.rotation and ctx.h.rotation.events or {}) do
+            if e.kind == 'interrupt' and e.t >= times[i] and e.t <= times[i + 1] then broken, rotation = true, rotation + 1 end
+        end
+        for _, b in ipairs(ctx.W.breaks or {}) do
+            if b.t >= times[i] and b.t <= times[i + 1] then broken = true end
+        end
+        if not broken then return false end
+    end
+    return rotation > 0
+end, "the rotation's evade breaks WonderCity's exit channel in a fight; uncapped 5 s re-casts")
 -- KNOWN (Rosie session): a drop that falls during Rosie's own Town Portal cast.
 rule('ROSIE-tp-cast-drop', 'known', 'LEFT_DROP', function(hit, ctx)
     return has(hit, '(waypoint)') and has(hit, '[dropped during the waypoint channel]') and cast_by(ctx, 'Rosie')
@@ -1244,7 +1275,7 @@ end, 'chaos: a Rosie reload during a trip out of the Undercity loses the return 
 -- PATH REJECTED, :1885 STUCK) while a target stays unreachable; same family
 -- as the harness author's LOW [nav] STUCK finding.
 rule('BAT-nav-log-rate', 'finding', 'SPAM', function(hit)
-    return has(hit, '(by Batmobile)') and has(hit, '[nav] ')
+    return has(hit, '(by Batmobile') and has(hit, '[nav] ')
 end, 'Batmobile [nav] log lines 20+ times a minute while a target is unreachable')
 
 -- ── the sweep ─────────────────────────────────────────────────────────────
@@ -1539,6 +1570,9 @@ local FINDINGS = {
         .. "reward chest opens (inside WonderCity's 10 s exit delay): Rosie's trip is not a resumable Alfred trip, the "
         .. 'return is a new run, and WonderCity stands in finish_undercity until the 600 s run timeout',
         o = {chaos = false, distance = 15, bag_after_chest = 9}},
+    {id = 'F9', rule = 'WC-exit-recast-rotation', seed = 9, seconds = 2560, title = 'WonderCity casts the exit '
+        .. 'teleport with an elite pack 8 m away; the rotation\'s evade breaks the channel and exit_undercity re-casts '
+        .. 'every 5 s (3 casts at t=3540-3550; seeded chaos, default config of seed 9)', o = {}},
 }
 local function run_finding(f, strict)
     local passed, err = xpcall(function()
