@@ -622,19 +622,32 @@ function explorer:movement_spell_to_target(target)
         table.insert(movement_spell_id, 2221282) -- Warlock Rampage (Demonic Slash)
     end
 
+    -- QQT_Warpigz_v3 HordeDev 2.2.8 (sweep D3): one summary line at most
+    -- every 30 s instead of a line per spell per call (about 10 lines every
+    -- combat pulse live).
+    local log = explorer.movement_spell_log
+    if not log then
+        log = {used = 0, failed = 0, cooldown = 0, last = nil}
+        explorer.movement_spell_log = log
+    end
     -- Check if the dash spell is off cooldown and ready to cast
     for _, spell_id in ipairs(movement_spell_id) do
         if local_player:is_spell_ready(spell_id) then
             -- Cast the dash spell towards the target's position
             local success = cast_spell.position(spell_id, target, 3.0) -- A little delay or else rogue goes turbo in dashing
             if success then
-                console.print("Successfully used movement spell to target.")
+                log.used = log.used + 1
             else
-                console.print("Failed to use movement spell.")
+                log.failed = log.failed + 1
             end
         else
-            console.print("Movement spell on cooldown.")
+            log.cooldown = log.cooldown + 1
         end
+    end
+    local now = get_time_since_inject()
+    if log.used + log.failed + log.cooldown > 0 and (log.last == nil or now - log.last >= 30) then
+        console.print(string.format("Movement spells: %d used, %d failed, %d on cooldown.", log.used, log.failed, log.cooldown))
+        log.used, log.failed, log.cooldown, log.last = 0, 0, 0, now
     end
 end
 
