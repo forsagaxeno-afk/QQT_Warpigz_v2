@@ -2,6 +2,19 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.20] — 2026-09-29
+
+### Added
+
+- **Rosie 1.0.31: Rosie stands in for Butler while Worldstone runs** (owner request: Worldstone 0.1.9 lists "Required plugins: Butler").
+  - While Worldstone is loaded and the real Butler is not, Rosie publishes a Butler that Worldstone can poll: "busy" during Rosie's town trip (Worldstone stands still, as it does for Butler), "needs a visit" only when Rosie will really run the trip. A real Butler is never overwritten; if one loads, Rosie steps aside.
+  - Setting: Rosie → "Stand in for Butler while Worldstone runs" (default on). A Butler call Rosie does not know yet is logged once ("Worldstone called Butler.<name> — not mimicked yet"); please send those lines.
+  - WarPigs 1.1.13 and SilentRaven 0.2.9 ignore Rosie's stand-in (they already follow Rosie's own trips), so a Whisper hand-off during a Rosie trip is not held.
+
+### Fixed
+
+- **SilentRaven 0.2.9: claiming a Whisper reward when the reward cards load late** (live log: four empty cards, "no_valid_reward", then a tight re-interact loop). SilentRaven now waits up to 4 s for the cards to fill in and claims on the first attempt; if they stay empty it retries after 5 s and ends after 3 attempts with "reward cards still empty".
+
 ## [3.3.19] — 2026-09-29
 
 ### Fixed
