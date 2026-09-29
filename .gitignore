@@ -38,3 +38,6 @@ archive/WarRoom/data/*
 !archive/WarRoom/data/.keep
 archive/WarRoom/server/.dashboard-token
 archive/WarRoom/server/stop.flag
+
+# Runtime state written by plugins
+ArkhamAsylum/back_portals.txt
