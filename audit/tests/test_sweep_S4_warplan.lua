@@ -933,6 +933,15 @@ end, "LOW: HordeDev's explorer stuck check prints 'Movement spell on cooldown.' 
 rule('HD-chest-retry-zero-aether', 'finding', 'LOOP', function(hit)
     return has(hit, 'HordeDev.state switches') and has(hit, 'OPENING_CHEST') and has(hit, 'WAITING_FOR_VFX')
 end, 'LOW: after a reload HordeDev retries a chest with 0 aether up to 15 times (~40 s, bounded)')
+-- LOW (Rosie, pickup/src/item_manager.lua report_rejection): the 'Skipped'
+-- line is deduplicated on the LAST reason per drop (reported[id] ~= reason),
+-- so a drop whose reason alternates -- 'outside pickup distance N' <->
+-- 'equipment bag full or unreadable' while a full-bag player patrols around
+-- the distance boundary -- prints a full line on every flip (24 in 60 s on
+-- seed 17, Helltide, bag full after a latched trip failure).
+rule('ROSIE-skip-log-flip', 'finding', 'SPAM', function(hit)
+    return has(hit, 'by Rosie') and has(hit, '[Rosie pickup] Skipped ')
+end, "LOW: Rosie's 'Skipped' line repeats when a drop's rejection reason alternates")
 -- DESIGN: HelltideRevamped fight / explore alternation (seconds per state).
 rule('LOOP-hr-fight-explore', 'expected', 'LOOP', function(hit)
     return has(hit, 'EXPLORE_HELLTIDE') and (has(hit, 'KILL_MONSTERS') or has(hit, 'MOVING_TO_HELLTIDE_CHEST'))
