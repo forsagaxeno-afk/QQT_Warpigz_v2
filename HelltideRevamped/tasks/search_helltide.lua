@@ -15,7 +15,12 @@ local plugin_label = "helltide_revamped"
 local LOOT_HOLD_MAX_S = 20.0
 local loot_hold_since, loot_hold_logged = nil, false
 local function loot_hold()
-    if not loot_guard.busy() then
+    -- QQT_Warpigz_v3 2.6.4 (sweep H4): the helltide task released its own
+    -- tear pause a moment ago (the hour ended in a tear): Rosie is not busy
+    -- yet, but the drops that pause held back are about to be picked.
+    local tear = tracker.tear_event
+    local just_released = tear and tear.recent_release and tear.recent_release(4)
+    if not loot_guard.busy() and not just_released then
         loot_hold_since, loot_hold_logged = nil, false
         return false
     end

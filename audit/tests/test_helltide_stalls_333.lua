@@ -569,6 +569,64 @@ case('2.6.4: two rupture chests 8 m apart are both opened (no spot / "opened" lo
     eq(s.logged('took longer than 300s'), 0)
 end)
 
+-- QQT_Warpigz_v3 2.6.4 (sweep 2026-09-28 H4): standing in a tear at :54,
+-- HR holds Rosie's pickup (a Legendary drop 5 m away waits). At :55 the
+-- helltide task stops, releases its own pause and search_helltide
+-- teleports to town in the same tick: Rosie is not busy yet (she was paused
+-- a moment ago), so the drop HR's own pause held back was left behind.
+local function hour_end_session(opts)
+    local s = session(opts)
+    s.teleports = {}
+    s.env.teleport_to_waypoint = function(id) s.teleports[#s.teleports + 1] = {at = s.now, id = id} end
+    -- A Rosie-shaped Looter that reports busy half a second after its pause
+    -- is released (her next pickup pulse), not in the same tick.
+    s.resumed_at = -math.huge
+    local looter = s.env.LooteerPlugin
+    local release = looter.release_pause
+    looter.release_pause = function(c) s.resumed_at = s.now; return release(c) end
+    looter.is_actively_looting = function()
+        return s.loot_item ~= nil and next(s.pauses) == nil and s.now - s.resumed_at >= 0.5
+    end
+    s.minute = 54
+    s.actors = {actor(SKIN.normal_starter, 30, 2), actor(SKIN.hold, 30, 0)}
+    local t = actor(SKIN.glint, 32, 0, {progress = 0})
+    t.close_s = 600
+    s.tears = {t}
+    s.actors[#s.actors + 1] = t
+    return s
+end
+
+case('2.6.4: at :55 the drop HR\'s own tear pause held back is picked before the town teleport', function()
+    local s = hour_end_session()
+    s.tick(15)
+    eq(state(s), 'RIFT_CLOSE_TEARS', 'standing in the tear at :54')
+    ok(next(s.pauses) ~= nil, "Rosie's pickup is paused")
+    s.loot_item = v(s.pos:x() + 4, s.pos:y() + 3, 0) -- a Legendary drops 5 m away
+    s.tick(5)
+    ok(s.loot_item ~= nil, 'held back by the tear pause')
+    local t55 = s.now
+    s.minute, s.in_helltide = 55, false              -- the Helltide hour ends
+    local picked_at
+    s.before_tick = function() if not picked_at and s.loot_item == nil then picked_at = s.now end end
+    s.tick(25)
+    ok(picked_at, 'the drop was picked up')
+    local first = s.teleports[1]
+    ok(first, 'teleported to town within 25 s')
+    ok(first and picked_at and picked_at <= first.at,
+        string.format('picked (%.1f) before the teleport (%.1f)', picked_at or -1, first and first.at or -1))
+    ok(first and first.at - t55 <= 25, 'left within 25 s')
+end)
+
+case('2.6.4: at :55 without a Looter pause (no Rosie) the town teleport still fires at once', function()
+    local s = hour_end_session()
+    s.env.LooteerPlugin = nil
+    s.tick(15)
+    local t55 = s.now
+    s.minute, s.in_helltide = 55, false
+    s.tick(10)
+    ok(s.teleports[1] and s.teleports[1].at - t55 <= 2, 'the idle town teleport fires without a wait')
+end)
+
 print(string.format('Helltide stalls: %d cases, %d checks, %d failures', cases, checks, #failures))
 if #failures > 0 then error('Helltide stalls failures:\n' .. table.concat(failures, '\n')) end
 print('PASS: test_helltide_stalls_333 (' .. cases .. ' cases)')
