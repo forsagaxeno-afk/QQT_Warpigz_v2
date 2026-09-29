@@ -22,7 +22,10 @@ local stuck_position = nil
 -- A phantom summon used to idle Reaper here for the rest of the session.
 local NO_FIGHT_BOUND = 75
 local EVIDENCE_RANGE = 40
-local fight = { seen_at = nil, mark = nil }
+local fight = { seen_at = nil, mark = nil, evidence_at = nil }
+-- QQT_Warpigz_v3 Reaper 1.10.7 (contract C-boss): a live boss fight is
+-- published only while fight evidence is at most FIGHT_FRESH seconds old.
+local FIGHT_FRESH = 5
 
 local function in_target_boss_zone()
     local boss = rotation.current()
@@ -68,7 +71,20 @@ local task = { name = "Kill Monsters" }
 -- the handoff and the next activity must not inherit clear OFF from Reaper.
 function task.reset()
     settings.orb_set_block(false)
-    fight.seen_at, fight.mark = nil, nil
+    fight.seen_at, fight.mark, fight.evidence_at = nil, nil, nil
+end
+
+-- QQT_Warpigz_v3 Reaper 1.10.7 (contract C-boss, ReaperPlugin.status().boss_fight):
+-- true while this run's summon is live in the target lair and Kill Monsters
+-- saw fight evidence (boss quest, enemies within EVIDENCE_RANGE) in the last
+-- FIGHT_FRESH seconds. Bounded: NO_FIGHT_BOUND drops the summon, and the
+-- reward chest hands over to Open Chest.
+function task.boss_fight()
+    if not tracker.altar_activated or tracker.chest_opened_time ~= nil then return false end
+    if not in_target_boss_zone() then return false end
+    if not fight.evidence_at or fight.mark ~= (tracker.altar_activate_time or 0) then return false end
+    local age = get_time_since_inject() - fight.evidence_at
+    return age >= 0 and age < FIGHT_FRESH
 end
 
 function task.shouldExecute()
@@ -83,9 +99,12 @@ function task.Execute()
     -- identifies it) or the last evidence, whichever is later.
     local t = get_time_since_inject()
     local mark = tracker.altar_activate_time or 0
-    if fight.mark ~= mark or fight.seen_at == nil then fight.mark, fight.seen_at = mark, t end
+    if fight.mark ~= mark or fight.seen_at == nil then
+        fight.mark, fight.seen_at, fight.evidence_at = mark, t, nil
+    end
     if fight_evidence() then
         fight.seen_at = t
+        fight.evidence_at = t -- QQT_Warpigz_v3 Reaper 1.10.7 (C-boss)
     elseif t - fight.seen_at >= NO_FIGHT_BOUND then
         console.print(string.format(
             "[Reaper] No boss, enemies or reward chest for %ds after the summon — re-checking the altar.",
@@ -93,7 +112,7 @@ function task.Execute()
         tracker.altar_activated     = false
         tracker.altar_interact_time = nil
         tracker.summoned_this_run   = false
-        fight.seen_at, fight.mark = nil, nil
+        fight.seen_at, fight.mark, fight.evidence_at = nil, nil, nil
         settings.orb_set_block(false)
         return
     end

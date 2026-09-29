@@ -166,6 +166,14 @@ function task.Execute()
 
         local dist = utils.distance_to(chest:get_position())
         if dist > 2.5 then
+            -- QQT_Warpigz_v3 Reaper 1.10.7: the chest walk waits while the Looter
+            -- picks up the boss drops (it dragged Rosie off a Mythic out of her
+            -- pickup range); bounded by utils.loot_ready (75 s). The stuck timer
+            -- is re-armed so standing still here is not "stuck".
+            if not utils.loot_ready() then
+                last_pos, last_move_t = get_player_position(), os.time()
+                return
+            end
             pathfinder.request_move(chest:get_position())
             return
         end

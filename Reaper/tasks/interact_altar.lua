@@ -233,6 +233,16 @@ local function live_fight()
     return nil
 end
 
+-- QQT_Warpigz_v3 Reaper 1.10.7: a fight already in progress at startup (a
+-- live boss, or its reward chest already up). main.lua on_enable joins it
+-- with a one-run committed rotation when no key is left (the summon spent it).
+function task.fight_in_progress()
+    local fight = live_fight()
+    if fight then return fight end
+    if any_chest_visible() then return "reward chest up" end
+    return nil
+end
+
 -- QQT_Warpigz_v3 Reaper 1.10.4: approach deadline (see APPROACH_BOUND). Returns
 -- true when it gave up.
 local function approach_expired(altar, t)
