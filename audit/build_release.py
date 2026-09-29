@@ -25,7 +25,8 @@ KEEP = ".keep"
 # QQT_Warpigz_v3: files the plugins generate on the user's machine never ship:
 # HelltideRevamped's learned chest spots / fence / stats and dashboard data.
 GENERATED = ("HelltideRevamped/learned/*.txt", "HelltideRevamped/learned/*.tmp",
-             "HelltideRevamped/dashboard/hr_data.js", "HelltideRevamped/dashboard/*.tmp")
+             "HelltideRevamped/dashboard/hr_data.js", "HelltideRevamped/dashboard/*.tmp",
+             "ArkhamAsylum/back_portals.txt")  # QQT_Warpigz_v3 3.3.13: Arkham back-portal memory
 # QQT_Warpigz_v3 3.3.6: repository folders that are never part of the package:
 # parked plugins (archive/, e.g. WarRoom), developer tools (tools/ApiProbe),
 # the audit and test tooling, the documents (shipped only through DOCS) and CI.
