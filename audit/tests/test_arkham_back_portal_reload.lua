@@ -13,6 +13,7 @@
 --   R4 leaving the pit prunes the store (except a resumed Alfred-trip floor).
 --   R5 control: a first load on floor 1 with no portal at spawn distance keeps
 --      no blacklist and descends.
+--   R6 a first load on floor 1 next to its descend portal does not blacklist it.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local checks, failures = 0, {}
 local function ok(value, message)
@@ -258,6 +259,17 @@ case('R5 control: first load on floor 1 with no portal at spawn distance: no bla
     local w = world_fixture({floor = 1, pos = vec(0, 0), load_s = 2})
     ok(w.run_until(function() return w.floor == 2 and not w.loading end, 60), 'floor 2 reached')
     ok(w.logged('treated as the back portal') == 0, 'no first-load blacklist on floor 1')
+end)
+
+-- QQT_Warpigz_v3 Arkham 2.1.6 (3.3.13 review #4): a first load on floor 1
+-- standing 5 m from its only (descend) portal took it as the back portal and
+-- sat until the reset timer. The heuristic now needs a second portal on the
+-- floor (floor 1 has only its descend portal).
+case('R6 first load on floor 1, 5 m from its descend portal: not blacklisted, descends', function()
+    local w = world_fixture({floor = 1, pos = vec(-15, 0), load_s = 2})
+    ok(w.run_until(function() return w.floor == 2 and not w.loading end, 60),
+        'floor 2 reached\n' .. table.concat(w.logs, '\n'))
+    ok(w.logged('treated as the back portal') == 0, 'no first-load blacklist of the descend portal')
 end)
 
 ok(rawget(_G, 'QQT_ArkhamBackPortals') == nil, 'no new global')

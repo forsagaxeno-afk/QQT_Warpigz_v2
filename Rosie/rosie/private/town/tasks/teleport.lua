@@ -310,11 +310,11 @@ function extension.move()
 end
 function extension.interact()
     local npc = extension.get_npc()
-    if npc then interact_object(npc) end
+    if npc then tracker.portal_taken=true; interact_object(npc) end -- QQT_Warpigz_v3 1.0.27: lifecycle.tick (sweep R1)
 end
 function extension.execute()
     local npc = extension.get_npc()
-    if npc then interact_object(npc) end
+    if npc then tracker.portal_taken=true; interact_object(npc) end -- QQT_Warpigz_v3 1.0.27: lifecycle.tick (sweep R1)
 end
 
 function extension.reset()
