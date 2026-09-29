@@ -56,10 +56,27 @@ local DIAG_INTERVAL = 30.0 -- seconds between "NPC not found" diagnostic dumps (
 -- re-teleport to the Temis waypoint once; after GIVE_UP_S give the turn-in up
 -- for RETRY_AFTER_S (M.suspended) so WarPigs continues, then retry.
 local hunt = {
-    TYRAEL = {2574.0, -484.0, 31.5},   -- Tyrael in Temis (joint_host, next to the War Plan table)
+    -- UNVERIFIED live (joint_host value; test_live_temis_wall has 2570,-500).
+    -- 1.1.11 logs the real player/Tyrael positions when he is found.
+    TYRAEL = {2574.0, -484.0, 31.5},
     RETELEPORT_S = 60.0, GIVE_UP_S = 180.0, RETRY_AFTER_S = 600.0,
     since = nil, reteleported = false, logged = false, retry_at = nil,
+    -- QQT_Warpigz_v3 1.1.11: the bounds count only ticks actually hunting
+    -- (gaps over GAP_S, e.g. a Rosie/Looter/SilentRaven hold, are not hunting).
+    spent = 0, seen = nil, GAP_S = 2.0,
 }
+local function hunt_reset()
+    hunt.since, hunt.reteleported, hunt.logged, hunt.spent, hunt.seen = nil, false, false, 0, nil
+end
+-- QQT_Warpigz_v3 1.1.11: our own Temis cast is still channelling (a move cuts it).
+local function own_cast_active(t)
+    if (t - last_teleport_time) < TELEPORT_DEBOUNCE_S then return true end
+    local ok, id = pcall(function()
+        local lp = get_local_player()
+        return lp and type(lp.get_active_spell_id) == 'function' and lp:get_active_spell_id()
+    end)
+    return ok and id == 186139 and (t - last_teleport_time) < 15.0
+end
 
 local function log(msg) console.print('[WarPigs:turn_in] ' .. msg) end
 local function now() return get_time_since_inject() end
@@ -239,7 +256,8 @@ function M.tick(active, ctx)
         stuck_not_in_town_since = nil
         alfred_wait_logged      = false
         hold_logged             = nil
-        hunt.since, hunt.reteleported, hunt.logged = nil, false, false -- QQT_Warpigz_v3 1.1.10
+        hunt_reset() -- QQT_Warpigz_v3 1.1.10
+        hunt.position_logged = nil -- QQT_Warpigz_v3 1.1.11
         return
     end
 
@@ -359,25 +377,30 @@ function M.tick(active, ctx)
         if not npc then
             -- QQT_Warpigz_v3 1.1.10: walk toward Tyrael, bounded (see `hunt`).
             local t = now()
+            -- QQT_Warpigz_v3 1.1.11: never walk into our own Temis channel
+            -- (the one-shot re-teleport cancelled itself); not hunting time.
+            if own_cast_active(t) then hunt.seen = nil; return end
             hunt.since = hunt.since or t
+            if hunt.seen and t - hunt.seen <= hunt.GAP_S then hunt.spent = hunt.spent + (t - hunt.seen) end
+            hunt.seen = t
             if not hunt.logged then
                 hunt.logged = true
                 log('NPC not found (' .. NPC_NAME .. ') — walking toward Tyrael so he loads')
             end
             diagnose_missing_npc()
-            if t - hunt.since >= hunt.GIVE_UP_S then
-                log(string.format('Tyrael still not found after %.0fs — giving the turn-in up for %.0fs; WarPigs continues',
-                    t - hunt.since, hunt.RETRY_AFTER_S))
+            if hunt.spent >= hunt.GIVE_UP_S then
+                log(string.format('Tyrael still not found after %.0fs of searching — giving the turn-in up for %.0fs; WarPigs continues',
+                    hunt.spent, hunt.RETRY_AFTER_S))
                 hunt.retry_at = t + hunt.RETRY_AFTER_S
-                hunt.since, hunt.reteleported, hunt.logged = nil, false, false
+                hunt_reset()
                 set_state(STATE.IDLE)
                 return
             end
-            if t - hunt.since >= hunt.RETELEPORT_S and not hunt.reteleported
+            if hunt.spent >= hunt.RETELEPORT_S and not hunt.reteleported
                 and (t - last_teleport_time) >= TELEPORT_DEBOUNCE_S and not teleport_held(ctx)
             then
                 hunt.reteleported = true
-                log(string.format('Tyrael not found for %.0fs — re-teleporting to the Temis waypoint once', t - hunt.since))
+                log(string.format('Tyrael not found for %.0fs — re-teleporting to the Temis waypoint once', hunt.spent))
                 teleport_to_waypoint(TEMIS_WP)
                 last_teleport_time = t
                 set_state(STATE.TELEPORTING)
@@ -390,7 +413,16 @@ function M.tick(active, ctx)
         end
         if hunt.since then
             log(string.format('Tyrael found after %.0fs', now() - hunt.since))
-            hunt.since, hunt.reteleported, hunt.logged = nil, false, false
+            hunt_reset()
+        end
+        -- QQT_Warpigz_v3 1.1.11: confirm hunt.TYRAEL from the live log (once per turn-in).
+        if not hunt.position_logged then
+            hunt.position_logged = true
+            local ok, line = pcall(function()
+                local a, b = npc:get_position(), get_player_position()
+                return string.format('Tyrael at (%.1f, %.1f), player at (%.1f, %.1f)', a:x(), a:y(), b:x(), b:y())
+            end)
+            if ok then log(line) end
         end
 
         local pos = npc:get_position()
@@ -419,6 +451,11 @@ function M.suspended(t)
     if hunt.retry_at and (t or now()) < hunt.retry_at then return true end
     hunt.retry_at = nil
     return false
+end
+-- QQT_Warpigz_v3 1.1.11: seconds left in the suspension (status line), or nil.
+function M.suspended_left(t)
+    if not M.suspended(t) then return nil end
+    return hunt.retry_at - (t or now())
 end
 
 return M

@@ -6,6 +6,12 @@
 --   Y2  Tyrael never appears: one re-teleport to Temis, then the turn-in is
 --       given up within the bound, WarPigs continues with the next War Plan
 --       step, and the turn-in is retried later.
+-- WarPigs 1.1.11 (post-release review of 1.1.10; each case fails on 1.1.10):
+--   Y3  TurnIn is the only WarPlans quest: during the suspension the pit
+--       filler runs (WarPug cannot plan), and the status line shows it.
+--   Y4  the one-shot re-teleport is not cut by the not-found walk.
+--   Y5  the real Tyrael/player positions are logged when he is found.
+--   Y6  the hunt bounds count only hunting time, not an Alfred hold.
 local root = assert(SUITE_ROOT) .. '/WarPigs/'
 local pug_root = SUITE_ROOT .. '/WarPug/'
 local checks, failures = 0, {}
@@ -256,7 +262,72 @@ case('Y2 Tyrael never appears: one re-teleport, bounded give-up, WarPigs continu
     truthy(f.until_true(function() return f.task.get_state() ~= 'IDLE' end, 700), 'the turn-in is retried later')
 end)
 
+
+-- Cast model for Y4: a waypoint call channels for 5 s (spell 186139); any
+-- move during the channel cuts it (counted).
+local function cast_model(f)
+    local tp = f.e.teleport_to_waypoint
+    f.cuts = 0
+    f.e.teleport_to_waypoint = function(...) f.cast_until = f.now + 5; return tp(...) end
+    local move = f.e.pathfinder.request_move
+    f.e.pathfinder.request_move = function(goal)
+        if f.cast_until and f.now < f.cast_until then f.cuts = f.cuts + 1; f.cast_until = nil end
+        return move(goal)
+    end
+    local lp = f.e.get_local_player
+    f.e.get_local_player = function()
+        local p = lp()
+        p.get_active_spell_id = function() return (f.cast_until and f.now < f.cast_until) and 186139 or -1 end
+        return p
+    end
+end
+
+case('Y3 TurnIn only: the pit filler runs during the suspension; the status shows it', function()
+    local f = fixture()
+    world_model(f, 2750, -650, false)
+    f.settings.run_pit_after_turnin = true
+    local ark = f.plugin('ArkhamAsylumPlugin')
+    f.warpug('IDLE')
+    f.quests = {'WarPlans_QST_TurnIn_Rewards'}
+    truthy(f.until_true(function() return f.logged('giving the turn-in up') == 1 end, 260), 'given up')
+    truthy(f.until_true(function() return ark.enables > 0 end, 30), 'pit filler runs during the suspension')
+    truthy(f.o.get_status_line():find('turn-in suspended (Tyrael not found), retry in', 1, true) ~= nil,
+        'status line: ' .. f.o.get_status_line())
+    truthy(type(f.e.WarPigsPlugin.peek().turn_in_suspended_s) == 'number', 'peek shows the suspension')
+end)
+
+case('Y4 the one-shot re-teleport is not cut by the not-found walk', function()
+    local f = fixture()
+    world_model(f, 2750, -650, false)
+    cast_model(f)
+    f.quests = {'WarPlans_QST_TurnIn_Rewards'}
+    truthy(f.until_true(function() return f.logged('re-teleporting to the Temis waypoint once') == 1 end, 90), 're-teleport')
+    f.run(10)
+    eq(f.cuts, 0, 'no move during our own Temis channel')
+end)
+
+case('Y5 the real Tyrael and player positions are logged when he is found', function()
+    local f = fixture()
+    world_model(f, 2750, -650, true)
+    f.quests = {'WarPlans_QST_TurnIn_Rewards'}
+    truthy(f.until_true(function() return f.interacts > 0 end, 120), 'interacted')
+    eq(f.logged('Tyrael at (2574.0, -484.0), player at ('), 1, 'positions logged once')
+end)
+
+case('Y6 an Alfred hold is not hunting time', function()
+    local f = fixture()
+    world_model(f, 2750, -650, false)
+    f.alfred({enabled = true})
+    f.quests = {'WarPlans_QST_TurnIn_Rewards'}
+    f.run(40)                                    -- ~30 s of hunting
+    f.alfred_status.running = true; f.run(150)   -- a Rosie trip: the turn-in yields
+    f.alfred_status.running = false
+    f.run(60)
+    eq(f.logged('giving the turn-in up'), 0, 'not given up right after the hold')
+    truthy(f.until_true(function() return f.logged('giving the turn-in up') == 1 end, 150), 'given up after 180 s of hunting')
+end)
+
 if #failures > 0 then
     error('WarPigs Tyrael turn-in failures:\n  ' .. table.concat(failures, '\n  '))
 end
-print('PASS WarPigs Tyrael turn-in: ' .. checks .. ' checks (Y1 walk toward Tyrael, Y2 bounded give-up and retry)')
+print('PASS WarPigs Tyrael turn-in: ' .. checks .. ' checks (Y1 walk toward Tyrael, Y2 bounded give-up and retry, Y3 filler + status, Y4 re-teleport not cut, Y5 positions logged, Y6 hunting time only)')

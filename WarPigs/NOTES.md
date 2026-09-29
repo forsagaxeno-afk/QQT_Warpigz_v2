@@ -1,11 +1,17 @@
-# WarPigs + WarPug: session notes (WarPigs 1.1.10, WarPug 1.0.17)
+# WarPigs + WarPug: session notes (WarPigs 1.1.11, WarPug 1.0.17)
 
 WarPigs is the orchestrator: it runs a War Plan (Pit, Helltide, Undercity, Hordes, bosses, Whispers) by driving the activity plugins through their APIs, and it calls Rosie for town trips. WarPug is the War Plan creator (planner).
 
 - `WarPigs/core/orchestrator.lua`: step machine; `core/external.lua`: the API, plus `WarPigsPlugin.peek()` (side-effect free; written for WarRoom, archived since 3.3.6).
 - Event bus: step_start / step_done are edges (`emitted_matches`), so they are not repeated per tick.
 - Joint tests: `audit/tests/test_joint_suite.lua`, `test_integration_warpug.lua`, `test_warpug.lua`, `test_activity_lease_joint.lua`.
-- Hang/loop regressions: `audit/tests/test_warpigs_hang_review.lua` (H1–H8), `test_warpug_alfred_bounds.lua` (P1–P4); teleport casts: `test_warpigs_teleport_casts.lua` (C1–C3); Tyrael turn-in: `test_warpigs_turnin_tyrael.lua` (Y1–Y2).
+- Hang/loop regressions: `audit/tests/test_warpigs_hang_review.lua` (H1–H8), `test_warpug_alfred_bounds.lua` (P1–P4); teleport casts: `test_warpigs_teleport_casts.lua` (C1–C3); Tyrael turn-in: `test_warpigs_turnin_tyrael.lua` (Y1–Y6).
+
+## 1.1.11 post-release review of 1.1.10 (2026-09-29)
+- Y3 [MED] TurnIn as the only WarPlans quest: WarPug cannot plan, so during the 600 s suspension the pit filler runs (when `run_pit_after_turnin` is on; WarPug on or off). Status line: `turn-in suspended (Tyrael not found), retry in Ns`; `peek().turn_in_suspended_s`. With the filler off nothing runs meanwhile (logged).
+- Y4 the one-shot re-teleport is no longer cut: no not-found walk within TELEPORT_DEBOUNCE_S of our Temis cast or while 186139 channels (≤15 s).
+- Y5 `hunt.TYRAEL` (2574,-484) is **UNVERIFIED live** (joint_host; test_live_temis_wall has 2570,-500). The turn-in logs `Tyrael at (x, y), player at (x, y)` once when he is found: take the real value from the owner's next log.
+- Y6 the 60 s / 180 s bounds count only ticks actually hunting (gaps > 2 s: Alfred/Looter/SilentRaven holds, our cast).
 
 ## 1.1.10 turn-in: Tyrael not in the actor list (2026-09-28, live 3.3.5)
 Live: `[WarPigs:turn_in] NPC not found … Looking for: NPC_QST_X2_Tyrael_NonCombat` every 4 s for 800+ s, the bot stood in Temis. APPROACH_NPC returned without moving.

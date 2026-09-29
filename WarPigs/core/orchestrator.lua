@@ -2702,7 +2702,7 @@ function orchestrator.tick()
             if ok and suspended == true then
                 matched = false
                 dispatch.task_suspended[pattern] = true
-                dispatch.note('suspended:' .. pattern, pattern .. ' suspended (task gave up) — continuing with the next War Plan step')
+                dispatch.note('suspended:' .. pattern, pattern .. ' suspended (task gave up; retried later) — the next War Plan step, or the pit filler when enabled, runs meanwhile')
             else
                 dispatch.notes['suspended:' .. pattern] = nil
             end
@@ -2834,10 +2834,14 @@ function orchestrator.tick()
     -- only ever fills empty gaps.  When a new WarPlans quest arrives next
     -- tick, the filler skips this block and the normal disable phase pulls
     -- ArkhamAsylumPlugin out (deferred by its in_town_disable_when).
+    -- QQT_Warpigz_v3 1.1.11: a suspended turn-in (Tyrael not found) is a
+    -- finished plan WarPug cannot replace (it plans only without WarPlans
+    -- quests), so the filler runs during the suspension too.
+    local turn_in_suspended = dispatch.task_suspended[TURN_IN_PATTERN] == true
     if settings.run_pit_after_turnin
-        and had_turn_in_complete
+        and (had_turn_in_complete or turn_in_suspended)
         and next(wants) == nil
-        and not plan_creator_enabled()
+        and (turn_in_suspended or not plan_creator_enabled())
     then
         local any_task_active = false
         for pattern, raw_entry in pairs(orchestrator.quest_plugin_map) do
@@ -3871,10 +3875,25 @@ function orchestrator.activity_on()
     return next(owned) ~= nil
 end
 
+-- QQT_Warpigz_v3 1.1.11: seconds left in a suspended turn-in, or nil.
+function orchestrator.turn_in_suspended_left()
+    local raw = orchestrator.quest_plugin_map and orchestrator.quest_plugin_map[TURN_IN_PATTERN]
+    local task = raw and normalize(raw).task
+    if not dispatch.task_suspended[TURN_IN_PATTERN] or not task or type(task.suspended_left) ~= 'function' then return nil end
+    local ok, left = pcall(task.suspended_left, get_time_since_inject())
+    return ok and type(left) == 'number' and left or nil
+end
+
 local function base_status_line()
     local names = {}
     for n in pairs(owned) do names[#names+1] = n end
-    if #names > 0 then return 'WarPigs: managing ' .. table.concat(names, ', ') end
+    -- QQT_Warpigz_v3 1.1.11: a suspended turn-in is visible.
+    local left = orchestrator.turn_in_suspended_left()
+    local suspended = left and string.format('turn-in suspended (Tyrael not found), retry in %ds', math.ceil(left)) or nil
+    if #names > 0 then
+        return 'WarPigs: managing ' .. table.concat(names, ', ') .. (suspended and (' — ' .. suspended) or '')
+    end
+    if suspended then return 'WarPigs: ' .. suspended end
     -- Show active task state so "watching quests" doesn't mask turn-in work.
     for pattern in pairs(last_matches) do
         local raw_entry = orchestrator.quest_plugin_map[pattern]

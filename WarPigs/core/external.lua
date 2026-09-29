@@ -51,6 +51,8 @@ local external = {
             version = settings.plugin_version,
             enabled = gui.elements.main_toggle:get() and settings.get_keybind_state(),
             busy    = orchestrator.activity_on(),
+            -- QQT_Warpigz_v3 1.1.11: seconds left in a suspended turn-in, or nil.
+            turn_in_suspended_s = orchestrator.turn_in_suspended_left(),
         }
     end,
 }
