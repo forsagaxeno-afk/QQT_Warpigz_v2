@@ -18,8 +18,8 @@
 --  * get_status: the observed Butler fields, filled from Rosie's status.
 --  * Any other name Worldstone reads returns a no-op function (nil result)
 --    and is logged once, so the owner's next log names it.
---  * Rosie's own town code never yields to this table (foreign.lua peer()
---    skips _rosie tables).
+--  * Rosie's own town code never yields to this table (foreign.lua
+--    real_butler() skips _rosie tables; 1.0.32).
 --  * Every entry point is pcall-guarded and never raises.
 local M={NAME='Butler',PEER='Worldstone'}
 local cfg={} -- alive, option, busy, will_run, status, in_town, step: functions
@@ -107,11 +107,21 @@ function M.get_status()
         counts={stash=0,salvage=0,inventory=0,talismans=0,keep=0,sell=0}}
 end
 local function noop() return nil end
+-- QQT_Warpigz_v3 1.0.32 (Coordinator review): any addon may read a missing
+-- name, not only Worldstone; the line names the reading source when the host
+-- has debug.getinfo (level 2: the code that indexed the table).
+local function reader()
+    local dbg=rawget(_G,'debug')
+    if type(dbg)~='table' or type(dbg.getinfo)~='function' then return '' end
+    local ok,info=pcall(dbg.getinfo,3,'Sl')
+    if not ok or type(info)~='table' or type(info.short_src)~='string' then return '' end
+    return string.format(' by %s:%s',info.short_src,tostring(info.currentline or '?'))
+end
 M.shim=setmetatable({_rosie=true,mimic=true,name='Rosie',
     is_busy=M.is_busy,needs_visit=M.needs_visit,get_status=M.get_status},
     {__index=function(_,key)
-        if type(key)=='string' and key:sub(1,2)~='__' then
-            log_once('missing|'..key,'Worldstone called Butler.'..key..' - not mimicked yet')
+        if type(key)=='string' and key:sub(1,2)~='__' and not logged['missing|'..key] then
+            log_once('missing|'..key,'Butler.'..key..' called (not mimicked yet)'..reader())
         end
         return noop
     end})

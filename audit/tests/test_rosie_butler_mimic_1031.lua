@@ -124,10 +124,30 @@ case('B6 an unknown name is a no-op that never throws, logged once', function()
     local okc, r = h.as(CONSUMER, function() return pcall(function() return butler(h).start_trip('Worldstone') end) end)
     eq(okc, true, 'no throw'); eq(r, nil, 'nil result')
     h.as(CONSUMER, function() return butler(h).start_trip() end)
-    eq(h.logged('Worldstone called Butler.start_trip - not mimicked yet'), 1, 'logged once')
+    eq(h.logged('Butler.start_trip called (not mimicked yet)'), 1, 'logged once (1.0.32 wording)')
+    -- the reading source is appended only when the host exposes debug.getinfo (not in the joint host)
     local s = h.as(CONSUMER, function() return butler(h).get_status() end)
     eq(type(s), 'table', 'get_status works')
     h.assert_clean('B6')
+end)
+
+-- QQT_Warpigz_v3 1.0.32 (Coordinator review of 1.0.31): foreign.butler_busy()
+-- read Rosie's own stand-in, so during her own trip get_status().foreign_busy
+-- was 'Butler' (farm plugins read it as a third-party Butler trip).
+case('B7 during Rosie\'s own trip with the stand-in published: foreign_busy and paused_by stay clear', function()
+    local h = new()
+    worldstone(h)
+    h.run(0.5)
+    ok(own(h), 'published')
+    fill(h)
+    local saw, bad = false, nil
+    ok(h.run_until(function()
+        local s = st(h)
+        if s.running then saw = true; if s.foreign_busy ~= nil or s.paused_by == 'Butler' then bad = bad or tostring(s.foreign_busy) end end
+        return saw and not s.running
+    end, 240), 'a trip ran\n' .. h.tail(6))
+    eq(bad, nil, 'foreign_busy stays nil during her own trip (1.0.31: Butler)')
+    h.assert_clean('B7')
 end)
 
 print(string.format('rosie butler 1.0.31: %d checks, %d failures', checks, #failures))

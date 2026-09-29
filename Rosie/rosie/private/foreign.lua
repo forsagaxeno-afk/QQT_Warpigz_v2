@@ -35,9 +35,18 @@ function M.scavenger_busy()
     local ok,busy=call(real_scavenger(),'is_busy')
     return ok and busy==true
 end
+-- QQT_Warpigz_v3 1.0.32 (Coordinator review of 1.0.31): the Butler addon,
+-- never Rosie's own stand-in (butler_mimic.lua, _rosie=true): during her own
+-- trip get_status().foreign_busy read 'Butler' (her own trip as a third-party one).
+local function real_butler()
+    local t=peer('Butler')
+    if t and rawget(t,'_rosie')~=true then return t end
+    return nil
+end
+M.real_butler=real_butler
 -- Butler (another town service): Rosie never starts a trip while it runs one.
 function M.butler_busy()
-    local ok,busy=call(peer('Butler'),'is_busy')
+    local ok,busy=call(real_butler(),'is_busy')
     return ok and busy==true
 end
 function M.navigator_status()

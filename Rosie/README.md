@@ -1,6 +1,6 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.31
+One local addon for pickup, item rules, repairs and storage. Version 1.0.32
 (QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
@@ -345,7 +345,8 @@ plugin. While Worldstone runs and no Butler addon is installed, Rosie publishes
 trip (Worldstone stands still meanwhile), `Butler.needs_visit()` is true only when
 Rosie's automatic service will run the trip, and `Butler.get_status()` reports the
 Butler fields from Rosie's own status. A name Rosie does not answer yet is a
-no-op, logged once as `Worldstone called Butler.<name> - not mimicked yet`. A real
+no-op, logged once as `Butler.<name> called (not mimicked yet)` (plus the reading
+source when the host exposes it). A real
 Butler always wins. Pickup rules > **Stand in for Butler while Worldstone runs**
 (on by default) turns this off. The console shows `[Rosie] Standing in for Butler
 for Worldstone (no Butler installed)` once.
