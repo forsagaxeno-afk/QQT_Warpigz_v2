@@ -2,6 +2,13 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.19] — 2026-09-29
+
+### Fixed
+
+- **HelltideRevamped 2.6.6: the bot stands in tears again** (live report: "not standing in tears to close those").
+  - Batmobile's walk to a tear ends on the walkable spot next to it, 1-3 m off, so the player stood outside the charge circle until the tear was skipped. Within 5 m of the tear, once the walk stops making progress, HR now steps into the circle directly (logged once per tear: "The walk stopped …m from the tear — stepping into its circle directly").
+
 ## [3.3.18] — 2026-09-29
 
 ### Fixed
