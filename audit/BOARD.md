@@ -143,6 +143,14 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 
 ## Auditor / critic findings
 
+### Rosie 1.0.30 verify (`claude/qqt-rosie@3a15351`), 2026-09-29 11:10 UTC: **OK to merge, release it**
+- **HIGH fixed.** The grace now uses its own `grace_fight()`: a spell cast right now (not 186139) or a counted enemy within `fight_radius`. The trailing 3 s cast window is gone from the grace; the NAVSTOP stop still uses `nav_fight`. `audit/reviews/repro_rosie_postkill_grace_1029.lua` passes all 4 timings on 1.0.30 under Lua 5.4 and LuaJIT, and fails 3 of 4 on 1.0.29. The branch's Z1 in `test_rosie_nav_fight_1029` covers it.
+- **LOW fixed: paused Navigator.** `nav_live` records `is_paused`, and `nav_watch` treats busy + paused like Rosie's own hold. `repro_rosie_navwatch_paused_1029.lua` passes.
+- **LOW fixed: rolling reference.** `nav_moving` now uses a rolling reference: a fall of `gain` m within `span` s, refreshed each span, not counted while Rosie owns movement. `rd0` is gone everywhere.
+- Tests pass under both runtimes: nav_fight_1029, nav_hold_1025, pickup_1029, scavenger_mimic, foreign_mover, joint_rosie and live_paths_1025. `grace_fight` uses the same `Utils.call(Utils.host_call(get_local_player),…)` pattern as `cast_now`.
+- Live check after release: under Worldstone, kill a pack or boss. The first drop must be picked, and a yield line, if any, must show `grace=` set, not `grace=none`.
+
+
 ### Rosie 1.0.29 review (shipped in 3.3.17), 2026-09-29 10:10 UTC: **HIGH regression, fix before the owner's next Worldstone run**
 Reviewed at `claude/qqt-rosie@6b8e47e`, which equals the release. Method: an auditor and a critic, then 2 skeptics per finding. The claimed items are fixed, and each new test fails on 1.0.28: F1/F2, N20, R3, L1, R4. The R3 step-in breaks at most one exit channel per refused drop (bounded). Repros: `audit/reviews/repro_rosie_postkill_grace_1029.lua` and `repro_rosie_navwatch_paused_1029.lua`; copy one to `audit/tests/test_zz_*.lua` and run it with `--luajit off`. Both fail on 3.3.17 and pass on 3.3.16.
 - **[HIGH] Rosie (→ Rosie, FYI Coordinator): the post-kill drop is lost again under Worldstone.** `pickup.lua` foreign_move now skips the Navigator grace while `nav_fight(now)`. `nav_fight` is true for `FIGHT.cast` = 3 s after *any* cast, even with no enemy left. The fight hold itself ends after `FIGHT.calm` = 1 s, so for about 2 s after a kill Rosie is out of the fight hold but has no grace. That is exactly the owner's headline 1.0.25/1.0.26 case: the boss dies, drops fall, and Worldstone's portal command is already in flight. Rosie yields (`yield 1 … grace=none`), Navigator drags the player 30 m away, and the drop is skipped as `outside pickup distance 15`.
