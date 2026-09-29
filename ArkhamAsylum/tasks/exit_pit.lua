@@ -14,6 +14,54 @@ local task = {
     status = status_enum['IDLE'],
     debounce_time = nil
 }
+-- QQT_Warpigz_v3 Arkham 2.1.5 (sweep A3): walk the boss pile before the exit
+-- cast. At most PILE_MAX s per floor in all; each drop is visited once
+-- (reached and held PILE_DWELL s for Rosie's pickup, or given up after
+-- PILE_ITEM_MAX s). The forced (reset timer) exit never waits for it.
+local PILE_MAX, PILE_ITEM_MAX, PILE_DWELL, PILE_ARRIVE = 20, 10, 1.5, 1.2
+local pile = {since = nil, key = nil, key_since = nil, arrive = nil, visited = {}, over = false}
+local function sweep_boss_pile(local_player)
+    if pile.over then return false end
+    local gizmo = utils.get_glyph_upgrade_gizmo()
+    local anchor = tracker.glyph_anchor_pos or (gizmo and gizmo:get_position()) or nil
+    local item, key, pos = utils.boss_pile_drop(anchor, pile.visited, pile.key)
+    if not item then
+        pile.key = nil
+        return false
+    end
+    local now = get_time_since_inject()
+    pile.since = pile.since or now
+    if now - pile.since >= PILE_MAX then
+        pile.over = true
+        console.print(string.format('[exit_pit] boss pile sweep over after %.0fs — exiting', now - pile.since))
+        return false
+    end
+    if key ~= pile.key then pile.key, pile.key_since, pile.arrive = key, now, nil end
+    local d = utils.distance(local_player, pos)
+    if d <= PILE_ARRIVE then
+        pile.arrive = pile.arrive or now
+        utils.stop_movement()
+        if now - pile.arrive >= PILE_DWELL then pile.visited[key] = true; pile.key = nil end
+        task.status = 'waiting for boss pile pickup'
+        return true
+    end
+    if now - pile.key_since >= PILE_ITEM_MAX then
+        pile.visited[key] = true
+        pile.key = nil
+        console.print(string.format('[exit_pit] boss pile drop %.1f away not reached in %ds — skipping it', d, PILE_ITEM_MAX))
+        return true
+    end
+    BatmobilePlugin.pause(plugin_label)
+    if d < 5 then
+        pathfinder.force_move_raw(pos)
+    else
+        BatmobilePlugin.set_target(plugin_label, pos, true)
+        BatmobilePlugin.move(plugin_label)
+    end
+    task.status = string.format('walking to boss pile drop (%.1f)', d)
+    return true
+end
+
 local exit_with_debounce = function (delay)
     if tracker.exit_trigger_time + settings.exit_pit_delay >= get_time_since_inject() then
         local wait_time = tracker.exit_trigger_time + settings.exit_pit_delay - get_time_since_inject()
@@ -62,6 +110,11 @@ end
 task.Execute = function ()
     local local_player = get_local_player()
     if not local_player then return end
+    -- QQT_Warpigz_v3 Arkham 2.1.5: boss pile first (not on the forced exit,
+    -- not once the exit has been triggered).
+    if tracker.exit_trigger_time == nil and not utils.exit_pit_forced()
+        and sweep_boss_pile(local_player)
+    then return end
     -- Stop any in-flight long_path navigation BEFORE pausing. Batmobile's
     -- main_pulse re-runs navigator.unpause() + update() + move() every frame
     -- while long_path.navigating is true (see Batmobile main.lua:85), which
@@ -94,8 +147,16 @@ task.Execute = function ()
     end
 end
 
+-- QQT_Warpigz_v3 Arkham 2.1.5: time yielded to Rosie's pickup (or Alfred) is
+-- not sweep time.
+task.on_yield = function (seconds)
+    if pile.since then pile.since = pile.since + seconds end
+    if pile.key_since then pile.key_since = pile.key_since + seconds end
+end
+
 task.reset = function ()
     task.debounce_time = nil
+    pile.since, pile.key, pile.key_since, pile.arrive, pile.visited, pile.over = nil, nil, nil, nil, {}, false -- QQT_Warpigz_v3 Arkham 2.1.5
 end
 
 return task

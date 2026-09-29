@@ -420,6 +420,31 @@ function rotation.set_external(boss_id, run_type)
     return true
 end
 
+-- QQT_Warpigz_v3 Reaper 1.10.7: one committed run of `boss_def` (from
+-- enums.boss_zones) for a fight already in progress at startup whose summon
+-- spent the last key: kill, chest, then is_done() (manual, non-external, so
+-- the run stays a manual run and never re-summons).
+function rotation.set_committed(boss_def)
+    local tier = boss_def.key_tier or "lair"
+    rotation.boss_list = { {
+        id             = boss_def.id,
+        zone_prefix    = boss_def.zone_prefix,
+        label          = boss_def.label,
+        key_tier       = tier,
+        run_type       = tier,
+        runs_remaining = 1,
+        committed      = true,
+    } }
+    rotation.current_idx = 1
+    rotation.mode        = "manual"
+    rotation.failed = false
+    rotation.failure_reason = nil
+    if tier == "husk" then rotation.pools.husk = HUSK_COST else rotation.pools[tier] = 1 end
+    refresh_runs_remaining()
+    rotation.initialized = true
+    tracker.current_boss_kills = 0
+end
+
 function rotation.clear_external()
     if rotation.external then
         console.print("[Reaper] Clearing external rotation flag.")

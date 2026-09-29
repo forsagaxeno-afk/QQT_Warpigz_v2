@@ -411,7 +411,10 @@ function bomber:move_in_pattern(move_positions, run_victory_lap)
         else
             if target_reach_time == 3 then 
                reached_target = true
-               target_reach_time = get_time_since_inject()
+               -- QQT_Warpigz_v3 HordeDev 2.2.8 (sweep D1): the dwell counter
+               -- restarts at 0; it held a timestamp, so the next point within
+               -- 2 m never reached '== 3' (the victory lap stood forever).
+               target_reach_time = 0
             else
                target_reach_time = target_reach_time + 1
             end
@@ -570,7 +573,9 @@ function bomber:main_pulse()
             if not tracker.victory_lap then
                 if not tracker.victory_positions then
                     -- Start from first position
-                    move_index = 1
+                    -- QQT_Warpigz_v3 HordeDev 2.2.8 (sweep D1): the lap starts
+                    -- with a fresh dwell state, not the wave pattern's.
+                    move_index, reached_target, target_reach_time = 1, false, 0
                     if get_player_pos():dist_to(horde_left_position) < get_player_pos():dist_to(horde_right_position) then
                         console.print("Doing a victory lap from left.")
                         tracker.victory_positions = left_positions

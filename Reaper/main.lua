@@ -1,5 +1,5 @@
 -- ============================================================
---  Reaper  v1.10.6
+--  Reaper  v1.10.7
 --  by Magoogle
 --
 --  Flow per run:
@@ -25,6 +25,7 @@ local revive       = require "tasks.revive"
 local alfred_task  = require "tasks.alfred"
 local dungeon_reset = require "tasks.dungeon_reset"
 local interact_altar = require "tasks.interact_altar" -- QQT_Warpigz_v3 (status text)
+local kill_monsters = require "tasks.kill_monsters" -- QQT_Warpigz_v3 Reaper 1.10.7 (C-boss)
 local activity_lease = require "core.activity_lease" -- QQT_Warpigz_v3
 local events       = require "core.qqt_events" -- QQT_Warpigz_v3
 
@@ -110,6 +111,27 @@ local function refuse_external(boss_id)
     return nil
 end
 
+-- QQT_Warpigz_v3 Reaper 1.10.7: enabled/reloaded inside a lair whose boss
+-- fight is already in progress (live boss or reward chest up) with no key
+-- left for it (the summon spent the last one): join it with a one-run
+-- committed rotation instead of refusing and leaving the boss and its chest.
+local function join_fight_in_progress()
+    local zone = utils.get_zone()
+    if not enums.is_boss_zone(zone) then return false end
+    local ok, fight = pcall(interact_altar.fight_in_progress)
+    if not ok or not fight then return false end
+    for _, bd in ipairs(enums.boss_zones) do
+        if enums.zone_matches(bd, zone) then
+            if refuse_external(bd.id) then return false end
+            rotation.set_committed(bd)
+            console.print(string.format("[Reaper] Joining the fight already in progress (%s, %s) — one committed run.",
+                bd.label, fight))
+            return true
+        end
+    end
+    return false
+end
+
 local function on_enable()
     local lp = get_local_player()
     if not lp then return false, "no local player" end
@@ -165,6 +187,7 @@ local function on_enable()
     materials.print_summary()
 
     rotation.build(settings)
+    if not rotation.initialized then join_fight_in_progress() end -- QQT_Warpigz_v3 Reaper 1.10.7
 
     -- QQT_Warpigz_v3: a manual Belial target is skipped while the Belial
     -- Chest sequence is off (see boss_rotation.build); say so plainly.
@@ -230,6 +253,14 @@ local function run_in_progress(enabled)
         or alfred_task.status == "waiting for alfred to complete"
 end
 
+-- QQT_Warpigz_v3 Reaper 1.10.7 (contract C-boss): see status().boss_fight.
+local function boss_fight_now(enabled)
+    if not enabled or finishing then return false end
+    if task_manager.get_current_task() ~= kill_monsters then return false end
+    local ok, live = pcall(kill_monsters.boss_fight)
+    return ok and live == true
+end
+
 -- C6: why Reaper is holding (Alfred or Looter), for status and overlay.
 local function hold_reason()
     return alfred_task.hold_reason() or utils.loot_hold_reason()
@@ -283,6 +314,14 @@ on_update(function()
     if not lp then return end
     local world = get_current_world()
     if not world or world:get_current_zone_name() == "" then return end
+    -- QQT_Warpigz_v3 Reaper 1.10.7: no task during a Limbo/Loading world (as
+    -- ArkhamAsylum/main.lua): out of the lair there it re-teleported mid-fight.
+    local named, world_name = pcall(function() return world:get_name() end)
+    if not named or type(world_name) ~= "string" then world_name = "?" end
+    if world_name == "" or world_name:find("Limbo", 1, true) or world_name:find("Loading", 1, true)
+            or world:get_current_zone_name() == "[sno none]" then
+        return
+    end
 
     -- Death recovery also applies while returning to town.
     if revive.shouldExecute() then revive.Execute(); return end
@@ -347,7 +386,7 @@ on_render(function()
     end
 
     local x, y = 20, 60
-    graphics.text_2d("=== REAPER  v1.10.6  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
+    graphics.text_2d("=== REAPER  v1.10.7  by Magoogle ===", vec2:new(x, y), 14, color_orange(255))
     y = y + 20
     if activity_lease.reason then -- QQT_Warpigz_v3
         graphics.text_2d(activity_lease.reason, vec2:new(x, y), 13, color_yellow(255))
@@ -522,11 +561,15 @@ ReaperPlugin = {
             last_result  = run.last_result,
             last_error   = run.last_error,
             hold_reason  = hold_reason(),
+            -- QQT_Warpigz_v3 Reaper 1.10.7 (contract C-boss): a live boss fight
+            -- (Kill Monsters running with fresh fight evidence; bounded there).
+            -- Rosie defers her automatic town trip while it is true.
+            boss_fight   = boss_fight_now(enabled),
         }
     end,
 }
 
 console.print("=============================================")
-console.print("  Reaper  v1.10.6  by Magoogle  - Loaded")
+console.print("  Reaper  v1.10.7  by Magoogle  - Loaded")
 console.print("  Enable in menu to start reaping")
 console.print("=============================================")

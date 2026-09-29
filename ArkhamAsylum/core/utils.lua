@@ -166,6 +166,53 @@ utils.looter_hold = function (max_hold, what)
     return false
 end
 
+-- QQT_Warpigz_v3 Arkham 2.1.5 (sweep 2026-09-28 A3 / S2 F4): the exit only waited
+-- for drops inside Rosie's own pickup distance (2 m shipped default), so a
+-- boss Mythic/Legendary 2-5 m from the glyphstone stayed behind. The boss
+-- pile: a drop within PILE_RADIUS of the anchor, rarity >= 5, that Rosie
+-- wants regardless of distance (evaluate_item(item, true)) but not from where
+-- the player stands (evaluate_item(item, false)). Rosie's radius is never
+-- widened (that pulls the player off Navigator/Worldstone routes). `keep`
+-- (a key) is still returned once in Rosie's range: the walk to it goes on
+-- until the pickup had its chance. Returns item, key, position or nil.
+local PILE_RADIUS, PILE_MIN_RARITY = 12, 5
+local function pile_key(item, pos)
+    local ok, id = pcall(function() return item:get_id() end)
+    if ok and type(id) == 'number' then return 'id' .. id end
+    return string.format('%d_%d', math.floor(pos:x()), math.floor(pos:y()))
+end
+utils.boss_pile_drop = function (anchor, visited, keep)
+    local looter = LooteerPlugin
+    if anchor == nil or type(looter) ~= 'table' or type(looter.evaluate_item) ~= 'function' then return nil end
+    if type(looter.get_enabled) == 'function' then
+        local ok, enabled = pcall(looter.get_enabled)
+        if not ok or enabled ~= true then return nil end
+    end
+    local ok, item, key, pos = pcall(function()
+        local me = get_player_position()
+        local best, best_key, best_pos, best_d = nil, nil, nil, math.huge
+        for _, it in pairs(actors_manager.get_all_items() or {}) do
+            local ipos = it:get_position()
+            if ipos and utils.distance(ipos, anchor) <= PILE_RADIUS then
+                local k = pile_key(it, ipos)
+                local info = it.get_item_info and it:get_item_info() or nil
+                local rarity = info and info.get_rarity and info:get_rarity() or nil
+                if not (visited and visited[k]) and type(rarity) == 'number' and rarity >= PILE_MIN_RARITY
+                    and looter.evaluate_item(it, true) == true
+                    and (k == keep or looter.evaluate_item(it, false) ~= true)
+                then
+                    local d = me and utils.distance(ipos, me) or 0
+                    if k == keep then d = -1 end
+                    if d < best_d then best, best_key, best_pos, best_d = it, k, ipos, d end
+                end
+            end
+        end
+        return best, best_key, best_pos
+    end)
+    if not ok then return nil end
+    return item, key, pos
+end
+
 -- QQT_Warpigz_v3: a SilentRaven Whisper claim (its own auto-fire or keybind,
 -- or a queued request) owns Temis movement and clicks until it finishes,
 -- bounded by SilentRaven (100 s run, 120 s pause). Town steps (walks,

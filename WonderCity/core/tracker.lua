@@ -7,6 +7,10 @@ local tracker = {
     name = plugin_label,
     undercity_start_time = get_time_since_inject(),
     exit_trigger_time = nil,
+    -- QQT_Warpigz_v3 WonderCity 2.2.7: when exit_undercity last CAST the exit
+    -- (teleport / reset). exit_trigger_time only starts the exit delay; a
+    -- trip that starts inside that delay must still resume the run (W1).
+    exit_cast_time = nil,
     exit_reset = false,
     boss_trigger_time = nil,
     boss_kill_time = nil,
@@ -99,6 +103,7 @@ end
 
 tracker.reset_floor_state = function ()
     tracker.exit_trigger_time = nil
+    tracker.exit_cast_time = nil -- QQT_Warpigz_v3 WonderCity 2.2.7 (W1)
     tracker.exit_reset = false
     tracker.boss_trigger_time = nil
     tracker.boss_kill_time = nil
@@ -124,6 +129,7 @@ tracker.reset_floor_state = function ()
     tracker.kill_dismissed_at = nil
     tracker.last_boss_name, tracker.last_boss_health, tracker.last_boss_at = nil, nil, nil
     tracker.boss_seen_at = nil -- QQT_Warpigz_v3
+    tracker.boss_last_pos = nil -- QQT_Warpigz_v3 WonderCity 2.2.7 (W4)
 end
 
 tracker.forget_resume = function ()
@@ -174,7 +180,10 @@ tracker.observe_world = function (alfred_trip)
     tracker.world_key = key
     tracker.in_undercity = inside
     if kind == 'outside' then
-        if left and alfred_trip and tracker.exit_trigger_time == nil then
+        -- QQT_Warpigz_v3 WonderCity 2.2.7 (W1): keyed on the exit CAST, not on
+        -- the exit delay (a Rosie trip inside the 10 s delay made the return
+        -- a new run: the opened chest forgotten, the instance re-explored).
+        if left and alfred_trip and tracker.exit_cast_time == nil then
             tracker.resume_key, tracker.resume_until = left, now + RESUME_WINDOW
             console.print('[WonderCity:tracker] left ' .. left .. ' for an Alfred trip — the run resumes on return')
         end
@@ -188,6 +197,7 @@ tracker.observe_world = function (alfred_trip)
         -- Same Undercity world: keep the deadline, enticements and reward
         -- state; only the per-visit exit stamps start over.
         tracker.exit_trigger_time = nil
+        tracker.exit_cast_time = nil -- QQT_Warpigz_v3 WonderCity 2.2.7 (W1)
         tracker.exit_reset = false
         tracker.loot_quiet_since = nil
         console.print('[WonderCity:tracker] back in ' .. key .. ' — resuming the run')
