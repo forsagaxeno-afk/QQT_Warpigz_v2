@@ -65,7 +65,10 @@ local function bump(z, list, k)
     if n < M.CAP then
         list[k] = n + 1
         z.dirty = true
-        M.gen = M.gen + 1 -- QQT_Warpigz_v3 2.6.5: road exit caches follow the fence
+        -- QQT_Warpigz_v3 2.6.5: road caches follow the fence; only a change
+        -- that can flip a cell's out status (every inside sample bumped it,
+        -- so the caches lived about 2 s).
+        if list == z.out or (z.out[k] or 0) > 0 then M.gen = M.gen + 1 end
     end
     z.any = true
     return true

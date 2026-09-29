@@ -72,10 +72,7 @@ R.case('jirandai: the road cost is close to the shortest road route and steady o
     end
     local detail = '\n    ' .. table.concat(rows, '\n    ')
     ok(ratio <= 1.5, string.format('road cost up to %.1fx the shortest road route%s', ratio, detail))
-    -- 2.6.5: starts on another lap only within LAP_EXTRA of the nearest one
-    -- (the hairpin guard), so a 15 m step may still swap the start lap; the
-    -- single-nearest planner swung by about 1.8 km here.
-    ok(jump <= 200, string.format('a 15 m step changed a road cost by %.0f m more than the step%s', jump, detail))
+    ok(jump <= 100, string.format('a 15 m step changed a road cost by %.0f m more than the step%s', jump, detail))
 end)
 
 R.case('jirandai: the planned route really walks the chosen arc (start and exit near player and chest)', function()
@@ -122,11 +119,12 @@ R.case('figure-eight: at the crossing a chest on the other lobe is reached acros
     ok(cost < 200, string.format('across the crossing (%.0f m), not round a lobe', cost))
 end)
 
--- QQT_Warpigz_v3 2.6.5 (review of 2.6.4, b): the start side had no hairpin
--- guard: any lap within the 40 m road reach was a start, so a player on one
--- lane of a hairpin "started" on the other lane 35 m away, across what the
--- loop goes round. Starts on another lap only within LAP_EXTRA of the
--- nearest one, and never across the learned Helltide border.
+-- QQT_Warpigz_v3 2.6.5 (review of 2.6.4, b): the start side had no border
+-- check: any lap within the 40 m road reach was a start, so a player on one
+-- lane of a hairpin "started" on the other lane across a learned out cell
+-- (the Helltide border runs between the lanes). A start whose straight leg
+-- from the player crosses an out cell is not a start; without one, the
+-- other lane stays a start (it often gives the short road: jirandai above).
 local function hairpin(gap)
     local wps = {}
     for x = -600, 600, 4 do wps[#wps + 1] = v(x, 0, 0) end
@@ -136,15 +134,37 @@ local function hairpin(gap)
     return wps
 end
 
-R.case('hairpin: a player on the lower lane does not start on the upper lane 35 m away', function()
-    local s, roads = session(hairpin(35))
+R.case('hairpin: no start on the other lane across a learned out cell; the other lane is a start without one', function()
+    local s, roads = session(hairpin(38))
+    local fence = s.require('core.hr_fence')
+    s.tracker.hr_fence = fence
     local p = v(0, 0, 0)
-    local chest = v(-150, 40, 0)                      -- 5 m off the upper lane
+    local chest = v(-150, 43, 0)                      -- 5 m off the upper lane
     s.pos = p
     local route = roads.plan(chest, p)
-    ok(route ~= nil, 'a route')
     local L = roads.loop()
+    ok(route ~= nil and L.ys[route.i0] > 30, 'without an out cell the upper lane is the short start')
+    -- the Helltide border between the lanes: learned out cells at y = 25 (the 20-40 m cell row)
+    for _ = 1, 3 do fence.tick(s.now, true, v(0, 0, 0)); s.advance(2.1) end
+    for x = -60, 60, 20 do fence.on_left(v(x, 25, 0)); fence.on_left(v(x, 25, 0)) end
+    s.pos = v(0.5, 0, 0)
+    route = roads.plan(chest, s.pos)
+    ok(route ~= nil, 'a route')
     ok(L.ys[route.i0] < 1, string.format('the start is on the player\'s lane (y=%.0f)', L.ys[route.i0]))
+end)
+
+R.case('fence.gen moves only when a cell can change its out status (road caches live across inside samples)', function()
+    local s = session(hairpin(38))
+    local fence = s.require('core.hr_fence')
+    s.tracker.hr_fence = fence
+    local g0 = fence.gen
+    for i = 1, 5 do fence.tick(s.now, true, v(i * 25, 0, 0)); s.advance(2.1) end
+    ok(fence.gen == g0, 'inside samples of plain cells: gen ' .. g0 .. ' -> ' .. fence.gen)
+    fence.on_left(v(0, 25, 0))
+    ok(fence.gen > g0, 'an out sample moves gen')
+    local g1 = fence.gen
+    fence.tick(s.now, true, v(0, 25, 0)); s.advance(2.1)
+    ok(fence.gen > g1, 'an inside sample of a cell with out samples moves gen')
 end)
 
 R.finish()
