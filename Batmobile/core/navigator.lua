@@ -1882,7 +1882,9 @@ navigator.move = function ()
             -- Push last_update forward so we don't re-trip every tick
             navigator.last_update = get_time_since_inject() + 0.5
         else
-            console.print('[nav] STUCK target=' .. utils.vec_to_string(navigator.target) .. ' dist=' .. string.format('%.1f', dist_to_target) .. ' path=#' .. #navigator.path .. ' unstuck_count=' .. navigator.unstuck_count)
+            -- QQT_Warpigz_v3 2.2.4: per-attempt diagnostics honour the logging
+            -- combo (sweep B1: raw lines ignored it, Disabled included).
+            nav_log('stuck', true, '[nav] STUCK target=' .. utils.vec_to_string(navigator.target) .. ' dist=' .. string.format('%.1f', dist_to_target) .. ' path=#' .. #navigator.path .. ' unstuck_count=' .. navigator.unstuck_count)
             tracker.bench_start("unstuck")
             unstuck(local_player)
             tracker.bench_stop("unstuck")
@@ -2081,7 +2083,7 @@ navigator.move = function ()
             and navigator.last_trav == nil
             and (navigator.trav_delay == nil or get_time_since_inject() > navigator.trav_delay)
         then
-            console.print('[nav] PARTIAL PATH REJECTED (plen=' .. #result ..
+            nav_log('partial_rejected', true, '[nav] PARTIAL PATH REJECTED (plen=' .. #result ..
                 ' dist=' .. string.format('%.1f', dist_to_target) ..
                 ') — too short to make progress, falling through to failure')
             result = {}
@@ -2098,7 +2100,7 @@ navigator.move = function ()
             and (navigator.trav_delay == nil or get_time_since_inject() > navigator.trav_delay)
             and settings.require_full_path_explore
         then
-            console.print('[nav] PARTIAL PATH SKIPPED (require_full_path_explore plen=' ..
+            nav_log('partial_skipped', true, '[nav] PARTIAL PATH SKIPPED (require_full_path_explore plen=' ..
                 #result .. ' dist=' .. string.format('%.1f', dist_to_target) .. ')')
             result = {}
             is_partial = false
@@ -2134,7 +2136,7 @@ navigator.move = function ()
                 end
             end
             if near_wall then
-                console.print('[nav] PARTIAL PATH SKIPPED (wall_path endpoint within ' ..
+                nav_log('partial_wall', true, '[nav] PARTIAL PATH SKIPPED (wall_path endpoint within ' ..
                     string.format('%.1f', radius) .. 'u of unwalkable; plen=' ..
                     #result .. ' dist=' .. string.format('%.1f', dist_to_target) .. ')')
                 result = {}
