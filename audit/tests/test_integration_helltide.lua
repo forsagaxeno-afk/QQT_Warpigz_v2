@@ -1162,6 +1162,30 @@ case('2.6.4 after a Rosie trip the Looter hold starts afresh: the drops at the p
     eq(s.logged('without progress — farming on'), 1, 'bounded: 15 s without a new item')
 end)
 
+-- QQT_Warpigz_v3 2.6.4 (sweep 2026-09-28 H5): the periodic debug lines
+-- ([PATROL], [NAV] mode=, [CHEST RECALL] every 1-2 s) had no switch: about
+-- 1.5-3 lines a second in every log. They are behind "Debug log" now.
+case('2.6.4 a minute of patrol and chest walks logs at most 20 lines per debug tag (Debug log off)', function()
+    local tags = {'[PATROL]', '[NAV]', '[CHEST RECALL]', '[HELLTIDE CHEST]', '[CHECK_EVENTS]'}
+    local function check(s, what)
+        for _, tag in ipairs(tags) do
+            ok(s.logged(tag) <= 20, what .. ': ' .. tag .. ' logged ' .. s.logged(tag) .. ' times in 60 s')
+        end
+    end
+    local p = session({zone = 'Scos_Coast'})       -- a minute of patrol
+    p.tick(60)
+    check(p, 'patrol')
+    local s = chest_session({chest_x = 30})         -- a minute of chest walks
+    s.tick(60)
+    check(s, 'chest')
+    -- with Debug log on they are back
+    local d = session({zone = 'Scos_Coast'})
+    d.controls.debug_log_toggle:set(true)
+    d.env.require('core.settings').debug_log = true -- this harness drives the tasks without main's settings pulse
+    d.tick(30)
+    ok(d.logged('[PATROL]') > 20, 'Debug log on: the patrol lines are logged (' .. d.logged('[PATROL]') .. ')')
+end)
+
 print(string.format('Helltide integration: %d cases, %d checks, %d failures', cases, checks, #failures))
 if #failures > 0 then error('Helltide integration failures:\n' .. table.concat(failures, '\n')) end
 print('PASS: test_integration_helltide (' .. cases .. ' cases)')

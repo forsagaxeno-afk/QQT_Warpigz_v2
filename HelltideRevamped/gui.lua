@@ -87,6 +87,7 @@ gui.elements = {
     log_tear_candidates = create_checkbox(false, plugin_label .. "log_tear_candidates"),
     debug_tree = tree_node:new(2),
     draw_chest_status = create_checkbox(false, plugin_label .. "draw_chest_status"),
+    debug_log_toggle = create_checkbox(false, plugin_label .. "debug_log"), -- QQT_Warpigz_v3 2.6.4
     -- QQT_Warpigz_v3: smart farm (Farm mode).
     smart_tree = tree_node:new(1),
     smart_order = create_checkbox(true, plugin_label .. "smart_order"),
@@ -380,6 +381,7 @@ function gui.render()
 
     if gui.elements.debug_tree:push("Debug settings") then
         gui.elements.draw_chest_status:render("Draw chest status", "Draw tracked chest labels and log scan counts every 5 seconds plus unrecognized Helltide skins once per session")
+        gui.elements.debug_log_toggle:render("Debug log", "Log the patrol, navigation and chest-walk state every 1-2 seconds ([PATROL], [NAV], [CHEST RECALL] ...). Off: only events are logged.")
         gui.elements.debug_tree:pop()
     end
 
