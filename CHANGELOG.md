@@ -2,6 +2,17 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.17] — 2026-09-29
+
+### Fixed
+
+- **Rosie 1.0.29: pickup next to Worldstone/Navigator, fights and other plugins' teleports**
+  - In a fight next to Worldstone, Rosie no longer walks off to a farther drop (the Navigator grace now has the same fight guard as the Navigator stop).
+  - The Navigator stop watchdog no longer switches itself off while Navigator is really travelling again (it only counts Navigator as idle when it does not move).
+  - Another plugin's waypoint or Town Portal channel is not taken for a fight: a drop in reach is picked up (the plugin re-casts after).
+  - "Skipped" lines are printed once per drop and reason, not again on every step back and forth.
+  - New diagnostic: "Active spell id N counts as a cast" (once per id) for the owner's logs.
+
 ## [3.3.16] — 2026-09-29
 
 ### Changed
