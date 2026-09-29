@@ -145,6 +145,13 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 
 ## Auditor / critic findings
 
+### HelltideRevamped 2.6.6 verify (`claude/qqt-helltide@f64f2b7`), 2026-09-29 12:45 UTC: **OK to merge, release it**
+- The fix matches the owner's live report ("not standing in tears"). Within `NEAR_IN` (5 m) of a chargeable tear, once the walk made no 0.3 m progress in 1 s, `close_tears_at` steps in with `helpers.force_step`: `pathfinder.force_move_raw`, with Batmobile paused and its target cleared. The step is logged once per tear. If `force_move_raw` is missing, the Batmobile walk stays. `clear_movement()` already releases `native_movement_owned`, and the next `move_to` resumes Batmobile, so nothing stays held. The existing 15 s approach bound still covers a gizmo whose collision blocks the step. No new file-level locals.
+- The new case in `test_helltide_stalls_333` (Batmobile stops 3 m short) fails on 3.3.18 ("the tear was closed: expected 1"). On the branch, it and `test_helltide_tears_joint` pass under Lua 5.4 and LuaJIT.
+- [LOW, no action needed] `sess.tear_force_key` stays set for a tear key. If the player comes back to the same tear, HR steps in without the 1 s stall check; that is harmless.
+- Live check: the log shows "The walk stopped …m from the tear — stepping into its circle directly", then the tear bar fills. Watch whether `force_move_raw` gets past the gizmo's collision.
+
+
 ### Rosie 1.0.30 verify (`claude/qqt-rosie@3a15351`), 2026-09-29 11:10 UTC: **OK to merge, release it**
 - **HIGH fixed.** The grace now uses its own `grace_fight()`: a spell cast right now (not 186139) or a counted enemy within `fight_radius`. The trailing 3 s cast window is gone from the grace; the NAVSTOP stop still uses `nav_fight`. `audit/reviews/repro_rosie_postkill_grace_1029.lua` passes all 4 timings on 1.0.30 under Lua 5.4 and LuaJIT, and fails 3 of 4 on 1.0.29. The branch's Z1 in `test_rosie_nav_fight_1029` covers it.
 - **LOW fixed: paused Navigator.** `nav_live` records `is_paused`, and `nav_watch` treats busy + paused like Rosie's own hold. `repro_rosie_navwatch_paused_1029.lua` passes.
