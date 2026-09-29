@@ -622,6 +622,14 @@ function J.new(opts)
     })
     local function host(name, val) rawset(G, name, val) end
     host('_G', G)
+    -- Sweep (opts.fast_globals, speed only): the Lua base names (pairs,
+    -- math, string, print, os, io ...) are copied into the shared table, so
+    -- a plugin's read of them skips the __index metamethod (about a fifth
+    -- of an hours-long run's CPU). Only an assignment to one of those names
+    -- is then no longer recorded in h.global_writes.
+    if opts.fast_globals then
+        for name, val in pairs(BASE) do rawset(G, name, val) end
+    end
 
     local function resolve(ctx, name)
         local rel = name:gsub('%.', '/')
@@ -742,9 +750,22 @@ function J.new(opts)
     if opts.rosie and not opts.shipped_defaults and persisted.Rosie_pickup_all_uniques == nil then
         persisted.Rosie_pickup_all_uniques = false
     end
+    -- Sweep (S2): QQT keeps a menu value the user set in this session under
+    -- its hash, and a script reload recreates the widget with that value.
+    -- Every keyed widget's set() records it in `session`; h.reload(dir,
+    -- {keep_widgets = true}) (the chaos 'reload' kind) reads it back. Without
+    -- keep_widgets a reload loads opts.persisted / the defaults, as before.
+    local session = {}
     local function stored(key, default)
+        if key ~= nil and h._keep_widgets and session[key] ~= nil then return session[key] end
         if key == nil or persisted[key] == nil then return default end
         return persisted[key]
+    end
+    local function remember(w, key)
+        if key == nil then return w end
+        local set = w.set
+        function w:set(val) set(self, val); session[key] = val end
+        return w
     end
     -- Sweep: every checkbox is registered by its hash key (h.checkboxes[key]
     -- = {w, owner}) and each plugin's '*main_toggle' by folder (h.toggles),
@@ -752,7 +773,7 @@ function J.new(opts)
     -- without calling a plugin getter (several are not read-only).
     h.checkboxes, h.toggles = {}, {}
     host('checkbox', {new = function(_, d, key)
-        local w = widget(stored(key, d == true))
+        local w = remember(widget(stored(key, d == true)), key)
         local owner = loading or context
         if type(key) == 'string' then
             h.checkboxes[key] = {w = w, owner = owner and owner.name or '-'}
@@ -760,9 +781,14 @@ function J.new(opts)
         end
         return w
     end})
-    host('combo_box', {new = function(_, d, key) return widget(stored(key, d or 0)) end})
-    host('slider_int', {new = function(_, _, _, d) return widget(d) end})
-    host('slider_float', {new = function(_, _, _, d) return widget(d) end})
+    host('combo_box', {new = function(_, d, key) return remember(widget(stored(key, d or 0)), key) end})
+    -- Sliders: the stored value is read back only on a keep_widgets reload.
+    local function slider(d, key)
+        if key ~= nil and h._keep_widgets and session[key] ~= nil then d = session[key] end
+        return remember(widget(d), key)
+    end
+    host('slider_int', {new = function(_, _, _, d, key) return slider(d, key) end})
+    host('slider_float', {new = function(_, _, _, d, key) return slider(d, key) end})
     host('tree_node', {new = function() return widget(false) end})
     host('button', {new = function() local w = widget(false); function w:render() return false end; return w end})
     host('input_text', {new = function(_, d) return widget(d or '') end})
@@ -1569,6 +1595,7 @@ function J.new(opts)
         local rec = assert(h.by_dir[dir], dir)
         if not o.keep_loaded then rec.loaded = {} end
         rec.update, rec.render, rec.menu = {}, {}, {}
+        h._keep_widgets = o.keep_widgets == true or nil -- sweep: QQT keeps the session's menu values
         loading = rec
         local chunk, err = loadfile(rec.dir .. 'main.lua', 't', G)
         if not chunk then
@@ -1578,6 +1605,7 @@ function J.new(opts)
             if not ok then h.errors[#h.errors + 1] = {plugin = rec.name, kind = 'reload', t = h.now, err = tostring(lerr)} end
         end
         loading = nil
+        h._keep_widgets = nil
     end
 
     -- ── frame loop ──────────────────────────────────────────────────────────
@@ -2418,8 +2446,8 @@ end
 -- h.chaos.replay() returns the J.new chaos table that replays the run.
 -- Kinds: death (+ ClickRevive stand-in revive at the checkpoint after
 -- `revive_after` s unless a plugin revived), drop (Mythic with probability
--- `mythic`), limbo (2-8 s), reload (one plugin's main.lua via h.reload),
--- bag_full, stash_lazy (stash full, first reads small), elite (a pack
+-- `mythic`), limbo (2-8 s), reload (one plugin's main.lua via h.reload;
+-- the menu keeps the values set in the session, as QQT does), bag_full, stash_lazy (stash full, first reads small), elite (a pack
 -- 8-14 m away), obstacle (a wall across the path for 5-20 s).
 J.CHAOS_KINDS = {'death', 'drop', 'limbo', 'reload', 'bag_full', 'stash_lazy', 'elite', 'obstacle'}
 J.CHAOS_DEFAULTS = {rate = 1.0, start = 5, channel_drop = 0.35, mythic = 0.35, revive_after = 8,
@@ -2505,7 +2533,9 @@ function J.install_chaos(h, user, host)
         local dirs = p.dir and {p.dir} or c.reload_dirs or h.dirs
         local dir = dirs[r.int(1, #dirs)]
         if not h.by_dir[dir] then return nil, 'not loaded: ' .. tostring(dir) end
-        h.reload(dir)
+        -- QQT keeps the menu values the user set in this session (the
+        -- widgets are recreated under the same hash with those values).
+        h.reload(dir, {keep_widgets = true})
         return 'reloaded ' .. dir .. '/main.lua'
     end
     function I.bag_full(r, p)
