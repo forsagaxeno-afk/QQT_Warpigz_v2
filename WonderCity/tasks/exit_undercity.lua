@@ -114,15 +114,20 @@ local exit_with_debounce = function (delay)
             return
         end
         -- QQT_Warpigz_v3 WonderCity 2.2.7 (W3): cast cap + back-off.
+        -- QQT_Warpigz_v3 WonderCity 2.2.8 (3.3.13 review #3): a forced exit
+        -- (run timer) is never delayed by the back-off.
         local now = get_time_since_inject()
-        if casts.backoff_until ~= nil then
+        local forced = utils.exit_forced()
+        if forced then
+            casts.backoff_until = nil
+        elseif casts.backoff_until ~= nil then
             if now < casts.backoff_until then
                 task.status = string.format('%s exit re-cast back-off %.0fs', status_enum['WAITING'], casts.backoff_until - now)
                 return
             end
             casts.n, casts.backoff_until = 0, nil
         end
-        if casts.n >= EXIT.MAX_CASTS then
+        if not forced and casts.n >= EXIT.MAX_CASTS then
             casts.backoff_until = now + EXIT.BACKOFF
             console.print(string.format('[WonderCity] exit cast %d times without leaving the Undercity - backing off %ds',
                 casts.n, EXIT.BACKOFF))
@@ -130,7 +135,10 @@ local exit_with_debounce = function (delay)
             return
         end
         -- QQT_Warpigz_v3 WonderCity 2.2.7 (W3): no cast into a fight (bounded).
-        if not utils.exit_forced() and now - tracker.exit_trigger_time < EXIT.ENEMY_HOLD and enemy_near() then
+        -- QQT_Warpigz_v3 WonderCity 2.2.8: the hold runs from the end of the
+        -- exit delay (from exit_trigger_time a delay >= 20 s disabled it).
+        local delay_end = tracker.exit_trigger_time + settings.exit_undercity_delay
+        if not forced and now - delay_end < EXIT.ENEMY_HOLD and enemy_near() then
             task.status = status_enum['WAITING'] .. ' for nearby enemies to die'
             return
         end

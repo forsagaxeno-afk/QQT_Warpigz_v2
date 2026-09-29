@@ -62,6 +62,26 @@ local function boss_floor(loot)
 end
 local function exit_cast(h) return #h.waypoints > 0 end
 
+-- QQT_Warpigz_v3 WonderCity 2.2.8 (3.3.13 review #5): reward_loot_target
+-- scanned the ground items and called evaluate_item up to 3 times per tick
+-- (loot_reward.shouldExecute, Execute, can_exit). One scan per tick now.
+case('W4-D the reward-loot scan asks the Looter at most once per item per tick', function()
+    local h = boss_floor({{0, 3.5, MYTHIC}})
+    ok(h.run_until(function() return h.opened_at ~= nil end, 30), 'the chest opened\n' .. h.tail(20))
+    local looter = h.G.LooteerPlugin
+    local real, calls = looter.evaluate_item, 0
+    looter.evaluate_item = function(...) calls = calls + 1; return real(...) end
+    local worst = 0
+    h.run(10, function()
+        if calls > worst then worst = calls end
+        calls = 0
+    end)
+    looter.evaluate_item = real
+    print('  evaluate_item calls in the worst tick (1 item): ' .. worst)
+    ok(worst >= 1, 'the item is evaluated')
+    ok(worst <= 1, 'evaluate_item calls per tick for one item: ' .. worst)
+end)
+
 case('W4-A a Mythic 3.5 m and a GA2 4 m from the chest (pickup 2 m) are picked up before the exit cast', function()
     local h = boss_floor({{0, 3.5, MYTHIC}, {0, -4, GA2}})
     ok(h.run_until(function() return h.opened_at ~= nil end, 30), 'the chest opened\n' .. h.tail(20))
