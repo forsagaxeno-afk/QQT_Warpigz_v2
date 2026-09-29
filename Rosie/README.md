@@ -76,13 +76,16 @@ first section that decides an item wins:
      non-Ancestral copy goes on to the rules below. Simple setup: check the
      Uniques you want, turn this on, set both *Otherwise* actions to Salvage
      and leave *Keep with Greater Affixes at least* at 0: only the checked
-     Ancestral Uniques are kept, every other Unique is salvaged.
+     Ancestral Uniques are kept, every other Unique is salvaged (with the
+     in-game loot filter off: it and junk come before the Otherwise actions).
+     *Drop on the spot* never drops a checked Unique; the town trip decides.
    - *Keep with Greater Affixes at least* (0 = off), otherwise the Ancestral /
      Non-Ancestral action; *Uniques to salvage or sell* (Carry to town / Drop
      on the spot) is shown while *Pick up every Unique* is on.
    - The old *Keep Uniques with Item Power at least* slider is gone (at endgame
      nearly every Unique drops at max item power, so any value kept them all).
-     A saved value above 0 still works and is shown read-only with a *Reset*.
+     A saved value above 0 still works; the slider is then shown (*Old: …*)
+     so it can be moved to 0, after which it disappears.
 3. **In-game loot filter** (optional, off): decides the rest of the equipment.
 4. **Items marked as junk**: Ancestral / Non-Ancestral action.
 5. **Legendary, Rare, Magic, Common**: keep Ancestral items with at least N

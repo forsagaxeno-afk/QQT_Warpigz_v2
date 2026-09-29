@@ -202,9 +202,6 @@ local element_makers = {
     ancestral_mythic_ga_count_slider = function() return slider_int:new(0, 4, 1, get_hash(plugin_label .. '_mythic_ga_slider')) end,
     -- QQT_Warpigz_v3 3.2.4 (Rosie 1.0.16): keep plain Uniques by item power (0 = off).
     unique_ip_keep_slider = function() return slider_int:new(0, 925, 0, get_hash(plugin_label .. '_unique_ip_keep')) end,
-    -- QQT_Warpigz_v3 Rosie 1.0.28 (owner): the slider is no longer shown; a
-    -- saved value > 0 is shown read-only with this reset button.
-    unique_ip_reset = function() return button:new(get_hash(plugin_label .. '_unique_ip_reset')) end,
     -- QQT_Warpigz_v3 Rosie 1.0.28 (owner): a checked Unique is kept only as an
     -- Ancestral copy (default off: any copy, the old behaviour).
     unique_ancestral_only = function() return create_checkbox(false, 'unique_ancestral_only') end,
@@ -449,14 +446,18 @@ local function render_settings()
     -- after them.
     if push_tree(e.unique_rules_tree, '2. Uniques') then
         render_menu_header('Plain Uniques (Mythics follow 1. Always keep). Checked Uniques are kept even if the loot filter hides them or they are marked junk.')
-        render_menu_header('Simple setup: check the Uniques you want, turn on "Keep checked Uniques only when Ancestral", set both Otherwise actions to Salvage, Greater Affixes 0.')
+        render_menu_header('Simple setup: check the Uniques you want, turn on "Keep checked Uniques only when Ancestral", set both Otherwise actions to Salvage, Greater Affixes 0 (in-game loot filter off: it and junk come before the Otherwise actions).')
         local sort=sorter()
         if sort and type(sort.render_toggle)=='function' then sort.render_toggle() end
+        -- QQT_Warpigz_v3 Rosie 1.0.28 (owner): the item power slider is shown
+        -- only while a saved value is above 0, so it can be moved to 0 (the
+        -- host's slider_int has no :set(), Coordinator review F1); at 0 it
+        -- is hidden for good.
         local ip=tonumber(e.unique_ip_keep_slider:get()) or 0
         if ip>0 then
-            render_menu_header(string.format('Old setting still on: every plain Unique with item power %d or more is kept. At endgame nearly every Unique drops at max item power, so it keeps them all.',ip))
-            e.unique_ip_reset:render('Reset (turn the item power rule off)','Sets the old "Keep Uniques with Item Power at least" to 0. Use "Uniques I keep" instead.')
-            if e.unique_ip_reset:get() then e.unique_ip_keep_slider:set(0) end
+            render_menu_header(string.format('Old setting still on: every plain Unique with item power %d or more is kept (at endgame nearly all of them). Move it to 0 to turn it off; it then disappears.',ip))
+            e.unique_ip_keep_slider:render('Old: Keep Uniques with Item Power at least (set to 0 to turn off)',
+                'Replaced by "Uniques I keep" and "Keep checked Uniques only when Ancestral". At 0 this slider is hidden.')
         end
         render_list('unique','Uniques I keep',unique_items,
             'Checked: the plain Unique is kept (only an Ancestral copy while "Keep checked Uniques only when Ancestral" is on), and its Mythic form by 1. Always keep. Rosie picks them up whatever the pickup Greater Affix sliders or the in-game loot filter say.',
@@ -465,7 +466,8 @@ local function render_settings()
             'Off (default): every copy of a checked Unique is kept, Ancestral or not. '
             ..'On: only an Ancestral copy is kept; a non-Ancestral copy goes on to the rules below (Greater Affixes, Otherwise). '
             ..'Simple setup: check the Uniques you want, turn this on, set both Otherwise actions to Salvage and leave '
-            ..'"Keep with Greater Affixes at least" at 0: only the checked Ancestral Uniques are kept, every other Unique is salvaged.')
+            ..'"Keep with Greater Affixes at least" at 0: only the checked Ancestral Uniques are kept, every other Unique is salvaged. '
+            ..'The in-game loot filter (3., when on) and junk (4.) decide a non-Ancestral copy before the Otherwise actions, so keep the loot filter off for this.')
         e.ancestral_unique_ga_count_slider:render('Keep with Greater Affixes at least', 'Any other plain Unique with at least this many Greater Affixes is kept. 0 = off.')
         e.ancestral_item_unique:render('Otherwise: Ancestral Uniques', gui.item_options, 'What to do with the other Ancestral Uniques.'..ACTION_TIP)
         e.item_unique:render('Otherwise: Non-Ancestral Uniques', gui.item_options, 'What to do with the other non-Ancestral Uniques.'..ACTION_TIP)

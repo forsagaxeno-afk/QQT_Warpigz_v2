@@ -131,32 +131,38 @@ case('C5 pickup still takes a checked Unique with the toggle on (ancestry is unk
     eq(why, "accepted: selected in 'Uniques I keep'", 'reason')
 end)
 
-case('I1 the item power slider is not shown; a saved value > 0 is honoured, shown with Reset, and Reset turns it off', function()
+-- Coordinator review F1: the host's slider_int has no :set() (the joint host
+-- gives every widget one); the first 1.0.28 build's Reset button called it.
+case('I1 the item power slider shows only while a saved value is above 0 (movable to 0; no :set() on the host slider), and is honoured meanwhile', function()
     local t = setup()
     t.tg['unique_2647147']:set(false); t.h.run(1.5)
-    -- the joint host's buttons record no label: spy on the reset button's render
-    local reset_shown = false
-    local real = t.tg.unique_ip_reset.render
-    t.tg.unique_ip_reset.render = function(self, ...) reset_shown = true; return real(self, ...) end
-    local function has(label)
-        t.h.menu_labels = {}; reset_shown = false; t.h.frame()
+    local LABEL = 'Old: Keep Uniques with Item Power at least (set to 0 to turn off)'
+    local function shown()
+        t.h.menu_labels = {}; t.h.frame()
         local found = false
-        for _, l in ipairs(t.h.menu_labels) do if l == label then found = true end end
+        for _, l in ipairs(t.h.menu_labels) do
+            if l == LABEL then found = true end
+            ok(l ~= 'Keep Uniques with Item Power at least', 'never the old label')
+        end
         t.h.menu_labels = nil
-        if label == 'Reset (turn the item power rule off)' then return reset_shown end
         return found
     end
-    ok(not has('Keep Uniques with Item Power at least'), 'no slider (1.0.27: shown)')
-    ok(not has('Reset (turn the item power rule off)'), 'no reset row at 0')
-    t.tg.unique_ip_keep_slider:set(900); t.h.run(1.5)
+    ok(not shown(), 'hidden at 0')
+    local slider = t.tg.unique_ip_keep_slider
+    slider:set(900)
+    local host_set = slider.set
+    slider.set = nil -- the live slider_int: no :set()
+    t.h.run(1.5)
     local f = leoric(true, 0); f.attrs = {Item_Power_Total = 910}
     eq(t.verdict(f), 'keep', 'a saved 900 is still honoured')
-    ok(has('Reset (turn the item power rule off)'), 'the reset row shows while it is on')
-    ok(not has('Keep Uniques with Item Power at least'), 'still no slider')
-    t.tg.unique_ip_reset:set(true); has('x'); t.tg.unique_ip_reset:set(false)
-    eq(t.tg.unique_ip_keep_slider:get(), 0, 'Reset sets it to 0')
+    ok(shown(), 'shown while above 0, so the user can move it to 0')
+    eq(t.lines('settings could not be displayed'), 0, 'the menu renders without :set()')
+    eq(t.lines('Settings error'), 0, 'no settings error')
+    host_set(slider, 0) -- the user drags it to 0
     t.h.run(1.5)
+    ok(not shown(), 'hidden again at 0')
     eq(t.verdict(f), 'salvage', 'off: the Ancestral action')
+    slider.set = host_set
 end)
 
 case('M1 one "2. Uniques" section right after 1. Always keep: toggle, list, Ancestral toggle, GA slider, actions', function()

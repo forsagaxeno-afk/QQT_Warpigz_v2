@@ -229,6 +229,26 @@ case('sorter "Plain Uniques: Drop": a plain Unique at or above the item power is
     t.h.assert_clean('sorter ip')
 end)
 
+-- QQT_Warpigz_v3 Rosie 1.0.28 (Coordinator review F2): with "Keep checked
+-- Uniques only when Ancestral" on, the town salvages a non-Ancestral copy of a
+-- checked Unique; the "Drop on the spot" sorter dropped it and pickup took the
+-- keep-listed SNO again (3 drops / 4 pickups, then "Could not drop"). A
+-- checked Unique is now left to the town trip.
+case('sorter "Drop on the spot" never drops a checked Unique, even a non-Ancestral copy with the Ancestral toggle on', function()
+    local t = setup({mode = 'drop'})
+    t.tg.unique_ancestral_only:set(true); t.h.run(1)
+    local leoric = t.bag_item(plain_leoric(false))
+    eq(t.acts(leoric), true, 'the town would salvage/sell it (the toggle is on)')
+    local other = t.bag_item({name = 'Dagger_Unique_Generic_001', sno = 451091, rarity = 6, ancestral = false, ga = 0,
+        affixes = {affix(3, 'Dagger_Unique_Generic_001', 1)}})
+    ok(t.h.run_until(function() return not t.in_bag(other) end, 20), 'control: an unchecked plain Unique is dropped\n' .. t.h.tail())
+    t.h.run(10)
+    ok(t.in_bag(leoric), 'the checked non-Ancestral Leoric stays for the town trip (first 1.0.28 build: dropped)')
+    eq(#t.h.dropped, 1, 'only the unchecked one dropped')
+    eq(t.lines('Could not drop'), 0, 'no drop loop')
+    t.h.assert_clean('sorter checked')
+end)
+
 -- 3.2.5 live crash: after a Lua reload onto the new Rosie, the town GUI reuses the
 -- previous generation's cached element table, which has no unique_ip_keep_slider.
 case('3.2.5 reload with a pre-3.2.4 cached GUI does not crash settings', function()

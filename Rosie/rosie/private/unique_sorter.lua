@@ -204,6 +204,12 @@ local function candidate(item, quiet)
         return nil
     end
     if given_up[fp] or done[fp] then return nil end
+    -- QQT_Warpigz_v3 Rosie 1.0.28 (Coordinator review F2): a Unique checked in
+    -- "Uniques I keep" is never dropped here, even a non-Ancestral copy the
+    -- town would salvage ("Keep checked Uniques only when Ancestral"): pickup
+    -- takes a keep-listed SNO past the blacklist, so it was dropped and picked
+    -- up again. The town trip decides it.
+    if M.named_keep(sno) ~= nil then return nil end
     local enum = utils.item_enum
     if not (utils.is_salvage_or_sell(item, enum.SALVAGE) or utils.is_salvage_or_sell(item, enum.SELL)) then return nil end
     return fp, sno
