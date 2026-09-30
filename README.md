@@ -6,7 +6,7 @@
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v3.3.21.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
+**Current release: v3.3.22.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
 
 **New here? Read the [step-by-step user guide](docs/GUIDE_EN.md)** (install, setup, WarPigs automation or one activity by hand, troubleshooting).
 
@@ -21,7 +21,7 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | Folder | Role | Component version |
 | --- | --- | --- |
 | `WarPigs` | Master orchestrator and town handoffs | 1.1.13 |
-| `WarPug` | War Plan selection and creation | 1.0.17 |
+| `WarPug` | War Plan selection and creation | 1.0.19 |
 | `Batmobile` | Shared navigation | 2.2.5 |
 | `ArkhamAsylum` | The Pit | 2.1.6 |
 | `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.6 |

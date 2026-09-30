@@ -57,7 +57,16 @@ local function set_state(s)
         state, state_entered = s, now()
     end
 end
+-- QQT_Warpigz_v3 1.0.19: a selection that is not ours is re-read after a
+-- table re-open (RECHECK_SETTLE) up to RECHECK_MAX times before the halt; a
+-- halt for it retries itself after RECHECK_RETRY_S, at most RECHECK_RETRIES
+-- times per enable (live: the host's selected_path() can be stale right after
+-- the table opens; toggling WarPug fixed it). A real user selection is never
+-- cleared or confirmed.
+local recheck = { count = 0, retries = 0, halted_at = nil, foreign = false,
+    SETTLE = 3.0, MAX = 3, RETRY_S = 60.0, RETRIES = 3 }
 local function halt(reason)
+    recheck.halted_at, recheck.foreign = now(), false
     halt_reason, pending_click, reroll_pending = reason, nil, false
     session.paused_at, session.paused_from = nil, nil
     log(reason .. ' — disable and re-enable WarPug to retry')
@@ -325,6 +334,7 @@ local function same_path(a, b)
     for i, id in ipairs(a) do if b[i] ~= id then return false end end
     return true
 end
+
 local function selected_path()
     local path, count = warplan.selected_path(), warplan.selected_count()
     assert(type(path) == 'table' and type(count) == 'number' and count == #path,
@@ -466,6 +476,7 @@ function planner.tick()
     if not settings.enabled then
         if state ~= 'DONE_WAIT' then clear_owned_path() end
         reset()
+        recheck.retries, recheck.halted_at, recheck.foreign = 0, nil, false -- QQT_Warpigz_v3 1.0.19
         return
     end
     local key, reason, companion = context()
@@ -483,7 +494,17 @@ function planner.tick()
         end
         return
     end
-    if state == 'HALTED' then return end
+    if state == 'HALTED' then
+        -- QQT_Warpigz_v3 1.0.19: bounded self-retry of a foreign-selection halt.
+        if recheck.foreign and recheck.halted_at and now() - recheck.halted_at >= recheck.RETRY_S
+            and recheck.retries < recheck.RETRIES then
+            recheck.retries = recheck.retries + 1
+            log(string.format('Retrying after "Existing selection preserved" (%d/%d): re-reading the board',
+                recheck.retries, recheck.RETRIES))
+            reset()
+        end
+        return
+    end
     if session.paused_at then resume_session(key); return end
     if session_world and key ~= session_world then halt('World changed during planning'); return end
     if state ~= 'IDLE' and state ~= 'DONE_WAIT' and now() - session_started >= SESSION_TIMEOUT then
@@ -491,6 +512,7 @@ function planner.tick()
     end
 
     if state == 'IDLE' then
+        recheck.count = 0 -- QQT_Warpigz_v3 1.0.19
         session_world, session_started = key, now()
         -- Latch Alfred admission for this session (see alfred_hold).
         session.alfred = AlfredTheButlerPlugin or PLUGIN_alfred_the_butler or false
@@ -531,7 +553,7 @@ function planner.tick()
     end
     if state == 'FIND_PATH' then
         if not warplan_api_ready() then set_state('APPROACH_TABLE'); return end
-        local ok, found = pcall(function()
+        local ok, found, read, ours = pcall(function()
             local path = selected_path()
             -- A user's existing path must never be cleared or auto-confirmed.
             -- Only this session's own complete selection, kept while paused
@@ -539,7 +561,15 @@ function planner.tick()
             if #path > 0 then
                 if owned_path and #owned_path > 0 and same_path(path, owned_path)
                     and warplan.is_complete() == true then return true end
-                return 'manual'
+                -- QQT_Warpigz_v3 1.0.19: our own partial path (exactly what
+                -- this session selected, fewer than the required picks)
+                -- continues picking. A full own path the board does not report
+                -- complete yet, a shorter path (a user edit while paused, WPG-4)
+                -- or anything else is re-read before the halt.
+                local ours = owned_path and #owned_path > 0 and same_path(path, owned_path)
+                if not (ours and #path < warplan.required_picks()) then
+                    return 'manual', path, ours
+                end
             end
             owned_path = path
             local required = warplan.required_picks()
@@ -548,7 +578,27 @@ function planner.tick()
             return find_path(required)
         end)
         if not ok then halt('Path search stopped: ' .. tostring(found)); return end
-        if found == 'manual' then halt('Existing selection preserved; clear it manually before retrying'); return end
+        if found == 'manual' then
+            -- QQT_Warpigz_v3 1.0.19: diagnosable, re-read before the halt.
+            local names = {}
+            for i, id in ipairs(read or {}) do
+                local ok_n, name = pcall(warplan.node_name, id)
+                names[i] = tostring(id) .. ':' .. tostring(ok_n and name or '?')
+            end
+            local owned = {}
+            for i, id in ipairs(owned_path or {}) do owned[i] = tostring(id) end
+            recheck.count = recheck.count + 1
+            log(string.format('Board holds %s (read %d/%d): [%s], ours: [%s]',
+                ours and 'our path but not reported complete' or 'a selection that is not ours',
+                recheck.count, recheck.MAX, table.concat(names, ', '), table.concat(owned, ', ')))
+            if recheck.count < recheck.MAX then
+                set_state('RECHECK_WAIT')
+                return
+            end
+            halt('Existing selection preserved; clear it manually before retrying')
+            recheck.foreign = true
+            return
+        end
         if found then
             reroll_pending = false
             set_state('CONFIRMING')
@@ -610,6 +660,11 @@ function planner.tick()
         pending_click = { t = now(), x = settings.reroll_confirm_x, y = settings.reroll_confirm_y,
             width = get_screen_width(), height = get_screen_height() }
         set_state('REROLL_WAIT1')
+        return
+    end
+    if state == 'RECHECK_WAIT' then
+        -- QQT_Warpigz_v3 1.0.19: let the table state settle, then re-open it.
+        if now() - state_entered >= recheck.SETTLE then set_state('APPROACH_TABLE') end
         return
     end
     if state == 'REROLL_WAIT1' then
