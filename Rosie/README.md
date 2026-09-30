@@ -1,6 +1,6 @@
 # Rosie
 
-One local addon for pickup, item rules, repairs and storage. Version 1.0.33
+One local addon for pickup, item rules, repairs and storage. Version 1.0.34
 (QQT_Warpigz_v2 build; local patches are marked `QQT_Warpigz_v2` in the code).
 The bundled Item catalog targets Diablo 4 Season 15, build 3.2.1.73552.
 
@@ -121,6 +121,9 @@ Soul Splinters, keys, runes, materials and other bags. Ancestral tier is not a G
 count. Common/Magic/Rare crafting bases are not implicitly junk. Select the rarity,
 GA and category policy you actually want; catalog presence does not prove that an
 item currently drops. Native in-game filtering is optional for supported gear.
+Horadric Cube Tuning Prisms use **Crafting Materials / Recipes / Unlocks**.
+They go to Materials, so consumable bag space does not limit their pickup.
+**Lair Keys** also controls Trace of Echoes (Item ID 2409389).
 
 **Keep, storage & town** sets disposition and storage policy. Locked gear cannot
 be sold or salvaged. The favorite preference also controls whether favorites are

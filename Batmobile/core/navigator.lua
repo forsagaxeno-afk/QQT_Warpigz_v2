@@ -4,6 +4,7 @@ local utils = require 'core.utils'
 local settings = require 'core.settings'
 local tracker = require 'core.tracker'
 local mengine = require 'core.movement_engine'
+local movement_cast = require 'core.movement_cast'
 
 local navigator = {
     last_pos = nil,
@@ -496,6 +497,7 @@ local get_movement_spell_id = function(local_player)
             blacklist       = navigator.blacklisted_spell_node,
         }
         local sid, need_rc, rng, pos, idx = mengine.pick(settings.movement_rules, ctx)
+        if sid==movement_cast.ENIGMA and utils.player_in_town() then return end
         if sid then
             utils.debug_log('[move_spell][revamp] cast id=%d pos=(%s)', sid, utils.vec_to_string(pos) or '?')
             return sid, need_rc, rng, pos, idx
@@ -503,6 +505,9 @@ local get_movement_spell_id = function(local_player)
         return
     end
 
+    if settings.use_enigma and not utils.player_in_town() and movement_cast.enigma_ready() then
+        return movement_cast.ENIGMA, false
+    end
     local class = utils.get_character_class(local_player)
     if class == 'sorcerer' then
         if settings.use_teleport and utility.can_cast_spell(288106) then
@@ -809,8 +814,14 @@ local unstuck = function (local_player)
             navigator.unstuck_nodes[unstuck_node_str] == 'evaded')
         then
             utils.log(1, 'unstuck by movement spell')
-            navigator.unstuck_nodes[unstuck_node_str] = 'teleporting'
-            cast_spell.position(movement_spell_id, unstuck_node, 0)
+            local sent = movement_cast.position(movement_spell_id, unstuck_node, 0)
+            if movement_spell_id==movement_cast.ENIGMA and not sent then
+                navigator.unstuck_nodes[unstuck_node_str] = 'injected'
+                table.insert(navigator.path, 1, unstuck_node)
+                navigator.side_step_node = unstuck_node
+            else
+                navigator.unstuck_nodes[unstuck_node_str] = 'teleporting'
+            end
             return
         else
             utils.log(1, 'unstuck by injecting path')
@@ -1785,8 +1796,8 @@ navigator.move = function ()
                         unstuck(local_player)
                     else
                         local pre_cast_pos = cur_node
-                        local success = cast_spell.position(movement_spell_id, spell_node, 0)
-                        utils.log(2, '[move_spell] cast_spell.position -> ' .. tostring(success))
+                        local success = movement_cast.position(movement_spell_id, spell_node, 0)
+                        utils.log(2, '[move_spell] dispatch -> ' .. tostring(success))
                         if success then
                             utils.log(2, 'movement spell to ' .. utils.vec_to_string(spell_node))
                             tracker.bench_count("move_spell_cast")
@@ -1799,12 +1810,16 @@ navigator.move = function ()
                             -- outright. Overriding last_pos to the spell destination + a
                             -- short replan cooldown keeps subsequent pathfinds anchored
                             -- where we actually are.
-                            navigator.move_spell_pre_cast_pos = pre_cast_pos
-                            navigator.last_pos = utils.normalize_node(spell_node)
-                            navigator.pathfind_replan_cooldown = get_time_since_inject() + 0.3
-                            navigator.path = new_path
-                            local node_str = utils.vec_to_string(spell_node)
-                            navigator.blacklisted_spell_node[node_str] = spell_node
+                            -- Mouse input only confirms dispatch. Keep following
+                            -- the real position if Enigma is on cooldown.
+                            if movement_spell_id~=movement_cast.ENIGMA then
+                                navigator.move_spell_pre_cast_pos = pre_cast_pos
+                                navigator.last_pos = utils.normalize_node(spell_node)
+                                navigator.pathfind_replan_cooldown = get_time_since_inject() + 0.3
+                                navigator.path = new_path
+                                local node_str = utils.vec_to_string(spell_node)
+                                navigator.blacklisted_spell_node[node_str] = spell_node
+                            end
                         end
                     end
                 end

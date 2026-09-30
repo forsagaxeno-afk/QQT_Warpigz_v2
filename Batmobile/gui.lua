@@ -1,5 +1,5 @@
 local plugin_label = 'batmobile'
-local plugin_version = '2.2.5'
+local plugin_version = '2.2.6'
 console.print("Lua Plugin - Batmobile - Leoric - v" .. plugin_version)
 
 local mrul    = require 'core.movement_rules'
@@ -53,6 +53,8 @@ gui.elements = {
     use_evade = create_checkbox(true, "use_evade"),
     use_teleport = create_checkbox(true, "use_teleport"),
     use_teleport_enchanted = create_checkbox(true, "use_teleport_enchanted"),
+    use_enigma = create_checkbox(false, "use_enigma"),
+    enigma_interval = slider_float:new(0.1, 30.0, 0.25, get_hash(plugin_label .. '_enigma_interval')),
     use_dash = create_checkbox(true, "use_dash"),
     use_soar = create_checkbox(true, "use_soar"),
     use_hunter = create_checkbox(true, "use_hunter"),
@@ -150,7 +152,7 @@ local function _build_skill_labels()
         end
     end
     for i, s in ipairs(mrul.skill_catalog) do
-        if equipped_set[s.id] then
+        if s.input_action or equipped_set[s.id] then
             items[i + 1] = s.name
         else
             items[i + 1] = s.name .. ' (unequipped)'
@@ -215,7 +217,7 @@ function gui.render_movement_revamp()
                 rw.enabled:render('Enabled',
                     'When off, this rule is skipped during evaluation.')
                 rw.skill:render('Skill', skill_items,
-                    'Which movement skill this rule casts. Unequipped skills will not fire.')
+                    'Which movement skill this rule casts. Unequipped skills will not fire. Enigma requires teleport bound to Mouse 3; its equipment/cooldown cannot be detected.')
                 rw.cast_position:render('Cast position', cast_items,
                     'Where to aim the spell:\n' ..
                     '• Next path node: farthest path node within range (legacy behavior).\n' ..
@@ -314,6 +316,8 @@ function gui.render()
         render_menu_header("Need 'use movement spell' to be toggled on to work")
         local class = get_character_class()
         gui.elements.use_evade:render('evade', 'use evade for movement')
+        gui.elements.use_enigma:render('Enigma Teleport (Mouse 3)',
+            'Bind Enigma teleport to Mouse 3 (middle click). Clicks toward the selected path node before class skills; equipment and cooldown cannot be detected.')
         if class == 'sorcerer' then
             gui.elements.use_teleport:render('teleport', 'use teleport for movement')
             gui.elements.use_teleport_enchanted:render('teleport enchanted', 'use teleport enchanted for movement')
@@ -338,6 +342,10 @@ function gui.render()
                 'Try OFF first if the cast never fires.')
         end
         gui.elements.movement_tree:pop()
+    end
+    if gui.elements.use_enigma:get() or gui.elements.mvr_enabled:get() then
+        gui.elements.enigma_interval:render('Enigma click interval',
+            'Minimum seconds between Enigma Mouse 3 attempts in either movement mode. Set this to suit your teleport cooldown.')
     end
     -- Shared movement/path settings: always rendered so both legacy and revamp
     -- modes can tune cast distance + path length. The revamp engine reads

@@ -1,6 +1,7 @@
 local gui   = require 'gui'
 local mrul  = require 'core.movement_rules'
 local mhelp = require 'core.movement_helpers'
+local movement_cast = require 'core.movement_cast'
 
 local settings = {
     plugin_label = gui.plugin_label,
@@ -12,6 +13,8 @@ local settings = {
     use_evade = false,
     use_teleport = false,
     use_teleport_enchanted = false,
+    use_enigma = false,
+    enigma_interval = 0.25,
     use_dash = false,
     use_soar = false,
     use_hunter = false,
@@ -121,6 +124,9 @@ settings.update_settings = function ()
     settings.use_evade = gui.elements.use_evade:get()
     settings.use_teleport = gui.elements.use_teleport:get()
     settings.use_teleport_enchanted = gui.elements.use_teleport_enchanted:get()
+    settings.use_enigma = gui.elements.use_enigma:get()
+    settings.enigma_interval = gui.elements.enigma_interval:get()
+    movement_cast.enigma_interval = settings.enigma_interval
     settings.use_dash = gui.elements.use_dash:get()
     settings.use_soar = gui.elements.use_soar:get()
     settings.use_hunter = gui.elements.use_hunter:get()

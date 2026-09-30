@@ -1,6 +1,7 @@
 -- Movement revamp data model: skill catalog, condition type registry,
 -- operators / combinators / cast position modes, and small helpers.
 local rules = {}
+local movement_cast = require 'core.movement_cast'
 
 -- Bounds on slot pre-allocation. Increasing requires bumping widget counts
 -- in gui.lua; keep these in sync.
@@ -56,6 +57,11 @@ for _, s in ipairs(rules.name_catalog) do
     rules.skill_catalog[#rules.skill_catalog + 1] = entry
 end
 rules.NAMED_TTL = 10
+-- Append after name-based skills to preserve every saved picker index.
+local enigma = { id=movement_cast.ENIGMA, name='Enigma Teleport (Mouse 3)',
+    needs_raycast=false, input_action=true }
+rules.skill_catalog[#rules.skill_catalog+1] = enigma
+rules.skill_by_id[enigma.id] = enigma
 local static_ids = {}
 for id in pairs(rules.skill_by_id) do static_ids[id] = true end
 local named_checked_at = nil

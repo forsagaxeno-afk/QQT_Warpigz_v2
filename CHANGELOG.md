@@ -2,6 +2,23 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.24] — 2026-09-30
+
+Community fixes by **@RadicalDadical55** (Misc Fixes). Thank you!
+
+### Fixed
+
+- **HelltideRevamped 2.6.7: golden tears before the central rift** (the priority was flipped).
+  - Golden micro-rupture tears are worked before the central chargeable rift, also when they appear after the rift was engaged; a golden tear is closed by its health (its charge stays 0), the central gizmo by its charge.
+  - An open tear is enough to start the rupture even with no ritual marker in sight; live tears are chosen before leftover rings. Mobile golden tears use the same step-into-the-circle movement.
+  - Completion is remembered only for the tear being worked on, so a gizmo seen closed before it opened is not skipped for 15 min.
+  - A small tear diagnostics file (`learned/tear_probe.txt`) is written while "Debug log" is on.
+- **Rosie 1.0.34**: Horadric Cube Tuning Prisms are picked up under **Crafting Materials / Recipes / Unlocks** (they go to Materials, a full consumable bag no longer blocks them); **Lair Keys** also picks up Trace of Echoes.
+
+### Added
+
+- **Batmobile 2.2.6: Enigma Teleport (Mouse 3)** as a movement spell for every class (off by default). Bind Enigma teleport to the middle mouse button in game, then enable it under Movement Spells or pick it in a Movement Revamp rule; "Enigma click interval" (default 0.25 s) sets how often it is tried. Never used in town.
+
 ## [3.3.23] — 2026-09-30
 
 ### Fixed

@@ -1,6 +1,7 @@
 -- Movement revamp helpers: buff lookup, density-on-path, enemy enumeration,
 -- can-cast caching, and the grow-only buff catalog used by the GUI.
 local helpers = {}
+local movement_cast = require 'core.movement_cast'
 
 -- ────────────────────────────────────────────────────────────────────────
 -- can_cast cache (per-tick). utility.can_cast_spell is cheap but called
@@ -11,6 +12,7 @@ local can_cast_cache_tick = -1
 
 helpers.can_cast = function (skill_id)
     if not skill_id then return false end
+    if skill_id==movement_cast.ENIGMA then return movement_cast.enigma_ready() end
     local now = get_time_since_inject()
     if now ~= can_cast_cache_tick then
         can_cast_cache = {}

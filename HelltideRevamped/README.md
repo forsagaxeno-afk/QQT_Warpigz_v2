@@ -97,11 +97,23 @@ instead of 45 s. `Helltide is not active, wait until helltide starts` prints
 once per idle window.
 
 **Tears (Farm mode).** A tear closes while you stand inside its golden
-circle and enemies die there. The bot keeps the tear it engaged until that
-tear closes, standing on it (a push of up to 2 m is not corrected, a push
-further out walks back), then goes to the next tear. A tear's charge counts
+circle and enemies die there. A recognized open tear interrupts ordinary
+monster farming even when no separate ritual marker is visible; live tears
+are selected before leftover rings. Golden micro-ruptures take priority over
+the central chargeable rift, including when they appear after that initial
+target was engaged. The bot keeps an engaged golden tear until it closes,
+standing on it (a push of up to 2 m is not corrected, a push
+further out walks back), then goes to the next tear. Mobile golden tears use
+the same circle-entry movement. Their health measures remaining work:
+depleted health closes them even though their charge attribute stays zero.
+The central chargeable gizmo's charge counts
 as full only at 99+ (0-100 reading) or when a 0.99-1.0 reading holds for 1 s
-(earlier a 0-100 charge read as closed at 1 %). Only the time inside the
+(earlier a 0-100 charge read as closed at 1 %). For chargeable gizmos,
+confirmed completion takes precedence over leftover health. Completion is
+remembered for the tear being worked on; a closed-looking gizmo seen during
+discovery can become eligible if it later opens. Golden micro-ruptures
+use their health rather than an unrelated charge attribute. A missing target
+cannot keep the event alive. Only the time inside the
 circle counts: a tear still open after 90 s inside (or 30 s inside without
 any charge/health change once its reading was seen to change), one it cannot
 get closer to for 15 s, or one engaged for 150 s is skipped (logged once);
