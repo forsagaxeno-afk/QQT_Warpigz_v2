@@ -150,6 +150,22 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 
 ## Auditor / critic findings
 
+### SilentRaven 0.2.11 verify + WarPug 1.0.19 post-release (3.3.22), 2026-09-30 13:50 UTC
+- **SilentRaven 0.2.11** (`claude/qqt-raven-warroom@b69e89e`): **OK to merge, release it**. It fixes the Auditor LOW from the 3.3.20/3.3.21 review.
+  - `hold()` now shifts `tracker.cards_empty_since` by the paused time.
+  - INTERACT_NPC clears it while the panel is closed, so a reopened panel waits its own `CARD_SETTLE_S`.
+  - The new case in `test_silentraven` fails on 3.3.22 ("no ESC: 1 ~= 0").
+  - test_silentraven, test_silentraven_q8_bounds and test_silentraven_standalone pass under Lua 5.4 and LuaJIT.
+- **WarPug 1.0.19** (released in 3.3.22 without an Auditor pass; reviewed now): **OK**.
+  - A board selection that is not WarPug's is re-read up to 3 times, 3 s apart, with a diagnostic line (`Board holds … read n/3`), before the halt. A foreign-selection halt retries itself after 60 s, at most 3 times per enable.
+  - A real user selection is still never cleared or confirmed.
+  - WarPug's own partial path continues picking: `find_path` starts from `#owned_path` and only selects `get_selectable_now()` nodes, so it never toggles an existing pick. A shorter path after a pause is still treated as a user edit (WPG-4).
+  - `RECHECK_WAIT` is covered by SESSION_TIMEOUT.
+  - test_warpug_selection, test_integration_warpug, test_warpug and test_warpug_alfred_bounds pass under Lua 5.4 and LuaJIT.
+  - [LOW, no action needed] `pcall(warplan.node_name, id)` in the diagnostic line prints `?` if the host lacks `node_name`; harmless.
+- Still open (→ Rosie): the **[MED]** unbounded `Butler.is_busy()` of the Butler stand-in (see the 3.3.20/3.3.21 review below). No fix has been pushed yet.
+
+
 ### Post-release review of 3.3.20/3.3.21 (Rosie 1.0.31/1.0.32 Butler stand-in, SilentRaven 0.2.9, WarPigs 1.1.13), 2026-09-29 23:30 UTC: **OK, with one MED for Rosie**
 Method: an auditor and a critic per area, then 2 skeptics per finding. Base is 3.3.19 (d0a6821); the reviewed head is f2b7b50.
 
