@@ -298,7 +298,8 @@ case('WPG-4 paused complete selection is confirmed only after revalidation', fun
     local g = fixture(); local gs = { enabled = true }
     AlfredTheButlerPlugin = { get_status = function() return gs end }
     g.until_state('CONFIRMING'); gs.running = true; g.tick(); g.path = { 3 }; gs.running = false
-    g.run(10); equal(g.confirms, 0); equal(g.state(), 'HALTED')
+    -- WarPug 1.0.19: re-read 3 times (3 s table re-open each) before the halt.
+    g.run(30); equal(g.confirms, 0); equal(g.state(), 'HALTED')
     -- A world change while paused with a selection on the board still stops.
     local h = fixture(); local hs = { enabled = true }
     AlfredTheButlerPlugin = { get_status = function() return hs end }

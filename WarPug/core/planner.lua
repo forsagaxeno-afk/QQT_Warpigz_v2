@@ -334,12 +334,7 @@ local function same_path(a, b)
     for i, id in ipairs(a) do if b[i] ~= id then return false end end
     return true
 end
--- QQT_Warpigz_v3 1.0.19: `a` is a (non-strict) prefix of `b`.
-local function path_prefix(a, b)
-    if not a or not b or #a > #b then return false end
-    for i, id in ipairs(a) do if b[i] ~= id then return false end end
-    return true
-end
+
 local function selected_path()
     local path, count = warplan.selected_path(), warplan.selected_count()
     assert(type(path) == 'table' and type(count) == 'number' and count == #path,
@@ -558,7 +553,7 @@ function planner.tick()
     end
     if state == 'FIND_PATH' then
         if not warplan_api_ready() then set_state('APPROACH_TABLE'); return end
-        local ok, found, read = pcall(function()
+        local ok, found, read, ours = pcall(function()
             local path = selected_path()
             -- A user's existing path must never be cleared or auto-confirmed.
             -- Only this session's own complete selection, kept while paused
@@ -566,10 +561,14 @@ function planner.tick()
             if #path > 0 then
                 if owned_path and #owned_path > 0 and same_path(path, owned_path)
                     and warplan.is_complete() == true then return true end
-                -- QQT_Warpigz_v3 1.0.19: our own partial path (equal to or a
-                -- prefix of what this session selected) continues picking.
-                if not (owned_path and path_prefix(path, owned_path)) then
-                    return 'manual', path
+                -- QQT_Warpigz_v3 1.0.19: our own partial path (exactly what
+                -- this session selected, fewer than the required picks)
+                -- continues picking. A full own path the board does not report
+                -- complete yet, a shorter path (a user edit while paused, WPG-4)
+                -- or anything else is re-read before the halt.
+                local ours = owned_path and #owned_path > 0 and same_path(path, owned_path)
+                if not (ours and #path < warplan.required_picks()) then
+                    return 'manual', path, ours
                 end
             end
             owned_path = path
@@ -589,7 +588,8 @@ function planner.tick()
             local owned = {}
             for i, id in ipairs(owned_path or {}) do owned[i] = tostring(id) end
             recheck.count = recheck.count + 1
-            log(string.format('Board holds a selection that is not ours (read %d/%d): [%s], ours: [%s]',
+            log(string.format('Board holds %s (read %d/%d): [%s], ours: [%s]',
+                ours and 'our path but not reported complete' or 'a selection that is not ours',
                 recheck.count, recheck.MAX, table.concat(names, ', '), table.concat(owned, ', ')))
             if recheck.count < recheck.MAX then
                 set_state('RECHECK_WAIT')

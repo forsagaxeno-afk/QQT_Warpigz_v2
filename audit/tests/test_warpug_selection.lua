@@ -4,8 +4,9 @@
 -- on 1.0.17.
 --   S1  a stale selected_path() read right after the table opens (the
 --       previous plan) that clears within 2 s: no halt, plan confirmed.
---   S2  our own partial selection after a pause (the board kept a prefix of
---       our path): WarPug continues picking and confirms.
+--   S2  our own path after a pause while the board is slow to report it
+--       complete: re-read, then confirmed (a shorter path after a pause stays
+--       a user edit and halts, WPG-4).
 --   S3  a real foreign selection, stable across the re-reads: halted with a
 --       diagnostic line per read, never cleared or confirmed; the halt
 --       retries itself after 60 s, bounded.
@@ -105,7 +106,7 @@ do -- S1 stale read that clears within 2 s
     equal(count(logs, 'not ours (read 1/3): [2:Warplans_ThePit]'), 1, 'S1 the stale read is logged')
 end
 
-do -- S2 our own partial selection after a pause
+do -- S2 our own path after a pause while the board is slow to report it complete
     local f = fixture()
     local logs = logger()
     f.p = dofile(root .. 'core/planner.lua')
@@ -113,13 +114,16 @@ do -- S2 our own partial selection after a pause
     equal(f.p.get_current_state(), 'CONFIRMING', 'S2 our path found')
     local busy = true
     LooteerPlugin = { get_enabled = function() return true end, is_actively_looting = function() return busy end }
+    local desel = f.deselections              -- the DFS backtrack before the pause
     f.tick()                                   -- companion work: the session pauses
-    table.remove(f.path)                       -- the board kept only a prefix of our path
+    local complete_fn, lag_until = warplan.is_complete, f.now + 6
+    warplan.is_complete = function() if f.now < lag_until then return false end return complete_fn() end
     busy = false
-    run(f, 20)
+    run(f, 40)
     LooteerPlugin = nil
-    equal(f.confirms, 1, 'S2 our partial path continued and was confirmed')
+    equal(f.confirms, 1, 'S2 our own path confirmed once the board reports it complete')
     equal(count(logs, 'Existing selection preserved'), 0, 'S2 not treated as manual')
+    equal(f.deselections, desel, 'S2 our selection kept')
 end
 
 do -- S3 a real foreign selection
@@ -141,4 +145,4 @@ do -- S3 a real foreign selection
     equal(f.deselections + f.confirms, 0, 'S3 the user selection is untouched')
 end
 LooteerPlugin = nil
-print('PASS WarPug selection (S1 stale read, S2 own partial path, S3 foreign selection: re-read, diagnose, bounded retry)')
+print('PASS WarPug selection (S1 stale read, S2 own path after a pause, S3 foreign selection: re-read, diagnose, bounded retry)')

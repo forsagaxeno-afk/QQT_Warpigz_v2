@@ -9,7 +9,7 @@ WarPigs is the orchestrator: it runs a War Plan (Pit, Helltide, Undercity, Horde
 
 ## WarPug 1.0.19: stale "Existing selection preserved" (2026-09-30, owner live report on 1.0.17)
 WarPug halted with "Existing selection preserved; clear it manually before retrying" without any manual selection; toggling WarPug fixed it at once (so the board read was stale, not a user path). 1.0.18 is taken by the owner's private branch (claude/qqt-owner-betteralfred), hence 1.0.19.
-- FIND_PATH: a board path equal to or a prefix of this session's `owned_path` is ours and continues picking (or confirms when complete); only anything else is foreign.
+- FIND_PATH: a board path equal to this session's `owned_path` is ours: fewer than the required picks → continue picking; complete → confirm; full length but not yet reported complete → re-read. A shorter path (a user edit while paused, WPG-4) or anything else is foreign.
 - A foreign read is logged with node ids/names and our path (`Board holds a selection that is not ours (read n/3): [...]`), then the table is re-opened after 3 s (RECHECK_WAIT → APPROACH_TABLE), up to 3 reads; only then the halt. A real user selection is never cleared or confirmed.
 - A foreign-selection halt retries itself after 60 s, at most 3 times per enable (logged).
 - Tests: `test_warpug_selection.lua` S1–S3 (fail on 1.0.17).
