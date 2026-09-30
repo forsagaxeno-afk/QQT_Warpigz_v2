@@ -2,6 +2,13 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.23] — 2026-09-30
+
+### Fixed
+
+- **Rosie 1.0.33**: the Butler stand-in for Worldstone reports "busy" only while Rosie's trip is really running (at most 10 minutes), so a dead player, a loading screen that never ends or an open chat no longer keeps Worldstone standing still for good. The stand-in's "standing in / stops standing in" lines are logged again after Worldstone reloads.
+- **SilentRaven 0.2.11**: the wait for the Whisper reward cards to load no longer runs out during a pause or after the reward panel was re-opened (it could cost one extra attempt).
+
 ## [3.3.22] — 2026-09-30
 
 ### Fixed
