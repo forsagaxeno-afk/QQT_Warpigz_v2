@@ -1,4 +1,4 @@
-# WarPigs + WarPug: session notes (WarPigs 1.1.13, WarPug 1.0.17)
+# WarPigs + WarPug: session notes (WarPigs 1.1.13, WarPug 1.0.19)
 
 WarPigs is the orchestrator: it runs a War Plan (Pit, Helltide, Undercity, Hordes, bosses, Whispers) by driving the activity plugins through their APIs, and it calls Rosie for town trips. WarPug is the War Plan creator (planner).
 
@@ -6,6 +6,14 @@ WarPigs is the orchestrator: it runs a War Plan (Pit, Helltide, Undercity, Horde
 - Event bus: step_start / step_done are edges (`emitted_matches`), so they are not repeated per tick.
 - Joint tests: `audit/tests/test_joint_suite.lua`, `test_integration_warpug.lua`, `test_warpug.lua`, `test_activity_lease_joint.lua`.
 - Hang/loop regressions: `audit/tests/test_warpigs_hang_review.lua` (H1–H8), `test_warpug_alfred_bounds.lua` (P1–P4); teleport casts: `test_warpigs_teleport_casts.lua` (C1–C3); Tyrael turn-in: `test_warpigs_turnin_tyrael.lua` (Y1–Y6).
+
+## WarPug 1.0.19: stale "Existing selection preserved" (2026-09-30, owner live report on 1.0.17)
+WarPug halted with "Existing selection preserved; clear it manually before retrying" without any manual selection; toggling WarPug fixed it at once (so the board read was stale, not a user path). 1.0.18 is taken by the owner's private branch (claude/qqt-owner-betteralfred), hence 1.0.19.
+- FIND_PATH: a board path equal to or a prefix of this session's `owned_path` is ours and continues picking (or confirms when complete); only anything else is foreign.
+- A foreign read is logged with node ids/names and our path (`Board holds a selection that is not ours (read n/3): [...]`), then the table is re-opened after 3 s (RECHECK_WAIT → APPROACH_TABLE), up to 3 reads; only then the halt. A real user selection is never cleared or confirmed.
+- A foreign-selection halt retries itself after 60 s, at most 3 times per enable (logged).
+- Tests: `test_warpug_selection.lua` S1–S3 (fail on 1.0.17).
+Live check: the next "Existing selection preserved" comes with 3 `not ours (read n/3)` lines that name the nodes on the board.
 
 ## 1.1.13 Rosie's Butler stand-in (2026-09-29)
 Rosie publishes `_G.Butler` with `_rosie=true` while Worldstone runs and no real Butler is loaded; its is_busy mirrors Rosie's own trip. The SilentRaven bridge (`wp_silent_raven.lua` companions_clear) read `Butler.is_busy()` without the `_rosie` skip, so a Rosie trip held/cancelled the Whisper request as `butler_busy`. Now skipped, like the Scavenger stand-in (1.1.8). Already skipping: `dispatch.third_party_busy` (orchestrator companion_hold) and WarPug `third_party_busy`; confirmed by tests (H9, P5).
