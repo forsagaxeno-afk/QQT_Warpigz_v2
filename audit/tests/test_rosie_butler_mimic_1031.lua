@@ -150,5 +150,54 @@ case('B7 during Rosie\'s own trip with the stand-in published: foreign_busy and 
     h.assert_clean('B7')
 end)
 
+-- QQT_Warpigz_v3 1.0.33 (Auditor, MED): is_busy mirrored the raw lifecycle
+-- busy flag, which stays true while the trip cannot tick (a dead player, an
+-- open chat, a loading screen that never ends): Worldstone stood still for
+-- good. Now bounded like the Navigator hold (no trip tick for NAV_PULSE s, or
+-- NAV_HOLD_MAX s in all).
+local function busy_trip(h)
+    worldstone(h)
+    h.run(0.5)
+    ok(own(h), 'published')
+    fill(h)
+    ok(h.run_until(function() return st(h).running == true and h.as(CONSUMER, function() return butler(h).is_busy() end) end, 30),
+        'a trip runs, is_busy true\n' .. h.tail(6))
+end
+local function busy(h) return h.as(CONSUMER, function() return butler(h).is_busy() end) end
+case('B8 a trip that cannot tick does not keep is_busy true for good: dead player (5 s), open chat or a hung load (600 s)', function()
+    local h = new()
+    busy_trip(h)
+    h.dead = true
+    h.run(6)
+    ok(st(h).running == true, 'the trip is still open (dead player)')
+    eq(busy(h), false, 'dead player: is_busy false after the 5 s pulse bound (1.0.32: true)')
+    local c = new()
+    busy_trip(c)
+    c.chat_open = true
+    c.run(300)
+    eq(busy(c), true, 'open chat: still busy under 600 s')
+    c.run(310)
+    ok(st(c).running == true, 'the trip is still open (chat)')
+    eq(busy(c), false, 'open chat: released after 600 s (1.0.32: true)')
+    local l = new()
+    busy_trip(l)
+    l.place = l.P.limbo -- a loading screen that never ends
+    l.run(610)
+    ok(st(l).running == true, 'the trip is still open (loading)')
+    eq(busy(l), false, 'hung load: released after 600 s (1.0.32: true)')
+end)
+
+-- QQT_Warpigz_v3 1.0.33 (Auditor, LOW): the publish/withdraw lines were logged
+-- once per session; after Worldstone unloads and reloads they stayed silent.
+case('B9 Worldstone unloaded and loaded again: the stand-in lines appear again', function()
+    local h = new()
+    for _ = 1, 2 do
+        worldstone(h); h.run(0.5)
+        h.G.Worldstone = nil; h.run(0.5)
+    end
+    eq(h.logged('Standing in for Butler for Worldstone'), 2, 'published twice, logged twice (1.0.32: once)')
+    eq(h.logged('Worldstone is not running: Rosie stops standing in for Butler'), 2, 'withdrawn twice, logged twice')
+end)
+
 print(string.format('rosie butler 1.0.31: %d checks, %d failures', checks, #failures))
 if #failures > 0 then error(#failures .. ' case(s) failed: ' .. table.concat(failures, ' | ')) end

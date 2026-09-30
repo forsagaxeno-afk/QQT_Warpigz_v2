@@ -144,6 +144,11 @@ local function trip_active()
     end
     return now-(nav_hold.pulse or -math.huge)<M.NAV_PULSE
 end
+-- QQT_Warpigz_v3 1.0.33 (Auditor, MED): the same bounded "trip holds its
+-- peers" reading for the Butler stand-in (butler_mimic.lua is_busy): a dead
+-- player, a loading screen that never ends or an open chat no longer keep
+-- Worldstone standing still for good.
+M.trip_active=function() return trip_active() end
 M.add_foreign_hold({name='Navigator',global='Navigator',
     hold=function() return foreign.navigator_hold(trip_active) end,
     release=function(_,_,how) foreign.navigator_release(how) end})

@@ -99,7 +99,7 @@ function M.new(cached,conflict)
         -- Compatibility consumers see the master gate, including immediate requests.
         local town_status=town.get_status
         town.get_status=function()
-            local s=town_status();s.name='Rosie';s.version='1.0.32';s.enabled=s.enabled and enabled()
+            local s=town_status();s.name='Rosie';s.version='1.0.33';s.enabled=s.enabled and enabled()
             s.allow_external=s.allow_external and enabled();return s
         end
         -- QQT_Warpigz_v3 1.0.23: Rosie as Scavenger for Worldstone/Navigator
@@ -117,7 +117,7 @@ function M.new(cached,conflict)
         app.butler=require('rosie.private.butler_mimic')
         app.butler.configure({alive=function() return app.active and not conflict end,
             option=function() return loot_gui.elements.act_as_butler:get()==true end,
-            busy=function() return life.busy() and true or false end,
+            busy=function() return life.trip_active() == true end, -- QQT_Warpigz_v3 1.0.33: bounded (NAV_PULSE / NAV_HOLD_MAX)
             will_run=function()
                 if not enabled() or settings.enabled~=true or life.busy() then return false end
                 local s=town.get_status()

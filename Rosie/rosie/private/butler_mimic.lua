@@ -11,7 +11,9 @@
 --    others). A real Butler is never overwritten: when one appears, Rosie's
 --    own table is withdrawn. Out of effect only Rosie's own table is removed.
 --  * is_busy: a Rosie town trip runs (the lifecycle, from the request through
---    the return), the span Worldstone must stand still for.
+--    the return), the span Worldstone must stand still for. QQT_Warpigz_v3
+--    1.0.33 (Auditor): bounded like the Navigator hold (lifecycle
+--    trip_active: a trip tick within NAV_PULSE s, at most NAV_HOLD_MAX s).
 --  * needs_visit: true only while Rosie's automatic service will run the trip
 --    (a need, the service on and not latched); never a need Rosie will not
 --    serve, or Worldstone would wait for good.
@@ -134,6 +136,7 @@ local function tick()
     local own=cur==M.shim or (type(cur)=='table' and rawget(cur,'_rosie')==true)
     if cur~=nil and not own then -- a real Butler: never overwritten
         if S.published then log_once('real','A Butler addon is loaded: Rosie stops standing in for Butler and yields to it') end
+        logged.pub=nil -- QQT_Warpigz_v3 1.0.33: each transition logs again
         unpublish(false)
         return
     end
@@ -141,10 +144,11 @@ local function tick()
         if cur~=M.shim then
             _G[M.NAME]=M.shim
             log_once('pub','Standing in for Butler for Worldstone (no Butler installed)')
+            logged.gone,logged.real=nil,nil -- QQT_Warpigz_v3 1.0.33: each transition logs again
         end
         S.published=true
     else
-        if S.published and not worldstone() then log_once('gone','Worldstone is not running: Rosie stops standing in for Butler') end
+        if S.published and not worldstone() then log_once('gone','Worldstone is not running: Rosie stops standing in for Butler');logged.pub=nil end
         unpublish(own)
     end
 end
