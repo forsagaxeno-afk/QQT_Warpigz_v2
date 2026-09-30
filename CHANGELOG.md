@@ -2,6 +2,15 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.22] — 2026-09-30
+
+### Fixed
+
+- **WarPug 1.0.19: no more stale "Existing selection preserved; clear it manually before retrying"** (user report: it stopped although nothing was selected by hand; toggling WarPug off and on fixed it).
+  - WarPug recognises its own partial selection and keeps picking.
+  - Any other selection is re-read up to 3 times (the War Plan table is re-opened after 3 s) before it stops, and the log names the nodes it read.
+  - After such a stop WarPug retries by itself after 60 s (at most 3 times per enable). A selection you made yourself is still never cleared or confirmed.
+
 ## [3.3.21] — 2026-09-29
 
 ### Fixed
