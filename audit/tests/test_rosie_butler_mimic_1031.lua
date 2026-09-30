@@ -1,0 +1,203 @@
+-- QQT_Warpigz_v3 Rosie 1.0.31 (owner: Worldstone v0.1.9 shows "Required
+-- plugins: Butler"): Rosie stands in for Butler (rosie/private/butler_mimic.lua)
+-- the way she stands in for Scavenger: _G.Butler (_rosie=true) only while
+-- _G.Worldstone exists, the option is on and no real Butler is loaded; a real
+-- Butler is never overwritten and wins when it loads later. is_busy covers a
+-- whole Rosie trip; needs_visit is true only while Rosie's automatic service
+-- will run the trip; any other name is a logged no-op; Rosie never yields to
+-- her own stand-in.
+local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
+local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
+local checks, failures = 0, {}
+local function ok(value, message) if not value then error(message or 'expected a true value', 2) end checks = checks + 1 end
+local function eq(a, e, m) if a ~= e then error((m or 'mismatch') .. ': expected ' .. tostring(e) .. ', got ' .. tostring(a), 2) end checks = checks + 1 end
+local function case(name, fn)
+    local passed, err = xpcall(fn, debug.traceback)
+    if passed then print('PASS butler 1.0.31: ' .. name)
+    else failures[#failures + 1] = name; print('FAIL butler 1.0.31: ' .. name .. ': ' .. tostring(err):gsub('\nstack traceback:.*', '')) end
+end
+local CONSUMER = {name = 'Consumer', dir = ROOT .. '/audit/tests/', loaded = {}}
+local function new(place)
+    local h = J.new({rosie = true, dirs = {}, place = place or 'pit'})
+    h.assert_clean('load')
+    eq(h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end), true, 'RosiePlugin.enable()')
+    h.frame()
+    return h
+end
+local function butler(h) return rawget(h.G, 'Butler') end
+local function own(h) local b = butler(h); return type(b) == 'table' and rawget(b, '_rosie') == true end
+local function st(h) return h.as(CONSUMER, function() return h.G.AlfredTheButlerPlugin.get_status() end) end
+local function fill(h) h.inventory = {}; for i = 1, 25 do h.inventory[i] = h.gear() end end
+local function worldstone(h) h.G.Worldstone = {get_status = function() return {} end} end
+
+case('B1 published only while Worldstone runs (no Butler installed); removed when Worldstone goes', function()
+    local h = new()
+    h.run(2)
+    eq(butler(h), nil, 'no Butler without Worldstone')
+    worldstone(h)
+    h.run(0.5)
+    ok(own(h), 'Rosie stands in for Butler')
+    eq(h.logged('Standing in for Butler for Worldstone'), 1, 'logged once')
+    h.G.Worldstone = nil
+    h.run(0.5)
+    eq(butler(h), nil, 'removed with Worldstone')
+    h.assert_clean('B1')
+end)
+
+case('B2 a real Butler is never overwritten, and wins when it loads after Rosie published', function()
+    local h = new()
+    local real = {is_busy = function() return false end, needs_visit = function() return false, {} end}
+    h.G.Butler = real
+    worldstone(h)
+    h.run(2)
+    eq(butler(h), real, 'a Butler loaded first is kept')
+    h.G.Butler = nil
+    h.run(0.5)
+    ok(own(h), 'published once the real one is gone')
+    h.G.Butler = real -- loads ~2 s after the others
+    h.run(0.5)
+    eq(butler(h), real, 'the real Butler stays')
+    eq(h.logged('A Butler addon is loaded: Rosie stops standing in for Butler'), 1, 'logged')
+    h.assert_clean('B2')
+end)
+
+case('B3 the option off: never published', function()
+    local h = new()
+    h.mod('Rosie', 'rosie.private.pickup.gui').elements.act_as_butler:set(false)
+    worldstone(h)
+    h.run(2)
+    eq(butler(h), nil, 'not published')
+end)
+
+case('B4 is_busy is true through a whole Rosie trip and false around it; Rosie never waits for her own stand-in', function()
+    local h = new()
+    worldstone(h)
+    h.run(0.5)
+    ok(own(h), 'published')
+    eq(h.as(CONSUMER, function() return butler(h).is_busy() end), false, 'idle')
+    fill(h)
+    local seen_busy, mismatch = false, 0
+    ok(h.run_until(function()
+        local running = st(h).running == true
+        local b = h.as(CONSUMER, function() return butler(h).is_busy() end)
+        if running then seen_busy = seen_busy or b; if not b then mismatch = mismatch + 1 end end
+        return seen_busy and not running
+    end, 240), 'a trip ran and ended\n' .. h.tail(8))
+    eq(mismatch, 0, 'is_busy true on every frame of the trip')
+    eq(st(h).outcome, 'completed', 'the trip completed (not blocked by the stand-in)')
+    eq(h.logged('Butler is running a town trip'), 0, 'Rosie never waits for her own stand-in')
+    eq(h.as(CONSUMER, function() return butler(h).is_busy() end), false, 'idle after')
+    h.assert_clean('B4')
+end)
+
+case('B5 needs_visit is true only while Rosie\'s automatic service will run the trip', function()
+    local h = new('temis')
+    worldstone(h)
+    h.run(0.5)
+    local function need() return h.as(CONSUMER, function() return butler(h).needs_visit() end) end
+    eq(need(), false, 'no need')
+    -- automatic service off (keybind gate): a need Rosie will not serve is never reported
+    local tg = h.mod('Rosie', 'rosie.private.town.gui').elements
+    tg.use_keybind:set(true); tg.keybind_toggle:set(false)
+    fill(h)
+    h.run(1.5)
+    eq(st(h).need_trigger, true, 'the bag needs town')
+    eq(need(), false, 'automatic service off: no need reported')
+    -- automatic service on, held by another activity (bounded): the trip will run
+    h.G.TRISTRAM_LOOP_STATE = {status = function() return {running = true, owns_activity = true, phase = 'travel'} end}
+    tg.use_keybind:set(false)
+    h.run(1.5)
+    eq(st(h).running, false, 'held')
+    local n, list = need()
+    eq(n, true, 'a need Rosie will serve is reported')
+    ok(type(list) == 'table' and #list >= 1, 'needs listed')
+    local s = h.as(CONSUMER, function() return butler(h).get_status() end)
+    eq(s.needs_visit, true, 'status needs_visit'); eq(s.owner, 'Butler', 'owner'); eq(s.is_in_town, true, 'in town')
+    ok(type(s.counts) == 'table' and type(s.counts.inventory) == 'number', 'counts')
+    h.assert_clean('B5')
+end)
+
+case('B6 an unknown name is a no-op that never throws, logged once', function()
+    local h = new()
+    worldstone(h)
+    h.run(0.5)
+    local okc, r = h.as(CONSUMER, function() return pcall(function() return butler(h).start_trip('Worldstone') end) end)
+    eq(okc, true, 'no throw'); eq(r, nil, 'nil result')
+    h.as(CONSUMER, function() return butler(h).start_trip() end)
+    eq(h.logged('Butler.start_trip called (not mimicked yet)'), 1, 'logged once (1.0.32 wording)')
+    -- the reading source is appended only when the host exposes debug.getinfo (not in the joint host)
+    local s = h.as(CONSUMER, function() return butler(h).get_status() end)
+    eq(type(s), 'table', 'get_status works')
+    h.assert_clean('B6')
+end)
+
+-- QQT_Warpigz_v3 1.0.32 (Coordinator review of 1.0.31): foreign.butler_busy()
+-- read Rosie's own stand-in, so during her own trip get_status().foreign_busy
+-- was 'Butler' (farm plugins read it as a third-party Butler trip).
+case('B7 during Rosie\'s own trip with the stand-in published: foreign_busy and paused_by stay clear', function()
+    local h = new()
+    worldstone(h)
+    h.run(0.5)
+    ok(own(h), 'published')
+    fill(h)
+    local saw, bad = false, nil
+    ok(h.run_until(function()
+        local s = st(h)
+        if s.running then saw = true; if s.foreign_busy ~= nil or s.paused_by == 'Butler' then bad = bad or tostring(s.foreign_busy) end end
+        return saw and not s.running
+    end, 240), 'a trip ran\n' .. h.tail(6))
+    eq(bad, nil, 'foreign_busy stays nil during her own trip (1.0.31: Butler)')
+    h.assert_clean('B7')
+end)
+
+-- QQT_Warpigz_v3 1.0.33 (Auditor, MED): is_busy mirrored the raw lifecycle
+-- busy flag, which stays true while the trip cannot tick (a dead player, an
+-- open chat, a loading screen that never ends): Worldstone stood still for
+-- good. Now bounded like the Navigator hold (no trip tick for NAV_PULSE s, or
+-- NAV_HOLD_MAX s in all).
+local function busy_trip(h)
+    worldstone(h)
+    h.run(0.5)
+    ok(own(h), 'published')
+    fill(h)
+    ok(h.run_until(function() return st(h).running == true and h.as(CONSUMER, function() return butler(h).is_busy() end) end, 30),
+        'a trip runs, is_busy true\n' .. h.tail(6))
+end
+local function busy(h) return h.as(CONSUMER, function() return butler(h).is_busy() end) end
+case('B8 a trip that cannot tick does not keep is_busy true for good: dead player (5 s), open chat or a hung load (600 s)', function()
+    local h = new()
+    busy_trip(h)
+    h.dead = true
+    h.run(6)
+    ok(st(h).running == true, 'the trip is still open (dead player)')
+    eq(busy(h), false, 'dead player: is_busy false after the 5 s pulse bound (1.0.32: true)')
+    local c = new()
+    busy_trip(c)
+    c.chat_open = true
+    c.run(300)
+    eq(busy(c), true, 'open chat: still busy under 600 s')
+    c.run(310)
+    ok(st(c).running == true, 'the trip is still open (chat)')
+    eq(busy(c), false, 'open chat: released after 600 s (1.0.32: true)')
+    local l = new()
+    busy_trip(l)
+    l.place = l.P.limbo -- a loading screen that never ends
+    l.run(610)
+    ok(st(l).running == true, 'the trip is still open (loading)')
+    eq(busy(l), false, 'hung load: released after 600 s (1.0.32: true)')
+end)
+
+-- QQT_Warpigz_v3 1.0.33 (Auditor, LOW): the publish/withdraw lines were logged
+-- once per session; after Worldstone unloads and reloads they stayed silent.
+case('B9 Worldstone unloaded and loaded again: the stand-in lines appear again', function()
+    local h = new()
+    for _ = 1, 2 do
+        worldstone(h); h.run(0.5)
+        h.G.Worldstone = nil; h.run(0.5)
+    end
+    eq(h.logged('Standing in for Butler for Worldstone'), 2, 'published twice, logged twice (1.0.32: once)')
+    eq(h.logged('Worldstone is not running: Rosie stops standing in for Butler'), 2, 'withdrawn twice, logged twice')
+end)
+
+print(string.format('rosie butler 1.0.31: %d checks, %d failures', checks, #failures))
+if #failures > 0 then error(#failures .. ' case(s) failed: ' .. table.concat(failures, ' | ')) end

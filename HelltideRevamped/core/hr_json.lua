@@ -1,0 +1,97 @@
+-- QQT_Warpigz_v3: minimal JSON encoder for the web dashboard data file.
+-- Strings are escaped, numbers must be finite (NaN / inf become 0), a table
+-- with #t > 0 is an array, any other table an object (string keys; other
+-- keys are skipped). Depth is limited to MAX_DEPTH (deeper values are null).
+-- No decoder: the live API is parsed with patterns (core/hr_live.lua).
+local M = {MAX_DEPTH = 6}
+
+local format, concat, floor = string.format, table.concat, math.floor
+
+local ESCAPES = {['"'] = '\\"', ['\\'] = '\\\\', ['\b'] = '\\b', ['\f'] = '\\f',
+    ['\n'] = '\\n', ['\r'] = '\\r', ['\t'] = '\\t'}
+
+local function escape_char(c)
+    return ESCAPES[c] or format('\\u%04x', c:byte())
+end
+
+function M.string(s)
+    local text = tostring(s):gsub('[%c"\\]', escape_char)
+    return '"' .. text .. '"'
+end
+
+function M.number(n)
+    if type(n) ~= 'number' or n ~= n or n == math.huge or n == -math.huge then return '0' end
+    if n == floor(n) and n > -1e15 and n < 1e15 then return format('%d', n) end
+    local text = format('%.3f', n):gsub('0+$', '')
+    return (text:gsub('%.$', ''))
+end
+
+local encode
+
+local function encode_array(t, depth, out)
+    out[#out + 1] = '['
+    for i = 1, #t do
+        if i > 1 then out[#out + 1] = ',' end
+        encode(t[i], depth + 1, out)
+    end
+    out[#out + 1] = ']'
+end
+
+local function encode_object(t, depth, out)
+    local keys = {}
+    for k in pairs(t) do
+        if type(k) == 'string' then keys[#keys + 1] = k end
+    end
+    table.sort(keys)
+    out[#out + 1] = '{'
+    for i, k in ipairs(keys) do
+        if i > 1 then out[#out + 1] = ',' end
+        out[#out + 1] = M.string(k)
+        out[#out + 1] = ':'
+        encode(t[k], depth + 1, out)
+    end
+    out[#out + 1] = '}'
+end
+
+local ARRAY = {}
+
+encode = function(v, depth, out)
+    local kind = type(v)
+    if kind == 'string' then
+        out[#out + 1] = M.string(v)
+    elseif kind == 'number' then
+        out[#out + 1] = M.number(v)
+    elseif kind == 'boolean' then
+        out[#out + 1] = v and 'true' or 'false'
+    elseif kind == 'table' and depth < M.MAX_DEPTH then
+        local mt = getmetatable(v)
+        if mt and mt.__json then
+            out[#out + 1] = tostring(mt.__json(v))
+        elseif mt == ARRAY or #v > 0 then
+            encode_array(v, depth, out)
+        else
+            encode_object(v, depth, out)
+        end
+    else
+        out[#out + 1] = 'null'
+    end
+end
+
+function M.encode(v)
+    local out = {}
+    encode(v, 0, out)
+    return concat(out)
+end
+
+-- A list that stays a JSON array when empty ([] instead of {}).
+function M.array(t)
+    return setmetatable(t or {}, ARRAY)
+end
+
+-- A pre-encoded fragment that encode() inserts verbatim.
+local RAW = {__json = function(t) return t[1] end}
+function M.raw(text)
+    return setmetatable({text}, RAW)
+end
+
+return M

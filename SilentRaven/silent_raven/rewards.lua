@@ -1,0 +1,519 @@
+-- core/rewards.lua  --  reward classification + priority-based picking
+--
+-- Pipeline at claim time:
+--   1. quest_reward.enumerate() -> live entry table
+--   2. For each entry, extract a normalized slot id
+--      (catalog lookup by SNO first, internal_name pattern fallback).
+--   3. Detect legendary (best-effort -- probes extra fields on the entry,
+--      then falls back to internal_name pattern matching).
+--   4. Score by user-configured per-slot priority + legendary bonus.
+--   5. Return the winning 1-based index for quest_reward.pick_and_accept.
+--
+-- All work is one-shot at claim time -- not per-frame.
+
+local M = {}
+
+-- ---------------------------------------------------------------------------
+-- BountyMetaCache + Whisper Cache catalog
+--
+-- Two-tier loader:
+--   1) Try `data.caches` -- the cloud-fetched Lua module dropped by
+--      Updater.bat from https://looter.d4data.live/d4/silentraven/caches.lua.
+--      Pipeline-generated from the master LooteerV3 catalog so it tracks
+--      every season's new SNOs without code changes.
+--   2) Fallback to the embedded mini-catalog below.  This means a fresh
+--      install with no Updater run yet still has correct slot/legendary
+--      classification for the most common caches the user will see.
+--
+-- The cloud schema is the same as the embedded one:
+--   [sno] = { slot=string, legendary=bool, name=string,
+--             item_type=string?, magic_type=int? }
+-- Extra fields (item_type / magic_type) are ignored by the runtime but
+-- handy for diagnostics.
+--
+-- Schema notes for legendary detection:
+--   * BountyMetaCache armor/weapons/jewelry: magic_type stays 0 even at
+--     Greater tier; only the name prefix distinguishes Greater/Ancestral.
+--     Pipeline pre-computes the bool so we don't classify-by-name at run
+--     time.
+--   * Whisper Cache (Material/Gold/Chaos/etc.): magic_type IS reliable
+--     (r>=3 == legendary). Pipeline uses both signals.
+-- ---------------------------------------------------------------------------
+
+-- Embedded fallback catalog -- only used when data.caches isn't present.
+-- Hand-curated from live S09 dumps + LooteerV3 catalog snippets.
+local EMBEDDED_CATALOG = {
+    [1087411] = { name = 'Collection of Helms',                 slot = 'helms',      legendary = false },
+    [1087549] = { name = 'Collection of Chestplates',           slot = 'chest',      legendary = false },
+    [1087551] = { name = 'Collection of Leg Guards',            slot = 'legs',       legendary = false },
+    [1087553] = { name = 'Collection of Boots',                 slot = 'boots',      legendary = false },
+    [1087555] = { name = 'Collection of Gauntlets',             slot = 'gloves',     legendary = false },
+    [1087557] = { name = 'Collection of Two-Handed Weapons',    slot = 'weapons_2h', legendary = false },
+    [1087567] = { name = 'Collection of One-handed Weapons',    slot = 'weapons_1h', legendary = false },
+    [1087570] = { name = 'Collection of Rings',                 slot = 'rings',      legendary = false },
+    [1087572] = { name = 'Collection of Amulets',               slot = 'amulets',    legendary = false },
+
+    [1092131] = { name = 'Greater Collection of Helms',              slot = 'helms',      legendary = true },
+    [1092135] = { name = 'Greater Collection of One-handed Weapons', slot = 'weapons_1h', legendary = true },
+    [1092140] = { name = 'Greater Collection of Two-Handed Weapons', slot = 'weapons_2h', legendary = true },
+    [1092142] = { name = 'Greater Collection of Amulets',            slot = 'amulets',    legendary = true },
+    [1092145] = { name = 'Greater Collection of Boots',              slot = 'boots',      legendary = true },
+    [1092149] = { name = 'Greater Collection of Chestplates',        slot = 'chest',      legendary = true },
+    [1092151] = { name = 'Greater Collection of Gauntlets',          slot = 'gloves',     legendary = true },
+    [1092153] = { name = 'Greater Collection of Leg Guards',         slot = 'legs',       legendary = true },
+    [1092155] = { name = 'Greater Collection of Rings',              slot = 'rings',      legendary = true },
+
+    [598510]  = { name = 'Collection of Chaos',         slot = 'chaos', legendary = false },
+    [1092147] = { name = 'Greater Collection of Chaos', slot = 'chaos', legendary = true },
+
+    -- Whisper Cache Material* family.  All show as legendary (orange)
+    -- in D4's reward UI -- legendary=true matches the visual tier.
+    -- Slot=materials (vs slot=other) lets the user weight materials
+    -- independently from generic unknown caches.
+    [2102725] = { name = 'Material Collection of Gold',            slot = 'gold',      legendary = true },
+    [2102987] = { name = 'Material Collection of Gem Fragments',   slot = 'materials', legendary = true },
+    [2103070] = { name = 'Material Collection of Salvage',         slot = 'materials', legendary = true },
+    [2167180] = { name = 'Material Collection of Keys',            slot = 'materials', legendary = true },
+    [2622775] = { name = 'Material Collection of Primordial Dust', slot = 'materials', legendary = true },
+}
+
+-- Try to load the cloud-fetched catalog; fall back to embedded.  Wrapped
+-- in pcall because require() throws when the file is missing on disk OR
+-- malformed.  Both cases should leave us with the embedded catalog and
+-- a warning logged.  CATALOG_SOURCE tracks which one we ended up with --
+-- exposed via M.catalog_source for the GUI to show "synced from cloud"
+-- vs "embedded fallback".
+local CACHE_CATALOG    = EMBEDDED_CATALOG
+local CATALOG_SOURCE   = 'embedded'
+local CATALOG_LOAD_ERR = nil
+do
+    -- pcall require so a missing-file error doesn't kill module load.
+    -- If the cloud module loaded but is empty (table with no keys) we
+    -- also stay on embedded -- empty file would silently break picking.
+    local ok, mod = pcall(require, 'silent_raven.data.caches')
+    if ok and type(mod) == 'table' and next(mod) ~= nil then
+        CACHE_CATALOG  = mod
+        CATALOG_SOURCE = 'cloud'
+    else
+        CATALOG_LOAD_ERR = (not ok) and tostring(mod) or 'data.caches missing or empty'
+    end
+end
+
+M.CACHE_CATALOG    = CACHE_CATALOG
+M.CATALOG_SOURCE   = CATALOG_SOURCE
+M.CATALOG_LOAD_ERR = CATALOG_LOAD_ERR
+
+-- Last-sync read cache (see last_sync_epoch). Reload Catalog invalidates it.
+local LAST_SYNC_TTL = 30
+local last_sync = { read_t = nil, value = nil }
+
+-- Allow the GUI/Reload-Catalog button to swap in a freshly-fetched
+-- catalog without restarting the script.  package.loaded["data.caches"]
+-- is cleared so the next require() reads the new file from disk.
+M.reload_catalog = function ()
+    last_sync.read_t = nil
+    package.loaded['silent_raven.data.caches'] = nil
+    local ok, mod = pcall(require, 'silent_raven.data.caches')
+    if ok and type(mod) == 'table' and next(mod) ~= nil then
+        CACHE_CATALOG  = mod
+        CATALOG_SOURCE = 'cloud'
+        CATALOG_LOAD_ERR = nil
+        M.CACHE_CATALOG  = CACHE_CATALOG
+        M.CATALOG_SOURCE = 'cloud'
+        M.CATALOG_LOAD_ERR = nil
+        return true, 'cloud'
+    end
+    -- Reload failed; keep current catalog state untouched.
+    M.CATALOG_LOAD_ERR = (not ok) and tostring(mod) or 'data.caches missing or empty'
+    return false, M.CATALOG_LOAD_ERR
+end
+
+-- Last-sync epoch from data/last_sync.lua (written by Updater.bat).
+-- Returns nil if never synced.  The file is git-ignored and usually absent,
+-- and this runs from the menu renderer (every frame) and the 1 Hz D4Remote
+-- payload, so the disk read (a failing package search when absent) happens
+-- at most once per LAST_SYNC_TTL seconds or after Reload Catalog.  Never
+-- kept in package.loaded, so a later Updater run is still picked up.
+M.last_sync_epoch = function ()
+    local now = (get_time_since_inject and get_time_since_inject()) or os.time()
+    if last_sync.read_t and now >= last_sync.read_t and now - last_sync.read_t < LAST_SYNC_TTL then
+        return last_sync.value
+    end
+    last_sync.read_t = now
+    package.loaded['silent_raven.data.last_sync'] = nil
+    local ok, ret = pcall(require, 'silent_raven.data.last_sync')
+    package.loaded['silent_raven.data.last_sync'] = nil
+    last_sync.value = (ok and type(ret) == 'number') and ret or nil
+    return last_sync.value
+end
+
+-- Human-readable freshness string for the GUI header.
+M.last_sync_str = function ()
+    local t = M.last_sync_epoch()
+    if not t then return 'never synced' end
+    local age = (os.time and os.time() or 0) - t
+    if age < 0     then return 'sync clock skewed' end
+    if age < 60    then return string.format('%ds ago', age) end
+    if age < 3600  then return string.format('%.0fm ago', age/60) end
+    if age < 86400 then return string.format('%.1fh ago', age/3600) end
+    return string.format('%.0fd ago', age/86400)
+end
+
+-- Local reload only. Run the optional updater manually outside the game loop.
+M.fetch_and_reload = function ()
+    return M.reload_catalog()
+end
+
+-- Slot ids the user can configure priority for.  Keep in sync with the
+-- per-slot sliders in gui.lua.  'other' catches anything we don't
+-- recognize from SNO catalog or internal_name parsing -- defensive
+-- against future-season caches we haven't catalogued yet.
+local KNOWN_SLOTS = {
+    'helms', 'chest', 'legs', 'gloves', 'boots',
+    'rings', 'amulets',
+    'weapons_1h', 'weapons_2h',
+    'gold',  'chaos',  'materials',
+    'other',
+}
+M.KNOWN_SLOTS = KNOWN_SLOTS
+
+-- Display labels for the GUI.  Keep parallel to KNOWN_SLOTS.
+M.SLOT_DISPLAY = {
+    helms       = 'Helms',
+    chest       = 'Chest',
+    legs        = 'Legs',
+    gloves      = 'Gloves',
+    boots       = 'Boots',
+    rings       = 'Rings',
+    amulets     = 'Amulets',
+    weapons_1h  = 'One-Hand Weapons',
+    weapons_2h  = 'Two-Hand Weapons',
+    gold        = 'Gold (currency cache)',
+    chaos       = 'Chaos (wildcard gear)',
+    materials   = 'Materials (gem fragments / keys / etc.)',
+    other       = 'Other / Unknown',
+}
+
+-- D4Remote.record_loot expects a singular category string per its
+-- INTEGRATION.md: "helm", "chest", "ring", "sigil", "material", etc.
+-- Map our slot ids onto that vocabulary.  Unknowns fall through to
+-- "cache" so D4Remote still groups SilentRaven picks meaningfully.
+M.SLOT_TO_D4REMOTE_CATEGORY = {
+    helms       = 'helm',
+    chest       = 'chest',
+    legs        = 'legs',
+    gloves      = 'gloves',
+    boots       = 'boots',
+    rings       = 'ring',
+    amulets     = 'amulet',
+    weapons_1h  = 'weapon',
+    weapons_2h  = 'weapon',
+    gold        = 'gold',
+    chaos       = 'cache',
+    materials   = 'material',
+    other       = 'cache',
+}
+
+-- ---------------------------------------------------------------------------
+-- Slot extraction
+-- ---------------------------------------------------------------------------
+
+-- Internal-name pattern fallback: maps a stripped lowercase token to a
+-- slot id.  Order is longest-match-first because some keywords are
+-- substrings of others ('legguards' vs 'leg').
+local SLOT_PATTERNS = {
+    { 'legguards',   'legs' },
+    { 'pants',       'legs' },
+    { 'helmets',     'helms' },
+    { 'helms',       'helms' },
+    { 'helm',        'helms' },
+    { 'chestplates', 'chest' },
+    { 'chests',      'chest' },
+    { 'chest',       'chest' },
+    { 'torsos',      'chest' },
+    { 'gauntlets',   'gloves' },
+    { 'gloves',      'gloves' },
+    { 'boots',       'boots' },
+    { 'feet',        'boots' },
+    { 'rings',       'rings' },
+    { 'ring',        'rings' },
+    { 'amulets',     'amulets' },
+    { 'amulet',      'amulets' },
+    { 'necks',       'amulets' },
+    { 'neck',        'amulets' },
+    { 'twohanded',   'weapons_2h' },
+    { 'two-handed',  'weapons_2h' },
+    { '2handed',     'weapons_2h' },
+    { '2hweapons',   'weapons_2h' },     -- internal_name form: BountyMeta_Cache_2HWeapons
+    { '2hweapon',    'weapons_2h' },
+    { 'onehanded',   'weapons_1h' },
+    { 'one-handed',  'weapons_1h' },
+    { '1handed',     'weapons_1h' },
+    { '1hweapons',   'weapons_1h' },
+    { '1hweapon',    'weapons_1h' },
+    { 'weapons',     'weapons_1h' },     -- generic weapons -> 1h bucket
+    { 'weapon',      'weapons_1h' },
+    { 'gold',        'gold' },
+    { 'chaos',       'chaos' },
+    { 'legs',        'legs' },           -- last so legguards/pants match first
+}
+
+-- Internal-name tokens that signal a legendary cache.  Live-validated:
+--   'upgraded' on `BountyMeta_Cache_Gold_Upgraded` (sno 2102725)
+--   'great'   matches 'Greater Collection of *' family
+local LEGENDARY_NAME_TOKENS = {
+    'legendary', 'ancestral', 'guaranteed', 'gilded',
+    'great', 'sacred', 'unique', 'upgraded',
+}
+
+local function strip_for_slot_match(internal_name)
+    local s = (internal_name or ''):lower()
+    for _, p in ipairs({ 'bountymeta_cache_', 'bounty_cache_', 'cache_' }) do
+        if s:sub(1, #p) == p then s = s:sub(#p + 1); break end
+    end
+    -- Strip trailing rarity tokens.
+    for _, tok in ipairs(LEGENDARY_NAME_TOKENS) do
+        local suffix = '_' .. tok
+        if #s > #suffix and s:sub(-#suffix) == suffix then
+            s = s:sub(1, -#suffix - 1); break
+        end
+        if #s > #tok and s:sub(-#tok) == tok then
+            s = s:sub(1, -#tok - 1); break
+        end
+    end
+    return s
+end
+
+local function slot_from_internal_name(internal_name)
+    if not internal_name or internal_name == '' then return 'other' end
+    local stripped = strip_for_slot_match(internal_name)
+    if stripped == '' then return 'other' end
+    for _, pair in ipairs(SLOT_PATTERNS) do
+        if stripped == pair[1] or stripped:find(pair[1], 1, true) then
+            return pair[2]
+        end
+    end
+    return 'other'
+end
+
+-- ---------------------------------------------------------------------------
+-- Entry usability (one rule for picking, claiming and verification)
+--
+-- The host's `valid` field convention is not verified: a live panel with
+-- four ordinary caches was rejected as `no_valid_reward` when only
+-- `valid == true` was accepted.  Only an explicit refusal (false, or a
+-- numeric 0 from a C-style binding) marks a card unusable.  The SNO may
+-- arrive as a number or a numeric string; it is normalized here because
+-- receipt verification counts that SNO in the bags.
+-- ---------------------------------------------------------------------------
+M.entry_sno = function (entry)
+    if type(entry) ~= 'table' then return nil end
+    local sno = tonumber(entry.sno)
+    if not sno or sno <= 0 or sno % 1 ~= 0 then return nil end
+    return sno
+end
+M.entry_invalid = function (entry)
+    if type(entry) ~= 'table' then return true end
+    return entry.valid == false or entry.valid == 0
+end
+M.entry_usable = function (entry)
+    return not M.entry_invalid(entry) and M.entry_sno(entry) ~= nil
+end
+
+-- Extract a normalized slot id from the live entry.  Tries the SNO
+-- catalog first (authoritative), falls back to internal_name parsing,
+-- and ultimately returns 'other' if neither path succeeds.
+M.extract_slot = function (entry)
+    if type(entry) ~= 'table' then return 'other' end
+    local sno = M.entry_sno(entry)
+    if sno and CACHE_CATALOG[sno] then
+        return CACHE_CATALOG[sno].slot
+    end
+    return slot_from_internal_name(entry.internal_name)
+end
+
+-- Display name from catalog if known, else internal_name, else '?'.
+-- Used for human-readable log lines in the dump and the FSM debug.
+M.display_name = function (entry)
+    if type(entry) ~= 'table' then return '?' end
+    local sno = M.entry_sno(entry)
+    if sno and CACHE_CATALOG[sno] then
+        return CACHE_CATALOG[sno].name
+    end
+    if entry.internal_name and entry.internal_name ~= '' then
+        return tostring(entry.internal_name)
+    end
+    return '?'
+end
+
+-- ---------------------------------------------------------------------------
+-- Legendary detection
+--
+-- The LooteerV3 catalog has r=0 for every BountyMetaCache SNO, so rarity
+-- isn't carried by the SNO itself.  If the live host distinguishes a
+-- legendary cache from a regular one, the signal must come from a field
+-- on the entry table that the API stub doesn't document.  We probe a
+-- handful of likely names; if none hit, fall back to internal_name
+-- pattern matching.
+-- ---------------------------------------------------------------------------
+
+-- Returns (bool legendary, string evidence).  `evidence` is a short
+-- token explaining the decision -- handy in the dump so the user can
+-- confirm the heuristic.
+M.is_legendary = function (entry)
+    if type(entry) ~= 'table' then return false, 'no-entry' end
+
+    -- 1. SNO catalog -- authoritative, ships hard-coded legendary flag.
+    local sno = M.entry_sno(entry)
+    if sno and CACHE_CATALOG[sno] then
+        local meta = CACHE_CATALOG[sno]
+        if meta.legendary == true  then return true,  'catalog:legendary=true'  end
+        if meta.legendary == false then return false, 'catalog:legendary=false' end
+    end
+
+    -- Boolean fields the host MIGHT expose.
+    if entry.legendary == true            then return true, 'field:legendary' end
+    if entry.is_legendary == true         then return true, 'field:is_legendary' end
+    if entry.is_unique == true            then return true, 'field:is_unique' end
+    if entry.guaranteed_legendary == true then return true, 'field:guaranteed_legendary' end
+    if entry.is_ancestral == true         then return true, 'field:is_ancestral' end
+    if entry.ancestral == true            then return true, 'field:ancestral' end
+
+    -- String / numeric rarity fields.
+    for _, key in ipairs({ 'rarity', 'quality', 'tier', 'class', 'rank', 'r' }) do
+        local v = entry[key]
+        if v ~= nil then
+            local lv = tostring(v):lower()
+            for _, tok in ipairs(LEGENDARY_NAME_TOKENS) do
+                if lv:find(tok, 1, true) then
+                    return true, 'field:' .. key .. '=' .. lv
+                end
+            end
+            local nv = tonumber(v)
+            if nv and nv >= 5 then
+                return true, 'field:' .. key .. '=' .. nv
+            end
+        end
+    end
+
+    -- internal_name pattern fallback.
+    local name = tostring(entry.internal_name or ''):lower()
+    for _, tok in ipairs(LEGENDARY_NAME_TOKENS) do
+        if name:find(tok, 1, true) then
+            return true, 'name:' .. tok
+        end
+    end
+    return false, 'none'
+end
+
+-- All entry fields outside the documented {sno, internal_name, valid}
+-- triple.  Used by the dump to surface anything new the host exposes.
+M.extra_fields = function (entry)
+    if type(entry) ~= 'table' then return {} end
+    local out = {}
+    for k, v in pairs(entry) do
+        if k ~= 'sno' and k ~= 'internal_name' and k ~= 'valid' then
+            out[#out + 1] = tostring(k) .. '=' .. tostring(v)
+        end
+    end
+    table.sort(out)
+    return out
+end
+
+-- ---------------------------------------------------------------------------
+-- Scoring + picking
+-- ---------------------------------------------------------------------------
+
+-- Score one entry using the user's settings.  Higher = better.
+-- Returns (score, slot, legendary, evidence) for traceability.
+--
+-- A legendary entry always scores at least `legendary_bonus_weight`
+-- (when prefer_legendary is on), even if the user set the slot
+-- priority to 0 -- the user explicitly asked that legendary cards
+-- never be skipped just because the slot wasn't on their priority
+-- list.  Score 0 is reserved for "regular card the user marked as
+-- skip"; pick_best_index has a fallback for the "all entries score 0"
+-- corner case.
+M.score_entry = function (entry, settings)
+    if type(entry) ~= 'table' then return 0, 'other', false, 'no-entry' end
+    local slot = M.extract_slot(entry)
+    local legendary, evidence = M.is_legendary(entry)
+
+    if M.entry_invalid(entry) then
+        return 0, slot, legendary, evidence
+    end
+
+    local sp = (settings.slot_priorities and settings.slot_priorities[slot]) or 0
+    local score = sp
+    if legendary and settings.prefer_legendary then
+        score = score + (settings.legendary_bonus_weight or 0)
+    end
+    return score, slot, legendary, evidence
+end
+
+-- Pick the highest-scoring entry's index from the enumerate() table.
+-- Returns (best_index, best_score, breakdown_table).
+--
+-- Fallback rule (per user request): if no entry scores above 0 -- i.e.
+-- every slot is set to 0 priority AND nothing on offer is legendary --
+-- pick the first valid entry rather than returning nil.  The user
+-- explicitly asked SilentRaven never refuse to claim a turn-in just
+-- because their slot priorities are all zeroed.  The breakdown row for
+-- the chosen index gets `fallback=true` so the debug log makes it
+-- obvious that's what happened.
+--
+-- Ties resolve to the lowest index (stable + matches how D4 renders
+-- duplicate cards left-to-right).
+M.pick_best_index = function (entries, settings)
+    if type(entries) ~= 'table' then return nil, 0, {} end
+    local breakdown = {}
+    local best_idx, best_score = nil, 0
+
+    -- Same usability rule as the claim and its verification (entry_usable).
+    local keys = {}
+    for k, entry in pairs(entries) do
+        if type(k) == 'number' and k >= 0 and k % 1 == 0 and M.entry_usable(entry) then
+            keys[#keys + 1] = k
+        end
+    end
+    table.sort(keys, function (a, b)
+        local na, nb = type(a) == 'number', type(b) == 'number'
+        if na and nb then return a < b end
+        if na ~= nb then return na end
+        return tostring(a) < tostring(b)
+    end)
+
+    for _, k in ipairs(keys) do
+        local e = entries[k]
+        local score, slot, legendary, evidence = M.score_entry(e, settings)
+        breakdown[#breakdown + 1] = {
+            index         = k,
+            slot          = slot,
+            legendary     = legendary,
+            score         = score,
+            evidence      = evidence,
+            display_name  = M.display_name(e),
+            internal_name = (e and e.internal_name) or '?',
+            fallback      = false,
+        }
+        if score > best_score then
+            best_idx, best_score = k, score
+        end
+    end
+
+    -- Fallback: nothing scored.  Pick first valid entry.
+    if best_score == 0 then
+        for i, k in ipairs(keys) do
+            local e = entries[k]
+            if M.entry_usable(e) then
+                if breakdown[i] then breakdown[i].fallback = true end
+                return k, 0, breakdown
+            end
+        end
+
+    end
+
+    return best_idx, best_score, breakdown
+end
+
+return M
