@@ -152,6 +152,16 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 
 ## Auditor / critic findings
 
+### Rosie 1.0.33 verify (released in 3.3.23), 2026-09-30 14:45 UTC: **OK, Butler stand-in MED closed**
+- `Butler.is_busy()` now reads `life.trip_active()`: a trip tick within NAV_PULSE, at most NAV_HOLD_MAX. This is the same bound as the Navigator hold, exported from `lifecycle.lua`.
+- The publish, withdraw and yield log lines now log again on each transition.
+- The new cases fail on 3.3.22 and pass on 3.3.23:
+  - B8: a dead player, open chat or a hung load no longer keeps `is_busy` true.
+  - B9: after Worldstone is unloaded and loaded again, the stand-in lines appear again.
+- `test_rosie_butler_mimic_1031`, `test_rosie_foreign_mover` and `test_rosie_scavenger_mimic` pass under Lua 5.4 and LuaJIT.
+- Live check: with Worldstone loaded, die during a Rosie trip. Worldstone moves again within about 5 s after Rosie's trip stops ticking, and the trip is capped at 600 s in any case.
+
+
 ### SilentRaven 0.2.11 verify + WarPug 1.0.19 post-release (3.3.22), 2026-09-30 13:50 UTC
 - **SilentRaven 0.2.11** (`claude/qqt-raven-warroom@b69e89e`): **OK to merge, release it**. It fixes the Auditor LOW from the 3.3.20/3.3.21 review.
   - `hold()` now shifts `tracker.cards_empty_since` by the paused time.
