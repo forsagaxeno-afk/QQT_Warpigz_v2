@@ -540,6 +540,12 @@ case('ring-only rupture is Unknown (no Realmwalker wait) until a starter confirm
     t.actors = {actor(SKIN.hold, 10, 0), actor(SKIN.surging_starter, 12, 0)}
     t.tick(3)
     eq(t.any_rift_state(), nil, 'Hunt Surging off is honoured for a ring')
+    -- QQT_Warpigz_v3 3.3.24: nor through an open golden tear at that ring.
+    local g = session({enabled = true, mode = 1})
+    g.settings.rupture_hunt_surging = false
+    g.actors = {actor(SKIN.hold, 10, 0), actor(SKIN.surging_starter, 12, 0), actor(SKIN.tear, 14, 0, {hp = 40})}
+    g.tick(3)
+    eq(g.any_rift_state(), nil, 'Hunt Surging off is honoured for an open tear')
     -- A ring engaged as Unknown picks its type up from the starter.
     local u = session({enabled = true, mode = 1})
     u.actors = {actor(SKIN.hold, 10, 0)}

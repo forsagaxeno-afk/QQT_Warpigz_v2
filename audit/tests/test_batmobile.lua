@@ -238,8 +238,10 @@ end)
 test('rule engine: a Rampage found by its spell name joins the equipped skills and is cast',function()
     local f=fixture()
     local rules=f.require('core.movement_rules')
-    local slot=#rules.skill_catalog
-    eq(rules.skill_catalog[slot].name,'Rampage','stable combo slot at the end of the catalog')
+    -- QQT_Warpigz_v3 3.3.24: Enigma Teleport is appended after Rampage, so saved combo slots keep their index.
+    local slot=#rules.skill_catalog-1
+    eq(rules.skill_catalog[slot].name,'Rampage','stable combo slot before the appended Enigma entry')
+    eq(rules.skill_catalog[slot+1].name,'Enigma Teleport (Mouse 3)','Enigma is appended last')
     eq(rules.skill_catalog[slot].id,0,'unresolved until equipped')
     local name_calls=0
     f.env.get_equipped_spell_ids=function() return {337031,2400001} end

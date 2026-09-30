@@ -11,6 +11,7 @@ Community fixes by **@RadicalDadical55** (Misc Fixes). Thank you!
 - **HelltideRevamped 2.6.7: golden tears before the central rift** (the priority was flipped).
   - Golden micro-rupture tears are worked before the central chargeable rift, also when they appear after the rift was engaged; a golden tear is closed by its health (its charge stays 0), the central gizmo by its charge.
   - An open tear is enough to start the rupture even with no ritual marker in sight; live tears are chosen before leftover rings. Mobile golden tears use the same step-into-the-circle movement.
+  - Coordinator review: a rupture found through an open tear stays "Unknown" (no Realmwalker wait) until its starter confirms the type, since golden tears also open in Normal ruptures; a type switched off under the hunt settings is not engaged through its tear.
   - Completion is remembered only for the tear being worked on, so a gizmo seen closed before it opened is not skipped for 15 min.
   - A small tear diagnostics file (`learned/tear_probe.txt`) is written while "Debug log" is on.
 - **Rosie 1.0.34**: Horadric Cube Tuning Prisms are picked up under **Crafting Materials / Recipes / Unlocks** (they go to Materials, a full consumable bag no longer blocks them); **Lair Keys** also picks up Trace of Echoes.

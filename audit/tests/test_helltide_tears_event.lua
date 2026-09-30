@@ -526,7 +526,8 @@ case('review: a rupture whose tears are open is engaged from far away: the walk 
     end
     s.tick(160)
     eq(s.closed, 2, 'both tears closed')
-    ok(s.logged('Found ritual ring at dist=100.0') == 1, 'engaged from 100 m')
+    -- QQT_Warpigz_v3 3.3.24: an open tear is engaged first (logged as the tear).
+    ok(s.logged('Found active tear S14_Rupture_SMP_Chargeable at dist=100.') == 1, 'engaged from 100 m')
     eq(paused_far, false, string.format('never paused on the walk (first pause %.1f m from the ring)', s.first_pause_d or -1))
     for _, x in ipairs({40, 55}) do
         for _, d in ipairs(s.drops) do ok(d ~= walk_drops[x], 'the drop passed at x=' .. x .. ' was taken on the way') end

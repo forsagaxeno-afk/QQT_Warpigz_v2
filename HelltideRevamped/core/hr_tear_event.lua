@@ -799,8 +799,13 @@ local function scan(self, states, max_dist)
         end)
         local anchor = (ring and actor_pos(ring)) or tpos
         local rtype = starter_label_near(anchor, r + 50)
-        if rtype == "Unknown" or not type_allowed(rtype) then rtype = rupture_type_label(actor_skin(tear)) end
-        if engage(self, states, anchor, rtype,
+        -- QQT_Warpigz_v3 2.6.7: golden micro-ruptures ("S14_Rupture_Major_")
+        -- open in Normal ruptures too, so their skin does not prove Colossal
+        -- (that would start a Realmwalker wait). Without a starter the event
+        -- is Unknown until one confirms it; a known type the hunt filters
+        -- out is not engaged through its tear either.
+        if rtype ~= "Unknown" and not type_allowed(rtype) then tear = nil end
+        if tear and engage(self, states, anchor, rtype,
             string.format("[RIFT] Found active tear %s at dist=%.1f — closing",
                 actor_skin(tear) or "?", dist(tear))) then
             return true

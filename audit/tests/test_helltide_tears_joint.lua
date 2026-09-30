@@ -196,7 +196,8 @@ case('review standalone HR + Rosie: the walk to a far rupture and the revive wal
         watch()
         return task.current_state == 'RIFT_CLOSE_TEARS' and h.pos:dist_to(tear.pos) <= 1.05
     end, 40), 'HR walked onto the golden tear\n' .. h.tail(30))
-    ok(h.logged('Found ritual ring at dist=85.0') == 1, 'the rupture was engaged from 85 m')
+    -- QQT_Warpigz_v3 3.3.24: an open tear is engaged first (logged as the tear).
+    ok(h.logged('Found active tear') == 1, 'the rupture was engaged from far away\n' .. h.tail(30))
     ok(drops[1] and drops[1].picked == true, 'the drop of the monster killed on the way was taken\n' .. h.tail(30))
     h.run(2)
     eq(rosie_status(h).reason, 'paused', 'paused in the tear')
