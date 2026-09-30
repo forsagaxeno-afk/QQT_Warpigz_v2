@@ -28,7 +28,7 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | `HordeDev` | Infernal Hordes | 2.2.9 |
 | `Reaper` | Boss lairs | 1.10.8 |
 | `WonderCity` | Kurast Undercity | 2.2.9 |
-| `SilentRaven` | Whisper reward checks in Temis | 0.2.9 |
+| `SilentRaven` | Whisper reward checks in Temis | 0.2.11 |
 | `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.33 |
 
 Nightmare Dungeons are not supported. WarPug excludes those nodes.

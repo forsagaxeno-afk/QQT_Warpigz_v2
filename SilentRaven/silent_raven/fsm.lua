@@ -100,6 +100,8 @@ local function hold(now, reason, expired)
     if tracker.state_t then tracker.state_t = tracker.state_t + dt end
     if tracker.run_started_t then tracker.run_started_t = tracker.run_started_t + dt end
     if tracker.walk_progress_t then tracker.walk_progress_t = tracker.walk_progress_t + dt end
+    -- QQT_Warpigz_v3 0.2.11 (audit LOW): paused time is no card-settle time either.
+    if tracker.cards_empty_since then tracker.cards_empty_since = tracker.cards_empty_since + dt end
     local held = now - tracker.yield_since
     if held >= YIELD_LOG_S and not tracker.yield_logged then
         tracker.yield_logged = true
@@ -572,6 +574,9 @@ function M.tick(settings)
         if tracker.interacts_fired > 0 and whispers.reward_panel_open() == true then
             claim(settings, now); return
         end
+        -- QQT_Warpigz_v3 0.2.11 (audit LOW): a closed panel restarts the card
+        -- settle; a reopened one waits its own CARD_SETTLE_S.
+        tracker.cards_empty_since = nil
         if now - tracker.state_t >= PANEL_TIMEOUT then
             -- An untranslated, incomplete meta quest gets one bounded probe.
             -- QQT_Warpigz_v3: so does a readiness inferred without an

@@ -1,8 +1,9 @@
-# SilentRaven (0.2.9): session notes (WarRoom archived in 3.3.6)
+# SilentRaven (0.2.11): session notes (WarRoom archived in 3.3.6)
 
 > 3.3.6 (Coordinator, owner request 2026-09-28): WarRoom is archived in `archive/WarRoom` (not shipped, not tested; see `archive/README.md`). This session owns SilentRaven only; the WarRoom notes below are kept for when it returns.
 
 ## SilentRaven
+- 0.2.11 (Auditor LOW, post-release review 3.3.20/3.3.21): hold() shifts tracker.cards_empty_since by the paused time; INTERACT_NPC clears it while the panel is closed. Tests (test_silentraven.lua): a 5 s pause during empty cards, and a closed + re-opened panel, both claim on attempt 1 with 0 ESC (each fails without its fix). 0.2.10 is taken by the owner's private branch claude/qqt-owner-betteralfred.
 - 0.2.9 (owner live 3.3.19: manual claim looped `no_valid_reward` with four `sno=0 valid=false` cards on an open panel): placeholder cards settle with the panel open (CARD_SETTLE_S 4 s, no ESC, no re-interact); still empty → `reward cards still empty after 4s` + one dump, retry after EMPTY_RETRY_S 5 s, `failed (reward_cards_empty)` after MAX_ATTEMPTS. No pick_and_accept fallback (unverified index convention; the dump shows the host API). Test: test_silentraven.lua (cards fill after 1.2 s → first-attempt claim, fails on 0.2.8; never fill → bounded failure). Live check: `run finished: success` on the first attempt, or the new line with the dump (send it).
 - 0.2.9: Rosie's Butler stand-in (`_rosie=true`) is skipped in third_party_reason (the only Butler read), like the Scavenger stand-in. Test q8_bounds B3 (fails without it).
 - Claims Tree of Whispers rewards both under WarPigs and when a farm plugin runs standalone; auto-fire in Temis; call API `SilentRavenPlugin.trigger_tasks[_with_teleport]`, `get_status`, `pause` / `resume`.

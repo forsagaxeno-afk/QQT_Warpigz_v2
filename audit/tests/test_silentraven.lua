@@ -171,6 +171,39 @@ do
     local ok_between=(c.time-t0)>=3*4+2*5;eq(ok_between,true,'4 s settle per attempt, 5 s between attempts')
     eq(c.interacts,3,'one interaction per attempt')
 end
+-- QQT_Warpigz_v3 0.2.11 (audit LOW): a pause during the card settle does not
+-- consume it; the claim still lands on attempt 1 with no ESC.
+do
+    local c=harness();local real=c.entries;c.entries=EMPTY;c.deliver=true
+    local answer=true
+    eq(c.start(function() if answer==true then return true end return false,answer end),true)
+    local opened,paused_at,resumed_at
+    for _=1,200 do
+        c.tick()
+        if c.panel and not opened then opened=c.time end
+        if opened and not paused_at and c.time-opened>=1 then answer='yield:looter_busy';paused_at=c.time end
+        if paused_at and not resumed_at and c.time-paused_at>=5 then answer=true;resumed_at=c.time end
+        if resumed_at and c.time-resumed_at>=0.5 then c.entries=real end
+        if c.result then break end
+    end
+    eq(c.result,'success','claimed after the pause');eq(c.escapes,0,'no ESC');eq(c.interacts,1,'attempt 1')
+    eq(logged(c,'reward cards still empty'),0,'the pause is not settle time')
+end
+-- A panel that closes and is re-opened by the FSM waits its own settle.
+do
+    local c=harness();local real=c.entries;c.entries=EMPTY;c.deliver=true;eq(c.start(),true)
+    local opened,closed,reopened
+    for _=1,200 do
+        c.tick()
+        if c.panel and not opened then opened=c.time end
+        if opened and not closed and c.time-opened>=2 then c.panel=false;closed=c.time end
+        if closed and c.panel and not reopened then reopened=c.time end
+        if reopened and c.time-reopened>=3 then c.entries=real end
+        if c.result then break end
+    end
+    eq(c.result,'success','claimed on the re-opened panel');eq(c.escapes,0,'no ESC');eq(c.interacts,2,'one re-interact')
+    eq(logged(c,'reward cards still empty'),0,'a re-opened panel restarts the settle')
+end
 -- Wrong selected index and all-invalid entries cannot accept.
 do
     local c=harness();c.wrong_select=true;c.start();c.tick();c.tick();eq(c.accepts,0,'selection mismatch stops claim')
