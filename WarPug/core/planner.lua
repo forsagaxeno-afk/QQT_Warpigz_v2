@@ -41,7 +41,13 @@ local session = { alfred = nil, paused_at = nil, paused_from = nil }
 local hold = { reason = nil, since = nil, logged_at = -math.huge, cleared_at = nil }
 local alfred_gate = { advisory_since = nil, advisory_logged = false,
     unreadable_since = nil, unreadable_logged = false,
-    hard_since = nil, hard_logged = false }  -- QQT_Warpigz_v3 1.0.16
+    hard_since = nil, hard_logged = false,  -- QQT_Warpigz_v3 1.0.16
+    live_since = nil, live_seen = -math.huge, live_logged = false }  -- QQT_Warpigz_v3 owner-build
+-- QQT_Warpigz_v3 owner-build: SteroidAlfred goes STUCK for good (stash full,
+-- or skip_cache with a full bag): trigger_tasks stays true forever and the
+-- 'Alfred working' hold never ended. Mirrors WarPigs' LIVE_WORK_HOLD: one live
+-- episode holds at most LIVE_WORK_MAX, logged once; a sampling gap restarts it.
+local LIVE_WORK_MAX = 300
 
 local function now() return get_time_since_inject() end
 local function log(m) console.print('[WarPug] ' .. m) end
@@ -178,7 +184,20 @@ local function alfred_hold(alfred, dispatcher)
         alfred_gate.advisory_since, alfred_gate.advisory_logged = nil, false
         if status.enabled == false or live or not hard then alfred_gate.hard_since, alfred_gate.hard_logged = nil, false end
         if status.enabled == false then return nil end
-        if live then return 'Alfred working' end
+        if not live then alfred_gate.live_since, alfred_gate.live_logged = nil, false end
+        if live then
+            -- QQT_Warpigz_v3 owner-build: bounded (a STUCK town service).
+            if t - alfred_gate.live_seen > 5 then alfred_gate.live_since = nil end
+            alfred_gate.live_seen = t
+            alfred_gate.live_since = alfred_gate.live_since or t
+            if t - alfred_gate.live_since < LIVE_WORK_MAX then return 'Alfred working' end
+            if not alfred_gate.live_logged then
+                alfred_gate.live_logged = true
+                log(string.format('town service busy for %ds without finishing (stash full?) — planning without it',
+                    LIVE_WORK_MAX))
+            end
+            return nil
+        end
         if hard then
             -- QQT_Warpigz_v3 1.0.16: bounded (C1), `stuck` honoured.
             local stuck = status.stuck == true

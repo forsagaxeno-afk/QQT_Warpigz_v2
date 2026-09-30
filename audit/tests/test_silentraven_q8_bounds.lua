@@ -9,6 +9,10 @@
 --      (5 s idle grace, TRIP_BOUND 400 s) and no second trip is asked for.
 --   D  the '[SilentRaven] Whisper quest ... -> <state>' line: one per change.
 --   H  Rosie names each refused hand-off once and queues nothing.
+-- QQT_Warpigz_v3 owner-build: no Rosie in this build. SteroidAlfred publishes
+-- no raven_handoff, so SilentRaven never asks it for a claim trip and there is
+-- no return-leg hand-off: G, B1, H, Z and S (claim-trip gates through Rosie,
+-- Rosie's refusal lines) are dropped; D runs with the joint host's mocks.
 -- Runs under Lua 5.4 and LuaJIT (run_tests.py runs both).
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
@@ -45,16 +49,12 @@ end
 -- Standalone Rosie + SilentRaven (claim trip after 1 min) in the helltide.
 local function host(o)
     o = o or {}
-    local h = J.new({rosie = o.rosie ~= false, dirs = o.dirs or {'Batmobile', SR}, place = o.place or 'helltide'})
+    local h = J.new({rosie = false, dirs = o.dirs or {'Batmobile', SR}, place = o.place or 'helltide'})
     h.assert_clean('load')
     h.instrument_exports()
     local g = h.mod(SR, 'silent_raven.gui').elements
     g.main_toggle:set(true)
     g.claim_trip_slider:set(o.claim_trip or 1)
-    if o.rosie ~= false then
-        eq(h.as('Rosie', function() return h.G.RosiePlugin.enable() end), true, 'Rosie enabled')
-        h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(2)
-    end
     h.P.helltide.helltide = true
     h.run(1)
     return h
@@ -69,118 +69,6 @@ local function town_status(h, fields)
         return s
     end
 end
-
--- Each gate: {name, wait-line reason, setup(h) -> lift(h) or nil, host options}.
-local GATES = {
-    {'dead player', 'the player is dead or loading', function(h)
-        h.dead = true
-        return function() h.dead = false end
-    end},
-    {'another town', 'the player is in a town other than Temis', function() return nil end, {place = 'kurast'}},
-    {'Rosie disabled', 'the town service is disabled', function(h)
-        h.as('Rosie', function() return h.G.RosiePlugin.disable() end)
-        return function() h.as('Rosie', function() return h.G.RosiePlugin.enable() end) end
-    end},
-    {'Rosie refuses external requests', 'the town service refuses external requests', function(h)
-        local f = {on = true, set = {allow_external = false}}
-        town_status(h, f)
-        return function() f.on = false end
-    end},
-    {'Rosie stuck', 'the town service is stuck (probe_failure)', function(h)
-        local f = {on = true, set = {stuck = true, stuck_reason = 'probe_failure'}}
-        town_status(h, f)
-        return function() f.on = false end
-    end},
-    {'Rosie paused', 'the town service is paused by Probe', function(h)
-        eq(h.G.AlfredTheButlerPlugin.pause('Probe'), true, 'Rosie paused by a companion')
-        return function() h.G.AlfredTheButlerPlugin.resume('Probe') end
-    end},
-    {'Rosie live work', 'the town service is on a trip', function(h)
-        local f = {on = true, set = {trigger_tasks = true}}
-        town_status(h, f)
-        return function() f.on = false end
-    end},
-    {'WarPug busy', 'a companion is busy (war_pug_busy)', function(h)
-        local st = {enabled = true, state = 'APPROACH_TABLE'}
-        h.G.WarPugPlugin = {status = function() return st end}
-        return function() st.state = 'IDLE' end
-    end},
-    {'Looter busy', 'a companion is busy (looter_busy:is_actively_looting)', function(h)
-        local busy = true
-        local looter = h.G.LooteerPlugin
-        local real = looter.is_actively_looting
-        looter.is_actively_looting = function(...) if busy then return true end return real(...) end
-        return function() busy = false end
-    end},
-    {'HelltideRevamped at the maiden', 'HelltideRevamped is busy (AT_MAIDEN)', function(h)
-        local state = 'AT_MAIDEN'
-        h.G.HelltideRevampedPlugin = {getState = function() return state end}
-        return function() state = 'EXPLORE_HELLTIDE' end
-    end},
-    -- QQT_Warpigz_v3 3.3.3: a third-party loop owning the run (Rosie defers
-    -- its own trip for it too) is never teleported away for a claim.
-    {'TristramLoop owns the run', 'another activity owns the run (TristramLoop, loop)', function(h)
-        local st = {running = true, owns_activity = true, phase = 'loop'}
-        h.G.TRISTRAM_LOOP_STATE = {status = function() return st end}
-        return function() st.owns_activity = false end
-    end},
-    -- QQT_Warpigz_v3 3.3.3 (auditor MED): third-party Butler / Scavenger /
-    -- Navigator (Worldstone) would interrupt the Town Portal cast.
-    {'Butler busy', 'a third-party addon is busy (butler_busy)', function(h)
-        local busy = true
-        h.G.Butler = {is_busy = function() return busy end}
-        return function() busy = false end
-    end},
-    {'Scavenger busy', 'a third-party addon is busy (scavenger_busy)', function(h)
-        local busy = true
-        h.G.Scavenger = {is_busy = function() return busy end}
-        return function() busy = false end
-    end},
-    -- 0.2.8: a town-priority walk (Butler, priority 10); Worldstone's priority-0
-    -- walk no longer holds (Rosie pauses Navigator for its trip; case W).
-    {'Navigator walking for Butler', 'a third-party addon is busy (navigator_busy:Butler)', function(h)
-        local st = {is_busy = true, owner = 'Butler', priority = 10}
-        h.G.Navigator = {get_status = function() return st end}
-        return function() st.is_busy = false end
-    end},
-    {'enemy close', 'enemies are close', function(h)
-        local mob = h.actor('helltide', 'Probe_Enemy', h.pos:x() + 3, h.pos:y(), {enemy = true, health = 1e9})
-        return function() h.remove_actor(mob) end
-    end},
-}
-
-case('G each claim-trip gate holds the trip with one line; lifting it starts the trip', function()
-    for _, gate in ipairs(GATES) do
-        local name, reason, setup, o = gate[1], gate[2], gate[3], gate[4] or {}
-        local h = host(o)
-        local lift = setup(h)
-        h.bounty_ready = true
-        h.run(80)
-        h.assert_clean(name)
-        eq(trips(h), 0, name .. ': no claim trip\n' .. h.tail(20))
-        eq(h.logged('[SilentRaven] reward ready: claim trip waits because ' .. reason), 1,
-            name .. ': one wait line\n' .. h.tail(20))
-        eq(h.logged('claim trip waits because'), 1, name .. ': no other wait reason')
-        if lift then
-            lift(h)
-            ok(h.run_until(function() return trips(h) == 1 end, 5), name .. ': the trip starts once the gate lifts\n' .. h.tail(20))
-        end
-    end
-end)
-
-case('B1 inferred readiness (localized complete counter), the panel never opens: exactly one claim trip', function()
-    local h = host()
-    h.set_quests({{name = 'Bounty_Meta_Quest', objectives = {{text = 'Соберите Мрачную Благосклонность (10/10)'}}}})
-    h.raven.on_interact = function() end
-    ok(h.run_until(function() return h.logged('no more claim trips') > 0 end, 400), 'the trips stop\n' .. h.tail(30))
-    h.run(120)
-    h.assert_clean('B1')
-    eq(h.reward_accepts, nil)
-    eq(trips(h), 1, 'one trip for an inferred readiness\n' .. h.tail(30))
-    eq(h.logged('claim trip ended without a claim'), 1)
-    eq(h.logged('reward ready: no more claim trips after 1 without a claim'), 1, 'one line')
-    eq(h.logged('[SilentRaven] reward ready (inferred: one probe per Temis visit)'), 1)
-end)
 
 -- A town service that accepts the trip, reports live work from 2 s after the
 -- request (until `idle_at` seconds, if given) and never calls back.
@@ -268,54 +156,6 @@ case('D the Whisper quest state line: one per change, never per check', function
     eq(whispers.utf8_head('abc', 90), 'abc')
 end)
 
--- Rosie's return-leg hand-off refused by SilentRaven's state: one line per
--- trip naming why, and no trigger_tasks queued.
-local REFUSALS = {
-    {'paused', 'SilentRaven is paused', function(h)
-        eq(h.G.SilentRavenPlugin.pause('Probe'), true, 'SilentRaven paused by a companion')
-    end},
-    {'latched', 'this Temis visit is already handled', nil, function(h)
-        h.mod(SR, 'silent_raven.tracker').last_zone_handled = 'Skov_Temis'
-    end},
-    {'pending', 'SilentRaven already has a request', nil, function(h)
-        local accepted = h.G.SilentRavenPlugin.trigger_tasks('Probe', nil, function() return false, 'yield:probe' end)
-        eq(accepted, true, 'a companion request queued (and held by its guard)')
-    end},
-}
-case('H Rosie names a refused hand-off (paused, visit handled, request pending) once and queues nothing', function()
-    for _, r in ipairs(REFUSALS) do
-        local name, why, before, in_temis = r[1], r[2], r[3], r[4]
-        local h = host({claim_trip = 0})
-        h.bounty_ready = true
-        if before then before(h) end
-        h.inventory = h.inventory or {}
-        for _ = 1, 25 do h.inventory[#h.inventory + 1] = h.gear() end
-        local seen_temis, done = false, false
-        done = h.run_until(function()
-            if h.place == h.P.temis and not seen_temis then
-                seen_temis = true
-                if in_temis then in_temis(h) end
-            end
-            return seen_temis and h.place == h.P.helltide
-        end, 200)
-        ok(done, name .. ': Rosie trip to Temis and back\n' .. h.tail(30))
-        h.assert_clean(name)
-        eq(h.logged('[Rosie] no SilentRaven hand-off: ' .. why), 1, name .. ': one line\n' .. h.tail(30))
-        eq(h.logged('[Rosie] no SilentRaven hand-off'), 1, name .. ': no other reason')
-        eq(h.count(h.api_calls, function(c)
-            return c.export == 'SilentRavenPlugin' and c.name == 'trigger_tasks' and c.caller == 'alfred_the_butler'
-        end), 0, name .. ': no hand-off queued')
-        eq(h.logged('[Rosie] waiting for SilentRaven'), 0)
-    end
-end)
-
--- QQT_Warpigz_v3 3.3.3: a third-party loop (TristramLoop, driven by
--- Worldstone) that owns the run keeps SilentRaven's own auto-fire in Temis
--- held (it would take movement away from it); the claim starts once it lets go.
--- QQT_Warpigz_v3 0.2.8 (RC1, "SilentRaven is manual now"): a third-party loop
--- (TristramLoop) owning the run holds auto-fire at a Temis stop only until the
--- reward has been ready 60 s (Rosie's DEFER_TOWN), then claims; one visible
--- hold line (RC6). 0.2.6/0.2.7 held it forever.
 case('T auto-fire in Temis waits for a loop owning the run at most 60 s of readiness', function()
     local h = J.new({dirs = {'Batmobile', SR}, place = 'temis'})
     h.assert_clean('load')
@@ -561,20 +401,6 @@ case('L the held reason reported is the one that held longest', function()
     eq(tracker.visit_hold, 'butler_busy', 'the long Butler hold, not the last teleport channel')
 end)
 
--- 0.2.8 review [LOW]: the claim trip waits for a loop owning the run at most
--- 600 s of readiness (Rosie's DEFER_ANY), with one line each.
-case('Z the claim trip waits for a loop owning the run at most 600 s', function()
-    local h = host()
-    h.G.TRISTRAM_LOOP_STATE = {status = function() return {running = true, owns_activity = true, phase = 'farm'} end}
-    h.bounty_ready = true
-    h.run(590)
-    h.assert_clean('Z held')
-    eq(trips(h), 0, 'no trip before 600 s\n' .. h.tail(20))
-    eq(h.logged('claim trip waits because another activity owns the run (TristramLoop, farm)'), 1, 'one wait line')
-    ok(h.run_until(function() return trips(h) == 1 end, 30), 'the trip after 600 s\n' .. h.tail(20))
-    eq(h.logged('claim trip waited 600s for TristramLoop, farm'), 1, 'one bound line')
-end)
-
 -- 0.2.8 review [MED]: a blank quest list on a loading screen does not end the
 -- ready episode (the 60 s TristramLoop bound would restart at every Temis
 -- arrival: 'manual now' again for Worldstone + TristramLoop).
@@ -612,20 +438,6 @@ case('K2 the channel bound restarts for a new cast after a loading screen', func
     h.casting = false
     ok(h.run_until(function() return h.logged('[SilentRaven] claiming the Whisper reward (auto)') == 1 end, 3),
         'the claim starts once the cast ends\n' .. h.tail(20))
-end)
-
--- 0.2.8 review [LOW]: the claim trip waits for a teleport channel (one line).
-case('S the claim trip waits for a teleport channel', function()
-    local h = host()
-    h.bounty_ready = true
-    h.run(55)
-    h.casting = true
-    h.run(12)
-    h.assert_clean('S')
-    eq(trips(h), 0, 'no trip during the channel\n' .. h.tail(20))
-    eq(h.logged('claim trip waits because the player is channelling a teleport'), 1, 'one wait line')
-    h.casting = false
-    ok(h.run_until(function() return trips(h) == 1 end, 3), 'the trip once the channel ends\n' .. h.tail(20))
 end)
 
 -- 0.2.8 re-review [MED]: after a loading screen the quest is re-read before

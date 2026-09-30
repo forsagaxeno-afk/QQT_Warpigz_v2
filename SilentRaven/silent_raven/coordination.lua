@@ -35,6 +35,11 @@ local TELEPORT_SPELL_ID = 186139
 -- Alfred inventory_full/need_repair holds a NEW auto-fire for at most
 -- HARD_NEED_LIMIT seconds; Alfred normally starts its own trip well before.
 local UNKNOWN_LIMIT, HARD_NEED_LIMIT = 10, 60
+-- QQT_Warpigz_v3 owner-build: SteroidAlfred goes STUCK for good (stash full,
+-- or skip_cache with a full bag): trigger_tasks stays true forever and
+-- 'alfred_busy' held every claim for the rest of the session. One live
+-- episode holds at most LIVE_WORK_MAX (WarPigs' LIVE_WORK_HOLD), logged once.
+local LIVE_WORK_MAX = 300
 local gate = {}
 
 local function clock() return (get_time_since_inject and get_time_since_inject()) or 0 end
@@ -163,7 +168,18 @@ local function alfred_reason(now, live_only)
         and (tracker.external_caller == s.name or tracker.external_caller == s.raven_handoff) then -- QQT_Warpigz_v3 (Q8)
         known('hard'); return nil
     end
-    if alfred_live_work(s) then known('hard'); return 'alfred_busy' end
+    if alfred_live_work(s) then
+        known('hard')
+        -- QQT_Warpigz_v3 owner-build: bounded (a STUCK town service).
+        if elapsed('live', now) < LIVE_WORK_MAX then return 'alfred_busy' end
+        if not gate.live_logged then
+            gate.live_logged = true
+            log.info(string.format('town service busy for %ds without finishing (stash full?); SilentRaven proceeds without it',
+                LIVE_WORK_MAX))
+        end
+        return nil
+    end
+    known('live')
     if live_only then return nil end
     if s.inventory_full == true or s.need_repair == true then
         if elapsed('hard', now) < HARD_NEED_LIMIT then return 'alfred_work_pending' end

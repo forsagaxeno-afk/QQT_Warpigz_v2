@@ -43,10 +43,9 @@ local function pattern_state(h)
 end
 
 local function run(release_when_reached)
-    local h = J.new({rosie = true, dirs = {'Batmobile', HD}, place = 'caldeum'})
+    -- QQT_Warpigz_v3 owner-build: no Rosie; the Alfred/Looter mocks stand in.
+    local h = J.new({rosie = false, dirs = {'Batmobile', HD}, place = 'caldeum'})
     h.assert_clean('load')
-    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(2)
-    assert(h.as('Rosie', function() return h.G.RosiePlugin.enable() end) == true)
     h.give_compasses(1)
     local A = h.setup_horde({})
     -- Hold back the locked door after the last wave; release it on the pulse

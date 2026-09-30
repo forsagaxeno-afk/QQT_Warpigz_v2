@@ -26,16 +26,24 @@ local task = {
 -- (no inventory_full/need_repair) are left to WarPigs when it is enabled.
 local TEMIS_WAYPOINT = 0x1CE51E
 local exit_plan = {trigger = nil, waypoint = nil}
+-- QQT_Warpigz_v3 owner-build: SteroidAlfred (BetterAlfred) services Temis
+-- only as well, so any loaded town-service provider counts, not only Rosie.
 local function rosie_need_pending()
-    local a = AlfredTheButlerPlugin
-    if type(RosiePlugin) ~= 'table' or type(a) ~= 'table' or type(a.get_status) ~= 'function' then return false end
+    local a = AlfredTheButlerPlugin or PLUGIN_alfred_the_butler
+    if type(a) ~= 'table' or type(a.get_status) ~= 'function' then return false end
     local ok, st = pcall(a.get_status)
     if not ok or type(st) ~= 'table' or st.enabled ~= true or st.paused == true then return false end
     if st.need_trigger ~= true then return false end
+    local ok_a, alfred_task = pcall(require, 'tasks.alfred')
+    -- QQT_Warpigz_v3 owner-build: a STUCK town service (no trip will start).
+    if ok_a and type(alfred_task) == 'table' and type(alfred_task.town_blocked) == 'function'
+        and alfred_task.town_blocked()
+    then
+        return false
+    end
     if st.inventory_full == true or st.need_repair == true then return true end
     -- QQT_Warpigz_v3 WonderCity 2.2.6 (review): the alfred task's 30 s
     -- post-cycle grace skips an advisory-only need; so does the exit.
-    local ok_a, alfred_task = pcall(require, 'tasks.alfred')
     if ok_a and type(alfred_task) == 'table' and type(alfred_task.advisory_grace_active) == 'function'
         and alfred_task.advisory_grace_active()
     then
@@ -57,7 +65,7 @@ local function exit_waypoint()
     local waypoint = settings.town_waypoint
     if waypoint ~= TEMIS_WAYPOINT and rosie_need_pending() then
         waypoint = TEMIS_WAYPOINT
-        console.print('[WonderCity] Rosie need pending at run end: teleporting out to Temis (Rosie serves there, then back to town)')
+        console.print('[WonderCity] town-service need pending at run end: teleporting out to Temis (the town service works there, then back to town)')
     end
     exit_plan.trigger, exit_plan.waypoint = tracker.exit_trigger_time, waypoint
     return waypoint

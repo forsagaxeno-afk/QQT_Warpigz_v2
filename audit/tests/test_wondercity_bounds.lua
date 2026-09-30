@@ -462,54 +462,29 @@ case('B6 a reload during chest confirmation keeps the reward phase: the run ends
     eq(rawget(s.env, 'WonderCity_run_state'), nil, 'no saved state after the run')
 end)
 
--- ── B3 (joint host, real Rosie) ────────────────────────────────────────────
+-- ── B3 (joint host) ────────────────────────────────────────────────────────
+-- QQT_Warpigz_v3 owner-build: no Rosie in this build; the joint host's Alfred
+-- mock services the bag-full trips (Rosie's outcome/fail_streak fields and
+-- its missing-return-portal case are not part of the SteroidAlfred contract).
 local J = dofile(SUITE .. '/audit/tests/joint_host.lua')
 
-case('B3 standalone WonderCity in Kurast + Rosie: bag-full trips complete, no fail_streak, back into Kurast', function()
-    local h = J.new({rosie = true, dirs = {'Batmobile', 'WonderCity'}, place = 'kurast'})
+case('B3 standalone WonderCity in Kurast + a town service: bag-full trips complete, back into Kurast', function()
+    local h = J.new({rosie = false, dirs = {'Batmobile', 'WonderCity'}, place = 'kurast'})
     h.assert_clean('load')
     local wc = h.mod('WonderCity', 'gui').elements
     wc.main_toggle:set(true); wc.skip_tribute:set(true); wc.exit_mode:set(1)
-    h.mod('Rosie', 'rosie.private.town.gui').elements.use_keybind:set(true) -- trips only on request
-    ok(h.as('Rosie', function() return h.G.RosiePlugin.enable() end))
-    local function al() return h.as('WonderCity', function() return h.G.AlfredTheButlerPlugin.get_status() end) end
     for trip = 1, 3 do
-        h.inventory = h.inventory or {}
-        for _ = 1, 25 do h.inventory[#h.inventory + 1] = h.gear() end
         local mark = h.now
-        -- 3.3.1: Rosie also logs why an automatic trip waits; wait for the trip's own end line.
-        ok(h.run_until(function() return h.logged('[Rosie] completed', mark) + h.logged('[Rosie] failed', mark) > 0
+        h.alfred.need_trigger, h.alfred.inventory_full = true, true
+        ok(h.run_until(function() return h.alfred.inventory_full == false and h.alfred.job == nil
             and h.place.key == 'kurast' end, 200),
             'trip ' .. trip .. ' ended back in Kurast\n' .. h.tail())
-        local st = al()
-        eq(st.outcome, 'completed', 'trip ' .. trip .. ' outcome')
-        eq(st.fail_streak, 0, 'trip ' .. trip .. ' fail_streak')
-        eq(st.stuck, false)
-        eq(#h.inventory, 0, 'bag emptied')
+        ok(h.count(h.alfred.triggers, function(c) return c.t >= mark and c.context == 'WonderCity' end) >= 1,
+            'trip ' .. trip .. ': WonderCity asked the town service')
         h.run(5)
     end
     eq(h.logged('teleport_failed'), 0, 'no teleport_failed')
     eq(#h.errors, 0, 'no host errors')
-end)
-
-case('B3 a with-teleport trip whose return portal is missing after a complete service is completed, not a failure', function()
-    local CONSUMER = {name = 'Consumer', dir = SUITE .. '/audit/tests/', loaded = {}}
-    local h = J.new({rosie = true, dirs = {}, place = 'pit'})
-    h.assert_clean('load')
-    h.open_town_portal = function() end -- no TownPortal back
-    ok(h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end)); h.frame()
-    h.inventory = {}
-    for i = 1, 25 do h.inventory[i] = h.gear() end
-    local results = {}
-    ok(h.as(CONSUMER, function()
-        return h.G.AlfredTheButlerPlugin.trigger_tasks_with_teleport('Consumer', function(_, detail) results[#results + 1] = detail end)
-    end), 'request accepted')
-    ok(h.run_until(function() return #results > 0 end, 200), 'trip finished\n' .. h.tail())
-    local st = h.as(CONSUMER, function() return h.G.AlfredTheButlerPlugin.get_status() end)
-    eq(results[1].outcome, 'completed', 'callback outcome'); eq(results[1].success, true)
-    eq(st.fail_streak, 0, 'fail_streak')
-    eq(#h.inventory, 0, 'bag serviced')
-    ok(h.logged('return portal missing') == 1, 'logged once')
 end)
 
 -- ── B7 (joint host: real Batmobile + WonderCity on a closed floor) ─────────

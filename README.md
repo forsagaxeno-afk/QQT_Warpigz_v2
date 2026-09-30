@@ -6,7 +6,7 @@
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v3.3.21.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
+**This branch: private owner build v3.3.21-rc.100 (no Rosie; SteroidAlfred/BetterAlfred + LooteerV3 instead — see [OWNER_BUILD_RU.txt](docs/OWNER_BUILD_RU.txt)). Public release: v3.3.21.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
 
 **New here? Read the [step-by-step user guide](docs/GUIDE_EN.md)** (install, setup, WarPigs automation or one activity by hand, troubleshooting).
 
@@ -21,24 +21,23 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | Folder | Role | Component version |
 | --- | --- | --- |
 | `WarPigs` | Master orchestrator and town handoffs | 1.1.13 |
-| `WarPug` | War Plan selection and creation | 1.0.17 |
+| `WarPug` | War Plan selection and creation | 1.0.18 |
 | `Batmobile` | Shared navigation | 2.2.5 |
-| `ArkhamAsylum` | The Pit | 2.1.6 |
-| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.6 |
-| `HordeDev` | Infernal Hordes | 2.2.9 |
-| `Reaper` | Boss lairs | 1.10.8 |
-| `WonderCity` | Kurast Undercity | 2.2.9 |
-| `SilentRaven` | Whisper reward checks in Temis | 0.2.9 |
-| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.32 |
+| `ArkhamAsylum` | The Pit | 2.1.7 |
+| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.7 |
+| `HordeDev` | Infernal Hordes | 2.2.10 |
+| `Reaper` | Boss lairs | 1.10.9 |
+| `WonderCity` | Kurast Undercity | 2.2.10 |
+| `SilentRaven` | Whisper reward checks in Temis | 0.2.10 |
 
 Nightmare Dungeons are not supported. WarPug excludes those nodes.
 
 ## Installation
 
 1. Stop the controllers and close QQT before replacing source files. Back up your plugin folders, settings, custom paths, and WarPug `positions.txt` outside the scripts directory.
-2. Copy **only the 10 plugin folders above** into the QQT scripts directory. **From 3.3.6 the package has no `WarRoom` folder:** delete an existing `WarRoom` folder from your scripts directory (the other plugins do not need it). Do not copy `archive`, `audit`, `docs`, `assets` or `tools` there (QQT would try to load them as plugins and print `cannot open ...\main.lua`). Keep one loaded copy of each plugin. **From 3.0 the folders have no version in their name** and keep it across updates; when upgrading from 2.x, delete `WarPigs-1.0.0`, `WarPug-1.0.0`, `Batmobile-1.0.12`, `ArkhamAsylum-1.0.6`, `HelltideRevamped-0.4`, `HordeDev-1.3.9`, `Reaper-main`, `WonderCity-main` and `SilentRaven-0.1.3` first, or QQT loads two copies.
+2. Copy **only the 9 plugin folders above** into the QQT scripts directory. **From 3.3.6 the package has no `WarRoom` folder:** delete an existing `WarRoom` folder from your scripts directory (the other plugins do not need it). Do not copy `archive`, `audit`, `docs`, `assets` or `tools` there (QQT would try to load them as plugins and print `cannot open ...\main.lua`). Keep one loaded copy of each plugin. **From 3.0 the folders have no version in their name** and keep it across updates; when upgrading from 2.x, delete `WarPigs-1.0.0`, `WarPug-1.0.0`, `Batmobile-1.0.12`, `ArkhamAsylum-1.0.6`, `HelltideRevamped-0.4`, `HordeDev-1.3.9`, `Reaper-main`, `WonderCity-main` and `SilentRaven-0.1.3` first, or QQT loads two copies.
 3. Replace the SilentRaven folder completely: its modules now live under `silent_raven.*`. Restore your saved configuration as needed. Do not load old SilentRaven alongside this build.
-4. **Rosie replaces Alfred and Looter**: remove (or move out of the scripts directory) your old Alfred, SteroidAlfred, AlfredTheButler-WarPigz and LooteerV3 folders — Rosie publishes the same `AlfredTheButlerPlugin` / `LooteerPlugin` APIs and yields if another provider is loaded. Rosie switches the host Auto Loot off while its pickup runs. Keep your separately installed **combat/Orbwalker** plugin; it is not bundled or replaced. Configure town, loot rules, combat, and activity settings before enabling automation.
+4. **Owner build (no Rosie): install SteroidAlfred (BetterAlfred, `SteroidAlfredV2`) and `LooteerV3` alongside** these 9 folders — they provide the town service (`AlfredTheButlerPlugin`) and the pickup (`LooteerPlugin`). Remove any old `Rosie` folder and any second Alfred/Looter copy (exactly one town service and one looter). Recommended settings and what this build does not do compared with Rosie: [docs/OWNER_BUILD_RU.txt](docs/OWNER_BUILD_RU.txt). Keep your separately installed **combat/Orbwalker** plugin; it is not bundled or replaced. Configure town, loot rules, combat, and activity settings before enabling automation.
 5. Fully reload QQT. This matters for the captured module imports that fix Reaper's externally triggered `reset_run` crash.
 6. Enable SilentRaven in its own menu and **Whispers in Temis (SilentRaven)** in WarPigs. WarPigs does not override SilentRaven's enable checkbox.
 7. WarPug ships `positions.txt` **uncalibrated** since v2.1.0 (the calibration shipped by earlier releases is ignored so WarPug never clicks blind). Capture your own **Reroll** and **Confirm** positions in WarPug's menu after installing or updating, or restore your own backed-up `positions.txt`. Boards with a valid path confirm natively without clicks.

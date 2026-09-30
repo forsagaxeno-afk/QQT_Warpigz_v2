@@ -2,7 +2,7 @@
 
 local M = {
     plugin_label   = 'silent_raven',
-    plugin_version = '0.2.9',
+    plugin_version = '0.2.10',
     plugin_author  = 'magoogle',
 
     -- Skov_Temis waypoint SNO.  Pulled from AlfredTheButler/core/town.lua.

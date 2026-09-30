@@ -71,7 +71,7 @@ local function chest(h, pts, skin, i, side)
 end
 
 case('a Farm Helltide: Mystery first, no ping-pong, overlay, stats and learned data saved', function()
-    local h = J.new({rosie = true, dirs = {'Batmobile', HR}, place = 'step', minute = 5})
+    local h = J.new({rosie = false, dirs = {'Batmobile', HR}, place = 'step', minute = 5})
     -- The Helltide hour is pinned (a real hour boundary during the run would
     -- close the Helltide record early); the minute is the host's h.minute.
     h.mod(HR, 'core.hr_clock')._now = function() return 1790481600 + h.minute * 60 + math.floor(h.now) % 60 end

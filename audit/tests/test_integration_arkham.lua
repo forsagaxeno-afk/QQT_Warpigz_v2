@@ -735,7 +735,7 @@ test('R6-A3 Home town Cerrigar with Rosie: full bags in Cerrigar hop to Temis fo
     assert(#s.alfred.triggers == 1 and not s.alfred.triggers[1].teleport, 'plain trip from Cerrigar')
     assert(#s.waypoints == 1 and s.waypoints[1].sno == TEMIS_WP,
         'no hop to Temis from a Cerrigar home town (waypoints=' .. #s.waypoints .. ')')
-    assert(s.logged('Rosie services Temis only'), 'service-town line not logged')
+    assert(s.logged('the town service works in Temis only'), 'service-town line not logged')
     s.go(TOWN); s.run_for(5)
     assert(#s.waypoints == 1 and s.task() == 'alfred_running', 'Temis counts as the service town')
     -- In the pit with a Cerrigar home town the hop also goes to Temis.
@@ -746,14 +746,17 @@ test('R6-A3 Home town Cerrigar with Rosie: full bags in Cerrigar hop to Temis fo
     p.alfred.need_trigger = true; p.alfred.inventory_full = true
     p.run_for(2)
     assert(#p.waypoints == 1 and p.waypoints[1].sno == TEMIS_WP, 'pit hop did not go to Temis')
-    -- Standalone AlfredTheButler (no Rosie): the home town is the service town.
+    -- QQT_Warpigz_v3 owner-build: any loaded town service (SteroidAlfred
+    -- services Temis only) is Temis-only too: from Cerrigar the trip hops to
+    -- Temis (3.3.21 kept the home town for a provider other than Rosie).
     local a = session({town = true})
     a.go(CERRIGAR)
     a.gui.elements.town:set(1)
     a.api.enable(); a.frames(2)
     a.alfred.need_trigger = true; a.alfred.inventory_full = true
     a.run_for(2)
-    assert(#a.alfred.triggers == 1 and #a.waypoints == 0, 'standalone Alfred in its home town must not hop')
+    assert(#a.alfred.triggers == 1 and #a.waypoints == 1 and a.waypoints[1].sno == TEMIS_WP,
+        'a town service other than Rosie: the Cerrigar trip hops to Temis (waypoints=' .. #a.waypoints .. ')')
 end)
 
 -------------------------------------------------------------------------------

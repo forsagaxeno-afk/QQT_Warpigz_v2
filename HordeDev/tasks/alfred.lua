@@ -104,10 +104,44 @@ local function retire_request()
     task.status = status_enum.IDLE
     retry_after = get_time_since_inject() + RETRY_DELAY
 end
+-- QQT_Warpigz_v3 owner-build: SteroidAlfred goes STUCK for good (stash full,
+-- or skip_cache with a full bag; its out-of-town teleport also retries
+-- forever): trigger_tasks stays true and no callback ever comes, so every
+-- live-work hold below waited forever. Mirrors WarPigs' LIVE_WORK_HOLD:
+-- continuous live work longer than LIVE_WORK_MAX is logged once, our request
+-- is retired, that live work no longer holds the Horde (until it ends), and
+-- no new trip is asked for while it lasts, and for at least TOWN_BLOCK_S.
+-- tracker.alfred_town_stuck tells core/loot_guard the same.
+local LIVE_WORK_MAX, TOWN_BLOCK_S = 300, 600
+local live = {since = nil, seen = -math.huge, expired = false, blocked_until = -math.huge}
+local function live_stuck(status)
+    if not (status and status.enabled and live_work(status)) then
+        live.since, live.expired, tracker.alfred_town_stuck = nil, false, nil
+        return false
+    end
+    local now = get_time_since_inject()
+    -- A sampling gap (the task did not run) starts the clock over.
+    if not live.expired and now - live.seen > 5 then live.since = now end
+    live.seen = now
+    if live.expired then return true end
+    if now - live.since < LIVE_WORK_MAX then return false end
+    live.expired, live.blocked_until, tracker.alfred_town_stuck = true, now + TOWN_BLOCK_S, true
+    tracker.alfred_town_block_until = live.blocked_until
+    console.print(string.format("[alfred] town service busy for %ds without finishing (stash full?) — farming on without it",
+        LIVE_WORK_MAX))
+    if task.status == status_enum.WAITING then retire_request() end
+    trip.returning_since = nil
+    tracker.needs_salvage = false
+    return true
+end
+-- Live work that still holds us (not a STUCK town service).
+local function busy_work(status) return live_work(status) and not live_stuck(status) end
+local function town_blocked() return live.expired or get_time_since_inject() < live.blocked_until end
+task.town_blocked = town_blocked
 local function waiting_for_request(status)
     if task.status ~= status_enum.WAITING then return false end
     if get_alfred() ~= request_plugin then retire_request(); return true end
-    if not status or live_work(status) then
+    if not status or busy_work(status) then
         quiet_since = nil
         return true
     end
@@ -162,7 +196,7 @@ local function awaiting_return(status)
     local now = get_time_since_inject()
     -- C1/C5: live or unreadable Alfred work after the callback keeps the hold
     -- and does not consume the idle return window.
-    if not status or (status.enabled and live_work(status)) then
+    if not status or (status.enabled and busy_work(status)) then
         trip.returning_since = now
         return true
     end
@@ -224,7 +258,7 @@ local function decide()
     -- the Library in the middle of it, the trip failed, the bag stayed full
     -- and the horde was abandoned. Only a readable, enabled, live status
     -- holds (bounded by Alfred's own service timeout and failure latch).
-    if status and status.enabled and live_work(status) then return true, 'Alfred busy' end
+    if status and status.enabled and busy_work(status) then return true, 'Alfred busy' end
 
     -- HRD-6 / C1: the user's use_alfred choice comes before any other Alfred
     -- hold, so an odd or unreadable Alfred cannot stall waves, chests or exit.
@@ -248,6 +282,9 @@ local function decide()
         return false
     end
     held.stuck_logged = false
+
+    -- QQT_Warpigz_v3 owner-build: a STUCK town service: farm on, no request.
+    if town_blocked() then tracker.needs_salvage = false; return false end
 
     -- Hold while we have our own cycle in flight.
     if get_time_since_inject() < retry_after then return true end
@@ -300,6 +337,7 @@ function task.Execute()
 
     -- Don't overwrite another caller's in-flight cycle.
     if live_work(status) then return end
+    if town_blocked() then tracker.needs_salvage = false; return end -- QQT_Warpigz_v3 owner-build
 
     if task.status == status_enum['IDLE'] then
         trigger_alfred()

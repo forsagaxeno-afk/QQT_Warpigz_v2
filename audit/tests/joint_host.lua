@@ -15,6 +15,11 @@
 -- keeps running; the test asserts that no error happened.
 -- The world, the player, AlfredTheButler, LooteerV3, the native warplan /
 -- quest_reward / pathfinder / orbwalker APIs are behaviour-level mocks.
+-- QQT_Warpigz_v3 owner-build: this branch ships no Rosie folder, so
+-- opts.rosie cannot load; opts.town_surface gives the same host surface
+-- without it, opts.alfred_shape = 'steroid' turns the Alfred mock into a
+-- SteroidAlfredV2-shaped one, and opts.no_mocks + opts.dirs load the real
+-- vendored third-party folders (audit/fixtures/third_party/).
 -- opts.rosie loads the REAL Rosie folder (Rosie publishes RosiePlugin plus the
 -- AlfredTheButlerPlugin / PLUGIN_alfred_the_butler / LooteerPlugin adapters)
 -- instead of the Alfred and Looter mocks; opts.dirs loads only those folders.
@@ -72,6 +77,14 @@ function J.new(opts)
     math.randomseed(opts.seed or 7)
     local rosie = opts.rosie == true
     h.rosie = rosie
+    -- QQT_Warpigz_v3 owner-build: opts.town_surface adds the host surface
+    -- Rosie mode models (Temis vendors/stash, gear, ground drops, the
+    -- asynchronous engine path, item counts) without loading Rosie;
+    -- opts.no_mocks drops the Alfred/Looter mocks (real third-party town
+    -- service / looter folders loaded through opts.dirs instead).
+    local surface = rosie or opts.town_surface == true
+    local mocks = not (rosie or opts.no_mocks == true)
+    h.surface = surface
     local dirs = {}
     for _, dir in ipairs(opts.dirs or J.DIRS) do dirs[#dirs + 1] = dir end
     if rosie then
@@ -567,7 +580,15 @@ function J.new(opts)
         end
         if mem_files[path] ~= nil then return mem_reader(mem_files[path]) end
         return io.open(path, mode)
-    end, lines = io.lines, write = function() end, read = function() return nil end}
+    end, lines = io.lines, write = function() end, read = function() return nil end,
+        -- QQT_Warpigz_v3 owner-build: SteroidAlfred's export writes through
+        -- io.output(file) / io.write / io.close(file) (in memory, as above).
+        output = function(f) h.io_output = f; return f end,
+        close = function(f) if type(f) == 'table' and f.close then return f:close() end return true end}
+    BASE.io.write = function(...)
+        local f = h.io_output
+        if type(f) == 'table' and f.write then return f:write(...) end
+    end
 
     local G = {}
     h.G = G
@@ -789,7 +810,7 @@ function J.new(opts)
     function player:get_skin_name() return 'Player' end
     function player:get_item_count()
         h.item_count_reads = (h.item_count_reads or 0) + 1
-        if rosie and h.item_count == nil then return #(h.inventory or {}) end
+        if surface and h.item_count == nil then return #(h.inventory or {}) end
         return h.item_count or 0
     end
     function player:get_inventory_items() return h.inventory or {} end
@@ -799,6 +820,7 @@ function J.new(opts)
         if h.consumables_error then error('host: consumable bag unavailable') end
         return h.consumables or {}
     end
+    function player:get_consumable_count() return #(h.consumables or {}) end -- QQT_Warpigz_v3 owner-build (LooteerV3)
     function player:get_dungeon_key_items() return h.keys_items or {} end
     -- Stash contents read only while the stash panel is open (Alfred's
     -- stash-count check relies on that).
@@ -850,7 +872,7 @@ function J.new(opts)
         local key = h.waypoint_places[sno] or 'cerrigar'
         -- Rosie mode: teleporting to Temis out of a non-town place leaves a
         -- town portal in Temis that leads back to the exact spot.
-        if rosie and key == 'temis' and not h.place.town and h.place ~= P.limbo then
+        if surface and key == 'temis' and not h.place.town and h.place ~= P.limbo then
             h.open_town_portal(h.place, h.pos)
         end
         h.travel_to(key, 1.0, 'waypoint')
@@ -922,7 +944,7 @@ function J.new(opts)
     end)
     host('interact_vendor', function(a)
         note_call(h.vendors, {actor = a, skin = a and a.skin})
-        if rosie and a and a.vendor and h.pos:dist_to_ignore_z(a.pos) <= (a == h.temis_stash and (opts.stash_reach or 4) or 4)
+        if surface and a and a.vendor and h.pos:dist_to_ignore_z(a.pos) <= (a == h.temis_stash and (opts.stash_reach or 4) or 4)
             and not (opts.stash_broken and a == h.temis_stash)
             and not (a == h.temis_stash and (opts.stash_fail_first or 0) > (h.stash_fails or 0) and (function() h.stash_fails = (h.stash_fails or 0) + 1; return true end)()) then
             h.vendor_screen, h.vendor_actor = true, a
@@ -969,7 +991,7 @@ function J.new(opts)
     -- routes to the MAP PIN: without a pin the request never completes
     -- ("create_path function exit point" forever, as in Temis).
     h.pins = {}
-    if rosie and opts.engine_path ~= false then
+    if surface and opts.engine_path ~= false then
         local engine = {calls = 0, forwards = 0, dummies = 0, finals = 0, last = -math.huge, log = {}}
         h.engine = engine
         pathfinder_api.create_path_game_engine = function(p)
@@ -1042,7 +1064,7 @@ function J.new(opts)
                 h.game_menu_opens = (h.game_menu_opens or 0) + 1
             end
             if key == 0x1B then h.panel = false end
-            if key == 0x1B and h.rosie then h.vendor_screen, h.vendor_actor, h.inventory_open = false, nil, false end end,
+            if key == 0x1B and h.surface then h.vendor_screen, h.vendor_actor, h.inventory_open = false, nil, false end end,
         send_mouse_click = function(x, y)
             h.clicks[#h.clicks + 1] = {x = x, y = y, t = h.now}
             if h.on_click then h.on_click(x, y) end
@@ -1091,7 +1113,7 @@ function J.new(opts)
             for _, a in ipairs(actors_here()) do if a.enemy then out[#out + 1] = a end end
             return out
         end,
-        get_all_items = function() return rosie and (h.place.items or {}) or {} end,
+        get_all_items = function() return surface and (h.place.items or {}) or {} end,
     })
     host('loot_manager', {
         any_item_around = function() return h.floor_loot end,
@@ -1109,7 +1131,7 @@ function J.new(opts)
         end,
         is_obols = function() return false end,
     })
-    if rosie then
+    if surface then
         -- Rosie's town commands act on the vendor screen that is open.
         local lm = G.loot_manager
         local function take(item, list)
@@ -1380,6 +1402,16 @@ function J.new(opts)
         end,
     })
 
+    -- QQT_Warpigz_v3 owner-build: the real third-party folders (opts.no_mocks)
+    -- probe these: a no-op asynchronous curl (no network; callbacks never
+    -- run) and the character name.
+    if opts.no_mocks then
+        h.curl_calls = {}
+        local function curl_call(kind) return function(url) h.curl_calls[#h.curl_calls + 1] = {kind = kind, url = url}; return true end end
+        host('curl', {http_get = curl_call('get'), http_post = curl_call('post')})
+        host('get_local_player_name', function() return 'JointHero' end)
+        host('world', {get_current_world = function() return G.get_current_world() end})
+    end
     -- ── AlfredTheButler (closed source): C1-shaped status ───────────────────
     local al = {enabled = true, need_trigger = false, inventory_full = false, need_repair = false,
         restock_count = 0, trigger_tasks = false, external_trigger = false, pending = false,
@@ -1389,8 +1421,45 @@ function J.new(opts)
     local ALFRED_FIELDS = {'enabled', 'need_trigger', 'inventory_full', 'need_repair', 'restock_count',
         'trigger_tasks', 'external_trigger', 'pending', 'running', 'teleport', 'teleport_done',
         'teleport_failed', 'paused', 'paused_by', 'external_caller', 'all_task_done'}
+    -- QQT_Warpigz_v3 owner-build: opts.alfred_shape = 'steroid' models the
+    -- SteroidAlfredV2 (BetterAlfred) contract instead of C1: get_status()
+    -- publishes only Steroid's fields (no paused/pending/running/
+    -- external_trigger/stuck); trigger_tasks[_with_teleport] return nil and
+    -- keep ONE callback slot (a later call replaces it), the callback gets no
+    -- arguments, also after a failed cycle (h.alfred.fail: the bag stays
+    -- full); the trip pauses Batmobile ('alfred_the_butler') and resumes it
+    -- at the end. h.alfred.stuck = true models its STUCK state (stash full /
+    -- skip_cache with a full bag): after the town work trigger_tasks stays
+    -- true forever, no callback, Batmobile stays paused.
+    local steroid = opts.alfred_shape == 'steroid'
+    h.steroid = steroid
+    local STEROID_FIELDS = {'name', 'version', 'enabled', 'teleport', 'teleport_done', 'teleport_failed',
+        'inventory_full', 'talisman_inventory_full', 'inventory_count', 'salvage_count', 'sell_count', 'stash_count',
+        'trigger_tasks', 'last_reset', 'salvage_failed', 'salvage_done', 'sell_failed', 'sell_done',
+        'all_task_done', 'need_repair', 'need_trigger'}
+    if steroid then
+        al.name, al.version, al.external_trigger = 'alfred_the_butler', 'steroid-mock', false
+        al.inventory_count, al.salvage_count, al.sell_count, al.stash_count, al.last_reset = 0, 0, 0, 0, 0
+    end
+    local function steroid_bm(action)
+        local bm = G.BatmobilePlugin
+        if type(bm) == 'table' and type(bm[action]) == 'function' then bm[action]('alfred_the_butler') end
+    end
     local function queue_alfred(caller, cb, teleport)
         local owner = code_owner(3)
+        if steroid then
+            al.triggers[#al.triggers + 1] = {t = h.now, caller = caller, teleport = teleport,
+                context = context and context.name or '-', owner = owner and owner.name or '-', place = h.place.key}
+            al.external_caller, al.external_trigger = caller, true
+            if cb then al.cb = cb end -- one slot: the last caller's callback wins
+            if teleport then al.teleport = true end
+            if not al.job then
+                al.all_task_done = false
+                al.job = {t = h.now, phase = 'queued', teleport = teleport, exit = h.place, exit_pos = h.pos}
+                if teleport then al.teleport_done, al.teleport_failed = false, false end
+            end
+            return nil
+        end
         al.triggers[#al.triggers + 1] = {t = h.now, caller = caller, teleport = teleport,
             context = context and context.name or '-', owner = owner and owner.name or '-', place = h.place.key}
         al.external_trigger, al.external_caller, al.cb, al.all_task_done = true, caller, cb, false
@@ -1398,23 +1467,36 @@ function J.new(opts)
         if teleport then al.teleport, al.teleport_done, al.teleport_failed = true, false, false end
         return true
     end
-    if not rosie then host('AlfredTheButlerPlugin', {
+    if mocks then host('AlfredTheButlerPlugin', {
         get_status = function()
             if al.unreadable then error('Alfred status unavailable') end
             local s = {}
-            for _, k in ipairs(ALFRED_FIELDS) do s[k] = al[k] end
+            for _, k in ipairs(steroid and STEROID_FIELDS or ALFRED_FIELDS) do s[k] = al[k] end
             return s
         end,
         trigger_tasks = function(caller, cb) return queue_alfred(caller, cb, false) end,
         trigger_tasks_with_teleport = function(caller, cb) return queue_alfred(caller, cb, true) end,
-        pause = function(caller) al.paused, al.paused_by = true, caller; return true end,
-        resume = function(caller) al.paused, al.paused_by = false, nil; return true end,
+        pause = function(caller)
+            if steroid then al.external_pause = true; return nil end
+            al.paused, al.paused_by = true, caller; return true
+        end,
+        resume = function(caller)
+            if steroid then al.external_pause = false; return nil end
+            al.paused, al.paused_by = false, nil; return true
+        end,
     }) end
     local function alfred_done()
         local job = al.job
+        if steroid and al.stuck then
+            -- STUCK: the status task returns before the reset and the callback.
+            if job then job.phase = 'stuck' end
+            if job and job.teleport then al.teleport_done = true end
+            return
+        end
         al.job = nil
         al.trigger_tasks, al.external_trigger, al.running, al.all_task_done = false, false, false, true
-        al.inventory_full, al.need_repair = false, false
+        if steroid and job and job.bm then steroid_bm('resume') end
+        if not (steroid and al.fail) then al.inventory_full, al.need_repair = false, false end
         if not al.sticky_need then al.need_trigger = false end
         if job and job.teleport then al.teleport_done = true end
         local cb = al.cb
@@ -1426,8 +1508,16 @@ function J.new(opts)
         if not job or al.paused or not al.enabled then return end
         local age = h.now - job.t
         local function phase(name) job.phase, job.t = name, h.now end
+        if job.phase == 'stuck' then return end
         if job.phase == 'queued' and age >= 0.3 then
             al.external_trigger, al.trigger_tasks, al.running = false, true, true
+            if steroid then
+                al.external_trigger = true; job.bm = true; steroid_bm('pause')
+                -- Steroid's status task: a trigger out of town always teleports.
+                if not h.place.town and not job.teleport then
+                    job.teleport, al.teleport, al.teleport_done, al.teleport_failed = true, true, false, false
+                end
+            end
             if job.teleport and not h.place.town then
                 h.travel_to('temis', 1.0, 'alfred'); phase('to_town')
             else
@@ -1454,7 +1544,7 @@ function J.new(opts)
     -- ── LooteerV3 (closed source): read only ────────────────────────────────
     local lt = {enabled = true, busy = false}
     h.looter = lt
-    if not rosie then host('LooteerPlugin', {
+    if mocks then host('LooteerPlugin', {
         get_enabled = function() return lt.enabled end,
         is_actively_looting = function() return lt.busy end,
     }) end
@@ -1531,7 +1621,7 @@ function J.new(opts)
         h.frames = h.frames + 1
         travel_tick()
         run_events()
-        if not rosie then
+        if mocks then
             invoke(h.alfred_ctx, 'update', alfred_tick)
             invoke(h.looter_ctx, 'update', looter_tick)
         end

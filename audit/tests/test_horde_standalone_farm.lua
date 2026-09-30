@@ -14,6 +14,10 @@
 --      no longer latches 'Leave Dungeon/reset timed out' / 'Activation timed
 --      out'; the next run starts.
 --   F  'Pick Pylon delay' applies to every pylon, not only the first.
+-- QQT_Warpigz_v3 owner-build: no Rosie in this build (SteroidAlfred +
+-- LooteerV3). B and C exercised Rosie's own automatic trip and pickup pause
+-- and are dropped; E runs with the joint host's Alfred mock (a bag-full
+-- need that HordeDev's Alfred task services); A, D, F are unchanged.
 -- Runs under Lua 5.4 and LuaJIT.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
@@ -36,11 +40,9 @@ end
 
 local HD = 'HordeDev'
 local function farm(compasses, place)
-    local h = J.new({rosie = true, dirs = {'Batmobile', HD}, place = place or 'caldeum'})
+    local h = J.new({rosie = false, dirs = {'Batmobile', HD}, place = place or 'caldeum'})
     h.assert_clean('load')
     h.instrument_exports()
-    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(2)
-    assert(h.as('Rosie', function() return h.G.RosiePlugin.enable() end) == true)
     h.give_compasses(compasses or 2)
     local A = h.setup_horde({})
     return h, A, h.mod(HD, 'gui').elements
@@ -61,39 +63,6 @@ case('A abandoned run (player moved to Temis at wave 3) is reset and the next co
     eq(hd_status(h).fault, nil, 'no fault')
     h.assert_clean('A')
 end)
-
-case("B 'Use alfred' off: Rosie's own automatic trip from BSK is not cancelled by a Library teleport", function()
-    local h, A, hd = farm(2)
-    hd.main_toggle:set(true); hd.use_alfred:set(false)
-    ok(h.run_until(function() return A.wave >= 3 end, 300), 'reached wave 3')
-    h.inventory = h.inventory or {}
-    for _ = 1, 33 do h.inventory[#h.inventory + 1] = h.gear() end
-    ok(h.run_until(function() return A.runs >= 2 end, 300), 'the run finished and the next started\n' .. h.tail(30))
-    eq(#h.inventory, 0, "Rosie's trip emptied the bag")
-    eq(hd_waypoints(h), 0, 'HordeDev never teleported to the Library during the trip')
-    eq(hd_status(h).fault, nil)
-    h.assert_clean('B')
-end)
-
-for _, how in ipairs({'toggle', 'disable', 'reload'}) do
-    case('C pylon pause of Rosie pickup is released on ' .. how, function()
-        local h, _, hd = farm(2)
-        hd.main_toggle:set(true)
-        ok(h.run_until(function() return h.logged('pausing Looter pickup while taking the pylon') > 0 end, 200),
-            'pylon pause taken')
-        if how == 'toggle' then hd.main_toggle:set(false)
-        elseif how == 'disable' then h.as(HD, function() h.G.InfernalHordesPlugin.disable() end)
-        else h.reload(HD) end
-        h.run(5)
-        local st = h.as('Rosie', function() return h.G.LooteerPlugin.status() end)
-        ok(st.paused ~= true, 'Rosie pickup is not paused after ' .. how .. ': ' .. tostring(st.detail))
-        local before = h.pickups or 0
-        h.drop(h.place, h.pos:x() + 1, h.pos:y(), {})
-        h.run(20)
-        ok((h.pickups or 0) > before, 'Rosie picks up again after ' .. how)
-        h.assert_clean('C ' .. how)
-    end)
-end
 
 case('D one horde logs on change, not on every pulse', function()
     local h, A, hd = farm(1)
@@ -116,25 +85,31 @@ case('D one horde logs on change, not on every pulse', function()
     h.assert_clean('D')
 end)
 
-case("E Rosie's automatic trip during the RESET exit: no fault, next run starts", function()
+case("E a bag-full Alfred trip during the RESET exit: no fault, next run starts", function()
     local h, A, hd = farm(2)
     hd.main_toggle:set(true)
     ok(h.run_until(function() return h.leaves >= 1 and h.place.key == 'caldeum' end, 300), 'left the Horde')
-    h.inventory = h.inventory or {}
-    for _ = 1, 33 do h.inventory[#h.inventory + 1] = h.gear() end
+    -- bag full: the town service starts its own with-teleport trip (as
+    -- SteroidAlfred does on need_trigger), not HordeDev's request.
+    h.alfred.need_trigger, h.alfred.inventory_full = true, true
+    h.as(h.alfred_ctx, function() return h.G.AlfredTheButlerPlugin.trigger_tasks_with_teleport('alfred_the_butler') end)
     ok(h.run_until(function() return A.runs >= 2 end, 300), 'the next run started\n' .. h.tail(30))
+    eq(h.alfred.job == nil and h.alfred.inventory_full, false, 'the Alfred trip completed')
     eq(hd_status(h).fault, nil, 'no latched exit fault')
     ok(h.resets >= 1, 'the old instance was reset')
     h.assert_clean('E exit')
 end)
 
-case("E Rosie's automatic trip during the sigil activation: no fault, a new run starts", function()
+case("E a bag-full Alfred trip during the sigil activation: no fault, a new run starts", function()
     local h, A, hd = farm(2)
     hd.main_toggle:set(true)
     ok(h.run_until(function() return h.logged('Sigil requested') > 0 end, 300), 'sigil requested')
-    h.inventory = h.inventory or {}
-    for _ = 1, 33 do h.inventory[#h.inventory + 1] = h.gear() end
+    -- bag full: the town service starts its own with-teleport trip (as
+    -- SteroidAlfred does on need_trigger), not HordeDev's request.
+    h.alfred.need_trigger, h.alfred.inventory_full = true, true
+    h.as(h.alfred_ctx, function() return h.G.AlfredTheButlerPlugin.trigger_tasks_with_teleport('alfred_the_butler') end)
     ok(h.run_until(function() return A.runs >= 1 end, 300), 'a horde was started after the trip\n' .. h.tail(30))
+    eq(h.alfred.job == nil and h.alfred.inventory_full, false, 'the Alfred trip completed')
     eq(hd_status(h).fault, nil, 'no latched activation fault')
     h.assert_clean('E sigil')
 end)

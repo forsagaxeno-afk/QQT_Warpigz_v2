@@ -2,6 +2,20 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.21-rc.100] — 2026-09-30 (private owner build, not published)
+
+A private build without Rosie, for SteroidAlfredV2 ("BetterAlfred", town service) + LooteerV3 (pickup). Based on 3.3.21.
+
+### Removed
+
+- **Rosie** is not in this build (its tests too). Install SteroidAlfred and LooteerV3 alongside the 9 plugins (docs/OWNER_BUILD_RU.txt).
+
+### Fixed
+
+- **SteroidAlfred STUCK** (stash full, or "skip cache" with a full bag; its out-of-town teleport retries forever): it keeps `trigger_tasks` on and never calls back, and every activity waited on that "live work" for good. ArkhamAsylum 2.1.7, HelltideRevamped 2.6.7, HordeDev 2.2.10, Reaper 1.10.9, WonderCity 2.2.10: after 300 s of continuous live work they log "town service busy for 300s without finishing (stash full?) — farming on without it" once, retire their request and ask for no new trip while the service stays stuck (and for at least 600 s). HordeDev's chest pause for a salvage trip also ends. WarPug 1.0.18 and SilentRaven 0.2.10 hold for it at most 300 s too.
+- **Temis-only town service**: SteroidAlfred services Temis only. Arkham with a Cerrigar home town no longer casts Cerrigar against Steroid's Temis teleport, and WonderCity leaves the Undercity to Temis when a town-service need is pending (not only with Rosie).
+- **HelltideRevamped 2.6.7**: SteroidAlfred calls the callback without arguments also after a failed cycle; two trips in a row that end with the bag still full now latch "town service unavailable" instead of a new trip every ~16 s.
+
 ## [3.3.21] — 2026-09-29
 
 ### Fixed

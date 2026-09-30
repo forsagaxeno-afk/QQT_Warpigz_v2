@@ -1,5 +1,12 @@
 -- Read-only compatibility with the supplied LooteerV2/V3 public exports.
 local M = {}
+-- QQT_Warpigz_v3 owner-build: tasks/alfred.lua's STUCK-service flag. Resolved
+-- at load (QQT resolves a later require in the calling plugin's context, and
+-- WarPigs calls into this module); a stub loader without it gets nil.
+local stuck_tracker = (function()
+    local ok, t = pcall(require, 'core.tracker')
+    return ok and t or nil
+end)()
 local quiet_since = nil
 local exit_committed = false
 local QUIET_SECONDS = 3
@@ -243,6 +250,9 @@ function M.alfred_may_own_movement(readable_only)
     local ok, status = pcall(alfred.get_status)
     if not ok or type(status) ~= 'table' or type(status.enabled) ~= 'boolean' then return not readable_only end
     if not status.enabled then return false end
+    -- QQT_Warpigz_v3 owner-build: live work the Alfred task found STUCK (300 s
+    -- without finishing, tasks/alfred.lua) no longer owns movement.
+    if type(stuck_tracker) == 'table' and stuck_tracker.alfred_town_stuck == true then return false end
     -- C1: a teleport latched after a finished or failed trip is not live work.
     return status.trigger_tasks == true or status.external_trigger == true or status.running == true
         or status.pending == true

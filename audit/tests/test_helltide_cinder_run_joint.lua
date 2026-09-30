@@ -71,7 +71,7 @@ local function chest(h, pts, skin, i, side, cost)
 end
 
 local function helltide(opts)
-    local h = J.new({rosie = true, dirs = {'Batmobile', HR}, place = 'step', minute = 5})
+    local h = J.new({rosie = false, dirs = {'Batmobile', HR}, place = 'step', minute = 5})
     h.mod(HR, 'core.hr_clock')._now = function() return 1790481600 + h.minute * 60 + math.floor(h.now) % 60 end
     local pts = loop_points()
     h.P.step.box = {-1300, -150, -900, -150}

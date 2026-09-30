@@ -36,15 +36,19 @@ end
 -- Cerrigar home town still hops to Temis for the trip; the home town keeps
 -- driving pit entry/exit (teleport_cerrigar brings Arkham home afterwards).
 -- A standalone AlfredTheButler keeps the home town, as before.
+-- QQT_Warpigz_v3 owner-build: SteroidAlfred (BetterAlfred) services Temis
+-- only as well (its town list is {'Temis'}), so ANY loaded town-service
+-- provider is Temis-only; with a Cerrigar home the plain trigger used to
+-- cast Cerrigar while Steroid cast Temis (two conflicting teleports).
 local ROSIE_ZONE, ROSIE_WAYPOINT = 'Skov_Temis', 0x1CE51E
 local rosie_town_logged = false
 local function service_town()
-    if type(rawget(_G, 'RosiePlugin')) ~= 'table' then
+    if type(rawget(_G, 'RosiePlugin')) ~= 'table' and get_alfred() == nil then
         return settings.town_zone, settings.town_waypoint
     end
     if settings.town_zone ~= ROSIE_ZONE and not rosie_town_logged then
         rosie_town_logged = true
-        console.print('[arkham] Rosie services Temis only; using Temis for town trips')
+        console.print('[arkham] the town service works in Temis only; using Temis for town trips')
     end
     return ROSIE_ZONE, ROSIE_WAYPOINT
 end
@@ -193,12 +197,43 @@ local function retire_request()
     -- A lost callback most likely means a finished cycle: same grace.
     last_completion_at = get_time_since_inject()
 end
+-- QQT_Warpigz_v3 owner-build: SteroidAlfred goes STUCK for good (stash full,
+-- or skip_cache with a full bag; its out-of-town teleport also retries
+-- forever): trigger_tasks stays true and no callback ever comes, so every
+-- live-work hold below waited forever. Mirrors WarPigs' LIVE_WORK_HOLD:
+-- continuous live work longer than LIVE_WORK_MAX is logged once, our request
+-- is retired, that live work no longer holds the Pit (until it ends), and
+-- no new trip is asked for while it lasts, and for at least TOWN_BLOCK_S.
+local LIVE_WORK_MAX, TOWN_BLOCK_S = 300, 600
+local live = {since = nil, seen = -math.huge, expired = false, blocked_until = -math.huge}
+local function live_stuck(status)
+    if not (status and status.enabled and live_work(status)) then
+        live.since, live.expired = nil, false
+        return false
+    end
+    local now = get_time_since_inject()
+    -- A sampling gap (the task did not run) starts the clock over.
+    if not live.expired and now - live.seen > 5 then live.since = now end
+    live.seen = now
+    if live.expired then return true end
+    if now - live.since < LIVE_WORK_MAX then return false end
+    live.expired, live.blocked_until = true, now + TOWN_BLOCK_S
+    console.print(string.format('[alfred] town service busy for %ds without finishing (stash full?) — farming on without it',
+        LIVE_WORK_MAX))
+    if task.status == status_enum.WAITING then retire_request() end
+    trip.return_until = nil
+    return true
+end
+-- Live work that still holds us (not a STUCK town service).
+local function busy_work(status) return live_work(status) and not live_stuck(status) end
+local function town_blocked() return live.expired or get_time_since_inject() < live.blocked_until end
+task.town_blocked = town_blocked
 local function waiting_for_request(status)
     if task.status ~= status_enum.WAITING then return false end
     if get_alfred() ~= request_plugin then retire_request(); return true end
     -- C1: a paused Alfred without hard work is idle for us (we never own
     -- its pause); with hard work it holds, bounded by paused_hold().
-    if not status or live_work(status) or paused_hold(status) then
+    if not status or busy_work(status) or paused_hold(status) then
         quiet_since = nil
         return true
     end
@@ -365,6 +400,7 @@ end
 -- Should a NEW request start now (no own request, no live work)?
 local function wants_new_request(status)
     if status.need_trigger ~= true then return false end
+    if town_blocked() then return false end -- QQT_Warpigz_v3 owner-build
     if not hard_need(status) then
         -- need_trigger covers restock/stash extras too (Steroid). Those are
         -- advisory: never leave a pit for them, and not again within the
@@ -436,7 +472,7 @@ task.shouldExecute = function ()
 
     -- Yield while Alfred is busy under any caller (WarPigs preamble, etc.),
     -- and while our own with-teleport return is still ahead.
-    if live_work(status) or awaiting_return(status) then return true end
+    if busy_work(status) or awaiting_return(status) then return true end
 
     return wants_new_request(status)
 end
@@ -479,10 +515,11 @@ task.Execute = function ()
     -- Don't overwrite another caller's in-flight cycle.
     local alfred_busy = live_work(status)
     if alfred_busy then
-        note_hold('Alfred busy with another caller')
+        note_hold(not live_stuck(status) and 'Alfred busy with another caller' or nil)
         return
     end
     note_hold(nil)
+    if town_blocked() then return end -- QQT_Warpigz_v3 owner-build
 
     if task.status == status_enum['IDLE'] then
         if BatmobilePlugin and type(BatmobilePlugin.pause) == 'function' then
@@ -518,7 +555,7 @@ task.is_busy = function (known_only)
     if not status then return not known_only end
     if not status.enabled then return false end
     return task.status == status_enum.WAITING or task.status == status_enum.LOOTING
-        or live_work(status) or awaiting_return(status)
+        or busy_work(status) or awaiting_return(status)
 end
 
 -- C2 alfred_trip: Arkham's own Alfred round trip is in progress (request in

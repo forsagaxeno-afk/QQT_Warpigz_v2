@@ -1,5 +1,5 @@
 -- QQT_Warpigz_v3: release package layout. 3.3.6: the owner parked WarRoom in
--- archive/WarRoom, so the package ships exactly the 10 plugin folders listed
+-- archive/WarRoom, so the package ships exactly the 9 (owner build) plugin folders listed
 -- in versions.json under scripts/, plus the user documents at the package
 -- root. The zip never contains WarRoom, archive/, tools/, audit/ or docs/
 -- (the user guide ships only as the DOCS target docs/GUIDE_EN.md at the
@@ -40,17 +40,18 @@ local function popen_all(cmd)
     return out
 end
 
--- The 10 shipped plugins (3.3.6). WarRoom is parked in archive/.
-local COMPONENTS = {'ArkhamAsylum', 'Batmobile', 'HelltideRevamped', 'HordeDev', 'Reaper', 'Rosie',
+-- The 9 shipped plugins of the owner build (no Rosie: SteroidAlfred + LooteerV3). WarRoom is parked in archive/.
+local COMPONENTS = {'ArkhamAsylum', 'Batmobile', 'HelltideRevamped', 'HordeDev', 'Reaper',
     'SilentRaven', 'WarPigs', 'WarPug', 'WonderCity'}
 local IS_COMPONENT = {}
 for _, name in ipairs(COMPONENTS) do IS_COMPONENT[name] = true end
 -- build_release.DOCS targets at the package root.
 local DOC_TARGETS = {['README.md'] = true, ['CHANGELOG.md'] = true, ['AUDIT.md'] = true, ['CREDITS.md'] = true,
-    ['LIVE_CHECKLIST.md'] = true, ['УСТАНОВКА_RU.txt'] = true, ['docs/GUIDE_EN.md'] = true}
+    ['LIVE_CHECKLIST.md'] = true, ['УСТАНОВКА_RU.txt'] = true, ['docs/GUIDE_EN.md'] = true,
+    ['OWNER_BUILD_RU.txt'] = true}
 local NEVER = {'WarRoom', 'archive', 'tools', 'audit', 'docs', 'assets', 'dist', '.github'}
 
-check('versions.json lists exactly the 10 components, no WarRoom', function()
+check('versions.json lists exactly the 9 components, no WarRoom', function()
     local manifest = read('versions.json')
     local block = assert(manifest:match('"components"%s*:%s*(%b{})'), 'components block')
     local seen, n = {}, 0
@@ -76,7 +77,7 @@ end)
 
 local ships = {
     'HelltideRevamped/main.lua', 'HelltideRevamped/learned/.keep', 'HelltideRevamped/dashboard/.keep',
-    'Rosie/main.lua', 'SilentRaven/silent_raven/gui.lua', 'WarPigs/core/qqt_events.lua',
+    'SilentRaven/silent_raven/gui.lua', 'WarPigs/core/qqt_events.lua',
 }
 local not_shipped = {
     'HelltideRevamped/learned/stats.txt', 'HelltideRevamped/learned/stats.txt.tmp',
@@ -115,11 +116,11 @@ with tempfile.TemporaryDirectory() as out:
         for name in zipfile.ZipFile(package).namelist():
             print("E " + name)
     notes = pathlib.Path(out, "RELEASE_NOTES.md").read_text(encoding="utf-8")
-    print("NOTES-10 " + str("only the 10 folders" in notes))
+    print("NOTES-9 " + str("only the 9 folders" in notes))
     print("NOTES-WARROOM " + str("| `WarRoom` |" in notes))
 ]]
 
-check('the built zip holds exactly the 10 plugin folders and the user documents', function()
+check('the built zip holds exactly the 9 plugin folders and the user documents', function()
     local out = popen_all(('PYTHONIOENCODING=utf-8 python3 -c %s %s 2>&1'):format(sh_quote(BUILD), sh_quote(root)))
     assert(not out:find('BUILD-FAILED', 1, true), out)
     local zips, entries = {}, {}
@@ -164,7 +165,7 @@ check('the built zip holds exactly the 10 plugin folders and the user documents'
         assert(main_lua[c], c .. '/main.lua missing from the package')
     end
     for target in pairs(DOC_TARGETS) do assert(docs[target], 'missing document ' .. target) end
-    assert(out:find('NOTES%-10 True'), 'RELEASE_NOTES says to copy the 10 folders')
+    assert(out:find('NOTES%-9 True'), 'RELEASE_NOTES says to copy the 9 folders')
     assert(out:find('NOTES%-WARROOM False'), 'RELEASE_NOTES has no WarRoom row in its folder table')
 end)
 

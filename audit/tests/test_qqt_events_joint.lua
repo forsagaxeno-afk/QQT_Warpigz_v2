@@ -16,6 +16,8 @@
 --      the Helltide hour ends
 --   E5 without a collector (the 3.3.6 package: WarRoom archived) nothing is
 --      emitted and no global appears.
+-- QQT_Warpigz_v3 owner-build: no Rosie in this build; E3 and E7 (Rosie's
+-- pickup/trip events) are dropped and E4 runs with the Alfred/Looter mocks.
 -- Runs under Lua 5.4 and LuaJIT.
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
@@ -237,68 +239,6 @@ case('E2 one War Plan: Pit, Undercity, War Plan Horde, Reaper lair, Helltide, tu
     scalar_only(h)
 end)
 
--- ── Rosie ─────────────────────────────────────────────────────────────────
-local CONSUMER = {name = 'Consumer', dir = ROOT .. '/audit/tests/', loaded = {}}
-local function rosie_host(opts)
-    opts = opts or {}
-    opts.rosie, opts.dirs = true, {}
-    local h = J.new(opts)
-    h.assert_clean('load')
-    collect(h)
-    eq(h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end), true, 'RosiePlugin.enable()')
-    h.frame()
-    return h
-end
-
-case('E3 Rosie: pickup events carry rarity / mythic / ancestral / GA; a trip reports its census', function()
-    local h = rosie_host({place = 'pit'})
-    h.pos = h.v(0, 0)
-    local pgui = h.mod('Rosie', 'rosie.private.pickup.gui')
-    pgui.elements.general.distance_slider:set(30)
-    local mythic = h.drop('pit', 6, 0, {name = 'Mythic_Joint_Helm', rarity = 8, ancestral = true, ga = 4,
-        sno = 990777001})
-    local legendary = h.drop('pit', -6, 0, {name = 'Helm_Legendary_Generic_009', rarity = 5, ancestral = true, ga = 3,
-        sno = 990777002})
-    ok(h.run_until(function() return mythic.picked and legendary.picked end, 40), 'both drops picked up\n' .. h.tail())
-    h.run(2)
-    local picks = events(h, 'rosie', 'pickup')
-    eq(#picks, 2, 'one pickup event per drop: ' .. listing(h))
-    local by = {}
-    for _, e in ipairs(picks) do by[e.sno] = e end
-    local m, l = by[990777001], by[990777002]
-    ok(m and l, 'both drops reported by SNO')
-    eq(m.rarity, 8); eq(m.mythic, true, 'mythic via item_manager.is_mythic'); eq(m.ancestral, true); eq(m.ga, 4)
-    eq(m.name, 'Mythic_Joint_Helm')
-    eq(l.rarity, 5); eq(l.mythic, false); eq(l.ancestral, true); eq(l.ga, 3)
-    eq(type(h.mod('Rosie', 'rosie.private.pickup.src.item_manager').is_mythic), 'function', 'M.is_mythic exported')
-    -- A drop Rosie never touched that leaves the ground is not a pickup.
-    local other = h.drop('pit', 200, 0, {name = 'Far_Away', rarity = 1})
-    h.run(1)
-    h.remove_actor(other)
-    for i = #(h.P.pit.items or {}), 1, -1 do if h.P.pit.items[i] == other then table.remove(h.P.pit.items, i) end end
-    h.run(2)
-    eq(#events(h, 'rosie', 'pickup'), 2, 'an untouched drop that vanished is not reported')
-    -- A with-teleport trip: census at the start, what was sold / salvaged at the end.
-    h.inventory = {}
-    for _ = 1, 25 do h.inventory[#h.inventory + 1] = h.gear() end
-    local done
-    eq(h.as(CONSUMER, function()
-        return h.G.AlfredTheButlerPlugin.trigger_tasks_with_teleport('Consumer', function(r, d) done = {r, d} end)
-    end), true, 'trip accepted')
-    ok(h.run_until(function() return done ~= nil end, 90), 'trip finished\n' .. h.tail())
-    local ts = one(h, 'rosie', 'trip_start', 'E3')
-    eq(ts.caller, 'Consumer'); eq(ts.teleport, true)
-    ok(ts.salvage + ts.sell >= 25, 'census counts the full bag: sell ' .. ts.sell .. ' salvage ' .. ts.salvage)
-    ok(type(ts.stash) == 'number' and type(ts.inv) == 'number', 'stash / inv counts')
-    local te = one(h, 'rosie', 'trip_end', 'E3')
-    eq(te.caller, 'Consumer', 'caller read before the trip cleared it'); eq(te.outcome, 'completed')
-    eq(te.salvaged, ts.salvage); eq(te.sold, ts.sell)
-    ok(te.secs > 0 and te.seq > ts.seq, 'trip secs ' .. tostring(te.secs))
-    eq(#h.salvaged, 25, 'salvaged at the Blacksmith')
-    h.assert_clean('E3')
-    scalar_only(h)
-end)
-
 -- ── HelltideRevamped ─────────────────────────────────────────────────────
 local MYSTERY, GLOVES = 'usz_rewardGizmo_Uber', 'usz_rewardGizmo_Gloves'
 local function loop_points()
@@ -331,7 +271,7 @@ local function hr_chest(h, pts, skin, i, side)
 end
 
 case('E4 HelltideRevamped farm: chest_opened with the cost, helltide_done when the hour ends', function()
-    local h = J.new({rosie = true, dirs = {'Batmobile', HR}, place = 'step', minute = 5})
+    local h = J.new({rosie = false, dirs = {'Batmobile', HR}, place = 'step', minute = 5})
     local hour = 1790481600
     h.mod(HR, 'core.hr_clock')._now = function() return hour + h.minute * 60 + math.floor(h.now) % 60 end
     local pts = loop_points()
@@ -422,33 +362,6 @@ end)
 -- 3.3.0 review B3: without a bus (no collector; the 3.3.6 package has none)
 -- Rosie's pickup does not build the event description (host getters, mythic
 -- scan, GA count) per drop.
-case('E7 Rosie without a collector: no pickup description is built', function()
-    local h = J.new({place = 'pit', rosie = true, dirs = {}})
-    h.assert_clean('load')
-    eq(h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end), true, 'RosiePlugin.enable()')
-    h.frame()
-    local pickup = h.mod('Rosie', 'rosie.private.pickup.src.pickup')
-    local described, hooked = 0, false
-    for i = 1, 200 do
-        local n, fn = debug.getupvalue(pickup.step, i)
-        if not n then break end
-        if n == 'describe' then
-            hooked = true
-            debug.setupvalue(pickup.step, i, function(...) described = described + 1; return fn(...) end)
-        end
-    end
-    ok(hooked, 'describe is an upvalue of pickup.step')
-    h.pos = h.v(0, 0)
-    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(30)
-    local drop = h.drop('pit', 6, 0, {name = 'NoBus_Helm', rarity = 5, ga = 2, sno = 990777010})
-    ok(h.run_until(function() return drop.picked end, 40), 'the drop is picked up\n' .. h.tail())
-    eq(rawget(h.G, 'QQT_Warpigz_events'), nil, 'no bus')
-    eq(described, 0, 'no describe() without a bus')
-end)
-
--- 3.3.0 review B4: a Horde left without horde_done (WarPigs switched HordeDev
--- off mid-run, a death / relog path) does not keep the next run's horde_start
--- back: fresh_run_reset() clears the run flags.
 case('E8 HordeDev: fresh_run_reset clears the horde_start guard', function()
     local h = setup({})
     local tracker = h.mod('HordeDev', 'core.tracker')

@@ -7,6 +7,9 @@
 -- finished instance was explored again. Now only an exit CAST
 -- (tracker.exit_cast_time) makes the leave final.
 -- Joint host: real Batmobile + WonderCity + real Rosie (automatic trips).
+-- QQT_Warpigz_v3 owner-build: no Rosie in this build; the town service's own
+-- automatic bag trip (SteroidAlfred's with-teleport trip on need_trigger) is
+-- the joint host's Alfred mock, triggered under its own name.
 -- Runs under Lua 5.4 and LuaJIT.
 local SUITE = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local checks, failures = 0, {}
@@ -31,11 +34,10 @@ local J = dofile(SUITE .. '/audit/tests/joint_host.lua')
 -- The boss floor after the kill: the reward chest 5 m from the spawn, one
 -- click opens it (non-interactable afterwards, it stays).
 local function boss_floor()
-    local h = J.new({rosie = true, dirs = {'Batmobile', 'WonderCity'}, place = 'undercity'})
+    local h = J.new({rosie = false, dirs = {'Batmobile', 'WonderCity'}, place = 'undercity'})
     h.assert_clean('load')
     local wc = h.mod('WonderCity', 'gui').elements
     wc.skip_tribute:set(true); wc.exit_mode:set(1)
-    ok(h.as('Rosie', function() return h.G.RosiePlugin.enable() end))
     local chest = h.actor('undercity', 'X1_Undercity_Chest_Attunement', 5, 0)
     chest.on_interact = function() chest.interactable = false end
     h.chest = chest
@@ -44,20 +46,24 @@ local function boss_floor()
     h.manager = h.mod('WonderCity', 'core.task_manager')
     return h
 end
+-- The bag fills: the town service starts its own with-teleport trip.
+local function bag_trip(h)
+    h.alfred.need_trigger, h.alfred.inventory_full = true, true
+    h.as(h.alfred_ctx, function() return h.G.AlfredTheButlerPlugin.trigger_tasks_with_teleport('alfred_the_butler') end)
+end
 local function task_name(h) return h.manager.get_current_task().name end
 
-case('W1 a Rosie trip that starts inside the exit delay resumes the finished run on return', function()
+case('W1 a town trip that starts inside the exit delay resumes the finished run on return', function()
     local h = boss_floor()
     ok(h.run_until(function() return h.tracker.done end, 30), 'the reward chest opened\n' .. h.tail(30))
     local start = h.tracker.undercity_start_time
     ok(h.run_until(function() return h.tracker.exit_trigger_time ~= nil end, 10), 'the exit delay started\n' .. h.tail(20))
     h.run(2)
     eq(#h.waypoints, 0, 'no exit cast yet (inside the 10 s exit delay)')
-    -- The bag fills: Rosie's automatic trip takes the player to town and
-    -- back through her portal into the same Undercity world.
-    h.inventory = h.inventory or {}
-    for _ = 1, 33 do h.inventory[#h.inventory + 1] = h.gear() end
-    ok(h.run_until(function() return h.place.key == 'temis' end, 30), 'Rosie took the player to town\n' .. h.tail(30))
+    -- The bag fills: the town service's automatic trip takes the player to
+    -- town and back through its portal into the same Undercity world.
+    bag_trip(h)
+    ok(h.run_until(function() return h.place.key == 'temis' end, 30), 'the trip took the player to town\n' .. h.tail(30))
     ok(h.run_until(function() return h.place.key == 'undercity' end, 200), 'back in the Undercity\n' .. h.tail(40))
     local back = h.now
     eq(h.logged('for an Alfred trip — the run resumes on return'), 1, 'leaving for the trip is recorded as resumable')
@@ -94,14 +100,13 @@ end)
 -- QQT_Warpigz_v3 WonderCity 2.2.9 (audit LOW a): an exit cast that did not
 -- take us out (the channel was cut) is not a final leave: a Rosie trip that
 -- then takes over inside the Undercity resumes the finished run on return.
-case('W1-C a cut exit cast followed by a Rosie trip: the run resumes on return', function()
+case('W1-C a cut exit cast followed by a town trip: the run resumes on return', function()
     local h = boss_floor()
     h.mod('WonderCity', 'gui').elements.exit_undercity_delay:set(0)
     ok(h.run_until(function() return #h.waypoints > 0 end, 40), 'the exit was cast\n' .. h.tail(30))
     h.travel, h.casting = nil, false -- the channel is cut: still inside
     local start = h.tracker.undercity_start_time
-    h.inventory = h.inventory or {}
-    for _ = 1, 33 do h.inventory[#h.inventory + 1] = h.gear() end
+    bag_trip(h)
     ok(h.run_until(function() return h.place.key == 'temis' end, 30), 'a trip left the Undercity\n' .. h.tail(30))
     ok(h.run_until(function() return h.place.key == 'undercity' end, 200), 'back in the Undercity\n' .. h.tail(40))
     eq(h.logged('for an Alfred trip — the run resumes on return'), 1, 'the trip leave after a cut exit cast is resumable')

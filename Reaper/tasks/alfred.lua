@@ -141,10 +141,41 @@ local function retire_request()
     retry_after = get_time_since_inject() + RETRY_DELAY
 end
 
+-- QQT_Warpigz_v3 owner-build: SteroidAlfred goes STUCK for good (stash full,
+-- or skip_cache with a full bag; its out-of-town teleport also retries
+-- forever): trigger_tasks stays true and no callback ever comes, so every
+-- live-work hold below waited forever. Mirrors WarPigs' LIVE_WORK_HOLD:
+-- continuous live work longer than LIVE_WORK_MAX is logged once, our request
+-- is retired, that live work no longer holds Reaper (until it ends), and no
+-- new trip is asked for while it lasts, and for at least TOWN_BLOCK_S.
+local LIVE_WORK_MAX, TOWN_BLOCK_S = 300, 600
+local live = {since = nil, seen = -math.huge, expired = false, blocked_until = -math.huge}
+local function live_stuck(status)
+    if not (status and status.enabled and live_work(status)) then
+        live.since, live.expired = nil, false
+        return false
+    end
+    local now = get_time_since_inject()
+    -- A sampling gap (the task did not run) starts the clock over.
+    if not live.expired and now - live.seen > 5 then live.since = now end
+    live.seen = now
+    if live.expired then return true end
+    if now - live.since < LIVE_WORK_MAX then return false end
+    live.expired, live.blocked_until = true, now + TOWN_BLOCK_S
+    console.print(string.format("[Reaper] town service busy for %ds without finishing (stash full?) — farming on without it",
+        LIVE_WORK_MAX))
+    if task.status == status_enum.WAITING then retire_request() end
+    return true
+end
+-- Live work that still holds us (not a STUCK town service).
+local function busy_work(status) return live_work(status) and not live_stuck(status) end
+local function town_blocked() return live.expired or get_time_since_inject() < live.blocked_until end
+task.town_blocked = town_blocked
+
 local function waiting_for_request(status)
     if task.status ~= status_enum.WAITING then return false end
     if get_alfred() ~= request_plugin then retire_request(); return true end
-    if not status or live_work(status) or paused_hold(status) then quiet_since = nil; return true end
+    if not status or busy_work(status) or paused_hold(status) then quiet_since = nil; return true end
     -- The legacy API accepts a request with nil and omits its queue flag.
     -- Never infer completion from that return value. If its callback is lost,
     -- allow pickup and require a fresh stable idle observation before retry.
@@ -268,9 +299,10 @@ local function evaluate()
     if waiting_for_request(status) then return true, "waiting for Reaper's Alfred trip" end
 
     -- Never fight Alfred's movement or teleport, whoever started it.
-    if live_work(status) then return true, "Alfred busy" end
+    if busy_work(status) then return true, "Alfred busy" end
 
     if not settings.use_alfred then watch.stuck_note = nil; return false end
+    if town_blocked() then return false end -- QQT_Warpigz_v3 owner-build: STUCK service, farm on
     -- C1/RPR-4: a pause Reaper does not own is idle for Reaper.
     if status.paused then return false end
     -- QQT_Warpigz_v3: never ask a stuck provider (it refuses anyway).
@@ -320,7 +352,7 @@ function task.live_hold()
     elseif status.enabled then
         if waiting_for_request(status) then
             hold = "waiting for Reaper's Alfred trip"
-        elseif live_work(status) then
+        elseif busy_work(status) then
             hold = "Alfred busy"
         end
     end
@@ -360,6 +392,7 @@ function task.Execute()
     if waiting_for_request(status) then return end
     if live_work(status) or status.paused or not settings.use_alfred or now < retry_after then return end
     if status.stuck == true then return end -- QQT_Warpigz_v3
+    if town_blocked() then return end -- QQT_Warpigz_v3 owner-build
 
     -- Don't overwrite another caller's in-flight cycle.
     if task.status == status_enum.IDLE then

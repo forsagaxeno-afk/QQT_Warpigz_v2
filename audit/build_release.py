@@ -18,7 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = {"README.md": "README.md", "CHANGELOG.md": "CHANGELOG.md", "AUDIT.md": "AUDIT.md",
         "CREDITS.md": "CREDITS.md", "audit/LIVE_CHECKLIST.md": "LIVE_CHECKLIST.md",
         "docs/INSTALL_RU.txt": "УСТАНОВКА_RU.txt",
-        "docs/GUIDE_EN.md": "docs/GUIDE_EN.md"}
+        "docs/GUIDE_EN.md": "docs/GUIDE_EN.md",
+        # QQT_Warpigz_v3 owner-build: the Russian note for the build without Rosie.
+        "docs/OWNER_BUILD_RU.txt": "OWNER_BUILD_RU.txt"}
 SKIP = {".gitignore", "Thumbs.db", ".DS_Store", "NOTES.md"}  # NOTES.md: session notes, not for players
 # Placeholder files that keep otherwise empty runtime folders in the package.
 KEEP = ".keep"

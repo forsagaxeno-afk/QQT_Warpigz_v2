@@ -163,10 +163,41 @@ local function retire_request(completed)
     retry_after = get_time_since_inject() + RETRY_DELAY
     if completed then last_completion_at = get_time_since_inject() end
 end
+-- QQT_Warpigz_v3 owner-build: SteroidAlfred goes STUCK for good (stash full,
+-- or skip_cache with a full bag; its out-of-town teleport also retries
+-- forever): trigger_tasks stays true and no callback ever comes, so every
+-- live-work hold below waited forever. Mirrors WarPigs' LIVE_WORK_HOLD:
+-- continuous live work longer than LIVE_WORK_MAX is logged once, our request
+-- is retired, that live work no longer holds the run (until it ends), and no
+-- new trip is asked for while it lasts, and for at least TOWN_BLOCK_S.
+local LIVE_WORK_MAX, TOWN_BLOCK_S = 300, 600
+local live = {since = nil, seen = -math.huge, expired = false, blocked_until = -math.huge}
+local function live_stuck(status)
+    if not (status and status.enabled and live_work(status)) then
+        live.since, live.expired = nil, false
+        return false
+    end
+    local now = get_time_since_inject()
+    -- A sampling gap (the task did not run) starts the clock over.
+    if not live.expired and now - live.seen > 5 then live.since = now end
+    live.seen = now
+    if live.expired then return true end
+    if now - live.since < LIVE_WORK_MAX then return false end
+    live.expired, live.blocked_until = true, now + TOWN_BLOCK_S
+    console.print(string.format('[WonderCity:alfred] town service busy for %ds without finishing (stash full?) — farming on without it',
+        LIVE_WORK_MAX))
+    if task.status == status_enum.WAITING then retire_request(false) end
+    trip.from_run, trip.return_until = false, nil
+    return true
+end
+-- Live work that still holds us (not a STUCK town service).
+local function busy_work(status) return live_work(status) and not live_stuck(status) end
+local function town_blocked() return live.expired or get_time_since_inject() < live.blocked_until end
+task.town_blocked = town_blocked
 local function waiting_for_request(status)
     if task.status ~= status_enum.WAITING then return false end
     if get_alfred() ~= request_plugin then retire_request(false); return true end
-    if not status or live_work(status) then
+    if not status or busy_work(status) then
         quiet_since = nil
         return true
     end
@@ -298,6 +329,7 @@ end
 -- set → skip; see HelltideRevamped for the same shape).
 local function wants_trigger(status)
     if not status.need_trigger then return false end
+    if town_blocked() then return false end -- QQT_Warpigz_v3 owner-build
     local now = get_time_since_inject()
     local cycle_just_completed = last_completion_at
         and (now - last_completion_at) < STUCK_NEED_TRIGGER_GRACE
@@ -335,7 +367,7 @@ task.shouldExecute = function ()
     -- live flag (both forks); external_trigger is the queued window
     -- Some forks expose external_trigger; the supplied legacy source does not.
     -- Its with-teleport trigger does expose teleport immediately.
-    if live_work(status) then return true end
+    if busy_work(status) then return true end
 
     if not wants_trigger(status) then
         trip.paused_since, trip.paused_logged = nil, false
@@ -377,10 +409,11 @@ task.Execute = function ()
 
     -- Don't overwrite another caller's in-flight cycle (WarPigs handoff).
     if live_work(status) then
-        note_hold('Alfred busy with another caller')
+        note_hold(not live_stuck(status) and 'Alfred busy with another caller' or nil)
         return
     end
     note_hold(nil)
+    if town_blocked() then return end -- QQT_Warpigz_v3 owner-build
 
     if task.status == status_enum['IDLE'] then
         -- QQT_Warpigz_v3 WonderCity 2.2.4: forced paths reach here too.
@@ -409,7 +442,7 @@ task.is_busy = function (known_only)
     if not status then return not known_only end
     if not status.enabled then return false end
     return task.status == status_enum.WAITING or task.status == status_enum.LOOTING
-        or live_work(status) or false
+        or busy_work(status) or false
 end
 
 -- C2 alfred_trip: WonderCity's own Alfred round trip is in progress (request

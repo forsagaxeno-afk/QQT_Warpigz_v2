@@ -103,6 +103,13 @@ end
 local function alfred_pause_expired(status)
     return status.paused == true and tracker.alfred_pause_expired == true
 end
+-- QQT_Warpigz_v3 owner-build: the Alfred task found the town service STUCK
+-- (SteroidAlfred: 300 s of live work without finishing) and blocks new trips
+-- for a while (tasks/alfred.lua); nobody will service a salvage pause.
+local function town_service_stuck()
+    return tracker.alfred_town_stuck == true
+        or get_time_since_inject() < (tracker.alfred_town_block_until or -math.huge)
+end
 
 -- H5-4 (suite policy): while WarPigs is loaded and enabled, an advisory-only
 -- Alfred flag (restock/stash: need_trigger without inventory_full or
@@ -232,6 +239,8 @@ open_chests_task = {
             -- QQT_Warpigz_v3: a stuck Alfred/Rosie refuses the trip; resume.
             if status.stuck == true then
                 why = "Rosie stuck: " .. tostring(status.stuck_reason or 'town service refused')
+            elseif town_service_stuck() then -- QQT_Warpigz_v3 owner-build
+                why = "town service stuck (busy for 300 s without finishing)"
             elseif not alfred_pause_expired(status) then return
             else why = "Alfred paused past its 60 s bound" end
         elseif tracker.entry_mode == 'warplan' then
@@ -413,6 +422,7 @@ open_chests_task = {
                     -- H5-4: an advisory-only flag under WarPigs does not.
                     if utils.alfred_trip_wanted(status, tracker.alfred_completed_at)
                         and not alfred_pause_expired(status)
+                        and not town_service_stuck() -- QQT_Warpigz_v3 owner-build
                         and not advisory_left_to_warpigs(status)
                     then
                         self.state_before_pause = self.current_state

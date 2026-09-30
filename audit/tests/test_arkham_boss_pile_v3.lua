@@ -6,6 +6,9 @@
 --      picked before the exit cast (pre-fix: the exit was cast at once).
 --   P2 unreachable wanted drops: the exit is still cast within 20 s.
 --   P3 the forced (reset timer) exit never walks the pile.
+-- QQT_Warpigz_v3 owner-build: no Rosie in this build. P1/P2 exercised Rosie's
+-- pickup (evaluate_item, pickup distance) and are dropped; P3 runs with the
+-- joint host's Alfred/Looter mocks (LooteerV3 publishes no evaluate_item).
 local ROOT = assert(SUITE_ROOT, 'SUITE_ROOT is required')
 local J = dofile(ROOT .. '/audit/tests/joint_host.lua')
 local checks, failures = 0, {}
@@ -18,20 +21,14 @@ local function case(name, fn)
     if passed then print('PASS arkham-boss-pile: ' .. name)
     else failures[#failures + 1] = name .. ': ' .. tostring(err); print('FAIL arkham-boss-pile: ' .. name .. ': ' .. tostring(err)) end
 end
-local CONSUMER = {name = 'Consumer', dir = ROOT .. '/audit/tests/', loaded = {}}
-local MYTHIC = {rarity = 6, ancestral = true, ga = 1, name = 'Helm_Unique_Generic_005', sno = 2647147,
-    affixes = {{affix_name_hash = 2628989, get_name = function() return 'S14_Mythic_UniquePotency' end}}}
-local function legendary_fields() return {rarity = 5, ga = 3, name = 'Helm_Legendary_Generic_031'} end
 
 -- The Guardian is dead and the glyph used: exit_pit is next. Glyphstone at
 -- (gx, gy), the player next to it.
 local function setup(gx, gy)
-    local h = J.new({rosie = true, dirs = {'ArkhamAsylum', 'Batmobile'}, place = 'pit'})
+    local h = J.new({rosie = false, dirs = {'ArkhamAsylum', 'Batmobile'}, place = 'pit'})
     h.assert_clean('load')
     h.pos = h.v(gx, gy + 1)
-    ok(h.as(CONSUMER, function() return h.G.RosiePlugin.enable() end) == true, 'RosiePlugin.enable()')
     h.frame()
-    h.mod('Rosie', 'rosie.private.pickup.gui').elements.general.distance_slider:set(2)
     h.mod('ArkhamAsylum', 'gui').elements.main_toggle:set(true)
     -- No exit delay: the time to the exit cast is the pile sweep.
     h.mod('ArkhamAsylum', 'gui').elements.exit_pit_delay:set(0)
@@ -56,49 +53,11 @@ local function run_to_exit(h, seconds)
     return at
 end
 
-case('P1 a Mythic 4 m and a Legendary 3.6 m from the glyphstone are picked before the exit cast', function()
-    local h = setup(20, 0)
-    local mythic = h.drop('pit', 24, 0, MYTHIC)
-    local leg = h.drop('pit', 20, -3.6, legendary_fields())
-    local picked_at_cast
-    local n0 = exit_cast_count(h)
-    local at = nil
-    local t0 = h.now
-    h.run_until(function(hh)
-        if exit_cast_count(hh) > n0 then
-            at = hh.now - t0
-            picked_at_cast = {mythic = mythic.picked == true, leg = leg.picked == true}
-            return true
-        end
-        return false
-    end, 60)
-    ok(at ~= nil, 'the exit is cast\n' .. h.tail(20))
-    ok(picked_at_cast.mythic, string.format('the Mythic 4 m away was left behind at the exit cast (%.1f s)\n%s',
-        at, h.tail(20)))
-    ok(picked_at_cast.leg, 'the Legendary 3.6 m away was left behind at the exit cast\n' .. h.tail(20))
-    ok(at <= 25, string.format('exit cast after %.1f s', at))
-    print(string.format('  P1 exit cast %.1f s after the glyph, both drops picked', at))
-end)
-
-case('P2 unreachable wanted drops: the exit is still cast within 20 s', function()
-    -- Glyphstone at the pit edge; the drops are 5-7 m off the walkable area.
-    local h = setup(20, -26)
-    h.drop('pit', 20, -33, MYTHIC)
-    h.drop('pit', 16, -32, legendary_fields())
-    h.drop('pit', 24, -31, legendary_fields())
-    local at = run_to_exit(h, 40)
-    ok(at ~= nil, 'the exit is cast\n' .. h.tail(20))
-    ok(at <= 21, string.format('exit cast after %.1f s (at most 20 s of sweep)', at))
-    ok(h.logged('boss pile sweep over') + h.logged('not reached in') >= 1, 'the sweep tried the drops\n' .. h.tail(20))
-end)
-
 case('P3 the forced (reset timer) exit never walks the pile', function()
     local h = setup(20, 0)
-    local mythic = h.drop('pit', 24, 0, MYTHIC)
     h.tracker.pit_start_time = h.now - 10000
     local at = run_to_exit(h, 10)
     ok(at ~= nil and at <= 2, 'forced exit cast at once, got ' .. tostring(at))
-    ok(not mythic.picked, 'no pile walk on the forced exit')
 end)
 
 if #failures > 0 then error(#failures .. ' arkham boss-pile case(s) failed:\n' .. table.concat(failures, '\n')) end

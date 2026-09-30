@@ -1,5 +1,5 @@
 -- QQT_Warpigz_v3 (3.3.0): the suite event bus (core/qqt_events.lua in every
--- plugin, Rosie: rosie/private/qqt_events.lua).
+-- plugin; the owner build ships no Rosie).
 --   * every copy is byte-identical: one per shipped plugin, 10 since 3.3.6
 --     (WarRoom's copy is parked with it in archive/ and not checked);
 --   * no shipped plugin creates the bus: WarRoom was its only creator, so
@@ -33,10 +33,10 @@ end
 
 local COPIES = {'ArkhamAsylum/core/qqt_events.lua', 'Batmobile/core/qqt_events.lua',
     'HelltideRevamped/core/qqt_events.lua', 'HordeDev/core/qqt_events.lua', 'Reaper/core/qqt_events.lua',
-    'Rosie/rosie/private/qqt_events.lua', 'SilentRaven/silent_raven/qqt_events.lua', 'WarPigs/core/qqt_events.lua',
+    'SilentRaven/silent_raven/qqt_events.lua', 'WarPigs/core/qqt_events.lua',
     'WarPug/core/qqt_events.lua', 'WonderCity/core/qqt_events.lua'}
 -- QQT_Warpigz_v3 3.3.6: the shipped plugins (versions.json); each has one copy above.
-local SHIPPED = {'ArkhamAsylum', 'Batmobile', 'HelltideRevamped', 'HordeDev', 'Reaper', 'Rosie', 'SilentRaven',
+local SHIPPED = {'ArkhamAsylum', 'Batmobile', 'HelltideRevamped', 'HordeDev', 'Reaper', 'SilentRaven',
     'WarPigs', 'WarPug', 'WonderCity'}
 
 local function read(rel)
@@ -175,7 +175,7 @@ local KINDS = {
     hordedev = {'horde_start', 'horde_pylon', 'horde_council', 'horde_chest', 'horde_chest_fault', 'horde_done', 'horde_fail'},
     reaper = {'boss_summoned', 'chest_opened', 'boss_killed', 'boss_skipped', 'run_end'},
     helltide = {'helltide_done', 'chest_opened', 'death', 'tear_done'},
-    rosie = {'trip_start', 'trip_end', 'stashed', 'pickup'},
+    -- QQT_Warpigz_v3 owner-build: Rosie is not in this build (SteroidAlfred + LooteerV3 instead).
     silentraven = {'whisper_claim'},
     warpug = {'plan_created', 'plan_reroll', 'plan_halt'},
     warpigs = {'step_start', 'step_done', 'turn_in_done', 'plugin_enabled', 'plugin_disabled', 'plugin_finished'},

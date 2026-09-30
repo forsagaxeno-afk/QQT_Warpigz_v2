@@ -160,6 +160,7 @@ local function town_unblock()
 end
 -- status: a readable status table, or nil while it is unreadable.
 local function town_blocked(status)
+    if watch.live_expired then return true end -- QQT_Warpigz_v3 owner-build: STUCK service (live_stuck)
     if status and status.stuck == true then return true end
     local refused = tracker.alfred_refused_until
     if refused then
@@ -191,12 +192,66 @@ local function retire_request()
     task.status = status_enum.IDLE
     retry_after = get_time_since_inject() + RETRY_DELAY
 end
+-- QQT_Warpigz_v3 owner-build: SteroidAlfred goes STUCK for good (stash full,
+-- or skip_cache with a full bag; its out-of-town teleport also retries
+-- forever): trigger_tasks stays true and no callback ever comes, so the
+-- 'Alfred busy' hold stood the farm still forever. Mirrors WarPigs'
+-- LIVE_WORK_HOLD: continuous live work longer than LIVE_WORK_MAX is logged
+-- once, our request is retired and the town-block latch applies (no request
+-- while the service stays stuck, and for at least TOWN_BLOCK_S). State lives
+-- in `watch` (helltide.lua reads it through town_blocked()).
+local LIVE_WORK_MAX, TOWN_BLOCK_S = 300, 600
+local function live_stuck(status)
+    if not (status and status.enabled and live_work(status)) then
+        watch.live_since, watch.live_expired = nil, false
+        return false
+    end
+    local now = get_time_since_inject()
+    -- A sampling gap (the task did not run) starts the clock over.
+    if not watch.live_expired and now - (watch.live_sampled or -math.huge) > 5 then watch.live_since = now end
+    watch.live_sampled = now
+    if watch.live_expired then return true end
+    if now - watch.live_since < LIVE_WORK_MAX then return false end
+    watch.live_expired = true
+    console.print(string.format('[HelltideRevamped] town service busy for %ds without finishing (stash full?) — farming on without it',
+        LIVE_WORK_MAX))
+    if task.status == status_enum.WAITING then retire_request() end
+    request_from_helltide = nil
+    town_block('busy for ' .. LIVE_WORK_MAX .. 's without finishing')
+    tracker.alfred_refused_until = now + TOWN_BLOCK_S
+    return true
+end
+-- Live work that still holds us (not a STUCK town service).
+local function busy_work(status) return live_work(status) and not live_stuck(status) end
+-- QQT_Warpigz_v3 owner-build: SteroidAlfred calls the callback without
+-- arguments also after a FAILED cycle (sell/salvage/teleport failed), so HR
+-- counted it as a salvage and asked again at once, with the bag still full
+-- (a town round trip after another). A hard need still set within
+-- STUCK_NEED_TRIGGER_GRACE of our completed trip is a trip without progress;
+-- the second in a row latches the town block for TOWN_BLOCK_S.
+local function full_after_trip(status)
+    if not (status.inventory_full == true or status.need_repair == true) then return false end
+    local now = get_time_since_inject()
+    if not (last_completion_at and now - last_completion_at < STUCK_NEED_TRIGGER_GRACE) then
+        watch.full_trips = 0 -- the bag filled up again later: a normal need
+        return false
+    end
+    if watch.full_mark == last_completion_at then return false end
+    watch.full_mark = last_completion_at
+    watch.full_trips = (watch.full_trips or 0) + 1
+    if watch.full_trips < 2 then return false end
+    watch.full_trips = 0
+    tracker.needs_salvage = false
+    town_block('two town trips in a row ended with the bag still full')
+    tracker.alfred_refused_until = now + TOWN_BLOCK_S
+    return true
+end
 local function waiting_for_request(status)
     if task.status ~= status_enum.WAITING then return false end
     if get_alfred() ~= request_plugin then retire_request(); return true end
     -- C1: a paused Alfred without hard work is idle for us (HR never owns
     -- its pause); with hard work it holds, bounded by paused_hold().
-    if not status or live_work(status) or paused_hold(status) then
+    if not status or busy_work(status) or paused_hold(status) then
         quiet_since = nil
         return true
     end
@@ -304,7 +359,7 @@ local function decide()
     -- other activity plugin transition). trigger_tasks is the live flag
     -- on both forks. external_trigger is optional and is absent from the
     -- supplied legacy status; teleport covers its with-teleport queue window.
-    local alfred_busy = live_work(status)
+    local alfred_busy = busy_work(status)
     if alfred_busy then return true, 'Alfred busy' end
 
     -- QQT_Warpigz_v3: town service refused/failed (stuck): farm on, no hold,
@@ -408,6 +463,7 @@ function task.Execute()
 
     -- QQT_Warpigz_v3: never re-ask a provider that refused/failed (stuck).
     if task.status == status_enum['IDLE'] and not town_blocked(status) then
+        if full_after_trip(status) then return end -- QQT_Warpigz_v3 owner-build
         trigger_alfred()
     end
 end
