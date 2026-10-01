@@ -152,6 +152,42 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 
 ## Auditor / critic findings
 
+### Post-release review of 3.3.24 (community patch: HelltideRevamped 2.6.7, Batmobile 2.2.6, Rosie 1.0.34), 2026-10-01 01:10 UTC
+Method: an auditor and a critic per plugin, then 2 skeptics per finding. Base is 3.3.23 (cf40761); the reviewed head is d5bed13.
+
+Verified:
+- The new contrib tests fail on 3.3.23.
+- The d5bed13 fixes hold, and test_helltide_modes fails on 8d55918 (the community patch before d5bed13):
+  - a rupture found through a tear stays Unknown until its starter confirms the type, so there is no Colossal/Realmwalker wait on a golden micro-rupture;
+  - a hunt type that is switched off is not engaged through its tear.
+- Golden tears cannot loop forever: each is bounded by stand.work, and the rupture by RUPTURE_MAX_S.
+- `tasks/helltide.lua` is not touched.
+- All listed tests pass under Lua 5.4 and LuaJIT.
+
+Repro: `audit/reviews/repro_hr_golden_handoff_267.lua`. Copy it to `audit/tests/test_zz_*.lua` and run it with `--luajit off`; it fails on 3.3.24.
+
+- **[HIGH, skeptics HIGH/MED] HelltideRevamped 2.6.7 (→ Helltide): the central tear is abandoned after a golden tear takes focus.**
+  - Cause: the golden handoff in `hr_tear_event.lua` `close_tears_at` (~line 880) only calls `release_focus()`. The central `S14_Rupture_SMP_Chargeable` keeps its `sess.tear_work` record: `best_d`/`best_t` (approach clock) and `engaged_at`.
+  - Effect: when the bot comes back after the golden tear, `stand.work` skips the central tear at once, with either "no progress towards it for 15s" or "engaged 150s without closing".
+  - It is then marked spent: for 300 s (UNREACHABLE_S, with `tear_unreached` set) if the bot never stood in it, or for 900 s if it stood in it for 20 s or more. The 45 s skip TTL does not help, because `engaged_at` is never reset. The rupture ends without the central tear closed.
+  - Repro case A: the bot is walking to the central tear, a golden tear opens 5 m away, and it closes 20 s later. The log then shows "Engaging tear S14_Rupture_SMP_Chargeable (dist=15.0)", immediately followed by "Skipping tear … no progress towards it for 15s".
+  - Case B (auditor repro): 25 s inside the central tear, then two golden tears take 140 s. The central tear is then skipped with "engaged 150s".
+  - Before 2.6.7 focus was never handed off, so this is a regression.
+  - Fix: when a tear that already has a record is focused again, give it a fresh approach window (`rec.best_d=d, rec.best_t=t, rec.last_t=t`) and credit the time away to `engaged_at`, for example with `stand.refocus(sess,key,d,t)`. Add cases A and B as a regression test.
+- [LOW] HelltideRevamped: golden Mobile/Sprint tears now take the hold_circle path, and with it the 2.6.6 `force_step`. Once `tear_force_key` latches, every tick sends `force_move_raw` straight at a sprinting tear, even 30 m away, with no pathing, until the 15 s approach bound skips the tear. Fix: clear `tear_force_key` once `d > NEAR_IN` and fall back to `move_to`.
+- [LOW] Batmobile 2.2.6 (→ Batmobile): Enigma Teleport (opt-in) can starve the class movement spells.
+  - `enigma_ready()` only knows the click throttle. When a click is refused (the node is off-screen, or `w2s` returns nil/NaN), `last_click` is never set, so the legacy selector returns Enigma on every tick. Repro: 48 Enigma picks to 2 class picks in 200 ticks; the class Teleport never fires. With `spell_interval >= enigma_interval`, Enigma also wins every pick.
+  - In revamp mode in town, `engine.pick` stamps the Enigma rule's `last_fire` before the town gate returns nil.
+  - Fix: arm the throttle on any Enigma attempt that reaches the projection step, or fall back to the class chain when the dispatch refused the click.
+  - `movement_rules` name_catalog comment: Enigma now sits after the name entries, so a later name entry would shift its saved index. Keep the order append-only and update the comment.
+- [LOW] Rosie 1.0.34 (→ Rosie): Trace of Echoes (2409389) is classified `lair_key` with stack 1 and bag `consumable`, both without live data. A full consumable bag then refuses a Trace even when a stack of Traces is already in the bag. No test calls `check_want_item` for it. Live check: which bag it lands in and its stack size.
+- [LOW] all three: the community code has no `-- QQT_Warpigz_v3 …` markers, and Rosie lost the `(Q1)` marker on the `classify` line. NOTES.md has no 2.6.7 / 2.2.6 / 1.0.34 entries (except Helltide).
+- (→ Coordinator) LIVE_CHECKLIST additions:
+  - Enigma bound to Mouse 3: the click lands on the path node, class spells still fire during the Enigma cooldown, and there are no clicks in town, chat or inventory.
+  - Trace of Echoes: which bag it lands in and its stack size.
+  - Golden tear while the central tear is charging: the central tear is finished afterwards. It is not until the HIGH is fixed.
+
+
 ### Rosie 1.0.33 verify (released in 3.3.23), 2026-09-30 14:45 UTC: **OK, Butler stand-in MED closed**
 - `Butler.is_busy()` now reads `life.trip_active()`: a trip tick within NAV_PULSE, at most NAV_HOLD_MAX. This is the same bound as the Navigator hold, exported from `lifecycle.lua`.
 - The publish, withdraw and yield log lines now log again on each transition.
