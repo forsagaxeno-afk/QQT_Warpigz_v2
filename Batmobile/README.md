@@ -16,6 +16,7 @@ Batmobile also handles any traversals in game if move command is given.
 
 ### Movement spells
 - checkboxes for movement spells available to your class. requires "Use movement spells" to be toggled on.
+- **Enigma Teleport (Mouse 3)** is available to every class, off by default. Bind Enigma teleport to the middle mouse button in-game, then enable it under **Movement Spells**, or select it in a **Movement Revamp** rule. Batmobile sends a middle click at the selected path node's screen position. **Enigma click interval** defaults to 0.25 seconds, supports 0.1–30 seconds, and controls attempts, not the game's cooldown; adjust it to your build. The shared movement-spell interval and any per-rule throttle also apply. Existing saved interval values are retained. Enigma equipment and cooldown are not detected. Unsupported mouse input, open chat/inventory/vendor screens, and off-screen destinations prevent clicks. A sent click does not advance the route until the player moves.
 - Movement Rules (revamp engine): the skill picker also offers **Rampage** (Warlock), found by its spell name (`get_name_for_spell`) among the equipped spells instead of a fixed id; it stays "(unequipped)" until a spell whose name contains "rampage" is on the bar (checked at most every 10 s). Range 15, no line-of-sight check. The legacy per-class chain is unchanged. The spell name, id and cast behaviour still need a live check.
 
 ### Debug

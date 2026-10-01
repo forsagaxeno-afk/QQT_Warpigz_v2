@@ -12,3 +12,7 @@ Since v2.2.0 / v2.3.0 the bundle also ships:
 
 - **Rosie** (town services and pickup, replacing Alfred and Looter), released here by its author's request without attribution. Its item catalog is built from **DiabloTools/d4data**, the public JSON dump of Diablo IV's game files; `core/json.lua` is rxi's json.lua (MIT). Bundle-integration edits are marked `QQT_Warpigz_v2` in its files.
 - **HelltideRevamped 2.2.0** ports the Pandemonium Rupture handling from Letrico's HelltideRevamped 2.5.0.
+
+Community contributions:
+
+- **@RadicalDadical55** — Misc Fixes (v3.3.24): HelltideRevamped golden tears before the central rift, Batmobile Enigma Teleport (Mouse 3), Rosie Tuning Prisms and Trace of Echoes pickup, with their tests.

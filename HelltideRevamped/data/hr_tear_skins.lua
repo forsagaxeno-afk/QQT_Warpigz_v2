@@ -55,8 +55,16 @@ return {
         "S14_Rupture_Major_ZE_MicroRupture_Mobile_Sprint",
     },
 
+    -- Central rupture progress gizmo. This is not the golden side tear.
     chargeable = {
         "S14_Rupture_SMP_Chargeable",
+    },
+
+    -- Live capture: golden circles pair holdArea with MicroRupture actors
+    -- (including Mobile/Sprint). They are untargetable, lose health while
+    -- worked, and report CHARGEABLE_GIZMO_PROGRESS = 0 throughout.
+    golden_tears = {
+        "S14_Rupture_Major_ZE_MicroRupture",
     },
 
     -- Ritual ring centre (stand here while the rupture is active).

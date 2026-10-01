@@ -358,7 +358,7 @@ local function render_settings(status)
       gui.elements.item_types.crafting_items_toggle:render("Crafting Materials / Recipes / Unlocks",
          "Recognized crafting materials, recipes, books and supported cosmetic or mount unlocks. Keeps the existing Crafting Items preference.")
       gui.elements.item_types.boss_items_toggle:render("Boss Trophies / Legacy Boss Items", "Keep boss trophies for crafting. Lair Keys have their own control.")
-      gui.elements.item_types.lair_key_items_toggle:render("Lair Keys", "Keys for opening boss hoards, including Superior Lair Keys.")
+      gui.elements.item_types.lair_key_items_toggle:render("Lair Keys", "Boss keys, including Superior Lair Keys and Trace of Echoes.")
       gui.elements.item_types.charm_items_toggle:render("Charms", "Includes recognized set and unique Charms. Uses the Talisman bag and optional ingame filter, not equipment rarity/GA sliders.")
       gui.elements.item_types.seal_items_toggle:render("Seals", "Includes recognized Mythic Seals and Annihilus. Uses the Talisman bag and optional ingame filter, not equipment rarity/GA sliders.")
       -- QQT_Warpigz_v3 (Q9): the one-per-character rule of the Splinters of Evil.

@@ -26,6 +26,7 @@ local hr_mode = require "core.hr_mode"
 local stand = require "core.hr_tear_stand" -- QQT_Warpigz_v3 (Q2): stand in the tear until it closes
 local loot = require "core.hr_tear_loot" -- QQT_Warpigz_v3 (Q3): no looting until the whole event is over
 local cinder_run = require "core.hr_cinder_run" -- QQT_Warpigz_v3 (rc.2): the save phase holds ring chests too
+local probe = require "core.hr_tear_probe"
 
 local M = { skins = skins }
 local helpers = {}      -- bound by tasks/helltide.lua (move_to, clear_movement, get_actors, get_kill_target)
@@ -47,11 +48,9 @@ local C = {
     PORTAL_ENTER_TIMEOUT = 25,
     PORTAL_POST_KILL_WAIT = 30,
     TEAR_ATTACK_DIST = 4,
-    TEAR_STAND_MAX = 0.7,
     -- QQT_Warpigz_v3 (Q2): TEAR_CLOSE_STUCK_S (18) and TEAR_STATIC_SKIP_S
     -- (12) are gone; the per-tear bounds live in core/hr_tear_stand.lua.
     TEAR_SKIP_TTL_S = 45,
-    RITUAL_CONTEXT_DIST = 45,
     SPAWN_WAIT_S = 5,
     HOLD_AREA_MAX_S = 30,
     CHEST_APPROACH_NO_PROGRESS_S = 12,
@@ -448,11 +447,12 @@ end
 -- charge_full); ">= 0.99" closed every tear at 1 % on a 0-100 scale.
 local function charge_open(progress, actor, skin)
     if type(progress) ~= "number" then return true end
-    local key = progress >= 0.99 and progress <= 1.001 and actor and tear_key(actor, skin) or nil
+    local key = actor and tear_key(actor, skin) or nil
     return not stand.charge_full(progress, now(), key)
 end
 
 local function is_chargeable(skin) return skin_matches(skin, skins.chargeable) end
+local function is_golden_tear(skin) return skin_matches(skin, skins.golden_tears) end
 
 -- QQT_Warpigz_v3 (Q2): a tear only charges while the player stands in it,
 -- so "position and charge unchanged for 12 s" skipped every tear the bot was
@@ -468,61 +468,51 @@ local function tear_signal(actor)
     return stand.signal(actor_attr(actor, "CHARGEABLE_GIZMO_PROGRESS"), actor_hp(actor))
 end
 
-local function is_stand_on_tear(tear, skin)
-    if skin and skin:match("Chargeable") then
-        return dist(tear) <= C.TEAR_STAND_MAX + 0.35
-    end
-    local hp = actor_hp(tear)
-    return hp ~= nil and hp <= 1
-end
-
 local function is_active_tear(actor, skin)
     if not skin_matches(skin, skins.tears) or tear_is_skipped(actor, skin) then return false end
     local operated = actor_attr(actor, "GIZMO_HAS_BEEN_OPERATED")
-    if operated == 1 or operated == true then return false end
     local progress = actor_attr(actor, "CHARGEABLE_GIZMO_PROGRESS")
-    if skin:match("Chargeable") then return charge_open(progress, actor, skin) end
     local hp = actor_hp(actor)
-    if skin:match("MicroRupture") then
-        if hp and hp > 1 then return true end
-        if progress ~= nil then return charge_open(progress, actor, skin) end
-        return false
+    local active
+    if operated == 1 or operated == true then
+        active = false
+    elseif is_chargeable(skin) then
+        active = charge_open(progress, actor, skin)
+    elseif is_golden_tear(skin) then
+        -- Live golden-circle actors are untargetable micro-ruptures. Their
+        -- health measures remaining work; charge stays zero even at death.
+        -- Falling back to that zero charge resurrected every closed tear.
+        active = hp ~= nil and hp > 1
+    else
+        active = not (hp and hp <= 1)
     end
-    return not (hp and hp <= 1)
+    -- Only remember completion of our engaged tear. Discovery can see a
+    -- dormant gizmo before it opens; that must not blacklist it for 15 min.
+    if not active and sess.tear_focus_key == tear_key(actor, skin) then
+        spent_tears[tear_key(actor, skin)] = now() + C.SPENT_TTL
+    end
+    return active
 end
 
-local function find_best_tear(anchor, radius)
-    local best, best_score = nil, -math.huge
+local function find_best_tear(anchor, radius, golden_only, for_hunt)
+    local best, best_distance, best_rank = nil, math.huge, -1
     for _, actor in pairs(get_actors()) do
         local skin = actor_skin(actor)
-        if is_active_tear(actor, skin) and tear_motion_viable(actor, skin) then
+        local golden = is_golden_tear(skin)
+        if (not golden_only or golden) and is_active_tear(actor, skin) and tear_motion_viable(actor, skin) then
             local ap = actor_pos(actor)
-            if ap and (not anchor or pos_dist(anchor, ap) <= radius) then
-                local score = -dist(actor)
-                local hp = actor_hp(actor) or 0
-                if settings.tear_use_charge_ring ~= false and is_chargeable(skin)
-                    and is_stand_on_tear(actor, skin) then
-                    score = score + 8000
-                elseif hp > 1 then
-                    score = score + 10000
-                elseif is_stand_on_tear(actor, skin) then
-                    score = score - 2500
+            if ap and (not anchor or pos_dist(anchor, ap) <= radius)
+                and (not for_hunt or (not is_blacklisted(ap) and type_allowed(rupture_type_label(skin)))) then
+                local d, rank = dist(actor), golden and 2 or 1
+                -- Work the golden side circles before standing at the
+                -- central SMP_Chargeable. Focus keeps a chosen circle stable.
+                if rank > best_rank or (rank == best_rank and d < best_distance) then
+                    best, best_distance, best_rank = actor, d, rank
                 end
-                if score > best_score then best, best_score = actor, score end
             end
         end
     end
     return best
-end
-
-local function ritual_context_near(pos, radius)
-    for _, actor in pairs(get_actors()) do
-        local skin = actor_skin(actor)
-        if skin_matches(skin, skins.hold_area) or skin_matches(skin, skins.starter) then
-            if pos_dist(pos, actor_pos(actor)) <= radius then return true end
-        end
-    end
-    return false
 end
 
 -- guards / bosses -----------------------------------------------------------
@@ -794,10 +784,33 @@ local function engage(self, states, pos, rtype, msg, starter)
     return true
 end
 
--- Scan for ritual ring / starter / active tear within max_dist.
--- require_ritual_for_tear: a distant bare tear needs a live ritual nearby.
-local function scan(self, states, max_dist, require_ritual_for_tear)
+-- A recognized open tear is sufficient evidence on its own. Prefer it to
+-- leftover rings/starters, whose presence does not prove an active event.
+local function scan(self, states, max_dist)
     local r = settings.tear_event_radius or 12
+    local tear = find_best_tear(get_player_position(), max_dist, false, true)
+    if tear then
+        local tpos = actor_pos(tear)
+        -- Keep the real event centre when its ring is visible; otherwise
+        -- the tear itself anchors the approach until a ring is discovered.
+        local ring = find_closest_actor(skins.hold_area, max_dist, function(a)
+            local pos = actor_pos(a)
+            return pos_dist(tpos, pos) <= r + 30 and not is_blacklisted(pos)
+        end)
+        local anchor = (ring and actor_pos(ring)) or tpos
+        local rtype = starter_label_near(anchor, r + 50)
+        -- QQT_Warpigz_v3 2.6.7: golden micro-ruptures ("S14_Rupture_Major_")
+        -- open in Normal ruptures too, so their skin does not prove Colossal
+        -- (that would start a Realmwalker wait). Without a starter the event
+        -- is Unknown until one confirms it; a known type the hunt filters
+        -- out is not engaged through its tear either.
+        if rtype ~= "Unknown" and not type_allowed(rtype) then tear = nil end
+        if tear and engage(self, states, anchor, rtype,
+            string.format("[RIFT] Found active tear %s at dist=%.1f — closing",
+                actor_skin(tear) or "?", dist(tear))) then
+            return true
+        end
+    end
     local hold = find_closest_actor(skins.hold_area, max_dist, function(a, skin)
         -- QQT_Warpigz_v3 3.3.2: a ring left over from a rupture this machine
         -- already finished is engaged again only with strong live evidence.
@@ -833,24 +846,12 @@ local function scan(self, states, max_dist, require_ritual_for_tear)
             return true
         end
     end
-    local tear = find_best_tear(get_player_position(), max_dist)
-    local tpos = tear and actor_pos(tear)
-    if tpos and not is_blacklisted(tpos)
-        and (not require_ritual_for_tear or ritual_context_near(tpos, C.RITUAL_CONTEXT_DIST)) then
-        local rtype = rupture_type_label(actor_skin(tear))
-        if rtype == "Unknown" then rtype = "Normal" end
-        if type_allowed(rtype) and engage(self, states, tpos, rtype,
-            string.format("[RIFT] Found active tear %s at dist=%.1f — closing",
-                actor_skin(tear) or "?", dist(tear))) then
-            return true
-        end
-    end
     return false
 end
 
 -- ── tear closing ───────────────────────────────────────────────────────────
 -- QQT_Warpigz_v3 (Q2): the engaged tear is kept until it closes, is gone or
--- is skipped (it was re-picked by distance every tick and dropped after 18 s).
+-- is skipped. The central chargeable gizmo yields to golden micro-ruptures.
 local function focused_tear()
     local key = sess.tear_focus_key
     if not key then return nil end
@@ -876,6 +877,14 @@ local function close_tears_at(self, states, anchor, r, pad)
             stand.inside_seconds(sess, sess.tear_focus_key), sess.tears_closed))
         release_focus()
     end
+    if tear and not is_golden_tear(actor_skin(tear)) then
+        local golden = find_best_tear(anchor, r + (pad or 30), true)
+        if golden then
+            log("[RIFT] Golden tear appeared — leaving the initial target to close it")
+            release_focus() -- a handoff, not a completed tear
+            tear = golden
+        end
+    end
     tear = tear or find_best_tear(anchor, r + (pad or 30))
     if not tear then
         release_focus()
@@ -897,9 +906,10 @@ local function close_tears_at(self, states, anchor, r, pad)
         end
     end
     local d = dist(tear)
-    local charge = settings.tear_use_charge_ring ~= false and is_chargeable(skin)
+    local hold_circle = settings.tear_use_charge_ring ~= false
+        and (is_golden_tear(skin) or is_chargeable(skin))
     -- Bounded per tear (C6): inside-the-circle time, approach and wall time.
-    local why = stand.work(sess, key, d, tear_signal(tear), t, charge and stand.C.STAND_OUT or C.TEAR_ATTACK_DIST)
+    local why = stand.work(sess, key, d, tear_signal(tear), t, hold_circle and stand.C.STAND_OUT or C.TEAR_ATTACK_DIST)
     if why then
         skip_tear(tear, skin, why)
         -- QQT_Warpigz_v3 3.3.2: stood in it this long and it never closed:
@@ -918,7 +928,7 @@ local function close_tears_at(self, states, anchor, r, pad)
     end
     sess.focus_tear, sess.tears_seen = tear, true -- QQT_Warpigz_v3 3.3.2: tears_seen
     combat_on()
-    if charge then
+    if hold_circle then
         -- Stop on the glint, walk back only when pushed out of the circle
         -- (hysteresis: no re-centering on every sub-metre drift).
         if d <= stand.C.STAND_IN or (sess.tear_standing and d <= stand.C.STAND_OUT) then
@@ -1424,7 +1434,7 @@ local function check_live(self, states, s, r, t)
     s.live_t = t
     -- QQT_Warpigz_v3 3.3.3 (audit): the Realmwalker counts only when this
     -- rupture would fight it.
-    local ev = s.tear_focus_key and "tear" or live_evidence(s.anchor, false, not realmwalker_chain(s))
+    local ev = focused_tear() and "tear" or live_evidence(s.anchor, false, not realmwalker_chain(s))
     local weak = ev == "marker" or ev == "starter"
     if ev and not weak then
         if not s.live_seen or s.live_seen == "marker" or s.live_seen == "starter" then
@@ -1548,7 +1558,7 @@ function M.check_events(self, states)
         end
         return false
     end
-    return scan(self, states, settings.tear_search_dist or 110, true)
+    return scan(self, states, settings.tear_search_dist or 110)
 end
 
 -- Per-tick hook from the helltide Execute (before the state dispatch).
@@ -1573,11 +1583,12 @@ function M.poll(self, states)
     sess.poll_t = t
     local range = state == states.KILL_MONSTERS and (settings.tear_search_dist or 110)
         or (settings.tear_passby_dist or 50)
-    return scan(self, states, range, state == states.KILL_MONSTERS)
+    return scan(self, states, range)
 end
 
 function M.execute(self, states)
     local state = self.current_state
+    probe.capture(state, sess, get_actors(), now())
     if not hr_mode.is_farm() then
         return resume_patrol(self, states, "[RIFT] Mode is warplan — leaving the rupture", true)
     end
