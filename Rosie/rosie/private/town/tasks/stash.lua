@@ -315,7 +315,15 @@ local function diag_now() return stash_read(nil).diag end
 local function stash_actor()
     local best,best_distance,selected=nil,math.huge,nil
     local best_rank=math.huge
-    local origin=get_player_position()
+    -- QQT_Warpigz_v3 1.0.37 (review MED; owner live 3.3.25: actor 8388681 at
+    -- (2570.1,-475.5), 11 m from the Temis chest every other addon uses):
+    -- ranked by the distance from the town table's chest, not from the
+    -- player (from the Blacksmith a nearer Stash-skin actor won); the player
+    -- only where the town has no table position. Each Stash-skin actor is
+    -- logged once per session.
+    local table_pos=utils.get_npc_location('STASH')
+    local origin=table_pos or get_player_position()
+    state.seen_actors=state.seen_actors or {}
     local function scan(list)
         for _,actor in pairs(list or {}) do
             local ok,pos,id=pcall(function()
@@ -323,12 +331,19 @@ local function stash_actor()
                 return actor:get_position(),actor:get_id()
             end)
             if ok and pos and (pos:x()~=0 or pos:y()~=0 or pos:z()~=0) then
-                local distance=origin:dist_to(pos)
+                local distance=origin:dist_to_ignore_z(pos) -- QQT_Warpigz_v3 1.0.37: 2D (a z read as 0)
                 -- QQT_Warpigz_v2 local patch: prefer a chest the host reports
                 -- interactable (TristramLoop, MaidenFarmer, WonderCity); never
                 -- require it.
                 local okf,flag=pcall(function() return actor:is_interactable() end)
                 local r=(okf and flag==false) and 1 or 0
+                local key=tostring(id)
+                if not state.seen_actors[key] then -- QQT_Warpigz_v3 1.0.37
+                    state.seen_actors[key]=true
+                    log(string.format('Stash actor %s: skin=%s at (%.1f,%.1f,%.1f) interactable=%s, %.1f m from the town chest position.',
+                        key,tostring(utils.npc_enum.STASH),pos:x(),pos:y(),pos:z(),okf and tostring(flag) or '?',
+                        table_pos and table_pos:dist_to_ignore_z(pos) or -1))
+                end
                 if state.actor_id and id==state.actor_id then selected=actor end
                 if r<best_rank or r==best_rank and distance<best_distance then
                     best,best_distance,best_rank=actor,distance,r
@@ -666,12 +681,15 @@ local function walk_line(head,w,here,goal,distance,sent)
 end
 -- QQT_Warpigz_v3 1.0.36: the game walks the player to an interacted chest.
 local function interact_walk(w,actor,distance)
-    if w.stalls<1 or not actor or not distance or distance>WALK.INTERACT_RANGE then return end
+    if w.stalls<1 or w.interacting or not actor or not distance or distance>WALK.INTERACT_RANGE then return end
     if (state.walk_interacts or 0)>=WALK.INTERACT_MAX or state.time<(w.interact_at or -math.huge)+WALK.INTERACT_GAP then return end
-    if vendor.npc_panel_held(state.base) then return end
-    w.interact_at=state.time
+    -- QQT_Warpigz_v3 1.0.37 (review LOW): Execute clears state.base on the
+    -- walk, so the guard reads a fresh baseline; a pending close (the
+    -- Blacksmith's Escape) is never dropped by a chest interaction.
+    if vendor.closing() or vendor.npc_panel_held(vendor.stash_baseline()) then return end
+    w.interact_at=state.time; w.interacting=true
     state.walk_interacts=(state.walk_interacts or 0)+1
-    if not state.base then state.base=vendor.stash_baseline() end
+    if not state.base then state.base=vendor.stash_baseline() end -- kept while walk_interacts>0 (Execute)
     local ok,result=pcall(vendor.interact,actor,'STASH')
     log(string.format('The walk stalls: interacting with the chest at %.1f m so the game walks there (%d of %d, host=%s).',
         distance,state.walk_interacts,WALK.INTERACT_MAX,tostring(ok and result)))
@@ -687,22 +705,42 @@ local function walk(actor,distance)
     w.from=from
     if (here.x-w.pos.x)^2+(here.y-w.pos.y)^2>=0.16 then w.pos=here; w.at=state.time end
     if w.via and flat(here,w.via)<=WALK.VIA_REACH then w.via=nil end
+    -- QQT_Warpigz_v3 1.0.37 (review HIGH): the game's own walk to an
+    -- interacted chest is never overridden: for WALK.STALL s after the
+    -- interaction, and then as long as the player makes progress, Rosie sends
+    -- no move request and no force window, clears no path on a stall and
+    -- drops the detour (1.0.36 re-sent request_move on the next 0.3 s tick).
+    local holding=false
+    if w.interacting then
+        -- The game gets WALK.STALL s to start; after that the hold needs
+        -- progress (Rosie sends nothing meanwhile, so the motion is the game's
+        -- walk, around obstacles to its interaction point); a game walk pinned
+        -- for WALK.STALL s ends it and the detours resume.
+        holding=state.time-w.interact_at<WALK.STALL or state.time-w.at<WALK.STALL
+        if not holding then w.interacting=false end
+    end
     local head=nil
     if state.time-w.at>=WALK.STALL then
         w.stalls=w.stalls+1; w.at=state.time
-        release_movement() -- clears rosie/movement.lua's block for this goal
-        w.via=detour(w.stalls,here,goal)
+        if holding then w.via=nil
+        else
+            release_movement() -- clears rosie/movement.lua's block for this goal
+            w.via=detour(w.stalls,here,goal)
+        end
         head=string.format('No walking progress for %ds; walking on',WALK.STALL)
     elseif state.time>=w.log_at+WALK.LOG_GAP then
         head='Walking to the stash'
     end
-    local target=w.via and vec3:new(w.via.x,w.via.y,w.via.z) or utils.compute_move_target(vec3:new(goal.x,goal.y,goal.z))
-    if w.stalls>0 then pcall(movement.force_for,'town',1) end -- QQT_Warpigz_v3 1.0.36
-    local sent
-    if BatmobilePlugin then
-        BatmobilePlugin.set_target(plugin_label,target); sent=BatmobilePlugin.move(plugin_label)
+    local sent='held (game walk to the chest)'
+    if holding then w.via=nil
     else
-        explorerlite:set_custom_target(target); sent=explorerlite:move_to_target()
+        local target=w.via and vec3:new(w.via.x,w.via.y,w.via.z) or utils.compute_move_target(vec3:new(goal.x,goal.y,goal.z))
+        if w.stalls>0 then pcall(movement.force_for,'town',1) end -- QQT_Warpigz_v3 1.0.36
+        if BatmobilePlugin then
+            BatmobilePlugin.set_target(plugin_label,target); sent=BatmobilePlugin.move(plugin_label)
+        else
+            explorerlite:set_custom_target(target); sent=explorerlite:move_to_target()
+        end
     end
     if head then w.log_at=state.time; walk_line(head,w,here,goal,distance,sent) end -- QQT_Warpigz_v3 1.0.36: after the request
     interact_walk(w,actor,distance)
@@ -816,7 +854,7 @@ function task.Execute()
     end
     task.set_status(task.status_enum.MOVING)
     unready()
-    if not near then state.base=nil end
+    if not near and (state.walk_interacts or 0)==0 then state.base=nil end -- QQT_Warpigz_v3 1.0.37: an interact walk keeps its baseline
     walk(actor,distance)
 end
 
