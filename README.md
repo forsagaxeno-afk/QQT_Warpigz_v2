@@ -22,7 +22,7 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | --- | --- | --- |
 | `WarPigs` | Master orchestrator and town handoffs | 1.1.13 |
 | `WarPug` | War Plan selection and creation | 1.0.19 |
-| `Batmobile` | Shared navigation | 2.2.6 |
+| `Batmobile` | Shared navigation | 2.2.7 |
 | `ArkhamAsylum` | The Pit | 2.1.6 |
 | `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.7 |
 | `HordeDev` | Infernal Hordes | 2.2.9 |

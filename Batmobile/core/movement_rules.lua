@@ -43,10 +43,14 @@ for _, s in ipairs(rules.skill_catalog) do rules.skill_by_id[s.id] = s end
 
 -- QQT_Warpigz_v3: skills found by their spell NAME (get_name_for_spell)
 -- instead of a fixed id, e.g. the Warlock's Rampage (id, name string and
--- cast mode need live confirmation). Each gets a stable slot at the END of
--- skill_catalog (saved rule combos keep their indices) with id 0 until an
--- equipped spell's lower-case name contains `match`; skill_by_id then gains
--- that id. Revamp rule engine only: the legacy per-class chain is unchanged.
+-- cast mode need live confirmation). Each gets a slot after the fixed-id
+-- skills with id 0 until an equipped spell's lower-case name contains
+-- `match`; skill_by_id then gains that id. Revamp rule engine only: the
+-- legacy per-class chain is unchanged.
+-- QQT_Warpigz_v3 2.2.7: saved rules store the picker INDEX, so the catalog
+-- order is append-only: fixed ids (1-14), Rampage (15), Enigma (16). Do not
+-- add entries to name_catalog (that would shift Enigma); append any new
+-- skill after Enigma instead.
 rules.name_catalog = {
     { match = 'rampage', name = 'Rampage', needs_raycast = false, range = 15 },
 }
@@ -58,6 +62,7 @@ for _, s in ipairs(rules.name_catalog) do
 end
 rules.NAMED_TTL = 10
 -- Append after name-based skills to preserve every saved picker index.
+-- New skills go after this entry (see the name_catalog note above).
 local enigma = { id=movement_cast.ENIGMA, name='Enigma Teleport (Mouse 3)',
     needs_raycast=false, input_action=true }
 rules.skill_catalog[#rules.skill_catalog+1] = enigma

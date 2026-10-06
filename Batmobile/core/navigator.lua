@@ -145,6 +145,7 @@ local navigator = {
     trav_approach_since       = -1,
     trav_interact_pos         = nil,   -- 2.2.2: {key, pos} where the last non-Jump interact fired
     trav_reapproach_count     = 0,
+    last_pick_enigma          = false, -- 2.2.7: the last legacy movement pick was Enigma
     explorer_updated_at       = nil,   -- 2.2.2: time of the last navigator.update explorer scan
 }
 
@@ -467,6 +468,7 @@ local function try_traversal_route(local_player, player_pos)
     navigator.pathfind_fail_count = 0
     return true, closest_trav
 end
+local class_movement_spell   -- QQT_Warpigz_v3 2.2.7: defined below
 local get_movement_spell_id = function(local_player)
     if not settings.use_movement then
         utils.log(2, '[move_spell] skip: use_movement=false')
@@ -495,6 +497,7 @@ local get_movement_spell_id = function(local_player)
             default_range   = navigator.spell_dist,
             min_spell_dist  = settings.min_spell_dist or navigator.movement_step,
             blacklist       = navigator.blacklisted_spell_node,
+            no_input_action = utils.player_in_town(),   -- QQT_Warpigz_v3 2.2.7
         }
         local sid, need_rc, rng, pos, idx = mengine.pick(settings.movement_rules, ctx)
         if sid==movement_cast.ENIGMA and utils.player_in_town() then return end
@@ -505,9 +508,29 @@ local get_movement_spell_id = function(local_player)
         return
     end
 
-    if settings.use_enigma and not utils.player_in_town() and movement_cast.enigma_ready() then
+    -- QQT_Warpigz_v3 2.2.7: Enigma and the class chain take turns. Enigma's
+    -- real cooldown cannot be read, so with spell_interval >= enigma_interval
+    -- it won every pick and the class spell never fired. After an Enigma
+    -- pick the next one goes to a castable class spell; Enigma alone still
+    -- takes every pick.
+    local enigma_ok = settings.use_enigma and not utils.player_in_town() and movement_cast.enigma_ready()
+    if enigma_ok and not navigator.last_pick_enigma then
+        navigator.last_pick_enigma = true
         return movement_cast.ENIGMA, false
     end
+    local sid, need_rc, rng = class_movement_spell(local_player)
+    if sid ~= nil then
+        navigator.last_pick_enigma = false
+        return sid, need_rc, rng
+    end
+    if enigma_ok then
+        navigator.last_pick_enigma = true
+        return movement_cast.ENIGMA, false
+    end
+    return nil, false
+end
+-- The legacy per-class movement chain (Evade last).
+class_movement_spell = function(local_player)
     local class = utils.get_character_class(local_player)
     if class == 'sorcerer' then
         if settings.use_teleport and utility.can_cast_spell(288106) then
