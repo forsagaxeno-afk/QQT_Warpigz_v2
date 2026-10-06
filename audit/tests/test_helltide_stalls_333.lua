@@ -675,6 +675,45 @@ case('2.6.6: Batmobile stops 3 m short of the tear: HR walks into the circle its
     ok(s.inside >= 4, string.format('%.1fs inside the circle', s.inside))
 end)
 
+-- QQT_Warpigz_v3 2.6.8 (owner live, 3.3.24: "suddenly stuck and stopped
+-- casting skills ... until the character was killed"): KILL_MONSTERS for
+-- ~40 s at a target 0.7 m away, Batmobile held by HR, no casts. With 'Manage
+-- orbwalker' on, the cinder gate (cinders > 150) turned the orbwalker's
+-- clear OFF every tick, and kill_monsters' orb_set_clear(true) was gated the
+-- same way: the rotation never fired. Clear stays ON while HR fights or
+-- while enemies are on the player; the gate only keeps it OFF out of combat.
+case('2.6.8: cinder gate on, KILL_MONSTERS at a monster next to the player: the orbwalker clears (casts)', function()
+    local s = session({mode = 0, kill = true, controls = {manage_orbwalker = true}})
+    s.cinders = 400                                  -- above the 150 gate
+    local e = enemy(1.5, 0, 1000, {elite = true})
+    s.enemies = {e}
+    local fighting, cleared = 0, 0
+    s.before_tick = function()
+        e.hp = e.hp - 1
+        if state(s) == 'KILL_MONSTERS' then
+            fighting = fighting + 1
+            if s.orb.clear then cleared = cleared + 1 end
+        end
+    end
+    s.tick(20)
+    ok(fighting > 100, 'fighting the monster: ' .. fighting .. ' ticks')
+    ok(cleared >= fighting - 2, string.format('clear ON while fighting: %d/%d ticks', cleared, fighting))
+    eq(s.logged('Cinder gate: clear forced ON'), 1, 'logged once')
+end)
+
+case('2.6.8: cinder gate on, enemies on the player while it walks (kill off): clear forced ON, then the gate again', function()
+    local s = session({mode = 0, controls = {manage_orbwalker = true}})
+    s.cinders = 400
+    s.tick(3)
+    eq(s.orb.clear, false, 'out of combat above 150 cinders the gate keeps clear OFF')
+    s.enemies = {enemy(4, 0, 100)}
+    s.tick(2)
+    eq(s.orb.clear, true, 'an enemy 4 m away: clear ON')
+    s.enemies = {}
+    s.tick(3)
+    eq(s.orb.clear, false, 'no enemy near: back to the gate')
+end)
+
 print(string.format('Helltide stalls: %d cases, %d checks, %d failures', cases, checks, #failures))
 if #failures > 0 then error('Helltide stalls failures:\n' .. table.concat(failures, '\n')) end
 print('PASS: test_helltide_stalls_333 (' .. cases .. ' cases)')

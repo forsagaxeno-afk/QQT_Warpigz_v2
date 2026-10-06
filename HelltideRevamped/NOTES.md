@@ -1,4 +1,4 @@
-# HelltideRevamped: session notes (current 2.6.6)
+# HelltideRevamped: session notes (current 2.6.8)
 
 ## Map
 - `tasks/helltide.lua`: the main state machine, about 186 file-level locals. **Add no new file-level locals.**
@@ -26,7 +26,10 @@
 
 - 2.6.6 (owner live, 3.3.16+: "not standing in tears to close those"): Batmobile's path to a tear ends on the walkable node next to the gizmo, 1-3 m off it, and reports the goal reached; the player stood outside the charge circle until the 15 s approach bound skipped the tear (tear after tear: 50+ s in RIFT_CLOSE_TEARS). Within NEAR_IN (5 m) of a chargeable tear, once the walk made no 0.3 m progress in 1 s, HR steps in with `pathfinder.force_move_raw` (Batmobile held, its goal dropped), logged once per tear; without force_move_raw the Batmobile walk stays. "Batmobile paused" in the owner's [NAV STATE] is HR's own hold while it drives the target (normal).
 
+- 2.6.8: (Auditor, 3.3.24 HIGH) a tear focused again after a golden tear gets a fresh approach window and its time away is not counted (`hr_tear_stand.refocus`); the central SMP_Chargeable was skipped at once ("no progress for 15s" / "engaged 150s") and marked spent. (LOW) a latched forced step is dropped beyond NEAR_IN (no force_move_raw at a sprinting golden tear 30 m away). (owner live, 3.3.24: "stopped casting skills until killed") with 'Manage orbwalker' on, the cinder gate (> 150 cinders) kept the orbwalker's clear OFF every tick while HR fought, kill_monsters' own orb_set_clear(true) was gated too: `settings.combat_clear()` (KILL_MONSTERS, maiden fight, chest farm) and a live enemy within 10 m of the player keep clear ON; logged once ("[HR] Cinder gate: clear forced ON — …").
+
 ## Open / live checks
+- 2.6.8: did the owner run with 'Manage orbwalker' on (the cinder gate only acts then)? With it off HR never turns clear off, and the no-casting stall needs another cause (Universal Rotation, Rosie's fight wait). Live: the log line "[HR] Cinder gate: clear forced ON" in fights above 150 cinders, and casting goes on.
 - 2.6.6: live check: the log shows "The walk stopped …m from the tear — stepping into its circle directly" and the tear bar fills; does force_move_raw walk into the circle past the gizmo's collision?
 - The move-on numbers (25 s / 45 m / 50 m); whether 2000 cinders is reachable in a typical Helltide hour; the map orientation and overlay fit.
 - A Surging rupture made only of waves (no tears or cultists) is kept alive by the marker skins only and completes after 30 s of quiet. Verify live.

@@ -148,6 +148,18 @@ function M.at_tear(sess, key, d)
     return near
 end
 
+-- QQT_Warpigz_v3 2.6.8 (Auditor, 3.3.24): a tear focused again after
+-- another one (a golden tear took the focus) gets a fresh approach window
+-- from distance d, and the time spent away does not count toward its wall
+-- bound. Its inside-the-circle time is kept.
+function M.refocus(sess, key, t, d)
+    local rec = sess and sess.tear_work and sess.tear_work[key]
+    if not rec then return end
+    local away = t - rec.last_t
+    if away > 0 then rec.engaged_at = rec.engaged_at + away end
+    rec.last_t, rec.best_d, rec.best_t, rec.inside = t, d, t, nil
+end
+
 function M.inside_seconds(sess, key)
     local rec = sess and sess.tear_work and sess.tear_work[key]
     return rec and rec.inside_s or 0
