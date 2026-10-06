@@ -1675,6 +1675,7 @@ local helltide_task = {
             was_dead = true
             clear_movement()
             tracker.tear_event.release_holds("death") -- QQT_Warpigz_v3 (Q2)
+            if settings.hurt_reset then settings.hurt_reset() end -- QQT_Warpigz_v3 2.6.11: no pre-death health baseline after the revive
             return
         elseif was_dead then
             was_dead = false

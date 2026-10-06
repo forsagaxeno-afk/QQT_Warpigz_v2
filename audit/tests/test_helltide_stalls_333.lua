@@ -89,7 +89,7 @@ local function session(opts)
         is_dead = function() return s.dead end, get_item_count = function() return s.items or 0 end,
         get_consumable_items = function() return {} end, get_attribute = function() return 0 end,
         get_buffs = function() return s.in_helltide and {{name_hash = HELLTIDE_BUFF}} or {} end,
-        get_current_health = function() return s.hp or 1000 end, get_max_health = function() return 1000 end,
+        get_current_health = function() return s.hp or 1000 end, get_max_health = function() return s.max_hp or 1000 end,
     }
     local world = {get_name = function() return 'Sanctuary_Eastern_Continent' end,
         get_current_zone_name = function() return s.zone end, get_world_id = function() return 1 end}
@@ -822,6 +822,54 @@ case('2.6.10: an enemy 4 m away that KILL_MONSTERS gave up on still keeps clear 
     s.tick(25)
     ok(s.logged('KILL MONSTERS') >= 1, 'KILL_MONSTERS ran')
     eq(s.orb.clear, true, 'clear ON with the ignored enemy 4 m away')
+end)
+
+-- QQT_Warpigz_v3 2.6.11 (review of 2.6.10): the hurt detector counted any
+-- drop of 0.5 HP (a life cost, a max-life buff running out) and kept a stale
+-- reading across 'Manage orbwalker' off, a zone change and a death.
+local function hurt_session()
+    local s = session({mode = 0, controls = {manage_orbwalker = true}})
+    s.cinders, s.hp, s.max_hp, s.frozen = 400, 1000, 1000, true
+    s.tick(2)
+    return s
+end
+local HURT_LOG = 'the player is taking damage'
+
+case('2.6.11: a 0.5% health drop is not damage; small hits adding up to 1.5% are', function()
+    local s = hurt_session()
+    s.hp = 995; s.tick(2)
+    eq(s.logged(HURT_LOG), 0, 'a 5 HP drop (0.5%)')
+    eq(s.orb.clear, false, 'the gate keeps clear OFF')
+    for _ = 1, 4 do s.hp = s.hp - 5; s.tick(0.5) end -- 995 -> 975: 2% in 2 s
+    eq(s.logged(HURT_LOG), 1, 'four 5 HP hits add up')
+end)
+
+case('2.6.11: max health falling with the health (a max-life buff ends) is not damage', function()
+    local s = hurt_session()
+    s.hp, s.max_hp = 800, 800; s.tick(2)
+    eq(s.logged(HURT_LOG), 0, 'max 1000 -> 800 with health 1000 -> 800')
+    eq(s.orb.clear, false, 'clear stays OFF')
+end)
+
+case('2.6.11: no stale baseline when Manage orbwalker is switched back on', function()
+    local s = hurt_session()
+    s.controls.manage_orbwalker:set(false); s.tick(1)
+    s.hp = 600; s.tick(1)                             -- hit while management is off
+    s.controls.manage_orbwalker:set(true); s.tick(2)
+    eq(s.logged(HURT_LOG), 0, 'switched back on after the hit')
+end)
+
+case('2.6.11: no stale baseline across a zone change', function()
+    local s = hurt_session()
+    s.zone, s.hp = 'Other_Zone', 700; s.tick(2)       -- health first read in a new zone
+    eq(s.logged(HURT_LOG), 0, 'a zone change')
+end)
+
+case('2.6.11: no stale baseline across a death and revive', function()
+    local s = hurt_session()
+    s.dead = true; s.tick(1)
+    s.dead, s.hp = false, 400; s.tick(2)               -- revived with less health than before
+    eq(s.logged(HURT_LOG), 0, 'a death and revive')
 end)
 
 print(string.format('Helltide stalls: %d cases, %d checks, %d failures', cases, checks, #failures))

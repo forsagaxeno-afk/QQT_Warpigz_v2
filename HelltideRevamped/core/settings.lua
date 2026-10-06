@@ -269,21 +269,47 @@ end
 -- dropping counts as a threat for HURT.S after the last drop: clear stays
 -- ON and the nearest target within HURT.KM_M is fought (km_gated). Sampled
 -- at most every 0.25 s; logged once per episode.
-local HURT = {S = 5, KM_M = 25, EPS = 0.5}
-local hurt = {at = -math.huge, hp = nil, last = -math.huge, logged = false}
+-- QQT_Warpigz_v3 2.6.11 (review of 2.6.10): a drop counts only when it is
+-- at least EPS_PCT of the max health (EPS absolute when max is unreadable)
+-- and max health did not fall too (a max-life buff running out, a life
+-- cost); the baseline is dropped while dead, on a zone change and while
+-- 'Manage orbwalker' is off, so a stale reading never starts an episode.
+local HURT = {S = 5, KM_M = 25, EPS = 0.5, EPS_PCT = 0.015}
+local hurt = {at = -math.huge, hp = nil, max = nil, zone = nil, last = -math.huge, logged = false}
+local function hurt_reset()
+    hurt.hp, hurt.max = nil, nil
+end
+settings.hurt_reset = hurt_reset -- the death path in tasks/helltide.lua
 -- One sample (every tick from apply_cinder_orb_gate, so the baseline stays fresh).
 local function hurt_sample()
     local now = get_time_since_inject()
     if now < hurt.at or now < hurt.last then hurt.at, hurt.hp, hurt.last = -math.huge, nil, -math.huge end
     if now - hurt.at < 0.25 then return end
     hurt.at = now
-    local ok, hp = pcall(function() return get_local_player():get_current_health() end)
-    if ok and type(hp) == 'number' then
-        if hurt.hp and hp < hurt.hp - HURT.EPS then hurt.last = now end
-        hurt.hp = hp
-    else
-        hurt.hp = nil
+    local okz, zone = pcall(function() return get_current_world():get_current_zone_name() end)
+    zone = okz and zone or nil
+    if zone ~= hurt.zone then hurt.zone = zone; hurt_reset() end
+    local ok, hp, max, dead = pcall(function()
+        local me = get_local_player()
+        local okm, m = pcall(function() return me:get_max_health() end)
+        local okd, d = pcall(function() return me:is_dead() end)
+        return me:get_current_health(), okm and m or nil, okd and d == true
+    end)
+    if not ok or type(hp) ~= 'number' or dead then
+        hurt_reset()
+        return
     end
+    max = type(max) == 'number' and max > 0 and max or nil
+    local eps = max and math.max(HURT.EPS, max * HURT.EPS_PCT) or HURT.EPS
+    local max_fell = max and hurt.max and max < hurt.max - HURT.EPS
+    -- hurt.hp is a reference that follows the health up at once and down
+    -- only by a counted drop (or with max health): small hits add up.
+    if hurt.hp and not max_fell and hp < hurt.hp then
+        if hp <= hurt.hp - eps then hurt.last, hurt.hp = now, hp end
+    else
+        hurt.hp = hp
+    end
+    hurt.max = max
 end
 
 -- The gate is active here: true (and logged once per episode) while hurt.
@@ -342,6 +368,7 @@ end
 settings.apply_cinder_orb_gate = function ()
     if not settings.manage_orbwalker then
         if orb_forced.clear then set_clear(true) end
+        hurt_reset() -- QQT_Warpigz_v3 2.6.11: no stale baseline when it is switched back on
         return
     end
     hurt_sample() -- QQT_Warpigz_v3 2.6.10
