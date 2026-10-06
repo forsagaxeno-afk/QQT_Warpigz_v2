@@ -247,24 +247,57 @@ local function threatened()
     if ok and type(list) == 'table' then
         local okp, here = pcall(get_player_position)
         for _, e in pairs(list) do
-            -- QQT_Warpigz_v3 2.6.9 (review of 2.6.8): get_kill_target's filters:
-            -- not on another floor (> 12 m up/down), not unreachable or ignored
-            -- (settings.threat_skip, bound by tasks/helltide.lua).
+            -- QQT_Warpigz_v3 2.6.9: not on another floor (> 12 m up/down).
+            -- QQT_Warpigz_v3 2.6.10 (review of 2.6.9): only that filter; an
+            -- enemy KILL_MONSTERS cannot reach or ignores (a ranged mob on a
+            -- ledge) still hits the player, so it keeps clear ON.
             local okz, far = pcall(function()
                 return math.abs(here:z() - e:get_position():z()) > 12
             end)
-            local skip = okp and okz and far
-            if not skip and settings.threat_skip then
-                local oks, s = pcall(settings.threat_skip, e)
-                skip = oks and s == true
-            end
-            if not skip then
+            if not (okp and okz and far) then
                 local okh, hp = pcall(function() return e:get_current_health() end)
                 if not okh or hp == nil or hp > 1 then threat.yes = true break end
             end
         end
     end
     return threat.yes
+end
+
+-- QQT_Warpigz_v3 2.6.10 (review of 2.6.9, MED): an archer or caster beyond
+-- THREAT_M hit the player through any slow phase (a Rosie wait, pickup, a
+-- tear stand) with clear OFF and KILL_MONSTERS gated. The player's health
+-- dropping counts as a threat for HURT.S after the last drop: clear stays
+-- ON and the nearest target within HURT.KM_M is fought (km_gated). Sampled
+-- at most every 0.25 s; logged once per episode.
+local HURT = {S = 5, KM_M = 25, EPS = 0.5}
+local hurt = {at = -math.huge, hp = nil, last = -math.huge, logged = false}
+-- One sample (every tick from apply_cinder_orb_gate, so the baseline stays fresh).
+local function hurt_sample()
+    local now = get_time_since_inject()
+    if now < hurt.at or now < hurt.last then hurt.at, hurt.hp, hurt.last = -math.huge, nil, -math.huge end
+    if now - hurt.at < 0.25 then return end
+    hurt.at = now
+    local ok, hp = pcall(function() return get_local_player():get_current_health() end)
+    if ok and type(hp) == 'number' then
+        if hurt.hp and hp < hurt.hp - HURT.EPS then hurt.last = now end
+        hurt.hp = hp
+    else
+        hurt.hp = nil
+    end
+end
+
+-- The gate is active here: true (and logged once per episode) while hurt.
+local function hurting()
+    hurt_sample()
+    if get_time_since_inject() - hurt.last > HURT.S then
+        hurt.logged = false
+        return false
+    end
+    if not hurt.logged then
+        hurt.logged = true
+        console.print('[HR] Cinder gate: clear forced ON — the player is taking damage')
+    end
+    return true
 end
 
 local function threat_log(why)
@@ -292,7 +325,7 @@ settings.orb_set_clear = function (v)
     if v and cinder_gate_active() and not force_active() then
         if threatened() then
             threat_log('enemies on the player') -- QQT_Warpigz_v3 2.6.8
-        else
+        elseif not hurting() then -- QQT_Warpigz_v3 2.6.10
             v = false
         end
     end
@@ -311,12 +344,15 @@ settings.apply_cinder_orb_gate = function ()
         if orb_forced.clear then set_clear(true) end
         return
     end
+    hurt_sample() -- QQT_Warpigz_v3 2.6.10
     if force_active() then
         set_clear(true)
     elseif cinder_gate_active() then
         -- QQT_Warpigz_v3 2.6.8: never OFF with enemies on the player.
         if threatened() then
             threat_log('enemies on the player')
+            set_clear(true)
+        elseif hurting() then -- QQT_Warpigz_v3 2.6.10
             set_clear(true)
         else
             set_clear(false)
@@ -335,6 +371,8 @@ end
 settings.km_gated = function (target, dist)
     if not (settings.manage_orbwalker and target and cinder_gate_active()) then return false end
     if type(dist) == 'number' and dist <= THREAT_M then return false end
+    -- QQT_Warpigz_v3 2.6.10: under fire, the nearest target within HURT.KM_M is fought.
+    if type(dist) == 'number' and dist <= HURT.KM_M and hurting() then return false end
     local ok, special = pcall(function()
         return target:is_boss() or target:is_champion() or target:is_elite()
     end)

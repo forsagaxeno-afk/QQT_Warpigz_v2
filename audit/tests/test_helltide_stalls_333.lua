@@ -89,6 +89,7 @@ local function session(opts)
         is_dead = function() return s.dead end, get_item_count = function() return s.items or 0 end,
         get_consumable_items = function() return {} end, get_attribute = function() return 0 end,
         get_buffs = function() return s.in_helltide and {{name_hash = HELLTIDE_BUFF}} or {} end,
+        get_current_health = function() return s.hp or 1000 end, get_max_health = function() return 1000 end,
     }
     local world = {get_name = function() return 'Sanctuary_Eastern_Continent' end,
         get_current_zone_name = function() return s.zone end, get_world_id = function() return 1 end}
@@ -783,6 +784,44 @@ case('2.6.9: the cinder-gate log prints once per gate episode, not once per figh
     s.cinders = 400
     s.enemies = {enemy(4, 0, 100)}; s.tick(2)
     eq(s.logged('Cinder gate: clear forced ON'), 2, 'a new gate episode logs again')
+end)
+
+-- QQT_Warpigz_v3 2.6.10 (review of 2.6.9, MED): an archer 13 m away (beyond
+-- the 10 m threat) hits a player standing still above the gate: clear stayed
+-- OFF and KILL_MONSTERS was gated, so the player never fought back. Health
+-- dropping keeps clear ON and the archer is fought; bounded after the hits stop.
+case('2.6.10: above the cinder gate, an archer 13 m away hitting a still player: clear ON and it is fought; bounded', function()
+    local s = session({mode = 0, kill = true, controls = {manage_orbwalker = true}})
+    s.cinders, s.hp, s.frozen = 400, 1000, true
+    local archer = enemy(13, 0, 1000)
+    s.enemies = {archer}
+    local hit, cleared, fighting = 0, 0, 0
+    s.before_tick = function()
+        hit = hit + 1
+        if hit % 5 == 0 then s.hp = s.hp - 20 end -- a hit every 0.5 s
+        if s.orb.clear then cleared = cleared + 1 end
+        if state(s) == 'KILL_MONSTERS' then fighting = fighting + 1 end
+    end
+    s.tick(6)
+    ok(cleared >= 50, string.format('clear ON while hit: %d/60 ticks', cleared))
+    ok(fighting >= 30, string.format('the archer is fought: %d/60 ticks in KILL_MONSTERS', fighting))
+    eq(s.logged('the player is taking damage'), 1, 'logged once')
+    s.before_tick = nil                                -- the hits stop
+    s.tick(8)
+    eq(s.orb.clear, false, '5 s after the last hit: back to the gate')
+    ok(state(s) ~= 'KILL_MONSTERS', 'and the archer is no longer a fight: ' .. tostring(state(s)))
+end)
+
+-- QQT_Warpigz_v3 2.6.10 (review of 2.6.9, LOW): the 10 m threat check
+-- skipped an enemy KILL_MONSTERS ignores (it took no damage for 15 s): a
+-- ranged mob on a ledge 4 m away turned clear OFF. Only the floor filter.
+case('2.6.10: an enemy 4 m away that KILL_MONSTERS gave up on still keeps clear ON above the gate', function()
+    local s = session({mode = 0, kill = true, controls = {manage_orbwalker = true}})
+    s.cinders, s.frozen = 400, true
+    s.enemies = {enemy(4, 0, 1000)}                    -- never loses health
+    s.tick(25)
+    ok(s.logged('KILL MONSTERS') >= 1, 'KILL_MONSTERS ran')
+    eq(s.orb.clear, true, 'clear ON with the ignored enemy 4 m away')
 end)
 
 print(string.format('Helltide stalls: %d cases, %d checks, %d failures', cases, checks, #failures))
