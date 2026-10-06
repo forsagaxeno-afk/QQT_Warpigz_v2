@@ -230,6 +230,35 @@ local function force_active()
     return get_time_since_inject() <= force_clear_until
 end
 
+-- QQT_Warpigz_v3 2.6.8 (owner live: "stopped casting skills ... until the
+-- character was killed"): the gate kept clear OFF while HR fought (and
+-- kill_monsters' own orb_set_clear(true) was gated too), so the rotation
+-- never cast. A living enemy within THREAT_M of the player, or HR fighting
+-- (combat_clear), keeps clear ON; logged once per episode.
+local THREAT_M = 10
+local threat = {at = -math.huge, yes = false, logged = false}
+local function threatened()
+    local now = get_time_since_inject()
+    if now - threat.at < 0.25 and now >= threat.at then return threat.yes end
+    threat.at, threat.yes = now, false
+    local ok, list = pcall(function()
+        return target_selector.get_near_target_list(get_player_position(), THREAT_M)
+    end)
+    if ok and type(list) == 'table' then
+        for _, e in pairs(list) do
+            local okh, hp = pcall(function() return e:get_current_health() end)
+            if not okh or hp == nil or hp > 1 then threat.yes = true break end
+        end
+    end
+    return threat.yes
+end
+
+local function threat_log(why)
+    if threat.logged then return end
+    threat.logged = true
+    console.print('[HR] Cinder gate: clear forced ON — ' .. why)
+end
+
 -- C4/L12b: orbwalker states HR itself forced (clear OFF, block ON). Like
 -- WonderCity's orb_forced, they are handed back even when 'Manage orbwalker'
 -- was switched off after HR forced them; HR never touches an orbwalker it
@@ -247,7 +276,11 @@ settings.orb_set_clear = function (v)
         return
     end
     if v and cinder_gate_active() and not force_active() then
-        v = false
+        if threatened() then
+            threat_log('enemies on the player') -- QQT_Warpigz_v3 2.6.8
+        else
+            v = false
+        end
     end
     set_clear(v)
 end
@@ -267,10 +300,30 @@ settings.apply_cinder_orb_gate = function ()
     if force_active() then
         set_clear(true)
     elseif cinder_gate_active() then
-        set_clear(false)
+        -- QQT_Warpigz_v3 2.6.8: never OFF with enemies on the player.
+        if threatened() then
+            threat_log('enemies on the player')
+            set_clear(true)
+        else
+            threat.logged = false
+            set_clear(false)
+        end
     else
         set_clear(true)
     end
+end
+
+-- QQT_Warpigz_v3 2.6.8: HR is fighting (KILL_MONSTERS, the maiden fight, a
+-- chest farm): clear ON for 1.5 s whatever the cinder gate says, refreshed
+-- every tick while the fight lasts.
+settings.combat_clear = function ()
+    if not settings.manage_orbwalker then
+        settings.orb_set_clear(true)
+        return
+    end
+    if cinder_gate_active() and not force_active() then threat_log('HR is fighting') end
+    force_clear_until = math.max(force_clear_until, get_time_since_inject() + 1.5)
+    set_clear(true)
 end
 
 -- Force orbwalker clear ON for `seconds` regardless of the cinder gate. Used

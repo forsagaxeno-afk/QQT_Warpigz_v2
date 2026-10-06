@@ -2692,7 +2692,7 @@ local helltide_task = {
         end
 
         if km_target then
-            settings.orb_set_clear(true)
+            settings.combat_clear() -- QQT_Warpigz_v3 2.6.8: clear ON whatever the cinder gate says
             local cur_dist = utils.distance_to(km_target)
             if cur_dist > 2 then
                 if BatmobilePlugin then
@@ -3497,7 +3497,7 @@ local helltide_task = {
         end
 
         -- Inside circle: kill monsters, or free-roam to find them
-        settings.orb_set_clear(true)
+        settings.combat_clear() -- QQT_Warpigz_v3 2.6.8: clear ON whatever the cinder gate says
         local km_target = get_kill_target()
         if km_target then
             local cur_dist = utils.distance_to(km_target)
@@ -3600,7 +3600,7 @@ local helltide_task = {
     end,
 
     kill_monsters = function(self)
-        settings.orb_set_clear(true)
+        settings.combat_clear() -- QQT_Warpigz_v3 2.6.8: clear ON whatever the cinder gate says
         local local_player = get_local_player()
         if not local_player then
             self.current_state = helltide_state.EXPLORE_HELLTIDE
