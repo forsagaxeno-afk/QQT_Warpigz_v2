@@ -88,6 +88,22 @@ do
     dump()
     A_SKIPPED = skipped
 end
+-- D (QQT_Warpigz_v3 2.6.9, review of 2.6.8): the focus flickers to a golden
+-- tear for one tick every 2 s while the central one cannot be reached (the
+-- player never gets closer): a sub-second time away is not a refocus, so the
+-- 15 s approach window still runs out and the tear is skipped.
+do
+    player = position(0)
+    local ch = chargeable(1, 10)
+    reset({ ch })
+    for i = 1, 240 do -- 60 s
+        if i % 8 == 0 then actors = { ch, golden(100 + i, -30) } else actors = { ch } end
+        tick()
+    end
+    D_SKIPPED = false
+    for _, l in ipairs(LOG) do if l:find('Skipping tear S14_Rupture_SMP_Chargeable', 1, true) then D_SKIPPED = true end end
+    print('D flicker: chargeable skipped=' .. tostring(D_SKIPPED))
+end
 -- B
 do
     player = position(0)
@@ -109,5 +125,6 @@ do
     assert(not skipped, 'B: chargeable skipped: ' .. tostring(skipped))
     assert(C_FORCED == 0 and C_MOVED, 'C: a sprinting golden tear 30 m away got ' .. tostring(C_FORCED)
         .. ' force_move_raw steps (the walk is a Batmobile move_to beyond NEAR_IN)')
+    assert(D_SKIPPED, 'D: focus flicker kept resetting the approach window (an unreachable tear never skipped in 60 s)')
 end
-print('PASS: test_helltide_golden_handoff_268 (A, B, C)')
+print('PASS: test_helltide_golden_handoff_268 (A, B, C, D)')

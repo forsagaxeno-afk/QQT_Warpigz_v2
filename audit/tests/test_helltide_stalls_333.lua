@@ -104,7 +104,15 @@ local function session(opts)
     env.on_render_menu = function() end
     env.on_update = function(fn) s.update = fn end
     env.console = {print = function(line) s.logs[#s.logs + 1] = string.format('%.1f %s', s.now, tostring(line)) end}
-    env.target_selector = {get_near_target_list = function() return s.enemies or {} end}
+    -- the enemies within r of pos (2D, like the host)
+    env.target_selector = {get_near_target_list = function(pos, r)
+        local out = {}
+        for _, e in ipairs(s.enemies or {}) do
+            local p = e:get_position()
+            if not (pos and r) or math.sqrt((p:x() - pos:x()) ^ 2 + (p:y() - pos:y()) ^ 2) <= r then out[#out + 1] = e end
+        end
+        return out
+    end}
     env.actors_manager = {get_all_actors = function() return s.actors end, get_enemy_actors = function() return {} end}
     env.loot_manager = {get_all_items_chest_sort_by_distance = function() return s.loot end,
         any_item_around = function() return false end}
@@ -712,6 +720,69 @@ case('2.6.8: cinder gate on, enemies on the player while it walks (kill off): cl
     s.enemies = {}
     s.tick(3)
     eq(s.orb.clear, false, 'no enemy near: back to the gate')
+end)
+
+-- QQT_Warpigz_v3 2.6.9 (review of 2.6.8, MED): with clear ON in every HR
+-- fight, the gate meant nothing while HR started a fight with any monster
+-- within 50 m. Above the gate a plain monster is fought only within 10 m;
+-- elites still are; below the gate, or without 'Manage orbwalker', as before.
+case('2.6.9: above the cinder gate a plain monster 30 m away is not a fight; one 5 m away is, with clear ON', function()
+    local s = session({mode = 0, kill = true, controls = {manage_orbwalker = true}})
+    s.cinders = 400
+    s.enemies = {enemy(30, 0, 1000)}
+    watch_states(s, {KILL_MONSTERS = true})
+    s.tick(5)
+    eq(s.entered, 0, 'a plain monster 30 m away above the gate: KILL_MONSTERS entries')
+    s.enemies = {enemy(5, 0, 1000)}
+    local fighting, cleared = 0, 0
+    s.before_tick = function()
+        if state(s) == 'KILL_MONSTERS' then
+            fighting = fighting + 1
+            if s.orb.clear then cleared = cleared + 1 end
+        end
+    end
+    s.tick(3)
+    ok(fighting > 10, 'a plain monster 5 m away is fought: ' .. fighting .. ' ticks')
+    ok(cleared >= fighting - 1, string.format('clear ON while fighting: %d/%d', cleared, fighting))
+end)
+
+case('2.6.9: an elite 30 m away above the gate, or a plain one below it or without manage_orbwalker, is still a fight', function()
+    for _, c in ipairs({
+        {why = 'elite above the gate', cinders = 400, manage = true, opts = {elite = true}},
+        {why = 'plain below the gate', cinders = 100, manage = true},
+        {why = 'plain, manage_orbwalker off', cinders = 400, manage = false},
+    }) do
+        local s = session({mode = 0, kill = true, controls = {manage_orbwalker = c.manage}})
+        s.cinders = c.cinders
+        s.enemies = {enemy(30, 0, 1000, c.opts)}
+        watch_states(s, {KILL_MONSTERS = true})
+        s.tick(5)
+        ok(s.entered >= 1, c.why .. ': KILL_MONSTERS entered ' .. s.entered .. 'x')
+    end
+end)
+
+case('2.6.9: the gate\'s 10 m threat check skips an enemy on another floor (> 12 m up)', function()
+    local s = session({mode = 0, controls = {manage_orbwalker = true}})
+    s.cinders = 400
+    local e = enemy(4, 0, 100)
+    e.pos = v(4, 0, 20)
+    s.enemies = {e}
+    s.tick(3)
+    eq(s.orb.clear, false, 'an enemy 20 m below/above the player does not force clear ON')
+end)
+
+case('2.6.9: the cinder-gate log prints once per gate episode, not once per fight', function()
+    local s = session({mode = 0, controls = {manage_orbwalker = true}})
+    s.cinders = 400
+    for _ = 1, 3 do
+        s.enemies = {enemy(4, 0, 100)}; s.tick(2)
+        s.enemies = {}; s.tick(2)
+    end
+    eq(s.logged('Cinder gate: clear forced ON'), 1, 'three fights in one gate episode')
+    s.cinders = 100; s.tick(1)
+    s.cinders = 400
+    s.enemies = {enemy(4, 0, 100)}; s.tick(2)
+    eq(s.logged('Cinder gate: clear forced ON'), 2, 'a new gate episode logs again')
 end)
 
 print(string.format('Helltide stalls: %d cases, %d checks, %d failures', cases, checks, #failures))
