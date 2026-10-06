@@ -1284,10 +1284,6 @@ tracker.tear_event.bind({
     get_actors = get_cached_actors,
     get_kill_target = get_kill_target,
 })
--- QQT_Warpigz_v3 2.6.9: the cinder gate's 10 m threat check skips what get_kill_target skips.
-settings.threat_skip = function(enemy)
-    return km_is_unreachable(enemy:get_position()) or tracker.hr_watch.km_ignored(enemy, get_time_since_inject())
-end
 
 local last_chest_diagnostic = -math.huge
 local unknown_chest_skins = {}
