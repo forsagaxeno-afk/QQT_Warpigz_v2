@@ -75,6 +75,12 @@ engine.pick = function (rule_state_list, ctx)
             utils.debug_log('[mvr] slot=%d skip: disabled', slot)
         elseif not rule.skill_id or rule.skill_id == 0 then
             utils.debug_log('[mvr] slot=%d skip: no skill selected', slot)
+        elseif ctx.no_input_action and rules.skill_by_id[rule.skill_id]
+            and rules.skill_by_id[rule.skill_id].input_action then
+            -- QQT_Warpigz_v3 2.2.7: Enigma (Mouse 3) is skipped in town here,
+            -- before its throttle is stamped; the navigator's town gate came
+            -- after the stamp and held the rule back outside town.
+            utils.debug_log('[mvr] slot=%d skip: input action not allowed here', slot)
         elseif not helpers.can_cast(rule.skill_id) then
             -- QQT_Warpigz_v3: a rule whose skill is on cooldown or unequipped
             -- never wins; the next rule (e.g. Evade) gets its turn.

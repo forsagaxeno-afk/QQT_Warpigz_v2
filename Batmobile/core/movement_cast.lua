@@ -26,6 +26,11 @@ end
 function M.position(skill_id, destination, delay)
     if skill_id~=M.ENIGMA then return cast_spell.position(skill_id,destination,delay) end
     if not destination or not M.enigma_ready() then return false end
+    -- QQT_Warpigz_v3 2.2.7: every attempt that reaches the projection arms
+    -- the throttle. A refused click (node off-screen, w2s nil/NaN) left it
+    -- unarmed, so enigma_ready() stayed true and the legacy selector picked
+    -- Enigma on every tick: class movement spells never fired.
+    last_click=get_time_since_inject()
     local ok,x,y=pcall(function()
         local screen=graphics.w2s(destination)
         if not screen then return end
@@ -37,7 +42,6 @@ function M.position(skill_id, destination, delay)
         or x<=0 or y<=0 or x>=w or y>=h then return false end
     -- API returns nil on dispatch. A click is not proof of a teleport;
     -- navigator keeps its route until the player's position actually changes.
-    last_click=get_time_since_inject()
     local sent,result=pcall(utility.send_mouse_middle_click,math.floor(x),math.floor(y))
     return sent and result~=false
 end

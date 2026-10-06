@@ -1,4 +1,4 @@
-# Batmobile: session notes (current 2.2.5)
+# Batmobile: session notes (current 2.2.7)
 
 The shared movement / navigation core: explorer, pathfinding, long paths, the movement-skill catalog (evade, Warlock Rampage) and freeroam. Most activity plugins move through `BatmobilePlugin` (`set_target` / `move` / `pause` / `resume` / `stop_long_path` / `is_paused` / `get_owner`).
 
@@ -8,6 +8,12 @@ The shared movement / navigation core: explorer, pathfinding, long paths, the mo
 - The third-party **Navigator** (with Worldstone) is a different navigator and not ours.
 
 ## History
+- 2.2.7 (Auditor review of 3.3.24, LOW; `test_batmobile_enigma_starvation.lua` E1-E4, E1-E3 fail on 2.2.6): Enigma Teleport no longer starves the class movement spells.
+  - `movement_cast.position` arms the Enigma throttle on every attempt that reaches the projection, so a refused click (node off-screen, w2s nil/NaN) no longer leaves `enigma_ready()` true on every tick (was 48 Enigma picks to 2 class picks in 200 ticks).
+  - The legacy selector alternates: after an Enigma pick the next one goes to a castable class spell (`navigator.last_pick_enigma`); Enigma alone keeps every pick. The class chain is now `class_movement_spell()`.
+  - Revamp: `engine.pick` skips input-action rules (Enigma) when `ctx.no_input_action` (town) before stamping `last_fire`.
+  - `movement_rules` catalog note: order is append-only (fixed ids 1-14, Rampage 15, Enigma 16); new skills go after Enigma.
+- 2.2.6 (community Enigma Teleport, `core/movement_cast.lua`; merged by the Coordinator).
 - 2.2.5 (Auditor LOWs on 2.2.4): the `[unstuck] … replanning, target kept` and `[unstuck] EXHAUSTED` lines go through `nav_log` too; B10 now also covers both `PARTIAL PATH SKIPPED` lines and the two `[unstuck]` lines; the 2.2.4 lines carry their version marker. `test_integration_batmobile.lua` BAT-4 reads the replan line at Debug.
 - 2.2.4 (scenario sweep 2026-09-28, §2.5 B1; test B10): the per-attempt `[nav] STUCK`, `PARTIAL PATH REJECTED` and both `PARTIAL PATH SKIPPED` lines go through `nav_log` (Disabled: none, Info: one per 5 s with `(+N similar)`, Debug: every line). A wedged paused caller printed 236 STUCK lines in 60 s. `test_batmobile_nav_recovery.lua` N5 now reads STUCK at Info.
 - 2.2.3 (Coordinator, 3.3.x): freeroam does not double-wait for Rosie's pickup (see CHANGELOG).
