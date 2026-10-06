@@ -615,7 +615,23 @@ end
 -- target, where it came from (the chest actor or the town table), the
 -- distance, the player and the movement status, so the next live log names
 -- the Temis chest position and why the walk stands.
-local WALK={STALL=4,LOG_GAP=10,VIA_REACH=1.5,SIDE=3}
+-- QQT_Warpigz_v3 1.0.36 (owner live 3.3.25, Temis, after a Reaper run): the
+-- 1.0.35 recovery ran (stalls 1-4, detours) but the player moved about 1 m in
+-- 22 s and reached not even the portal point, so the move requests did not
+-- move the player at all (another mover's command kept, or the host skipping
+-- request_move). The stash walk uses rosie/movement.lua like the base tasks
+-- (BatmobilePlugin is nil in this file); the 1.0.35 lines read move=Idle
+-- because they were printed right after Rosie's own release. Now:
+--  * after a stall the walk opens movement.force_for('town'), so a request
+--    the host skips is sent once more with force_move_raw (rosie/movement.lua);
+--  * from the first stall, a chest actor within WALK.INTERACT_RANGE m is
+--    interacted with every WALK.INTERACT_GAP s (at most WALK.INTERACT_MAX per
+--    session; not counted in MAX_INTERACTIONS): the game walks the player to
+--    an interacted object; the normal approach takes over within 3 m;
+--  * the lines are printed after the request: the request result, the
+--    movement status and the player's move destination (dest=, a foreign
+--    command shows there).
+local WALK={STALL=4,LOG_GAP=10,VIA_REACH=1.5,SIDE=3,INTERACT_RANGE=10,INTERACT_GAP=3,INTERACT_MAX=6}
 task.WALK=WALK
 local function point(v)
     local ok,x,y,z=pcall(function() return v:x(),v:y(),v:z() end)
@@ -638,13 +654,27 @@ local function detour(n,here,goal)
     local side=k==2 and 1 or -1
     return {x=here.x-dy/d*WALK.SIDE*side,y=here.y+dx/d*WALK.SIDE*side,z=here.z}
 end
-local function walk_line(head,w,here,goal,distance)
+local function walk_line(head,w,here,goal,distance,sent)
     local okm,st=pcall(movement.status)
     local detail=okm and type(st)=='table' and tostring(st.detail) or '?'
     local via=w.via and string.format(' via=(%.1f,%.1f)',w.via.x,w.via.y) or ''
-    log(string.format('%s: target=(%.1f,%.1f,%.1f) from=%s distance=%s player=(%.1f,%.1f) move=%s stalls=%d%s',
+    local okd,dest=pcall(function() return point(get_local_player():get_move_destination()) end) -- QQT_Warpigz_v3 1.0.36
+    local dest_s=okd and dest and string.format('(%.1f,%.1f)',dest.x,dest.y) or 'n/a'
+    log(string.format('%s: target=(%.1f,%.1f,%.1f) from=%s distance=%s player=(%.1f,%.1f) request=%s move=%s dest=%s stalls=%d%s',
         head,goal.x,goal.y,goal.z,tostring(w.from),
-        distance and string.format('%.1f',distance) or 'n/a',here.x,here.y,detail,w.stalls,via))
+        distance and string.format('%.1f',distance) or 'n/a',here.x,here.y,tostring(sent),detail,dest_s,w.stalls,via))
+end
+-- QQT_Warpigz_v3 1.0.36: the game walks the player to an interacted chest.
+local function interact_walk(w,actor,distance)
+    if w.stalls<1 or not actor or not distance or distance>WALK.INTERACT_RANGE then return end
+    if (state.walk_interacts or 0)>=WALK.INTERACT_MAX or state.time<(w.interact_at or -math.huge)+WALK.INTERACT_GAP then return end
+    if vendor.npc_panel_held(state.base) then return end
+    w.interact_at=state.time
+    state.walk_interacts=(state.walk_interacts or 0)+1
+    if not state.base then state.base=vendor.stash_baseline() end
+    local ok,result=pcall(vendor.interact,actor,'STASH')
+    log(string.format('The walk stalls: interacting with the chest at %.1f m so the game walks there (%d of %d, host=%s).',
+        distance,state.walk_interacts,WALK.INTERACT_MAX,tostring(ok and result)))
 end
 local function walk(actor,distance)
     local here=point(get_player_position())
@@ -657,22 +687,25 @@ local function walk(actor,distance)
     w.from=from
     if (here.x-w.pos.x)^2+(here.y-w.pos.y)^2>=0.16 then w.pos=here; w.at=state.time end
     if w.via and flat(here,w.via)<=WALK.VIA_REACH then w.via=nil end
+    local head=nil
     if state.time-w.at>=WALK.STALL then
         w.stalls=w.stalls+1; w.at=state.time
         release_movement() -- clears rosie/movement.lua's block for this goal
         w.via=detour(w.stalls,here,goal)
-        w.log_at=state.time
-        walk_line(string.format('No walking progress for %ds; walking on',WALK.STALL),w,here,goal,distance)
+        head=string.format('No walking progress for %ds; walking on',WALK.STALL)
     elseif state.time>=w.log_at+WALK.LOG_GAP then
-        w.log_at=state.time
-        walk_line('Walking to the stash',w,here,goal,distance)
+        head='Walking to the stash'
     end
     local target=w.via and vec3:new(w.via.x,w.via.y,w.via.z) or utils.compute_move_target(vec3:new(goal.x,goal.y,goal.z))
+    if w.stalls>0 then pcall(movement.force_for,'town',1) end -- QQT_Warpigz_v3 1.0.36
+    local sent
     if BatmobilePlugin then
-        BatmobilePlugin.set_target(plugin_label,target); BatmobilePlugin.move(plugin_label)
+        BatmobilePlugin.set_target(plugin_label,target); sent=BatmobilePlugin.move(plugin_label)
     else
-        explorerlite:set_custom_target(target); explorerlite:move_to_target()
+        explorerlite:set_custom_target(target); sent=explorerlite:move_to_target()
     end
+    if head then w.log_at=state.time; walk_line(head,w,here,goal,distance,sent) end -- QQT_Warpigz_v3 1.0.36: after the request
+    interact_walk(w,actor,distance)
 end
 
 function task.Execute()
