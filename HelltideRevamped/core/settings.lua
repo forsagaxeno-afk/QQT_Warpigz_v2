@@ -245,9 +245,23 @@ local function threatened()
         return target_selector.get_near_target_list(get_player_position(), THREAT_M)
     end)
     if ok and type(list) == 'table' then
+        local okp, here = pcall(get_player_position)
         for _, e in pairs(list) do
-            local okh, hp = pcall(function() return e:get_current_health() end)
-            if not okh or hp == nil or hp > 1 then threat.yes = true break end
+            -- QQT_Warpigz_v3 2.6.9 (review of 2.6.8): get_kill_target's filters:
+            -- not on another floor (> 12 m up/down), not unreachable or ignored
+            -- (settings.threat_skip, bound by tasks/helltide.lua).
+            local okz, far = pcall(function()
+                return math.abs(here:z() - e:get_position():z()) > 12
+            end)
+            local skip = okp and okz and far
+            if not skip and settings.threat_skip then
+                local oks, s = pcall(settings.threat_skip, e)
+                skip = oks and s == true
+            end
+            if not skip then
+                local okh, hp = pcall(function() return e:get_current_health() end)
+                if not okh or hp == nil or hp > 1 then threat.yes = true break end
+            end
         end
     end
     return threat.yes
@@ -305,12 +319,26 @@ settings.apply_cinder_orb_gate = function ()
             threat_log('enemies on the player')
             set_clear(true)
         else
-            threat.logged = false
             set_clear(false)
         end
     else
+        threat.logged = false -- QQT_Warpigz_v3 2.6.9: logged once per gate episode, not per fight
         set_clear(true)
     end
+end
+
+-- QQT_Warpigz_v3 2.6.9 (review of 2.6.8): with HR fighting, clear stays ON
+-- (combat_clear), so above the gate HR must not start fights for cinders it
+-- does not need: a plain monster farther than THREAT_M is not engaged
+-- (elites, champions and bosses still are; a closer one is self-defence).
+-- Only with 'Manage orbwalker' (the gate is its feature).
+settings.km_gated = function (target, dist)
+    if not (settings.manage_orbwalker and target and cinder_gate_active()) then return false end
+    if type(dist) == 'number' and dist <= THREAT_M then return false end
+    local ok, special = pcall(function()
+        return target:is_boss() or target:is_champion() or target:is_elite()
+    end)
+    return not (ok and special)
 end
 
 -- QQT_Warpigz_v3 2.6.8: HR is fighting (KILL_MONSTERS, the maiden fight, a

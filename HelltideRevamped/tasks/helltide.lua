@@ -1284,6 +1284,10 @@ tracker.tear_event.bind({
     get_actors = get_cached_actors,
     get_kill_target = get_kill_target,
 })
+-- QQT_Warpigz_v3 2.6.9: the cinder gate's 10 m threat check skips what get_kill_target skips.
+settings.threat_skip = function(enemy)
+    return km_is_unreachable(enemy:get_position()) or tracker.hr_watch.km_ignored(enemy, get_time_since_inject())
+end
 
 local last_chest_diagnostic = -math.huge
 local unknown_chest_skins = {}
@@ -1507,6 +1511,8 @@ local function check_events(self)
         local km_target = get_kill_target()
         -- QQT_Warpigz_v3: Farm: plain monsters are passed by while the patrol moves on (core/hr_mode.lua km_hold).
         if km_target and tracker.hr_mode.km_skip(km_target, get_time_since_inject()) then km_target = nil end
+        -- QQT_Warpigz_v3 2.6.9: above the cinder gate a far plain monster is not a fight (settings.km_gated).
+        if km_target and settings.km_gated(km_target, utils.distance_to(km_target)) then km_target = nil end
         if km_target then
             -- Arm the experimental explorer the first time we see a monster in this zone:
             -- means the patrol successfully walked us into populated terrain and grid
@@ -3613,6 +3619,8 @@ local helltide_task = {
         if target and tracker.hr_mode.km_hold(get_time_since_inject(), get_player_position(), target) then
             target = nil
         end
+        -- QQT_Warpigz_v3 2.6.9: the fight ends where a new one would not start (settings.km_gated).
+        if target and settings.km_gated(target, utils.distance_to(target)) then target = nil end
         if not target then
             if BatmobilePlugin then BatmobilePlugin.clear_target(plugin_label) end
             console.print("[KILL MONSTERS] No targets, resuming patrol")
