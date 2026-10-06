@@ -6,11 +6,18 @@ All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0
 
 ### Fixed
 
-- **Rosie 1.0.36: still stuck at the Blacksmith in Temis** (owner live, 3.3.25). The 1.0.35 recovery ran, but the player's move requests did nothing (about 1 m in 22 s). After a stall the walk now forces the move. From the first stall it also interacts with the chest when it is within 10 m (every 3 s, at most 6 times), so the game walks the player to it. The walk log adds the request and the player's move destination.
-- **HelltideRevamped 2.6.9: cinder gate follow-ups.**
-  - Above 150 cinders, with "Manage orbwalker" on, HR stops to fight only elites, champions, bosses or monsters within 10 m, so it no longer lingers to fight every pack it does not need cinders from. Self-defence stays.
-  - The 10 m threat check skips enemies on another floor and enemies HR marked unreachable or ignored.
-  - The gate log line prints once per gate episode.
+- **Rosie 1.0.37: still stuck at the Blacksmith in Temis** (owner live, 3.3.25).
+  - The player's move requests did nothing: about 1 m in 22 s.
+  - After a stall Rosie now interacts with the chest when it is within 10 m (every 3 s, at most 6 times), so the game walks the player there itself.
+  - While the game walks, Rosie sends no move of its own and does not clear the path.
+  - A stalled walk is forced.
+  - The stash chest is chosen by its distance from the town's known chest, not from the player. The 3.3.25 log targeted another "Stash" actor 11 m away.
+  - Each stash actor is logged once, and the walk log adds the request and the player's move destination.
+- **HelltideRevamped 2.6.10: cinder-gate follow-ups.** These apply above 150 cinders with "Manage orbwalker" on.
+  - HR stops to fight only elites, champions, bosses, monsters within 10 m, or anything within 25 m while the player is losing health. A ranged attacker no longer hits a still player unanswered.
+  - Fighting lasts for 5 s after the last health drop.
+  - Enemies on another floor are not a threat.
+  - The gate's log line prints once per episode.
   - A tear focus flicker of 1 s or less no longer resets the approach window.
 
 ## [3.3.25] — 2026-10-06
