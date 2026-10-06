@@ -2,6 +2,17 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.25] — 2026-10-06
+
+### Fixed
+
+- **HelltideRevamped 2.6.8**
+  - **The character stopped casting in fights until it died** (owner live, 3.3.24). With "Manage orbwalker" on, the cinder gate (above 150 cinders) switched the orbwalker's clear OFF on every tick, even while HR was fighting. Clear now stays ON in KILL_MONSTERS, the maiden fight, chest farming and whenever a live enemy is within 10 m, and HR logs it once: "[HR] Cinder gate: clear forced ON".
+  - **The central tear was abandoned after a golden tear** (Auditor HIGH, a 3.3.24 regression). A tear the bot comes back to gets a fresh approach window, so the central tear is closed after the golden ones instead of being skipped at once.
+  - No forced step at a sprinting golden tear that is far away.
+- **Rosie 1.0.35: stuck at the Blacksmith on the way to the stash** (owner live, Temis). The stash walk had no stuck recovery. After 4 s without progress it now walks on: it asks again, then goes to the town's reset point, then sidesteps 3 m. Its target, distance and movement status are logged.
+- **Batmobile 2.2.7: Enigma Teleport no longer starves the class movement spells** (Auditor LOW). The click throttle is armed even when a click is refused, the picks alternate with a castable class spell, and in town the Enigma rule never fires.
+
 ## [3.3.24] — 2026-09-30
 
 Community fixes by **@RadicalDadical55** (Misc Fixes). Thank you!
