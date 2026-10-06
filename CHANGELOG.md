@@ -2,6 +2,17 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.26] — 2026-10-06
+
+### Fixed
+
+- **Rosie 1.0.36: still stuck at the Blacksmith in Temis** (owner live, 3.3.25). The 1.0.35 recovery ran, but the player's move requests did nothing (about 1 m in 22 s). After a stall the walk now forces the move. From the first stall it also interacts with the chest when it is within 10 m (every 3 s, at most 6 times), so the game walks the player to it. The walk log adds the request and the player's move destination.
+- **HelltideRevamped 2.6.9: cinder gate follow-ups.**
+  - Above 150 cinders, with "Manage orbwalker" on, HR stops to fight only elites, champions, bosses or monsters within 10 m, so it no longer lingers to fight every pack it does not need cinders from. Self-defence stays.
+  - The 10 m threat check skips enemies on another floor and enemies HR marked unreachable or ignored.
+  - The gate log line prints once per gate episode.
+  - A tear focus flicker of 1 s or less no longer resets the approach window.
+
 ## [3.3.25] — 2026-10-06
 
 ### Fixed
