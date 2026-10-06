@@ -330,6 +330,7 @@ local function stash_actor()
                 if actor:get_skin_name()~=utils.npc_enum.STASH then return nil end
                 return actor:get_position(),actor:get_id()
             end)
+            if ok and pos and state.bad_actors and state.bad_actors[tostring(id)] then pos=nil end -- QQT_Warpigz_v3 1.0.38
             if ok and pos and (pos:x()~=0 or pos:y()~=0 or pos:z()~=0) then
                 local distance=origin:dist_to_ignore_z(pos) -- QQT_Warpigz_v3 1.0.37: 2D (a z read as 0)
                 -- QQT_Warpigz_v2 local patch: prefer a chest the host reports
@@ -359,6 +360,24 @@ local function stash_actor()
         state.position=vec3:new(pos:x(),pos:y(),pos:z())
     end
     return actor
+end
+
+-- QQT_Warpigz_v3 1.0.38: set the current chest actor aside when another
+-- Stash-skin actor was seen this session; true when one is left to try.
+local function next_actor()
+    local cur=state.actor_id and tostring(state.actor_id)
+    if not cur or state.deposited>0 then return false end
+    state.bad_actors=state.bad_actors or {}
+    state.bad_actors[cur]=true
+    local left=0
+    for key in pairs(state.seen_actors or {}) do if not state.bad_actors[key] then left=left+1 end end
+    if left==0 then return false end
+    log(string.format('Stash actor %s did not open after %d interactions; trying the next Stash actor (%d left).',
+        cur,C.MAX_INTERACTIONS,left))
+    state.actor_id,state.position,state.walk=nil,nil,nil
+    state.interactions,state.interacted,state.probe_sent,state.base=0,false,false,nil
+    state.progress=state.time
+    return true
 end
 
 local function fail(reason)
@@ -681,7 +700,7 @@ local function walk_line(head,w,here,goal,distance,sent)
 end
 -- QQT_Warpigz_v3 1.0.36: the game walks the player to an interacted chest.
 local function interact_walk(w,actor,distance)
-    if w.stalls<1 or w.interacting or not actor or not distance or distance>WALK.INTERACT_RANGE then return end
+    if w.stalls<(w.resume_stall or 1) or w.interacting or not actor or not distance or distance>WALK.INTERACT_RANGE then return end
     if (state.walk_interacts or 0)>=WALK.INTERACT_MAX or state.time<(w.interact_at or -math.huge)+WALK.INTERACT_GAP then return end
     -- QQT_Warpigz_v3 1.0.37 (review LOW): Execute clears state.base on the
     -- walk, so the guard reads a fresh baseline; a pending close (the
@@ -717,7 +736,11 @@ local function walk(actor,distance)
         -- walk, around obstacles to its interaction point); a game walk pinned
         -- for WALK.STALL s ends it and the detours resume.
         holding=state.time-w.interact_at<WALK.STALL or state.time-w.at<WALK.STALL
-        if not holding then w.interacting=false end
+        -- QQT_Warpigz_v3 1.0.38 (review MED): a hold that ended without
+        -- progress lets the next two stalls run their detours before another
+        -- interact walk (the 4 s hold outlasts the 3 s INTERACT_GAP, so the
+        -- next interaction replaced the detour at once: no detour ran).
+        if not holding then w.interacting=false; w.resume_stall=w.stalls+2 end
     end
     local head=nil
     if state.time-w.at>=WALK.STALL then
@@ -835,6 +858,10 @@ function task.Execute()
                     leave(order(snap.list),'the stash panel did not open again after '..C.MAX_INTERACTIONS..' interactions')
                     return
                 end
+                -- QQT_Warpigz_v3 1.0.38 (review LOW): with several Stash-skin
+                -- actors (a stale town table) the chosen one is set aside and
+                -- the next is tried, once per actor, before the step fails.
+                if next_actor() then return end
                 fail('Stash window did not open after '..C.MAX_INTERACTIONS..' interactions. '..diag_now()); return
             end
             state.interactions=state.interactions+1; state.next_interact=state.time+C.INTERACT_GAP
