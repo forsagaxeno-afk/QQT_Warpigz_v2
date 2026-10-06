@@ -1,0 +1,1184 @@
+<!doctype html>
+<!-- QQT_Warpigz_v3: HelltideRevamped map page inside WarRoom (WarRoom/dashboard/helltide/), "Daylight" theme. Open index.html
+     from disk (double-click); it opens the last chosen theme. It reloads ../hr_data.js (the WarRoom dashboard folder) every 5 s;
+     HelltideRevamped rewrites that file while "Web dashboard" is on.
+     No server, no internet, no external files. The map is drawn from the
+     plugin's own data (patrol road, learned Helltide border, learned chest
+     spots); an optional background image stays in this browser only. -->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HelltideRevamped — Live</title>
+<script>/* QQT_Warpigz_v3: ?embed=1 = shown inside WarRoom's Helltide tab */ if (/[?&]embed=1/.test(location.search)) document.documentElement.className += ' embed';</script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f3f1ed; --panel: #ffffff; --panel2: #f7f5f2; --line: #e4e0d9; --line2: #d3cdc3;
+  --ink: #1d2025; --ink2: #3a3f47; --muted: #6b6f76; --dim: #9a9ca1;
+  --red: #b3121b; --red2: #d8323b; --redsoft: rgba(179, 18, 27, .08); --redline: rgba(179, 18, 27, .28);
+  --char: #2a2d33; --char2: #4a4f58; --gold: #b7791f; --green: #16803c; --blue: #2456c9; --violet: #7a3fb8;
+  --bar3: #b9b3a9; --track: #ebe7e0; --head: #1d2025; --headink: #f3f1ed;
+  --shadow: 0 1px 2px rgba(29, 32, 37, .06), 0 2px 8px rgba(29, 32, 37, .04);
+  --num: "Bahnschrift", "DIN Alternate", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121417; --panel: #1b1e22; --panel2: #22262b; --line: #2b3036; --line2: #3a4048;
+  --ink: #ecebe7; --ink2: #cfcdc8; --muted: #9a9ea5; --dim: #6c7178;
+  --red: #e0414a; --red2: #f05b63; --redsoft: rgba(224, 65, 74, .12); --redline: rgba(224, 65, 74, .35);
+  --char: #d7d5d0; --char2: #a9adb3; --gold: #e0a33a; --green: #3fbf73; --blue: #6b97ff; --violet: #b68cf0;
+  --bar3: #5b6068; --track: #262a30; --head: #0b0c0e; --headink: #ecebe7;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3);
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); }
+body { margin: 0; color: var(--ink); font: 14px/1.45 system-ui, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+button, select { font: inherit; font-size: 13px; color: var(--ink); background: var(--panel); border: 1px solid var(--line2);
+  border-radius: 4px; padding: 4px 10px; cursor: pointer; line-height: 1.3; }
+button:hover, select:hover { border-color: var(--char2); }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--red); outline-offset: 1px; }
+button.on { background: var(--char); color: var(--panel); border-color: var(--char); }
+.num { font-family: var(--num); font-variant-numeric: tabular-nums; }
+.cap { font-size: 10.5px; font-weight: 700; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; }
+
+/* ── masthead ─────────────────────────────────────────── */
+.mast { background: var(--head); color: var(--headink); border-bottom: 3px solid var(--red); }
+.mast .in { max-width: 1560px; margin: 0 auto; padding: 10px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.mark { width: 30px; height: 30px; flex: none; }
+.mast h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: .02em; }
+.mast .sub { color: #a8a39b; font-size: 12.5px; }
+.grow { flex: 1; }
+.tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border-radius: 3px;
+  background: rgba(255, 255, 255, .07); color: #d6d2cb; white-space: nowrap; text-transform: capitalize; }
+.tag .led { width: 7px; height: 7px; border-radius: 50%; background: #6c7178; }
+.tag.ok .led { background: #3fbf73; box-shadow: 0 0 0 3px rgba(63, 191, 115, .2); animation: blink 2s infinite; }
+.tag.warn .led { background: #e0a33a; } .tag.bad .led { background: #f05b63; }
+@keyframes blink { 50% { box-shadow: 0 0 0 5px rgba(63, 191, 115, .05); } }
+.mast button { background: transparent; color: #e7e3dc; border-color: rgba(255, 255, 255, .22); }
+.mast button:hover { border-color: rgba(255, 255, 255, .5); }
+#dot { display: none; }
+
+.wrap { max-width: 1560px; margin: 0 auto; padding: 0 20px 40px; }
+.banner { display: flex; gap: 10px; align-items: baseline; padding: 8px 2px; font-size: 12.5px; color: var(--muted);
+  border-bottom: 1px dashed var(--line2); }
+.banner b { color: var(--ink); font-weight: 650; white-space: nowrap; }
+.banner::before { content: ""; width: 8px; height: 8px; flex: none; transform: rotate(45deg) translateY(-1px); background: var(--dim); }
+.banner.ok::before { background: var(--green); } .banner.warn::before { background: var(--gold); }
+
+/* ── hour strip ───────────────────────────────────────── */
+.clock { display: grid; grid-template-columns: 190px minmax(0, 1fr) 190px; gap: 18px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 6px; padding: 14px 18px; margin-top: 14px; }
+.read .big { font-family: var(--num); font-variant-numeric: tabular-nums; font-size: 34px; font-weight: 600; line-height: 1.05; letter-spacing: .01em; margin-top: 2px; }
+.read .note { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.read.r { text-align: right; }
+#k-reset { color: var(--red); }
+.strip { position: relative; padding: 22px 0 22px; }
+.track { position: relative; height: 26px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.seg { position: absolute; top: 0; bottom: 0; border-right: 2px solid var(--panel); background: var(--redsoft);
+  display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 650; color: var(--muted); letter-spacing: .04em; }
+.seg.past { background: repeating-linear-gradient(135deg, var(--redsoft) 0 5px, transparent 5px 10px); color: var(--dim); }
+.seg.cur { background: var(--red); color: #fff; }
+.seg.cur .fill { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(0, 0, 0, .22); }
+.seg.cur span { position: relative; }
+.seg.off { background: transparent; border-right: 0; color: var(--dim); }
+.seg.off.cur { background: var(--char2); color: var(--panel); }
+.tick { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; color: var(--muted); font-family: var(--num); font-variant-numeric: tabular-nums; }
+.tick::after { content: ""; position: absolute; left: 50%; top: 17px; width: 1px; height: 32px; background: var(--line2); }
+.tick.end { color: var(--red); font-weight: 700; }
+.tick.end::after { background: var(--red); width: 2px; }
+.needle { position: absolute; top: 14px; bottom: 6px; width: 0; transition: left .9s linear; }
+.needle::before { content: ""; position: absolute; left: -1.5px; top: 4px; bottom: 12px; width: 3px; background: var(--ink); border-radius: 2px; }
+.needle::after { content: ""; position: absolute; left: -6px; top: 0; border: 6px solid transparent; border-top: 7px solid var(--ink); border-bottom: 0; }
+.needle span { position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%); background: var(--ink); color: var(--panel);
+  font: 600 10.5px/1 var(--num); padding: 3px 6px; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* ── tiles ────────────────────────────────────────────── */
+.tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.tile { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 6px; padding: 10px 14px 11px; min-width: 0; position: relative; }
+.tile .v { font-family: var(--num); font-variant-numeric: tabular-nums; font-size: 24px; font-weight: 600; line-height: 1.15; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .v small { font-size: 15px; color: var(--muted); font-weight: 500; }
+.tile .note { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile.accent { border-top: 3px solid var(--red); }
+.meter { height: 5px; background: var(--track); border-radius: 1px; margin: 5px 0 4px; overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; background: var(--gold); transition: width .6s; }
+.split { display: flex; height: 5px; margin: 5px 0 4px; gap: 2px; }
+.split i { display: block; height: 100%; min-width: 0; transition: flex-grow .6s; }
+
+/* ── main split ───────────────────────────────────────── */
+.main { display: grid; grid-template-columns: 400px minmax(0, 1fr); gap: 14px; margin-top: 14px; align-items: stretch; }
+.panel { background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 6px; min-width: 0; }
+.ph { display: flex; align-items: center; gap: 8px; padding: 11px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.ph .sub { color: var(--muted); font-size: 12px; }
+.feedcol { display: flex; flex-direction: column; min-height: 0; }
+.now { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); background: linear-gradient(var(--redsoft), transparent 70%); }
+.now h2 { font-size: 19px; margin: 4px 0 0; font-weight: 700; text-transform: none; }
+.now .zone { color: var(--muted); font-size: 12.5px; }
+.tgt { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 10px; padding: 9px 11px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line2); border-left: 3px solid var(--red); }
+.tgt svg { flex: none; margin-top: 2px; }
+.tgt .tn { font-weight: 700; font-size: 14.5px; }
+.tgt .tn.none { color: var(--muted); font-weight: 500; }
+.tgt .tm { font-size: 12px; color: var(--muted); }
+.kvs { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 13px; }
+.kvs dt { color: var(--muted); } .kvs dd { margin: 0; text-align: right; }
+.yes { color: var(--green); font-weight: 650; } .no { color: var(--red); font-weight: 650; }
+.feedhead { display: flex; align-items: center; gap: 8px; padding: 10px 16px 6px; flex-wrap: wrap; }
+.seg3 { display: inline-flex; border: 1px solid var(--line2); border-radius: 4px; overflow: hidden; margin-left: auto; }
+.seg3 button { border: 0; border-radius: 0; padding: 3px 9px; font-size: 12px; background: transparent; }
+.seg3 button + button { border-left: 1px solid var(--line2); }
+.seg3 button.on { background: var(--char); color: var(--panel); }
+#opened { padding: 0 16px 8px; font-size: 12.5px; color: var(--muted); }
+#opened b { color: var(--ink); font-family: var(--num); font-weight: 600; }
+.feed { list-style: none; margin: 0; padding: 4px 16px 14px 16px; overflow-y: auto; flex: 1; min-height: 160px; max-height: 520px; position: relative; }
+.feed li { position: relative; padding: 7px 0 9px 26px; font-size: 13px; }
+.feed li::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 2px; background: var(--line); }
+.feed li:first-child::before { top: 12px; } .feed li:last-child::before { bottom: calc(100% - 14px); }
+.feed .ic { position: absolute; left: 0; top: 7px; width: 16px; height: 16px; }
+.feed .row { display: flex; gap: 8px; align-items: baseline; }
+.feed .row .t { flex: 1; min-width: 0; }
+.feed time { color: var(--dim); font: 600 11.5px var(--num); font-variant-numeric: tabular-nums; flex: none; }
+.feed .m { color: var(--muted); font-size: 11.5px; }
+.feed .src { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; margin-right: 5px; vertical-align: 1px; }
+.feed li.op .t b { color: var(--green); }
+.feed li.op.mys .t b { color: var(--gold); }
+.empty { color: var(--dim); font-size: 13px; padding: 12px 0; }
+.foot { color: var(--muted); font-size: 12px; padding: 10px 16px; border-top: 1px solid var(--line); }
+.foot b { color: var(--ink); font-family: var(--num); font-weight: 600; }
+
+/* ── map ──────────────────────────────────────────────── */
+.mapcol { display: flex; flex-direction: column; }
+.maptools { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; align-items: center; }
+.mapbox { position: relative; flex: 1; min-height: 520px; overflow: hidden; background: var(--track); }
+#map { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+#map.drag { cursor: grabbing; }
+.zoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; box-shadow: var(--shadow); border-radius: 4px; overflow: hidden; border: 1px solid var(--line2); }
+.zoom button { border: 0; border-radius: 0; width: 32px; height: 30px; padding: 0; font-size: 16px; font-weight: 600; }
+.zoom button + button { border-top: 1px solid var(--line2); }
+.zoom #fit { font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+#tip { position: absolute; pointer-events: none; background: var(--panel); color: var(--ink); border: 1px solid var(--line2); box-shadow: 0 4px 14px rgba(0, 0, 0, .14);
+  border-radius: 4px; padding: 6px 9px; font-size: 12px; display: none; white-space: nowrap; }
+#calib { position: absolute; left: 10px; top: 10px; right: 54px; background: var(--panel); border: 1px solid var(--gold); color: var(--ink);
+  border-radius: 4px; padding: 8px 12px; font-size: 12.5px; display: none; }
+#cursor { position: absolute; right: 10px; bottom: 10px; font: 600 11px var(--num); color: var(--muted); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 3px; padding: 2px 7px; pointer-events: none; font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--ink2); font-size: 12px; padding: 10px 16px 4px; border-top: 1px solid var(--line); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.mapnote { color: var(--muted); font-size: 11.5px; padding: 0 16px 10px; }
+
+/* ── stats ────────────────────────────────────────────── */
+.lower { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; margin-top: 14px; }
+.body { padding: 12px 16px 14px; }
+.keyrow { display: flex; gap: 14px; font-size: 11.5px; color: var(--muted); margin-left: auto; }
+.keyrow i { display: inline-block; width: 10px; height: 10px; border-radius: 1px; margin-right: 5px; vertical-align: -1px; }
+#stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 18px; }
+.mc .mh { display: flex; justify-content: space-between; font-size: 12px; font-weight: 650; margin-bottom: 5px; }
+.mc .mh span:last-child { color: var(--muted); font-weight: 500; }
+.mc.mys .mh span:first-child { color: var(--gold); }
+.br { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px; height: 16px; }
+.br .bt { height: 7px; background: var(--track); border-radius: 1px; overflow: hidden; }
+.br .bt i { display: block; height: 100%; border-radius: 1px; }
+.br b { font: 600 11.5px var(--num); font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
+.extras { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.extras div { font-size: 11.5px; color: var(--muted); }
+.extras b { display: block; color: var(--ink); font: 600 16px var(--num); font-variant-numeric: tabular-nums; }
+#spark { width: 100%; height: 190px; display: block; }
+#sparknote { font-size: 12px; color: var(--muted); margin-top: 6px; }
+#sparknote b { color: var(--ink); font-family: var(--num); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 12.5px; }
+th, td { text-align: right; padding: 6px 7px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 700; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; background: var(--panel2); }
+td { font-family: var(--num); }
+tbody tr:hover td { background: var(--panel2); }
+.scroll { overflow-x: auto; }
+.lower2 { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; margin-top: 14px; align-items: start; }
+.foot2 { text-align: center; color: var(--dim); font-size: 11.5px; margin-top: 18px; }
+
+@media (max-width: 1200px) {
+  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .main { grid-template-columns: 340px minmax(0, 1fr); }
+  .lower, .lower2 { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; }
+  .mapcol { order: -1; }
+  .feed { max-height: 420px; }
+  .clock { grid-template-columns: 1fr 1fr; }
+  .clock .strip { grid-column: 1 / -1; grid-row: 2; }
+  #stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .wrap { padding: 0 12px 30px; } .mast .in { padding: 10px 12px; gap: 10px; }
+  .mast .sub { display: none; }
+  .tiles { grid-template-columns: 1fr 1fr; }
+  .tiles .tile:first-child { grid-column: 1 / -1; }
+  .tile .note { white-space: normal; }
+  .banner { flex-wrap: wrap; gap: 2px 10px; } .banner span { flex-basis: 100%; }
+  .tag { font-size: 11px; padding: 2px 8px; }
+  .mast button { padding: 3px 9px; font-size: 12px; }
+  .read .big { font-size: 28px; }
+  .clock { padding: 12px; gap: 6px 12px; }
+  .tick.minor { font-size: 0; }
+  .mapbox { min-height: 380px; }
+  .ph .maptools { margin-left: 0; }
+  .extras { grid-template-columns: 1fr 1fr 1fr; }
+  .keyrow { margin-left: 0; width: 100%; }
+}
+
+/* ── theme switcher (shared markup across forge / daylight / console) ── */
+.hrsw { position: relative; z-index: 60; }
+.hrsw .hrsw-in { max-width: 1560px; margin: 0 auto; padding: 5px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.hrsw .hrsw-lbl { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.hrsw .hrsw-seg { display: inline-flex; }
+.hrsw a { display: inline-block; text-decoration: none; font-size: 12px; line-height: 1.2; padding: 4px 11px; }
+.hrsw a:focus-visible { outline-offset: 1px; }
+.hrsw { background: var(--bg); border-bottom: 1px solid var(--line); }
+.hrsw .hrsw-lbl { color: var(--muted); }
+.hrsw .hrsw-seg { background: var(--track); border: 1px solid var(--line2); border-radius: 6px; padding: 2px; gap: 2px; }
+.hrsw a { color: var(--ink2); border-radius: 4px; font-weight: 500; }
+.hrsw a:hover { background: var(--panel); color: var(--ink); }
+.hrsw a:focus-visible { outline: 2px solid var(--red); }
+.hrsw a.cur { background: var(--char); color: var(--panel); font-weight: 600; }
+@media (max-width: 560px) { .hrsw .hrsw-in { padding-left: 12px; padding-right: 12px; justify-content: space-between; } .hrsw a { padding: 4px 9px; } }
+/* QQT_Warpigz_v3: back link to the WarRoom suite dashboard; embedded view hides the bar */
+.hrsw .hrsw-back { margin-right: auto; text-decoration: none; border: 0; background: transparent; padding: 4px 0; }
+.hrsw .hrsw-back:hover { background: transparent; text-decoration: underline; }
+html.embed .hrsw { display: none; }
+</style>
+</head>
+<body>
+<nav class="hrsw" aria-label="Dashboard theme"><div class="hrsw-in"><a class="hrsw-back" href="../daylight.html#helltide" target="_top">&lsaquo; Back to WarRoom</a><span class="hrsw-lbl">Theme</span><div class="hrsw-seg"><a href="forge.html" data-theme-file="forge">Forge</a><a href="daylight.html" data-theme-file="daylight" class="cur" aria-current="page">Daylight</a><a href="console.html" data-theme-file="console">Console</a></div></div></nav>
+<header class="mast">
+  <div class="in">
+    <svg class="mark" viewBox="0 0 30 30" aria-hidden="true"><rect x="4" y="4" width="22" height="22" transform="rotate(45 15 15)" fill="#b3121b"/><path d="M15 7 L20 15 L15 23 L10 15 Z" fill="none" stroke="#f3f1ed" stroke-width="1.8"/><circle cx="15" cy="15" r="2.2" fill="#f3f1ed"/></svg>
+    <span id="dot"></span>
+    <div>
+      <h1>HelltideRevamped — Live</h1>
+      <div class="sub" id="subtitle">Waiting for data</div>
+    </div>
+    <div class="grow"></div>
+    <span class="tag" id="modepill">—</span>
+    <span class="tag" id="agepill"><i class="led"></i><span>No data</span></span>
+    <button id="theme" title="Switch between the light and dark theme" aria-label="Toggle dark mode">Dark</button>
+    <button id="refresh" title="Reload hr_data.js now">Refresh</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="banner" id="banner"><b>Waiting for hr_data.js</b><span>Turn on "Web dashboard" in HelltideRevamped (Live data &amp; stats); this page reloads it every 5 s.</span></div>
+
+  <section class="clock" aria-label="Helltide hour">
+    <div class="read">
+      <div class="cap">Chest reset in</div>
+      <div class="big" id="k-reset">--:--</div>
+      <div class="note" id="n-reset">—</div>
+    </div>
+    <div class="strip" id="strip">
+      <div class="ticks" id="ticks"></div>
+      <div class="track" id="track"></div>
+      <div class="needle" id="needle" style="left:0"><span id="needlelbl">:00</span></div>
+    </div>
+    <div class="read r">
+      <div class="cap" id="c-end">Helltide ends in</div>
+      <div class="big" id="k-end">--:--</div>
+      <div class="note" id="n-end">Runs xx:00 – xx:55</div>
+    </div>
+  </section>
+
+  <div class="tiles">
+    <div class="tile accent"><div class="cap">Cinders / goal</div><div class="v" id="k-cind">—</div>
+      <div class="meter"><i id="b-cind"></i></div><div class="note" id="n-cind">—</div></div>
+    <div class="tile"><div class="cap">Chests · session</div><div class="v" id="k-sess">0</div>
+      <div class="split" id="b-sess"></div><div class="note" id="n-sess">Mystery 0 · Normal 0 · Rift 0</div></div>
+    <div class="tile"><div class="cap">Chests · all time</div><div class="v" id="k-all">0</div>
+      <div class="note" id="n-all">0 Helltides</div></div>
+    <div class="tile"><div class="cap">Cinder pace</div><div class="v" id="pace">0.0</div>
+      <div class="note" id="pacehr">cinders/min</div></div>
+    <div class="tile"><div class="cap">Active time</div><div class="v" id="activetime">0m</div>
+      <div class="note">this Helltide</div></div>
+  </div>
+
+  <div class="main">
+    <section class="panel feedcol" aria-label="Activity">
+      <div class="now">
+        <div class="cap">Now</div>
+        <h2 id="activity">Idle</h2>
+        <div class="zone" id="nowzone">—</div>
+        <div class="tgt">
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7" fill="none" stroke="currentColor" stroke-width="1.6" style="color:var(--red)"/><circle cx="9" cy="9" r="2.4" fill="var(--red)"/><path d="M9 0v4M9 14v4M0 9h4M14 9h4" stroke="var(--red)" stroke-width="1.6"/></svg>
+          <div><div class="tn none" id="tname">No target</div><div class="tm" id="tmeta">—</div></div>
+        </div>
+        <dl class="kvs">
+          <dt>Movement</dt><dd id="movement">—</dd>
+          <dt>In Helltide</dt><dd id="inht">—</dd>
+          <dt>Plan</dt><dd id="plan">—</dd>
+        </dl>
+      </div>
+      <div class="feedhead">
+        <div class="cap">Activity feed</div>
+        <div class="seg3" role="group" aria-label="Feed filter">
+          <button data-f="all" class="on">All</button><button data-f="op">Opened</button><button data-f="ev">Events</button>
+        </div>
+      </div>
+      <div id="opened">Opened this wave: <b>0</b></div>
+      <ol class="feed" id="events"></ol>
+      <div class="foot" id="toopen">Still to open: —</div>
+    </section>
+
+    <section class="panel mapcol" aria-label="Map">
+      <div class="ph">
+        <div><div class="cap">Map</div><div class="sub" id="mapsub">No map data yet</div></div>
+        <div class="maptools">
+          <select id="filter" title="Which chest sites to show">
+            <option value="all">All sites</option>
+            <option value="mystery">Mystery</option>
+            <option value="regular">Regular</option>
+            <option value="opened">Opened</option>
+            <option value="candidate">Candidates</option>
+          </select>
+          <button id="border" class="on" title="Learned Helltide border">Border</button>
+          <button id="coords" title="Show chest coordinates">Coords</button>
+          <button id="follow" class="on" title="Keep the player centred">Follow</button>
+          <button id="bgbtn" title="Background image: pick a local map image and calibrate it with two known points">Background</button>
+          <input type="file" id="bgfile" accept="image/*" hidden>
+        </div>
+      </div>
+      <div class="mapbox" id="mapbox">
+        <canvas id="map"></canvas>
+        <div class="zoom">
+          <button id="zin" title="Zoom in" aria-label="Zoom in">+</button>
+          <button id="zout" title="Zoom out" aria-label="Zoom out">−</button>
+          <button id="fit" title="Fit the Helltide on the map">FIT</button>
+        </div>
+        <div id="cursor" hidden></div>
+        <div id="tip"></div>
+        <div id="calib"></div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="mapnote" id="mapnote">Drag to pan, wheel or +/− to zoom. Learned spots are predictions until a chest is seen there this wave.</div>
+    </section>
+  </div>
+
+  <div class="lower">
+    <section class="panel">
+      <div class="ph"><div class="cap">Stats</div>
+        <div class="keyrow"><span><i style="background:var(--red)"></i>This HT</span><span><i style="background:var(--char)"></i>Session</span><span><i style="background:var(--bar3)"></i>All time</span></div>
+      </div>
+      <div class="body">
+        <div id="stats"></div>
+        <div class="extras">
+          <div>Ruptures · session / all time<b id="s-tears">0 / 0</b></div>
+          <div>Opened this Helltide<b id="s-hour">0</b></div>
+          <div>Target pool<b id="s-pool">—</b></div>
+        </div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="ph"><div class="cap">Earned per Helltide</div><div class="keyrow"><span><i style="background:var(--red)"></i>Earned</span><span><i style="background:var(--char)"></i>Spent</span></div></div>
+      <div class="body">
+        <svg id="spark" viewBox="0 0 600 120" preserveAspectRatio="none"></svg>
+        <div id="sparknote">—</div>
+      </div>
+    </section>
+  </div>
+
+  <div class="lower2">
+    <section class="panel"><div class="ph"><div class="cap">History</div></div><div class="scroll"><table id="hist"></table></div></section>
+    <section class="panel"><div class="ph"><div class="cap">Slowest sections</div><span class="sub">max ms since load</span></div><div class="scroll"><table id="perftab"></table></div></section>
+  </div>
+  <div class="foot2">Reads hr_data.js from the WarRoom dashboard folder every 5 s · times in UTC unless marked local</div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var last = null, fetchedAt = 0, loadedOnce = false;
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]; }); };
+  var num = function (v) { v = Number(v); return isFinite(v) ? v : 0; };
+  var arr = function (v) { return Array.isArray(v) ? v : []; };
+  var obj = function (v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; };
+  var fmt = function (v, dg) { return num(v).toFixed(dg || 0); };
+  var pad2 = function (n) { return ('0' + n).slice(-2); };
+  var mmss = function (s) { s = Math.max(0, Math.round(num(s))); return pad2(Math.floor(s / 60)) + ':' + pad2(s % 60); };
+  var mins = function (s) { s = Math.max(0, num(s)); var m = Math.floor(s / 60);
+    return m >= 60 ? Math.floor(m / 60) + 'h ' + pad2(m % 60) + 'm' : m + 'm'; };
+  var ago = function (s) { s = Math.max(0, Math.round(num(s)));
+    return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + pad2(s % 60) + 's' : Math.floor(s / 3600) + 'h ' + pad2(Math.floor(s / 60) % 60) + 'm'; };
+  var nowSec = function () { return Date.now() / 1000; };
+  var store = {
+    get: function (k, dflt) { try { var v = localStorage.getItem('hrdash.' + k); return v == null ? dflt : JSON.parse(v); } catch (e) { return dflt; } },
+    set: function (k, v) { try { localStorage.setItem('hrdash.' + k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  };
+  function clamp01(v) { return Math.max(0, Math.min(1, num(v))); }
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  // ── theme ──────────────────────────────────────────────────────────────
+  var theme = store.get('theme', 'light');
+  function applyTheme() {
+    document.documentElement.setAttribute('data-theme', theme);
+    $('theme').textContent = theme === 'dark' ? 'Light' : 'Dark';
+    $('theme').setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    buildLegend();
+  }
+  $('theme').onclick = function () { theme = theme === 'dark' ? 'light' : 'dark'; store.set('theme', theme); applyTheme(); draw(); if (last) renderHistory(last); if (last) renderStats(last); };
+
+  // ── hour strip (UTC, from this computer's clock) ───────────────────────
+  function resetMinutes(d) { var r = arr(d && d.reset_minutes); return r.length ? r.map(num) : [0, 15, 20, 30, 40, 45]; }
+  function clockNow() { var t = new Date(); return t.getUTCMinutes() + t.getUTCSeconds() / 60 + t.getUTCMilliseconds() / 60000; }
+  var stripKey = '';
+  function buildStrip(list, endMin) {
+    var key = list.join(',') + '|' + endMin;
+    if (key === stripKey) return;
+    stripKey = key;
+    var segs = '', ticks = '', i;
+    for (i = 0; i < list.length; i++) {
+      var a = list[i], b = i + 1 < list.length ? Math.min(list[i + 1], endMin) : endMin;
+      if (b <= a) continue;
+      segs += '<div class="seg" data-i="' + i + '" style="left:' + (a / 60 * 100) + '%;width:' + ((b - a) / 60 * 100) + '%"><i class="fill"></i><span>W' + (i + 1) + '</span></div>';
+      ticks += '<span class="tick' + (i && i < list.length - 1 && (a % 15) ? ' minor' : '') + '" style="left:' + (a / 60 * 100) + '%">:' + pad2(a) + '</span>';
+    }
+    segs += '<div class="seg off" data-i="off" style="left:' + (endMin / 60 * 100) + '%;width:' + ((60 - endMin) / 60 * 100) + '%"><span>off</span></div>';
+    ticks += '<span class="tick end" style="left:' + (endMin / 60 * 100) + '%">:' + pad2(endMin) + '</span>';
+    $('track').innerHTML = segs; $('ticks').innerHTML = ticks;
+  }
+  function renderTimers(d) {
+    var at = clockNow(), list = resetMinutes(d), endMin = num(d && d.end_minute) || 55;
+    var i, idx = 0;
+    for (i = 0; i < list.length; i++) if (at >= list[i]) idx = i;
+    var start = list[idx], next = idx + 1 < list.length ? list[idx + 1] : 60;
+    var active = at < endMin;
+    buildStrip(list, endMin);
+    $('k-reset').textContent = mmss((next - at) * 60);
+    $('n-reset').textContent = active
+      ? 'Wave ' + (idx + 1) + ' of ' + list.length + ' · next reset :' + pad2(next % 60)
+      : 'Helltide over · chests return at :00';
+    if (active) {
+      $('k-end').textContent = mmss((endMin - at) * 60);
+      $('n-end').textContent = 'Runs xx:00 – xx:' + pad2(endMin);
+    } else {
+      $('k-end').textContent = mmss((60 - at) * 60);
+      $('n-end').textContent = 'Next Helltide starts at :00';
+    }
+    $('c-end').textContent = active ? 'Helltide ends in' : 'Next Helltide in';
+    Array.prototype.forEach.call($('track').children, function (el) {
+      var k = el.getAttribute('data-i'), cur = active ? String(idx) === k : k === 'off';
+      var past = !cur && (k === 'off' ? false : (!active || Number(k) < idx));
+      el.className = 'seg' + (k === 'off' ? ' off' : '') + (cur ? ' cur' : '') + (past ? ' past' : '');
+      var f = el.querySelector('.fill');
+      if (f) f.style.width = cur ? (clamp01((at - start) / Math.max(1, Math.min(next, endMin) - start)) * 100).toFixed(1) + '%' : '0';
+    });
+    $('needle').style.left = (at / 60 * 100).toFixed(2) + '%';
+    var t = new Date();
+    $('needlelbl').textContent = ':' + pad2(t.getUTCMinutes()) + ':' + pad2(t.getUTCSeconds());
+  }
+
+  // ── header / tiles / now / stats ───────────────────────────────────────
+  function sessionChests(s) { s = obj(s); var m = num(s.mystery); return {all: num(s.chests), mystery: m, normal: Math.max(0, num(s.chests) - m), rift: num(s.tears)}; }
+  function rate(s) { s = obj(s); var m = num(s.secs) / 60; return m > 0 ? num(s.earned) / m : 0; }
+
+  function renderHeader(d) {
+    var region = d.region || d.zone || '';
+    var mode = d.mode ? d.mode.charAt(0).toUpperCase() + d.mode.slice(1) + ' mode' : '';
+    $('subtitle').textContent = [region, d.zone && d.zone !== region ? d.zone : '', mode].filter(Boolean).join(' · ') || 'No zone yet';
+    $('modepill').textContent = (d.state ? String(d.state).replace(/_/g, ' ').toLowerCase() : 'no task');
+  }
+
+  function renderStatus() {
+    var pill = $('agepill'), ban = $('banner');
+    if (!last) { pill.className = 'tag'; pill.lastChild.textContent = 'No data'; return; }
+    var age = Math.max(0, nowSec() - num(last.t));
+    var fresh = age < 45, stale = age >= 120;
+    pill.className = 'tag ' + (fresh ? 'ok' : stale ? 'bad' : 'warn');
+    pill.lastChild.textContent = (fresh ? 'Live' : stale ? 'Stale' : 'Delayed') + ' · ' + ago(age);
+    if (stale) {
+      ban.className = 'banner warn';
+      ban.innerHTML = '<b>No new data for ' + esc(ago(age)) + '</b><span>HelltideRevamped is off, the game is closed or "Web dashboard" was switched off. Showing the last data.</span>';
+    } else if (!last.in_helltide && last.in_helltide !== undefined) {
+      ban.className = 'banner';
+      ban.innerHTML = '<b>Game connected</b><span>Not in a Helltide right now' + (last.active ? '' : ' (the Helltide hour is over)') + '. Stats and the map keep the last zone.</span>';
+    } else {
+      ban.className = 'banner ok';
+      ban.innerHTML = '<b>Game connected</b><span>Target and chest evidence come from HelltideRevamped. Learned spots are predictions and never count as opened.</span>';
+    }
+  }
+
+  function renderKpis(d) {
+    var goal = obj(d.goal), c = num(d.cinders), cost = num(goal.cost);
+    $('k-cind').innerHTML = fmt(c) + (cost > 0 ? ' <small>/ ' + fmt(cost) + '</small>' : '');
+    $('b-cind').style.width = (clamp01(cost > 0 ? c / cost : 0) * 100).toFixed(1) + '%';
+    $('n-cind').textContent = cost <= 0 ? 'No goal yet'
+      : (goal.ready || c >= cost ? 'Ready to open' : 'Need ' + fmt(cost - c) + ' more') + (goal.label ? ' · ' + goal.label : '');
+    var s = sessionChests(d.session);
+    $('k-sess').textContent = s.all;
+    $('n-sess').textContent = 'Mystery ' + s.mystery + ' · Normal ' + s.normal + ' · Rift ' + s.rift;
+    var tot = s.mystery + s.normal + s.rift;
+    $('b-sess').innerHTML = tot ? '<i style="flex-grow:' + s.mystery + ';background:var(--gold)"></i><i style="flex-grow:' + s.normal + ';background:var(--char)"></i><i style="flex-grow:' + s.rift + ';background:var(--violet)"></i>'
+      : '<i style="flex-grow:1;background:var(--track)"></i>';
+    var a = obj(d.alltime), ht = num(a.helltides);
+    $('k-all').textContent = fmt(a.chests);
+    $('n-all').textContent = ht + ' Helltide' + (ht === 1 ? '' : 's') + ' · ' + (ht > 0 ? fmt(num(a.chests) / ht, 1) : '0.0') + ' per Helltide · ' + fmt(a.mystery) + ' mystery';
+  }
+
+  function renderNow(d) {
+    var n = obj(d.now), t = d.target ? obj(d.target) : null;
+    $('activity').textContent = n.activity || (d.state ? String(d.state).replace(/_/g, ' ').toLowerCase() : 'Idle');
+    $('nowzone').textContent = [d.zone, d.live_zone ? 'live: ' + d.live_zone : ''].filter(Boolean).join(' · ') || '—';
+    if (t) {
+      $('tname').className = 'tn';
+      $('tname').textContent = (t.name || 'Chest') + (num(t.cost) > 0 ? ' · ' + fmt(t.cost) : '');
+      var src = {seen: 'Seen chest', learned: 'Learned spot (unconfirmed)'}[t.source] || (t.source || 'Chest');
+      $('tmeta').textContent = [src, t.dist != null ? fmt(t.dist) + ' m' : '', t.road ? 'via the patrol road' : '',
+        t.x != null ? '(' + fmt(t.x) + ', ' + fmt(t.y) + ')' : ''].filter(Boolean).join(' · ');
+    } else {
+      $('tname').className = 'tn none'; $('tname').textContent = 'No target';
+      $('tmeta').textContent = 'Patrolling until a chest is worth a trip';
+    }
+    $('movement').textContent = n.movement || '—';
+    $('inht').innerHTML = d.in_helltide === undefined ? '—' : d.in_helltide ? '<span class="yes">Yes</span>' : '<span class="no">No</span>';
+    $('plan').textContent = n.plan || (d.plan ? 'reserve ' + fmt(obj(d.plan).reserve) : '—');
+    $('activetime').textContent = mins(obj(d.helltide).secs);
+    var r = obj(d.rates);
+    $('pace').innerHTML = fmt(r.per_min, 1) + ' <small>/min</small>';
+    $('pacehr').textContent = 'cinders · ~' + fmt(r.per_hr) + ' per hour';
+  }
+
+  function renderStats(d) {
+    var cols = [obj(d.helltide), obj(d.session), obj(d.alltime)], colors = ['var(--red)', 'var(--char)', 'var(--bar3)'];
+    var rows = [['Chests', 'chests'], ['Mystery', 'mystery', 'm'], ['Earned', 'earned'], ['Spent', 'spent'], ['Lost', 'lost'],
+      ['Deaths', 'deaths'], ['Time', 'secs'], ['Cinders/min', 'rate']];
+    $('stats').innerHTML = rows.map(function (r) {
+      var raw = cols.map(function (s) { return r[1] === 'rate' ? rate(s) : num(s[r[1]]); });
+      var max = Math.max.apply(null, raw.concat([0]));
+      var tip = r[1] === 'lost' ? ' title="Cinders still held when a Helltide ended (they expire)"' : '';
+      return '<div class="mc' + (r[2] ? ' mys' : '') + '"' + tip + '><div class="mh"><span>' + r[0] + '</span><span>' + (r[1] === 'lost' ? 'expired' : '') + '</span></div>' +
+        cols.map(function (s, i) {
+          var v = r[1] === 'secs' ? mins(s.secs) : r[1] === 'rate' ? fmt(rate(s), 1) : fmt(s[r[1]]);
+          var w = max > 0 ? Math.max(raw[i] > 0 ? 2 : 0, raw[i] / max * 100) : 0;
+          return '<div class="br" title="' + ['This HT', 'Session', 'All time'][i] + ': ' + v + '"><div class="bt"><i style="width:' + w.toFixed(1) + '%;background:' + colors[i] + '"></i></div><b>' + v + '</b></div>';
+        }).join('') + '</div>';
+    }).join('');
+    $('s-tears').textContent = fmt(obj(d.session).tears) + ' / ' + fmt(obj(d.alltime).tears);
+    $('s-hour').textContent = arr(d.opened_hour).length;
+    var o = obj(d.to_open);
+    $('s-pool').textContent = d.to_open ? fmt(num(o.mystery) + num(o.regular)) + ' seen · ' + fmt(o.learned) + ' learned' : '—';
+  }
+
+  // ── activity feed: opened this wave + events on one timeline ───────────
+  var feedFilter = store.get('feed', 'all');
+  var ICON = {
+    op: '<svg class="ic" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="var(--panel)" stroke="var(--green)" stroke-width="1.6"/><path d="M4.8 8.2l2.1 2.1 4.2-4.4" fill="none" stroke="var(--green)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    opm: '<svg class="ic" viewBox="0 0 16 16"><path d="M8 1l6 3.5v7L8 15l-6-3.5v-7z" fill="var(--gold)" stroke="var(--panel)" stroke-width="1"/><path d="M5.2 8.2l1.9 1.9 3.8-4" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    ev: '<svg class="ic" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" transform="rotate(45 8 8)" fill="var(--panel)" stroke="var(--char2)" stroke-width="1.5"/></svg>',
+    evr: '<svg class="ic" viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9" transform="rotate(45 8 8)" fill="var(--red)"/></svg>'
+  };
+  function hm(sec) { var t = new Date(num(sec) * 1000); return pad2(t.getHours()) + ':' + pad2(t.getMinutes()); }
+  function renderFeed(d) {
+    var now = nowSec(), items = [];
+    var list = arr(d.opened);
+    if (feedFilter !== 'ev') list.forEach(function (o) { items.push({k: 'op', t: num(o.t), o: o}); });
+    if (feedFilter !== 'op') arr(d.events).forEach(function (e, i) { items.push({k: 'ev', t: num(e.t), e: e, i: i}); });
+    items.sort(function (a, b) { return b.t - a.t || (a.k === 'op' ? -1 : 1); });
+    $('events').innerHTML = items.length ? items.map(function (it) {
+      if (it.k === 'op') {
+        var o = it.o, mys = /mystery/i.test(o.name || '');
+        return '<li class="op' + (mys ? ' mys' : '') + '">' + (mys ? ICON.opm : ICON.op) + '<div class="row"><div class="t">Opened <b>' + esc(o.name) + '</b>' +
+          (num(o.cost) ? ' · ' + fmt(o.cost) + ' cinders' : '') + '</div><time>' + hm(o.t) + '</time></div><div class="m">' + ago(now - num(o.t)) + ' ago' +
+          (o.x != null ? ' · (' + fmt(o.x) + ', ' + fmt(o.y) + ')' : '') + ' · this wave</div></li>';
+      }
+      var msg = String(it.e.msg || ''), m = msg.match(/^\[([^\]]+)\]\s*(.*)$/), src = m ? m[1] : '', body = m ? m[2] : msg;
+      var hot = /reset|death|died|rupture|maiden/i.test(msg);
+      return '<li class="ev">' + (hot ? ICON.evr : ICON.ev) + '<div class="row"><div class="t">' + (src ? '<span class="src">' + esc(src) + '</span>' : '') + esc(body) +
+        '</div><time>' + hm(it.e.t) + '</time></div></li>';
+    }).join('') : '<li class="empty">' + (feedFilter === 'op' ? 'Nothing opened in this wave yet.' : feedFilter === 'ev' ? 'No events yet.' : 'Nothing opened in this wave yet · no events yet.') + '</li>';
+  }
+  function renderOpened(d) {
+    var list = arr(d.opened), spent = list.reduce(function (a, o) { return a + num(o.cost); }, 0);
+    var mys = list.filter(function (o) { return /mystery/i.test(o.name || ''); }).length;
+    $('opened').innerHTML = 'Opened this wave: <b>' + list.length + '</b>' + (list.length ? ' · <b>' + mys + '</b> mystery · <b>' + fmt(spent) + '</b> cinders spent' : '');
+    var t = obj(d.to_open);
+    $('toopen').innerHTML = d.to_open ? 'Still to open: <b>' + fmt(t.mystery) + '</b> mystery · <b>' + fmt(t.regular) + '</b> regular seen · <b>' + fmt(t.learned) + '</b> learned spots' : 'Still to open: —';
+    renderFeed(d);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.seg3 button'), function (b) {
+    b.classList.toggle('on', b.getAttribute('data-f') === feedFilter);
+    b.onclick = function () {
+      feedFilter = b.getAttribute('data-f'); store.set('feed', feedFilter);
+      Array.prototype.forEach.call(document.querySelectorAll('.seg3 button'), function (x) { x.classList.toggle('on', x === b); });
+      if (last) renderFeed(last); else renderFeed({});
+    };
+  });
+
+  function renderHistory(d) {
+    var hist = arr(d.history);
+    if (!hist.length) {
+      $('hist').innerHTML = '<tr><td class="empty">No finished Helltide yet.</td></tr>';
+      $('spark').innerHTML = ''; $('sparknote').textContent = 'Each finished Helltide adds a bar.';
+      return;
+    }
+    $('hist').innerHTML = '<thead><tr><th>Hour (UTC)</th><th>Zone</th><th>Earned</th><th>Spent</th><th>Lost</th><th>Chests</th><th>Mystery</th><th>Deaths</th><th>Time</th><th>/min</th></tr></thead><tbody>' +
+      hist.slice().reverse().map(function (h) {
+        var t = new Date(num(h.hour) * 1000), m = num(h.secs) / 60;
+        var when = t.getUTCFullYear() + '-' + pad2(t.getUTCMonth() + 1) + '-' + pad2(t.getUTCDate()) + ' ' + pad2(t.getUTCHours()) + ':00';
+        return '<tr><td>' + when + '</td><td>' + esc(h.zone) + '</td><td>' + fmt(h.earned) + '</td><td>' + fmt(h.spent) + '</td><td>' + fmt(h.lost) +
+          '</td><td>' + fmt(h.chests) + '</td><td>' + fmt(h.mystery) + '</td><td>' + fmt(h.deaths) + '</td><td>' + mins(h.secs) + '</td><td>' + (m > 0 ? fmt(num(h.earned) / m, 1) : '—') + '</td></tr>';
+      }).join('') + '</tbody>';
+    // Column chart: earned (red) with spent (charcoal) inset, oldest left.
+    var W = 600, H = 120, top = 8, base = H - 16, vals = hist.map(function (h) { return num(h.earned); });
+    var max = Math.max.apply(null, vals.concat(hist.map(function (h) { return num(h.spent); })).concat([1]));
+    var n = hist.length, slot = W / n, bw = Math.max(3, Math.min(34, slot * 0.62));
+    var sum = vals.reduce(function (a, b) { return a + b; }, 0), avg = sum / n;
+    var ay = base - (base - top) * avg / max;
+    var out = '<line x1="0" x2="' + W + '" y1="' + base + '" y2="' + base + '" stroke="' + css('--line2') + '" stroke-width="1" vector-effect="non-scaling-stroke"/>';
+    hist.forEach(function (h, i) {
+      var x = i * slot + (slot - bw) / 2, e = num(h.earned), s = num(h.spent);
+      var he = (base - top) * e / max, hs = (base - top) * s / max, t = new Date(num(h.hour) * 1000);
+      out += '<g><title>' + pad2(t.getUTCHours()) + ':00 UTC · earned ' + fmt(e) + ' · spent ' + fmt(s) + '</title>' +
+        '<rect x="' + x.toFixed(1) + '" y="' + (base - he).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + he.toFixed(1) + '" fill="' + css('--red') + '"/>' +
+        '<rect x="' + (x + bw * 0.3).toFixed(1) + '" y="' + (base - hs).toFixed(1) + '" width="' + (bw * 0.4).toFixed(1) + '" height="' + hs.toFixed(1) + '" fill="' + css('--char') + '" opacity=".8"/></g>';
+      if (n <= 16 || i % Math.ceil(n / 12) === 0) out += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 3) + '" text-anchor="middle" font-size="10" fill="' + css('--muted') + '">' + pad2(t.getUTCHours()) + '</text>';
+    });
+    out += '<line x1="0" x2="' + W + '" y1="' + ay.toFixed(1) + '" y2="' + ay.toFixed(1) + '" stroke="' + css('--ink') + '" stroke-dasharray="4 4" stroke-width="1" vector-effect="non-scaling-stroke" opacity=".55"/>';
+    $('spark').innerHTML = out;
+    $('sparknote').innerHTML = 'Last ' + n + ' Helltides · avg <b>' + fmt(avg) + '</b> (dashed) · best <b>' + fmt(Math.max.apply(null, vals)) + '</b> cinders · hour labels in UTC';
+  }
+
+  function renderPerf(d) {
+    var rows = arr(d.perf);
+    $('perftab').innerHTML = rows.length ? '<thead><tr><th>Section</th><th>Max ms</th><th>Avg ms</th><th>Calls</th></tr></thead><tbody>' + rows.map(function (p) {
+      return '<tr><td>' + esc(p.name) + '</td><td>' + fmt(p.max_ms, 1) + '</td><td>' + fmt(p.avg_ms, 2) + '</td><td>' + fmt(p.count) + '</td></tr>';
+    }).join('') + '</tbody>' : '<tr><td class="empty" style="padding:12px 16px">No timings yet.</td></tr>';
+  }
+
+  // ── map ────────────────────────────────────────────────────────────────
+  // World x/y are drawn the way the in-game map shows them (rotated 45°):
+  // right = (y - x), down = (x + y). The view works in that projected space.
+  var canvas = $('map'), ctx = canvas.getContext('2d'), box = $('mapbox');
+  var R2 = Math.SQRT1_2;
+  var P = function (x, y) { return [(num(y) - num(x)) * R2, (num(x) + num(y)) * R2]; };
+  var view = {cx: 0, cy: 0, scale: 0.6, fitted: '', follow: store.get('follow', true), border: store.get('border', true),
+    coords: store.get('coords', false), filter: store.get('filter', 'all')};
+  var geo = null, W = 0, H = 0, bg = null, calib = null;
+
+  function pal() {
+    var dark = theme === 'dark';
+    return {
+      bg0: dark ? '#1f2328' : '#f6f3ee', bg1: dark ? '#16191d' : '#e9e4dc', grid: dark ? 'rgba(236,235,231,.05)' : 'rgba(29,32,37,.07)',
+      red: css('--red'), redFill: dark ? 'rgba(224,65,74,.13)' : 'rgba(179,18,27,.07)', hatch: dark ? 'rgba(224,65,74,.16)' : 'rgba(179,18,27,.11)',
+      ink: css('--ink'), halo: dark ? 'rgba(18,20,23,.92)' : 'rgba(255,255,255,.94)', muted: css('--muted'),
+      road: dark ? 'rgba(215,213,208,.45)' : 'rgba(42,45,51,.5)', blue: css('--blue'), gold: css('--gold'), green: css('--green'),
+      char: css('--char'), violet: css('--violet'), panel: css('--panel'), dim: css('--dim')
+    };
+  }
+
+  function toScreen(p) { return [(p[0] - view.cx) * view.scale + W / 2, (p[1] - view.cy) * view.scale + H / 2]; }
+  function fromScreen(sx, sy) { return [(sx - W / 2) / view.scale + view.cx, (sy - H / 2) / view.scale + view.cy]; }
+  function unP(p) { return [(p[1] - p[0]) * R2, (p[0] + p[1]) * R2]; }
+
+  function near(a, b, m) { var dx = a.x - b.x, dy = a.y - b.y; return dx * dx + dy * dy <= m * m; }
+  function atlasStatus(s) { return s === 'opened' || s === 'spent' ? 'opened' : s === 'seen' ? 'candidate' : 'unconfirmed'; }
+
+  // Chest sites: learned atlas spots, remembered chests, chests opened this
+  // hour and the current target, merged by position (6 m).
+  function buildSites(d) {
+    var sites = [], maxId = 0;
+    arr(d.atlas).forEach(function (s) {
+      var id = num(s.id) || sites.length + 1; maxId = Math.max(maxId, id);
+      sites.push({id: id, name: s.name || (s.type === 'mystery' ? 'Mystery' : 'Chest'), cost: num(s.cost), type: s.type, x: num(s.x), y: num(s.y),
+        status: atlasStatus(s.status), seen: s.seen, miss: s.miss, src: 'learned'});
+    });
+    function attach(e, status, src) {
+      var hit = null;
+      sites.forEach(function (s) { if (!hit && s.type === e.type && near(s, e, 6)) hit = s; });
+      if (!hit) sites.forEach(function (s) { if (!hit && near(s, e, 4)) hit = s; });
+      if (!hit) { hit = {id: ++maxId, name: e.name || 'Chest', cost: num(e.cost), type: e.type, x: num(e.x), y: num(e.y), status: status, src: src}; sites.push(hit); return hit; }
+      if (e.name) hit.name = e.name;
+      if (num(e.cost)) hit.cost = num(e.cost);
+      hit.status = status; hit.src = src;
+      return hit;
+    }
+    arr(d.chests).forEach(function (c) {
+      attach({type: c.type, name: c.name, cost: c.cost, x: c.x, y: c.y}, c.status === 'target' ? 'target' : c.status === 'predicted' ? 'unconfirmed' : 'candidate',
+        c.status === 'predicted' ? 'learned' : 'seen');
+    });
+    arr(d.opened_hour).forEach(function (o) {
+      var mys = /mystery/i.test(o.name || '');
+      attach({type: mys ? 'mystery' : 'regular', name: o.name, cost: o.cost, x: o.x, y: o.y}, 'opened', 'opened');
+    });
+    var t = d.target;
+    if (t && t.x != null) attach({type: t.mystery ? 'mystery' : 'regular', name: t.name, cost: t.cost, x: t.x, y: t.y}, 'target', t.source || 'seen');
+    return sites;
+  }
+
+  function buildGeo(d) {
+    var g = {cells: [], edges: [], road: [], trail: [], route: [], sites: buildSites(d), bounds: null, zone: d.zone || ''};
+    var cell = num(d.fence_cell) || 20, f = arr(d.fence_in), set = {}, i;
+    for (i = 0; i + 1 < f.length; i += 2) set[f[i] + ',' + f[i + 1]] = true;
+    for (i = 0; i + 1 < f.length; i += 2) {
+      var cx = f[i], cy = f[i + 1], x0 = cx * cell, y0 = cy * cell, x1 = x0 + cell, y1 = y0 + cell;
+      g.cells.push([P(x0, y0), P(x1, y0), P(x1, y1), P(x0, y1)]);
+      if (!set[(cx - 1) + ',' + cy]) g.edges.push([P(x0, y0), P(x0, y1)]);
+      if (!set[(cx + 1) + ',' + cy]) g.edges.push([P(x1, y0), P(x1, y1)]);
+      if (!set[cx + ',' + (cy - 1)]) g.edges.push([P(x0, y0), P(x1, y0)]);
+      if (!set[cx + ',' + (cy + 1)]) g.edges.push([P(x0, y1), P(x1, y1)]);
+    }
+    var rp = arr(obj(d.road).pts);
+    for (i = 0; i + 1 < rp.length; i += 2) g.road.push(P(rp[i], rp[i + 1]));
+    g.trail = arr(d.trail).map(function (p) { return P(p[0], p[1]); });
+    g.route = arr(d.route).map(function (p) { return P(p[0], p[1]); });
+    g.player = Array.isArray(d.player) ? P(d.player[0], d.player[1]) : null;
+    g.playerW = Array.isArray(d.player) ? d.player : null;
+    g.target = d.target && d.target.x != null ? P(d.target.x, d.target.y) : null;
+    g.maiden = Array.isArray(d.maiden) ? P(d.maiden[0], d.maiden[1]) : null;
+    g.tears = arr(d.tears).map(function (t) { return {p: P(t.x, t.y), type: t.type, active: t.active}; });
+    g.sites.forEach(function (s) { s.p = P(s.x, s.y); });
+    // Heading: from the last two trail points.
+    if (g.trail.length > 1 && g.player) {
+      var a = g.trail[g.trail.length - 2], b = g.player;
+      if (Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]) < 0.5 && g.trail.length > 2) a = g.trail[g.trail.length - 3];
+      g.heading = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    }
+    // Bounds: the border, then the road, then the sites.
+    var pts = [];
+    g.cells.forEach(function (c) { pts.push(c[0], c[2]); });
+    if (!pts.length) pts = g.road.slice();
+    g.sites.forEach(function (s) { pts.push(s.p); });
+    if (g.player) pts.push(g.player);
+    if (pts.length) {
+      var bb = [Infinity, Infinity, -Infinity, -Infinity];
+      pts.forEach(function (p) { bb[0] = Math.min(bb[0], p[0]); bb[1] = Math.min(bb[1], p[1]); bb[2] = Math.max(bb[2], p[0]); bb[3] = Math.max(bb[3], p[1]); });
+      g.bounds = bb;
+    }
+    if (g.cells.length) {
+      var sx = 0, sy = 0;
+      g.cells.forEach(function (c) { sx += (c[0][0] + c[2][0]) / 2; sy += (c[0][1] + c[2][1]) / 2; });
+      g.label = [sx / g.cells.length, sy / g.cells.length];
+    }
+    g.region = d.region || d.zone || '';
+    return g;
+  }
+
+  function fit() {
+    if (!geo || !geo.bounds) return;
+    var b = geo.bounds, w = Math.max(80, b[2] - b[0]), h = Math.max(80, b[3] - b[1]);
+    view.cx = (b[0] + b[2]) / 2; view.cy = (b[1] + b[3]) / 2;
+    view.scale = Math.max(0.05, Math.min(8, Math.min((W - 70) / w, (H - 60) / h)));
+  }
+
+  function resize() {
+    var r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    W = Math.max(10, r.width); H = Math.max(10, r.height);
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+
+  function pathLine(list, close) {
+    if (list.length < 2) return;
+    ctx.beginPath();
+    list.forEach(function (p, i) { var s = toScreen(p); if (i) ctx.lineTo(s[0], s[1]); else ctx.moveTo(s[0], s[1]); });
+    if (close) ctx.closePath();
+  }
+
+  function labelText(text, x, y, color, size, weight, c) {
+    ctx.font = (weight || 600) + ' ' + (size || 12) + 'px system-ui, "Segoe UI", sans-serif';
+    ctx.lineJoin = 'round'; ctx.lineWidth = 3.5; ctx.strokeStyle = c.halo;
+    ctx.strokeText(text, x, y); ctx.fillStyle = color; ctx.fillText(text, x, y);
+  }
+
+  // Marker shapes: square = regular chest, hexagon = mystery chest.
+  // Fill by status: target = red with reticle, candidate = solid charcoal,
+  // opened = green with a check, unconfirmed = hollow dashed outline.
+  function shapePath(x, y, r, type) {
+    ctx.beginPath();
+    if (type === 'mystery') {
+      for (var k = 0; k < 6; k++) { var a = Math.PI / 6 + k * Math.PI / 3; ctx.lineTo(x + Math.cos(a) * r * 1.12, y + Math.sin(a) * r * 1.12); }
+      ctx.closePath();
+    } else {
+      ctx.rect(x - r * 0.82, y - r * 0.82, r * 1.64, r * 1.64);
+    }
+  }
+  function marker(x, y, r, type, status, c) {
+    var mys = type === 'mystery';
+    if (status === 'target') {
+      ctx.beginPath(); ctx.arc(x, y, r * 2, 0, Math.PI * 2); ctx.strokeStyle = c.red; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.beginPath();
+      [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(function (v) { ctx.moveTo(x + v[0] * r * 1.55, y + v[1] * r * 1.55); ctx.lineTo(x + v[0] * r * 2.5, y + v[1] * r * 2.5); });
+      ctx.lineWidth = 2; ctx.stroke();
+    }
+    shapePath(x, y, r, type);
+    ctx.setLineDash([]);
+    if (status === 'unconfirmed') {
+      ctx.fillStyle = c.halo; ctx.fill(); ctx.setLineDash([2.5, 2]); ctx.lineWidth = 1.6; ctx.strokeStyle = mys ? c.gold : c.muted; ctx.stroke(); ctx.setLineDash([]);
+      return;
+    }
+    var fill = status === 'target' ? c.red : status === 'opened' ? c.green : mys ? c.gold : c.char;
+    ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = c.halo; ctx.stroke();
+    if (status === 'opened') {
+      ctx.beginPath(); ctx.moveTo(x - r * 0.45, y + r * 0.02); ctx.lineTo(x - r * 0.1, y + r * 0.38); ctx.lineTo(x + r * 0.5, y - r * 0.35);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.7; ctx.lineCap = 'round'; ctx.stroke(); ctx.lineCap = 'butt';
+    } else if (mys && status !== 'opened') {
+      ctx.beginPath(); ctx.arc(x, y, r * 0.3, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
+    }
+  }
+
+  function visible(s) {
+    var f = view.filter;
+    if (f === 'mystery') return s.type === 'mystery';
+    if (f === 'regular') return s.type !== 'mystery';
+    if (f === 'opened') return s.status === 'opened';
+    if (f === 'candidate') return s.status === 'candidate' || s.status === 'target';
+    return true;
+  }
+
+  function drawGrid(c) {
+    // World grid, drawn as a diamond lattice in the game-map view.
+    var step = 100;
+    if (view.scale * step < 18) step = view.scale * 500 >= 18 ? 500 : 1000;
+    var corners = [fromScreen(0, 0), fromScreen(W, H), fromScreen(W, 0), fromScreen(0, H)].map(unP);
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    corners.forEach(function (w) { minX = Math.min(minX, w[0]); maxX = Math.max(maxX, w[0]); minY = Math.min(minY, w[1]); maxY = Math.max(maxY, w[1]); });
+    ctx.strokeStyle = c.grid; ctx.lineWidth = 1;
+    ctx.beginPath();
+    var x, y, a, b;
+    for (x = Math.floor(minX / step) * step; x <= maxX; x += step) { a = toScreen(P(x, minY)); b = toScreen(P(x, maxY)); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    for (y = Math.floor(minY / step) * step; y <= maxY; y += step) { a = toScreen(P(minX, y)); b = toScreen(P(maxX, y)); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+    ctx.stroke();
+    return step;
+  }
+
+  function drawBackground() {
+    if (!bg || !bg.img || !bg.cal || bg.zone !== (geo && geo.zone)) return;
+    // image pixel -> projected space: p = a * px + b (complex similarity)
+    var cal = bg.cal, s = view.scale;
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.transform(cal.ar * s, cal.ai * s, -cal.ai * s, cal.ar * s, (cal.br - view.cx) * s + W / 2, (cal.bi - view.cy) * s + H / 2);
+    ctx.drawImage(bg.img, 0, 0);
+    ctx.restore();
+  }
+
+  function draw() {
+    if (!W) return;
+    var c = pal();
+    ctx.clearRect(0, 0, W, H);
+    var gr = ctx.createLinearGradient(0, 0, 0, H);
+    gr.addColorStop(0, c.bg0); gr.addColorStop(1, c.bg1);
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+    if (calib) { drawCalib(c); return; }
+    if (!geo) { labelText('No map data yet', 20, 30, c.muted, 13, 500, c); return; }
+    drawBackground();
+    var gridStep = drawGrid(c);
+    // Helltide border: light fill, diagonal hatching, solid red outline.
+    if (view.border && geo.cells.length) {
+      ctx.beginPath();
+      geo.cells.forEach(function (cl) {
+        cl.forEach(function (p, i) { var s = toScreen(p); if (i) ctx.lineTo(s[0], s[1]); else ctx.moveTo(s[0], s[1]); });
+        ctx.closePath();
+      });
+      ctx.fillStyle = c.redFill; ctx.fill();
+      ctx.save(); ctx.clip();
+      ctx.beginPath();
+      for (var hx = -H; hx < W; hx += 9) { ctx.moveTo(hx, H); ctx.lineTo(hx + H, 0); }
+      ctx.strokeStyle = c.hatch; ctx.lineWidth = 1; ctx.stroke();
+      ctx.restore();
+      ctx.beginPath();
+      geo.edges.forEach(function (e) { var a = toScreen(e[0]), b = toScreen(e[1]); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); });
+      ctx.lineCap = 'square'; ctx.strokeStyle = c.red; ctx.lineWidth = 2.4; ctx.stroke(); ctx.lineCap = 'butt';
+    }
+    // Patrol road: charcoal dashes.
+    if (geo.road.length > 1) {
+      pathLine(geo.road, true);
+      ctx.setLineDash([7, 4]); ctx.strokeStyle = c.road; ctx.lineWidth = 1.8; ctx.lineJoin = 'round'; ctx.stroke(); ctx.setLineDash([]);
+    }
+    if (geo.label && view.border) {
+      var ls = toScreen(geo.label);
+      ctx.textAlign = 'center';
+      labelText(String(geo.region).toUpperCase(), ls[0], ls[1], c.red, 13, 800, c);
+      ctx.textAlign = 'left';
+    }
+    // Trail (fading) and route.
+    if (geo.trail.length > 1) {
+      for (var ti = 1; ti < geo.trail.length; ti++) {
+        var p0 = toScreen(geo.trail[ti - 1]), p1 = toScreen(geo.trail[ti]);
+        ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]);
+        ctx.globalAlpha = 0.15 + 0.75 * ti / geo.trail.length; ctx.strokeStyle = c.blue; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.stroke();
+      }
+      ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+    }
+    if (geo.route.length > 1) { pathLine(geo.route); ctx.setLineDash([6, 5]); ctx.strokeStyle = c.red; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]); }
+    if (geo.player && geo.target) {
+      var a = toScreen(geo.player), b = toScreen(geo.target);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+      ctx.strokeStyle = c.red; ctx.lineWidth = 1.6; ctx.setLineDash([1, 4]); ctx.lineCap = 'round'; ctx.stroke(); ctx.setLineDash([]); ctx.lineCap = 'butt';
+    }
+    // Maiden (triangle) and ruptures (burst), violet.
+    if (geo.maiden) {
+      var m = toScreen(geo.maiden);
+      ctx.beginPath(); ctx.moveTo(m[0], m[1] - 8); ctx.lineTo(m[0] + 7.5, m[1] + 6); ctx.lineTo(m[0] - 7.5, m[1] + 6); ctx.closePath();
+      ctx.fillStyle = c.violet; ctx.fill(); ctx.strokeStyle = c.halo; ctx.lineWidth = 1.5; ctx.stroke();
+      labelText('Blood Maiden', m[0] + 11, m[1] + 4, c.violet, 11.5, 700, c);
+    }
+    geo.tears.forEach(function (t) {
+      var s = toScreen(t.p), r = t.active ? 9 : 7, k;
+      ctx.beginPath();
+      for (k = 0; k < 16; k++) { var ang = k * Math.PI / 8, rr = k % 2 ? r * 0.5 : r; ctx.lineTo(s[0] + Math.cos(ang) * rr, s[1] + Math.sin(ang) * rr); }
+      ctx.closePath(); ctx.fillStyle = c.violet; ctx.globalAlpha = t.active ? 1 : 0.55; ctx.fill(); ctx.globalAlpha = 1;
+      labelText((t.type || 'Rupture') + (t.active ? ' (active)' : ''), s[0] + 11, s[1] + 4, c.violet, 11, 700, c);
+    });
+    // Chest sites: markers, then labels without overlaps (priority order).
+    var order = {target: 0, candidate: 2, opened: 3, unconfirmed: 4};
+    var shown = geo.sites.filter(visible).map(function (s) { return {s: s, p: toScreen(s.p)}; })
+      .filter(function (e) { return e.p[0] > -40 && e.p[1] > -40 && e.p[0] < W + 40 && e.p[1] < H + 40; });
+    shown.sort(function (a, b) { return (order[b.s.status] - (b.s.type === 'mystery' ? 1 : 0)) - (order[a.s.status] - (a.s.type === 'mystery' ? 1 : 0)); });
+    var size = Math.max(5, Math.min(9, 4 + view.scale * 3.5));
+    shown.forEach(function (e) { marker(e.p[0], e.p[1], size, e.s.type, e.s.status, c); });
+    var placed = [];
+    if (geo.player) { var pp = toScreen(geo.player); placed.push([pp[0] - 12, pp[1] - 24, pp[0] + (view.coords ? 130 : 44), pp[1] + 12]); }
+    if (geo.label && view.border) {
+      var lp = toScreen(geo.label);
+      ctx.font = '800 13px system-ui, "Segoe UI", sans-serif';
+      var lw = ctx.measureText(String(geo.region).toUpperCase()).width / 2 + 6;
+      placed.push([lp[0] - lw, lp[1] - 14, lp[0] + lw, lp[1] + 5]);
+    }
+    shown.forEach(function (e) { placed.push([e.p[0] - size, e.p[1] - size, e.p[0] + size, e.p[1] + size]); });
+    ctx.font = '600 11.5px system-ui, "Segoe UI", sans-serif';
+    shown.slice().reverse().forEach(function (e) {
+      var s = e.s, t1 = s.name + (s.cost ? ' · ' + s.cost : ''), tid = '#' + s.id + ' ', t2 = view.coords ? '(' + fmt(s.x) + ', ' + fmt(s.y) + ')' : '';
+      ctx.font = '600 11.5px system-ui, "Segoe UI", sans-serif';
+      var w = ctx.measureText(tid + t1).width + 4, w2 = t2 ? ctx.measureText(t2).width + 4 : 0, h = t2 ? 27 : 14;
+      var x = e.p[0] + size + 4, y = e.p[1] - 7, rect = [x, y, x + Math.max(w, w2), y + h];
+      var important = s.status === 'target';
+      for (var i = 0; i < placed.length && !important; i++) {
+        var q = placed[i];
+        if (q[2] - q[0] <= size * 2 + 0.1 && Math.abs((q[0] + q[2]) / 2 - e.p[0]) < 0.1 && Math.abs((q[1] + q[3]) / 2 - e.p[1]) < 0.1) continue;
+        if (rect[0] < q[2] && rect[2] > q[0] && rect[1] < q[3] && rect[3] > q[1]) return;
+      }
+      placed.push(rect);
+      var col = s.status === 'target' ? c.red : s.status === 'opened' ? c.green : s.type === 'mystery' ? c.gold : s.status === 'unconfirmed' ? c.muted : c.ink;
+      labelText(tid, x, y + 11, c.dim, 11.5, 600, c);
+      labelText(t1, x + ctx.measureText(tid).width, y + 11, col, 11.5, s.status === 'target' ? 800 : 600, c);
+      if (t2) labelText(t2, x, y + 24, c.muted, 10.5, 500, c);
+    });
+    // Player: heading arrow in a ring.
+    if (geo.player) {
+      var ps = toScreen(geo.player), hd = geo.heading == null ? -Math.PI / 2 : geo.heading;
+      ctx.beginPath(); ctx.arc(ps[0], ps[1], 15, 0, Math.PI * 2); ctx.fillStyle = theme === 'dark' ? 'rgba(107,151,255,.18)' : 'rgba(36,86,201,.12)'; ctx.fill();
+      ctx.save(); ctx.translate(ps[0], ps[1]); ctx.rotate(hd + Math.PI / 2);
+      ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(7, 7); ctx.lineTo(0, 3.5); ctx.lineTo(-7, 7); ctx.closePath();
+      ctx.fillStyle = c.blue; ctx.fill(); ctx.lineWidth = 1.8; ctx.strokeStyle = c.halo; ctx.lineJoin = 'round'; ctx.stroke();
+      ctx.restore();
+      labelText('You' + (view.coords && geo.playerW ? ' (' + fmt(geo.playerW[0]) + ', ' + fmt(geo.playerW[1]) + ')' : ''), ps[0] + 16, ps[1] - 9, c.blue, 12, 800, c);
+    }
+    // Scale bar.
+    var px = gridStep * view.scale;
+    ctx.fillStyle = c.halo; ctx.fillRect(10, H - 30, px + 64, 20);
+    ctx.strokeStyle = c.ink; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(16, H - 16); ctx.lineTo(16 + px, H - 16); ctx.stroke();
+    ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(16, H - 21); ctx.lineTo(16, H - 12); ctx.moveTo(16 + px, H - 21); ctx.lineTo(16 + px, H - 12); ctx.stroke();
+    ctx.font = '600 11px system-ui, sans-serif'; ctx.fillStyle = c.ink; ctx.fillText(gridStep + ' m', 22 + px, H - 12);
+    $('mapsub').textContent = (last && last.zone ? last.zone : 'Map') + ' · zoom ' + view.scale.toFixed(2) + ' · ' +
+      geo.sites.length + ' sites' + (geo.cells.length ? '' : ' · border not learned yet') + (bg && bg.cal && bg.zone === geo.zone ? ' · background' : '');
+  }
+
+  function renderMap(d) {
+    geo = buildGeo(d);
+    if (view.fitted !== geo.zone && geo.bounds && W) { fit(); view.fitted = geo.zone; }
+    if (view.follow && geo.player) { view.cx = geo.player[0]; view.cy = geo.player[1]; }
+    loadBackground(geo.zone);
+    draw();
+  }
+
+  // Legend: the same shapes the canvas draws.
+  function buildLegend() {
+    var sq = function (fill, stroke, dash) { return '<svg width="14" height="14" viewBox="0 0 14 14"><rect x="2.5" y="2.5" width="9" height="9" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.5"' + (dash ? ' stroke-dasharray="2 1.6"' : '') + '/></svg>'; };
+    var hex = '<svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1l5.2 3v6L7 13l-5.2-3V4z" fill="var(--gold)"/><circle cx="7" cy="7" r="1.6" fill="#fff"/></svg>';
+    var items = [
+      ['<svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1l5 11-5-3-5 3z" fill="var(--blue)"/></svg>', 'You / trail'],
+      ['<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.6" fill="none" stroke="var(--red)" stroke-width="1.4"/><rect x="4.6" y="4.6" width="4.8" height="4.8" fill="var(--red)"/></svg>', 'Target'],
+      [sq('var(--char)', 'var(--char)'), 'Regular (seen)'],
+      [hex, 'Mystery'],
+      ['<svg width="14" height="14" viewBox="0 0 14 14"><rect x="2" y="2" width="10" height="10" fill="var(--green)"/><path d="M4.5 7l1.8 1.8 3.4-3.6" stroke="#fff" stroke-width="1.5" fill="none"/></svg>', 'Opened'],
+      [sq('var(--panel)', 'var(--muted)', true), 'Learned, unconfirmed'],
+      ['<svg width="18" height="14" viewBox="0 0 18 14"><rect x="1" y="2" width="16" height="10" fill="var(--redsoft)" stroke="var(--red)" stroke-width="2"/></svg>', 'Helltide border'],
+      ['<svg width="18" height="14" viewBox="0 0 18 14"><path d="M1 7h16" stroke="var(--char2)" stroke-width="2" stroke-dasharray="5 3"/></svg>', 'Patrol road'],
+      ['<svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1.5l5.5 10h-11z" fill="var(--violet)"/></svg>', 'Maiden / rupture']
+    ];
+    $('legend').innerHTML = items.map(function (it) { return '<span>' + it[0] + it[1] + '</span>'; }).join('');
+  }
+
+  // Interaction: drag, wheel, buttons, hover.
+  var dragging = null;
+  canvas.addEventListener('pointerdown', function (e) {
+    if (calib) { calibClick(e); return; }
+    dragging = {x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy, moved: false};
+    canvas.setPointerCapture(e.pointerId); canvas.classList.add('drag');
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    var r = canvas.getBoundingClientRect(), w = unP(fromScreen(e.clientX - r.left, e.clientY - r.top));
+    $('cursor').hidden = !geo || !!calib; $('cursor').textContent = 'x ' + fmt(w[0]) + ' · y ' + fmt(w[1]);
+    if (dragging) {
+      var dx = e.clientX - dragging.x, dy = e.clientY - dragging.y;
+      if (Math.abs(dx) + Math.abs(dy) > 3 && !dragging.moved) { dragging.moved = true; setFollow(false); }
+      view.cx = dragging.cx - dx / view.scale; view.cy = dragging.cy - dy / view.scale;
+      draw(); return;
+    }
+    showTip(e);
+  });
+  function endDrag() { dragging = null; canvas.classList.remove('drag'); }
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  canvas.addEventListener('pointerleave', function () { $('tip').style.display = 'none'; $('cursor').hidden = true; });
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, mx, my);
+  }, {passive: false});
+  function zoomAt(k, mx, my) {
+    var before = fromScreen(mx, my);
+    view.scale = Math.max(0.05, Math.min(12, view.scale * k));
+    if (!view.follow) { var after = fromScreen(mx, my); view.cx += before[0] - after[0]; view.cy += before[1] - after[1]; }
+    draw();
+  }
+  function showTip(e) {
+    var tip = $('tip');
+    if (!geo) { tip.style.display = 'none'; return; }
+    var r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, best = null, bd = 144;
+    geo.sites.filter(visible).forEach(function (s) { var p = toScreen(s.p), dd = (p[0] - mx) * (p[0] - mx) + (p[1] - my) * (p[1] - my); if (dd < bd) { bd = dd; best = s; } });
+    if (!best) { tip.style.display = 'none'; return; }
+    var st = {target: 'current target', opened: 'opened', candidate: 'seen, not opened', unconfirmed: 'learned, unconfirmed'}[best.status];
+    tip.innerHTML = '<b>#' + best.id + ' ' + esc(best.name) + (best.cost ? ' · ' + best.cost : '') + '</b><br>' + esc(st) +
+      (best.seen != null ? ' · seen ' + best.seen + ' / missed ' + best.miss : '') + '<br>(' + fmt(best.x) + ', ' + fmt(best.y) + ')';
+    tip.style.display = 'block';
+    tip.style.left = Math.min(W - tip.offsetWidth - 6, mx + 14) + 'px'; tip.style.top = Math.min(H - tip.offsetHeight - 6, my + 12) + 'px';
+  }
+  function setFollow(on) { view.follow = on; $('follow').classList.toggle('on', on); store.set('follow', on); }
+  $('zin').onclick = function () { zoomAt(1.3, W / 2, H / 2); };
+  $('zout').onclick = function () { zoomAt(1 / 1.3, W / 2, H / 2); };
+  $('fit').onclick = function () { setFollow(false); fit(); draw(); };
+  $('follow').onclick = function () { setFollow(!view.follow); if (view.follow && geo && geo.player) { view.cx = geo.player[0]; view.cy = geo.player[1]; } draw(); };
+  $('border').onclick = function () { view.border = !view.border; this.classList.toggle('on', view.border); store.set('border', view.border); draw(); };
+  $('coords').onclick = function () { view.coords = !view.coords; this.classList.toggle('on', view.coords); store.set('coords', view.coords); draw(); };
+  $('filter').onchange = function () { view.filter = this.value; store.set('filter', view.filter); draw(); };
+  $('filter').value = view.filter;
+  $('border').classList.toggle('on', view.border); $('coords').classList.toggle('on', view.coords); $('follow').classList.toggle('on', view.follow);
+
+  // Background image: pick a local image, then click two points on it and
+  // type their world coordinates. Kept per zone in this browser only.
+  function loadBackground(zone) {
+    if (!zone || (bg && bg.zone === zone)) return;
+    var saved = store.get('bg.' + zone, null);
+    bg = {zone: zone};
+    if (!saved || !saved.src) return;
+    var img = new Image();
+    img.onload = function () { bg.img = img; bg.cal = saved.cal; draw(); };
+    img.src = saved.src;
+  }
+  $('bgbtn').onclick = function () {
+    if (!geo || !geo.zone) { alert('Wait for map data (the zone) first.'); return; }
+    if (bg && bg.img && bg.cal && !confirm('Replace the background image of ' + geo.zone + '? (Cancel keeps it; OK picks a new one. Pick nothing to remove it.)')) return;
+    $('bgfile').value = ''; $('bgfile').click();
+  };
+  $('bgfile').onchange = function () {
+    var file = this.files && this.files[0];
+    if (!file) { if (geo) { store.set('bg.' + geo.zone, null); bg = {zone: geo.zone}; draw(); } return; }
+    var rd = new FileReader();
+    rd.onload = function () {
+      var img = new Image();
+      img.onload = function () { calib = {img: img, src: rd.result, pts: []}; updateCalib(); draw(); };
+      img.src = rd.result;
+    };
+    rd.readAsDataURL(file);
+  };
+  function calibFit() {
+    var s = Math.min(W / calib.img.width, H / calib.img.height);
+    return {s: s, ox: (W - calib.img.width * s) / 2, oy: (H - calib.img.height * s) / 2};
+  }
+  function drawCalib(c) {
+    var f = calibFit();
+    ctx.drawImage(calib.img, f.ox, f.oy, calib.img.width * f.s, calib.img.height * f.s);
+    calib.pts.forEach(function (p, i) {
+      var x = f.ox + p.px * f.s, y = f.oy + p.py * f.s;
+      ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fillStyle = c.red; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+      labelText('Point ' + (i + 1) + ' (' + p.x + ', ' + p.y + ')', x + 10, y + 4, c.red, 12, 700, c);
+    });
+  }
+  function updateCalib() {
+    var el = $('calib');
+    if (!calib) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.innerHTML = 'Calibrate: click point ' + (calib.pts.length + 1) + ' of 2 on the image, then type its world x, y (the player position is offered). ' +
+      '<button id="calcancel" style="margin-left:8px;padding:2px 8px">Cancel</button>';
+    $('calcancel').onclick = function (e) { e.stopPropagation(); calib = null; updateCalib(); draw(); };
+  }
+  function calibClick(e) {
+    var r = canvas.getBoundingClientRect(), f = calibFit();
+    var px = (e.clientX - r.left - f.ox) / f.s, py = (e.clientY - r.top - f.oy) / f.s;
+    var dflt = geo && geo.playerW ? geo.playerW[0] + ', ' + geo.playerW[1] : '';
+    var ans = prompt('World coordinates x, y of this point:', dflt);
+    if (ans == null) return;
+    var m = String(ans).match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/);
+    if (!m) { alert('Type two numbers: x, y'); return; }
+    calib.pts.push({px: px, py: py, x: Number(m[1]), y: Number(m[2])});
+    if (calib.pts.length < 2) { updateCalib(); draw(); return; }
+    // complex similarity: projected = a * pixel + b
+    var p1 = calib.pts[0], p2 = calib.pts[1], w1 = P(p1.x, p1.y), w2 = P(p2.x, p2.y);
+    var dr = p2.px - p1.px, di = p2.py - p1.py, den = dr * dr + di * di;
+    var nr = w2[0] - w1[0], ni = w2[1] - w1[1];
+    if (den < 1) { alert('The two points are too close.'); calib.pts.pop(); return; }
+    var ar = (nr * dr + ni * di) / den, ai = (ni * dr - nr * di) / den;
+    var cal = {ar: ar, ai: ai, br: w1[0] - (ar * p1.px - ai * p1.py), bi: w1[1] - (ai * p1.px + ar * p1.py)};
+    var ok = store.set('bg.' + geo.zone, {src: calib.src, cal: cal});
+    bg = {zone: geo.zone, img: calib.img, cal: cal};
+    if (!ok) alert('The image is too large to keep in this browser; it is shown until the page is closed.');
+    calib = null; updateCalib(); draw();
+  }
+
+  // ── load loop ──────────────────────────────────────────────────────────
+  function render(d) {
+    renderHeader(d); renderKpis(d); renderNow(d); renderStats(d); renderOpened(d);
+    renderHistory(d); renderPerf(d); renderMap(d); renderTimers(d); renderStatus();
+  }
+
+  function load() {
+    var old = document.getElementById('hr-data');
+    if (old) old.parentNode.removeChild(old);
+    var s = document.createElement('script');
+    s.id = 'hr-data';
+    s.src = '../hr_data.js?ts=' + Date.now();
+    s.onload = function () {
+      // A half-written file throws while loading and leaves HR_DATA as it was.
+      var d = window.HR_DATA;
+      if (d && d !== last && d.v === 1) { last = d; fetchedAt = Date.now(); render(d); }
+      renderStatus();
+    };
+    s.onerror = function () { renderStatus(); };
+    document.head.appendChild(s);
+  }
+  $('refresh').onclick = load;
+  window.addEventListener('resize', resize);
+  applyTheme();
+  resize();
+  renderTimers(null);
+  renderStats({});
+  renderOpened({});
+  load();
+  setInterval(load, 5000);
+  setInterval(function () { renderTimers(last); renderStatus(); if (last) renderOpened(last); }, 1000);
+})();
+</script>
+<script>
+/* Theme switcher: remember the choice for index.html (localStorage may be
+   blocked for file:// pages; the links still navigate). */
+(function () {
+  var links = document.querySelectorAll('.hrsw a');
+  for (var i = 0; i < links.length; i++) {
+    links[i].addEventListener('click', function () {
+      try { localStorage.setItem('wr_theme', this.getAttribute('data-theme-file')); } catch (e) { /* blocked */ }
+    });
+  }
+})();
+</script>
+</body>
+</html>

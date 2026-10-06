@@ -1,0 +1,121 @@
+# 0.2.11 — card-settle clock (Auditor LOW after 3.3.21)
+
+- A pause during the reward-card settle (a companion yield, an owner's `yield:`) no longer uses up the 4 s settle, and a panel that closes and is re-opened waits its own settle. Before, the first empty read after either gave up at once (ESC, a 5 s wait, the claim on attempt 2). (0.2.10 is the owner's private build.)
+
+# 0.2.9 — reward cards that fill in late (owner live, 3.3.19)
+
+- The reward panel may list its cards as empty placeholders (no SNO, `valid=false`) for a moment after it opens. SilentRaven no longer declares `no_valid_reward` on the first frame: it keeps the panel open and re-reads the cards for up to 4 s. Cards that stay empty end the attempt with `reward cards still empty after 4s (…); attempt N of 3, retrying in 5s` and one reward dump (host API state included), the next attempt waits 5 s, and after 3 attempts the run ends `failed (reward_cards_empty)`. The host's `pick_and_accept` is not used as a fallback (its index convention is unverified); the dump shows whether it exists.
+- Rosie's Butler stand-in (`_G.Butler` with `_rosie=true`, published while Worldstone runs) is skipped like its Scavenger stand-in: it mirrors Rosie's own trip, so it no longer holds auto-fire, the keybind or the claim trip; a real Butler still does.
+
+# 0.2.8 — "SilentRaven is manual now" (QQT_Warpigz_v3, after 3.3.6)
+
+- **Auto-claims again next to Worldstone / TristramLoop / Butler.** A loop owning the run (`TRISTRAM_LOOP_STATE.owns_activity`) holds auto-fire at a Temis stop only until the reward has been ready 60 s (`auto-fire waited 60s for …; claiming at this Temis stop`), the claim trip at most 600 s. A Navigator request below priority 10 (Worldstone's walk) no longer holds; the claim's Navigator pause condition stops it. Butler, Scavenger and a town-priority Navigator walk hold at most 180 s per ready reward (one line).
+- A Looter / Alfred yield mid-claim keeps Navigator paused (only a Butler or town-priority Navigator yield releases it); the claim no longer ends `cancelled (yield_timeout:navigator_busy:Worldstone)`.
+- **Receipt:** a quest that was ready and is turned in (gone, panel closed, 1 s) is a claim, `run finished: success (quest_turned_in)`, even when the cache is not seen in the bags (it was `unconfirmed — not claimed`). A real timeout logs `receipt not seen: …` and once a bag diff across all five lists.
+- A held auto-fire logs `reward ready in Temis but auto-fire waits: <reason>` once per reason and reward; the outside-Temis lines no longer promise the next visit while the last one was held.
+- A claim-trip callback that arrives after the reward left no longer starves the next reward's claim trip.
+- A Whisper objective without text counts by the host's progress fields (ratio 1: ready, inferred; partial: collecting; no progress fields: not ready).
+- No claim walk or claim trip starts while the player channels a teleport (spell 186139, at most 15 s), e.g. WonderCity's cast to Kurast.
+- Review fixes: the 180 s third-party limit counts time actually held (a short early Butler sighting no longer switches the Butler hold off for the rest of the reward); a textless objective needs positive progress fields to count as ready; the outside-Temis line names the reason that held longest, not the last one. A loading screen (a blank quest list in Limbo) no longer ends the ready episode (every bound restarted at each Temis arrival). After a loading screen the first live pulse re-reads the quest before auto-fire or a hand-off, and a ready episode ends only after 3 s of not-ready in a live zone. A Scavenger yield releases the Navigator pause like Butler's. The 15 s teleport-channel bound is per cast (a loading screen, a zone change or a sampling gap starts a new one). `receipt not seen` reports `panel open=false` (was `error`); the turned-in receipt always needs the quest ready at the start.
+
+# 0.2.6 — QQT_Warpigz_v3 3.3.3
+
+- A third-party loop that owns the run (`TRISTRAM_LOOP_STATE.status().owns_activity`, TristramLoop driven by Worldstone) is never interrupted: the claim trip waits (`claim trip waits because another activity owns the run (TristramLoop, …)`) and auto-fire in Temis holds (`activity_owner:TristramLoop`). Rosie already deferred its own trips for it; SilentRaven asked Rosie to teleport away after 5 min of a ready reward. The reward stays ready for a later Temis visit or a Rosie trip's hand-off.
+- Third-party Butler, Scavenger and Navigator (closed addons, `docs/THIRD_PARTY_APIS.md`): auto-fire, the keybind and the mid-run yield wait while `Butler.is_busy()`, `Scavenger.is_busy()` or Navigator moves for another owner (busy and not paused); the claim trip waits for them too (one line each). While a claim runs (not while it yields), the Navigator pause condition `SilentRaven` holds Navigator.
+- A claim trip that ended before any teleport is not counted against the trip limit.
+- Held auto-fire in Temis is checked at 2 Hz, not every frame (WarPigs status calls 22/s → 6/s).
+- `get_status().yielding`: a request paused by its owner's `yield:` guard answer.
+- An owner's cancel (Rosie after its hand-off wait) and the Enable toggle end a run through the FSM: the `whisper_claim` event, and the visit latched once an accept was sent. The run timeout is 90 s (Rosie waits 100 s).
+
+# 0.2.0 — QQT_Warpigz_v2 2.1.0 integration
+
+- A reward card is rejected only when it is explicitly invalid (`valid` false/0) or has no readable SNO; a missing `valid` field no longer rejects every card (live `failed (no_valid_reward)` on a normal 4-card panel). Numeric-string SNOs are accepted.
+- Selection verification tolerates a void `select()` and a `selected_index()` in either index space (0.5 s settle); one automatic `reward diagnostics` dump per run shows the host's fields when a claim cannot be verified.
+- Continuation guard may answer `yield:<reason>`: the request pauses (no attempt or timeout consumed, 120 s cap) instead of being cancelled; after accept a yield only lets the receipt be confirmed.
+- Unmanaged auto-fire waits for WarPug sessions, Alfred live work, the Looter and a busy WarPigs; own runs pause for Alfred/Looter without clearing their paths. `get_status().hold_reason` added.
+- ESC is sent only while the reward panel is open. The Temis walk always passes the intermediate waypoint and detects stalls.
+- D4Remote `record_loot` is sent per confirmed claim; registration retries when D4Remote loads later; catalog freshness is not re-read every frame.
+
+# 0.1.4 — WarPigs integration build
+
+- Added a versioned, owner-checked WarPigs bridge contract with a pending request state, reservation, continuation guard, and exactly-once callback delivery.
+- Restricted town reward handling to Temis; orchestrated town checks never teleport.
+- Namespaced modules under `silent_raven.*` to avoid shared Lua cache collisions.
+- Added a bounded NPC probe for untranslated bounty objectives.
+- Verify selected reward index/SNO, reject invalid or sparse entries, and confirm inventory receipt before success.
+- Never repeat acceptance after an ambiguous send; failed quest reads cannot prove completion.
+- Bound walking when a visible NPC is unreachable and reset the visit latch while idle after a real departure.
+- Preserve competing navigation on guard rejection, cancellation, and disable transitions.
+- Make catalog reload local; the optional updater runs manually outside the game loop.
+- Added 101 offline behavioral assertions. Live game validation remains required.
+
+---
+
+## Original upstream changelog
+
+# Changelog
+
+All notable changes to SilentRaven will be documented in this file. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [0.1.2] — 2026-05-09
+
+The actual fix for the two bugs that v0.1.1 misdiagnosed.
+
+### Fixed
+- **Off-by-one in `pick_and_accept` / `select`.** A user-supplied screenshot of the live reward UI proved that both `Material Collection of Keys` and `Greater Collection of Two-Handed Weapons` are colored **orange (legendary)** in D4 — meaning the original "non-legendary was selected" complaint was about the picker getting the wrong card *visually*, not a wrong rarity classification. Both reports had `pick_and_accept(3)` ostensibly succeed but the user got the entry at `enumerate()[4]`. Conclusion: on this host, **`enumerate()` keys are 1-indexed but `pick_and_accept(N)` and `select(N)` are 0-indexed.** Two related host functions, two different conventions, neither documented in the API stub. SilentRaven now subtracts 1 before calling `select` / `pick_and_accept` and verifies post-`select` by reading `selected_index()` and comparing the SNO at the selected position to the SNO we intended.
+
+### Changed (revert from v0.1.1)
+- **Material Collection of *** caches restored to `legendary=true`. The v0.1.1 reclassification was based on a wrong diagnosis — those caches genuinely show as legendary (orange) in D4's UI. The `slot=materials` separation introduced in v0.1.1 is kept (so users can still independently weight materials vs gear via the slider), but rarity now matches D4's display tier.
+
+## [0.1.1] — 2026-05-09
+
+Bugfix release based on two live user reports:
+
+### Fixed
+- **`Material Collection of *` caches no longer treated as legendary gear.** A user with `legendary_bonus_weight=100` reported the picker grabbed `Material Collection of Gem Fragments` over a regular `Collection of Helms`. Root cause: the LooteerV3 catalog has these at `magic_type=3` (legendary *cache rarity tier*), which the classifier read as "drops legendary gear" — they're crafting-material caches. New `materials` slot covers Gem Fragments / Salvage / Keys / Primordial Dust with `legendary=false` so they don't trigger the legendary bonus. `Material Collection of Gold` stays at `slot=gold legendary=true` (gold is genuinely high-value). Added a `Materials` priority slider in the GUI defaulting to 3 (lower than the gear default of 5). Server-side fix in `silentraven_export.py` regenerated `caches.lua` with the new classification (4 entries flipped); client fallback catalog mirrors it.
+- **Two-step claim with verification telemetry.** Another user reported the bot called `pick_and_accept(3)` ("Greater Two-Handed Weapons") but actually got Gauntlets (the entry at index 4). Couldn't conclusively prove host indexing mismatch from the log alone, so `fire_claim` now uses the granular `select(idx)` → `selected_index()` → `accept()` path when the host exposes it. Logs a `WARNING:` line if `selected_index()` doesn't match the requested index, and a separate warning if the SNO at the post-select position doesn't match the SNO we intended. This will give us ground truth on the next occurrence. Falls back to single-call `pick_and_accept` when the granular API isn't available.
+
+### Added
+- New `materials` slot covering 4 Whisper Cache Material entries (Gem Fragments / Salvage / Keys / Primordial Dust). Maps to `material` in the D4Remote loot category vocabulary; `materials_claimed` counter exposed in the dashboard payload.
+
+## [0.1] — 2026-05-09
+
+First public release. Live-validated on Skov_Temis (D4 S09).
+
+### Added
+- **Standalone Tree-of-Whispers turn-in plugin** for the QQT Lua host (Diablo 4). Two trigger paths:
+  - **Auto-fire** when the player is in `Skov_Temis` or `Hawe_TreeOfWhispers` with 10/10 Grim Favor and the master toggle is on.
+  - **Call-driven** via the `SilentRavenPlugin` global (Alfred-shaped contract): `trigger_tasks(caller, callback)`, `trigger_tasks_with_teleport(caller, callback)`, `pause`/`resume`, `cancel`, `get_status`, `is_available`, `check_version`. Mirrors `AlfredTheButlerPlugin` so other scripts can interrupt themselves to claim a turn-in.
+- **TP-to-Skov_Temis** waypoint SNO `0x1CE51E` (lifted from `AlfredTheButler/core/town.lua`) when `trigger_tasks_with_teleport` is called from out of town.
+- **Static-coord pathing in Skov_Temis.** After TP arrival the bounty Raven NPC is ~16 yards away and out of the live ally stream's range. SilentRaven walks blindly via a randomized intermediate waypoint at `(2597.24, -488.08, 30.52)` then to the NPC at `(2596.38, -495.79, 30.52)` — bringing the actor into stream so the normal interact + claim flow runs. Per-attempt randomization (±2y) avoids same-spot pathing.
+- **Priority-based reward picking** (`core/rewards.lua`):
+  - 12 slot ids: `helms`, `chest`, `legs`, `gloves`, `boots`, `rings`, `amulets`, `weapons_1h`, `weapons_2h`, `gold`, `chaos`, `other`. Each gets a 0–10 GUI slider, all default 5.
+  - `Prefer legendary` toggle + `Legendary bonus weight` slider (default 50). Legendary cards score `slot_priority + bonus_weight` so they beat any non-legendary at the same slot priority. Legendary still wins even when its slot is set to 0.
+  - First-valid fallback: if every entry scores 0 (all slots set to 0 AND nothing legendary on offer), the picker grabs the first valid entry rather than refusing to claim.
+- **Cloud-synced cache catalog** (`Updater.bat` + `https://looter.d4data.live/d4/silentraven/caches.lua`):
+  - Three-tier loader: cloud-synced `data/caches.lua` → embedded fallback (21 entries) → `internal_name` pattern parsing as last resort.
+  - Server pipeline (`silentraven_export.py` running in `looter-d4share` container) regenerates the catalog daily from the master LooteerV3 catalog. Currently 75 entries spanning regular + Greater + Ancestral tiers + Whisper Cache material variants. 33 (44%) flagged legendary.
+  - GUI header shows the catalog source (`cloud` vs `embedded fallback`) and last-sync age.
+  - **Reload Catalog (cloud)** GUI checkbox: tick fires `Updater.bat oneshot`, reloads `data.caches` in-process, then auto-clears the box. Debounced 2s.
+- **D4Remote dashboard integration** (`update_stats` + `record_loot`):
+  - `core/stats.lua` keeps cumulative counters (`turnins_success`, `turnins_failed`, `tp_attempts`, `legendary_claimed`, `regular_claimed`, per-slot `<slot>_claimed`, last-pick details). Resets on script reload, same pattern as Alfred / GoFish.
+  - `report_to_d4remote()` pushes a flat ~30-key payload (live state + catalog freshness + cumulative counters + per-slot breakdown + last-pick details) every 1 Hz. Reporting runs even when the plugin is disabled so the dashboard card stays visible with `status="Disabled"`.
+  - `D4Remote.record_loot(category, rarity)` fires once per successful claim. SilentRaven slots translate to D4Remote's singular vocab via `SLOT_TO_D4REMOTE_CATEGORY` (`rings → ring`, `weapons_1h/2h → weapon`, etc.). Rarity is `5 (Legendary)` for legendary picks, `4 (Rare)` otherwise.
+- **`SilentRavenPlugin` + `PLUGIN_silent_raven`** globals — the Alfred-style entry points for caller scripts.
+- **Per-zone success/failure latch** so a finished run doesn't busy-loop the autofire gate; cleared on zone change.
+- **Console output** prefixed `[SilentRaven]`. Debug logging GUI toggle gates the per-state-transition tracing in the FSM.
+
+### Performance / safety
+- **API-only reward selection.** Uses `quest_reward.pick_and_accept(idx)` exclusively. No pixel-click fallback — if the host doesn't expose the API, the run fails fast with a clear error rather than chasing screen coordinates.
+- **`pathfinder.request_move` for movement** (the per-frame friendly variant matching WarMachine's nav). `pathfinder.clear_stored_path()` is called on disable / cancel / FSM finalize so the bot actually stops instead of drifting to its last requested goal.
+- **All hot-path work is O(1) per frame.** The auto-fire ready-check (quest scan + actor scan) is throttled to 2 Hz when idle. D4Remote reporting is throttled to 1 Hz. `os.execute` is only invoked from the user-triggered `Reload Catalog` checkbox.
+- **`quest_reward.enumerate()` 1-indexing** confirmed live (the API stub doesn't specify); `pick_and_accept(0)` would silently fail.
+
+### Server side
+- New private repo [magoogle/looter-d4share](https://github.com/magoogle/looter-d4share) holds the FastAPI service that backs `https://looter.d4data.live`. The SilentRaven additions (`silentraven_export.py`, the patches to `pipeline.py` and `api.py`) are committed there alongside the existing Alfred / LooteerV3 publishing surfaces.
+- New endpoint `GET /d4/silentraven/{filename}` mirrors the `/d4/alfred/{filename}` pattern — path-traversal-guarded `FileResponse`, `text/plain` for Lua source.
+
+### Known limitations
+- Static-coord pathing currently only covers `Skov_Temis`. In `Hawe_TreeOfWhispers` the bot will only autofire if the NPC is already in the live actor stream.
+- Counters are in-memory; a script reload zeroes them.
+- The `Dump reward options` keybind + button were commented out for normal play after the new-season classification was confirmed working — re-enable in `gui.lua` + `main.lua` (three call-sites, all marked) when investigating future-season SNOs.

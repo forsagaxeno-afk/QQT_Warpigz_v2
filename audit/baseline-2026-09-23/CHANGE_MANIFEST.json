@@ -1,0 +1,661 @@
+{
+  "baseline": "Original supplied War-Pig-Zewx-main.zip (including working Horde fix2)",
+  "remote_commit": "e7fd3b1e078470d6993ab4220d34a9990c5a909e",
+  "scope": "Runtime and primary documentation; audit artifacts excluded from this change list",
+  "changes": [
+    {
+      "path": "AUDIT.md",
+      "status": "added",
+      "original_sha256": null,
+      "sha256": "1cf104277be4cb9b2617eaf7db2c9213aa2fe70e07962f3c139885cea46b5d77"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/README.md",
+      "status": "modified",
+      "original_sha256": "10573535908c04e84ba1b15d3fee1a9e916a8631cc6da73f109e2f2d3fd8843f",
+      "sha256": "b9658d93c09360af7cac16eeec2f5301c552b1c913715d803b31b0d7d7a8e4cc"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/core/external.lua",
+      "status": "modified",
+      "original_sha256": "665cf2d563bf8a3c0341ae184be134a0345bd6bcac4d1a7bbb3b932159d29aca",
+      "sha256": "a7451c0c80f59141fbda19f6c41e5ea37c1730ca27b09c407ee5f007fe8515f7"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/core/task_manager.lua",
+      "status": "modified",
+      "original_sha256": "2acb16c642fba0e5e58a213513a47b010dadda8bdd9de37f5ba33632b45ee432",
+      "sha256": "1e7d5df47a58e8ab095618a331f8a09071220ae9d53f34179d176a2a5c5495d4"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/core/tracker.lua",
+      "status": "modified",
+      "original_sha256": "9adeb99b24f213612ccb3440e9c14053728214f6c93d7fb4664b298d8e25e42a",
+      "sha256": "3351aee1239b1217f382f0ee0a943c079bb87010e423ec61565b045630dabb56"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/core/utils.lua",
+      "status": "modified",
+      "original_sha256": "401cf97b65d939dda27a7050c1ffa89f9c5685ea53a423c70280febbace274bf",
+      "sha256": "0b86369b1243c1dd9812116108cac8dda595255980ca59b1e97104788f9ea0fd"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/main.lua",
+      "status": "modified",
+      "original_sha256": "33f7fc3031fcaedea4d0face820d918c7c786804b9a53044af1f51588eb31380",
+      "sha256": "15851c6568828ae77df42baa1aaee82ad739f4d7ca3c5d533b768eabff8b6698"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/alfred.lua",
+      "status": "modified",
+      "original_sha256": "ec8c1b1e43485607e81f3cf1fc7b95aa09a7ef45bd3f6aea8680ccde2eac2f8e",
+      "sha256": "72ce498f96bd20db885cf7009be6e446248e9719fc4743b010d4a1ab56aeb89b"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/consume_chorons_soul.lua",
+      "status": "modified",
+      "original_sha256": "8db829562942e442a9c145ab530e845a0a2a0247d1b39b959246aedfaad5bbf3",
+      "sha256": "e4efcb009e20b1e87a637850c7ff1e651cd2bc3b393f14c2795fabd60939dd36"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/cross_traversal.lua",
+      "status": "modified",
+      "original_sha256": "57f1aed1871fc2b1a3e85debf168064fdcce5e3e1894229ad6f3ea1974091868",
+      "sha256": "e4b2c425c68047217ae2458aa197b67ff31b886c8a1d4775da225833be53f3d0"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/enter_pit.lua",
+      "status": "modified",
+      "original_sha256": "b7fcd39278094dbd5ccc82a133b12262d0901aac9582bfdcc369806783255c45",
+      "sha256": "937dea8ab832c92d1e5364f336c396cd61c24efb279330048a7c4be1e53958c4"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/exit_pit.lua",
+      "status": "modified",
+      "original_sha256": "be0ed43af6e7c234e0ea0c14f686ea607e0e1b4cf96e30f1f6831964888ea006",
+      "sha256": "1368ae9b7768b87f3ad47f4a30fbfa1993153b906d7637e410520adb561034a5"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/explore_pit.lua",
+      "status": "modified",
+      "original_sha256": "1d552b2a6fd17d72b6fd2afa5a69318995af443584667e174ed6105623da76c8",
+      "sha256": "266b381de92a475d3f3f2b2a3fe9280d101bb62bc44183133654d74802327665"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/interact_shrine.lua",
+      "status": "modified",
+      "original_sha256": "ee3100a3e69c6c64710a5f2709c9f879de3a6ec3c1b7443b1fcbf0d2a93c1c06",
+      "sha256": "c55e9911a3eb62eaca7c1d36499832060ac1b5ce5f5ff4adb8af14f421b3f0f9"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/kill_boss.lua",
+      "status": "modified",
+      "original_sha256": "92af63f4b979f3996d2bc5172e461f9d3a0f0ea97914fc67adbcd471ec9c3fb4",
+      "sha256": "9d508fed1d24cfcf83d74a04ce558a58d9e04e516e02f32cef75b6be137f8808"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/kill_monster.lua",
+      "status": "modified",
+      "original_sha256": "547c3f857fea488ef4ca6543b9d68913b5de4eed20cc7d5b1867c7bfafc32882",
+      "sha256": "f28dff1036bc87c24953fbffecd8789b519603d039e7063e714867fe12259061"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/pickup_heart_of_stone.lua",
+      "status": "modified",
+      "original_sha256": "70361cb194e9e3feb791376ce658e60554426408c8c283597c6e34f2f64615f6",
+      "sha256": "ea0392b30811a1d9ed19d48b0eeae28fdd090b01533c210cf0fcb254b274c0e7"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/portal.lua",
+      "status": "modified",
+      "original_sha256": "4a8784b0186e1f0d2a1e9651badbfc7bd99840ef7a5870237d7dc3fa01a3c1de",
+      "sha256": "d33e562ede245bfe99289a359ff8503ca807090c9e029d5d29b35f81964afe92"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/push_monsters.lua",
+      "status": "modified",
+      "original_sha256": "9c836ed724b794b5b762d0dc5afc215bc1e291840eae8203363fc491cab87049",
+      "sha256": "58d7d25fc512eaa8ac7369bf83910676ef615abe51190c43b29165c870509cbb"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/teleport_cerrigar.lua",
+      "status": "modified",
+      "original_sha256": "f453f8faaffeed7b5f27ad5c38ad0d7f35975cf0230aeeafac2c33843cc5c39f",
+      "sha256": "859575d22cdba0c0306cbe20afcde63d14ea17a9177f32f5fb5f459c643a548e"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/upgrade_glyph.lua",
+      "status": "modified",
+      "original_sha256": "6ea67092596bdb731ae94d4e7b8837efc8887fe63dd33f613f6c4137e9060f33",
+      "sha256": "1bfd0a08473f6230b5d22349a0c559513b5f4451b0bfc69c973ca62331c75488"
+    },
+    {
+      "path": "ArkhamAsylum-1.0.6/tasks/use_burden_altar.lua",
+      "status": "modified",
+      "original_sha256": "3a56a9260af39d550b89688621134d89384b9dbe89b527c151d2b31f41df6940",
+      "sha256": "49b5080fb02acd3d344420a4405cbbc39d8e98b61602634d33eb8d1d1d22d5ac"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/explorer.lua",
+      "status": "modified",
+      "original_sha256": "ba96b0066ca38f716c5894482c6fcc7566d402f0b7efbfdb072cb2a97a35a2d0",
+      "sha256": "4148dc22600188b245dc9a5f12e388bf1470dfa3dfb024335322f16bb3185e0a"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/external.lua",
+      "status": "modified",
+      "original_sha256": "40199c67dc0dc32dc491f3701d7bf5d577cc73848db85ad49eaf4834822b8ff8",
+      "sha256": "bf57100ce10e15e6e4c991fe0176b373fb0480ac4d3cafbb732c244c37f241b0"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/long_path.lua",
+      "status": "modified",
+      "original_sha256": "83810c2ca0e27716d0e8d16522dfea624c482970501dfb7504e0c9a9eb43a2e3",
+      "sha256": "6ff0bf3dbda783fac300c41d7892096f7ab6a9a68b5ca833eac7ca327e2036d6"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/movement_conditions.lua",
+      "status": "modified",
+      "original_sha256": "5ce76545ce177ad6269c790aa6de58712e9483d8fc6d4eb2683246dad12b5a4d",
+      "sha256": "18bd179f1c7c56d84912e8bc45a7dd2f3ae42b316ba91a9f6418f71f8e8786d0"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/movement_engine.lua",
+      "status": "modified",
+      "original_sha256": "f1f8bbe93740774824d283540d708a73ae2322937bf5232ef2bf2bfc728e0155",
+      "sha256": "123980fcf2574da3c57dbd1d245e5a092c46dec60c66de417c4a0da74116d2d6"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/movement_helpers.lua",
+      "status": "modified",
+      "original_sha256": "3608830a98c187232f02d17587da19b65e9bff1b53d2c94807f12973e2552f1a",
+      "sha256": "ccad28a71ed1435cad26bcada0a5d9bcbe83db6797aa34368669c4f019661c80"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/navigator.lua",
+      "status": "modified",
+      "original_sha256": "ee4801f4e4d2c8d9626a16ae0cf3c0c89d3728a56b8522b8f5b81923e0a7c8ce",
+      "sha256": "fab94d60a1391f4e90c45c84daf74c7c2868479d67f637bcb513036e16dbdd0c"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/pathfinder.lua",
+      "status": "modified",
+      "original_sha256": "8be239387bf2dfe59ca439bcc54bb1afa75c28d859420bba7a9b86473f5ab2d8",
+      "sha256": "7f7f0c52f021f8087a447672cc19d70fe68e37216600f1aa2e622810b181df92"
+    },
+    {
+      "path": "Batmobile-1.0.12/core/utils.lua",
+      "status": "modified",
+      "original_sha256": "c710b374710e5f0f5096a836e520af8e6298e100532ebfbe8d05e5ff48c4d60f",
+      "sha256": "9e75b930f5509301d52028956e48e3e79522a347fcc7b7530279165bf7377ffa"
+    },
+    {
+      "path": "Batmobile-1.0.12/main.lua",
+      "status": "modified",
+      "original_sha256": "21143529c3897fb89b2a5baa1180c19b7c0749e32916fbe8dd36a5d3ac17d4d4",
+      "sha256": "119de82bc06540eaa8a2bcfdca1e20d7536ae52c6098df20ec935a123d17775b"
+    },
+    {
+      "path": "HelltideRevamped-0.4/README.md",
+      "status": "modified",
+      "original_sha256": "aebf92655b775a56284a20ce4f52a6313c62d4ec3338cb3bb1aa742f48abe353",
+      "sha256": "8c23410cd1d51f1de35212469c0bf721ebce96105e95ac7d90a1ffdd62eba356"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/chest_targets.lua",
+      "status": "added",
+      "original_sha256": null,
+      "sha256": "78d77f3e22428ccb1f35aafbd9bdfc4db2c1b8995f6d874ccd74c5603d585be2"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/settings.lua",
+      "status": "modified",
+      "original_sha256": "dfad24371395c3b5d8f392849a0c31cbee64d43c5bfb3655a6680701bd11eb6c",
+      "sha256": "9b6706c1d1880be9b24976d89570f459a219786726655c6130c54f375129cd88"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/task_manager.lua",
+      "status": "modified",
+      "original_sha256": "6e40f7f3db74fc91f9c13282113c28053bdc1c42aa20162d5eb4fb9cbd0e035f",
+      "sha256": "9f7fed03fbc89e0fb642fb358b60a1b8278c36180e8c55edb7f556a3ec351665"
+    },
+    {
+      "path": "HelltideRevamped-0.4/core/utils.lua",
+      "status": "modified",
+      "original_sha256": "d4af6ef5aee36f9475a26faca2e5de18bd7cb8128ec4da70b9caea8478d9ee82",
+      "sha256": "b4fa5e094d3d7621ffd3e5bddb0d0a72b70e0155db110bd2043af8f4f9ae5571"
+    },
+    {
+      "path": "HelltideRevamped-0.4/gui.lua",
+      "status": "modified",
+      "original_sha256": "4c58b1aeedc925b6549ee7b950ddb9cb7e747b3b912d7f76ae20ed32cf2a3ea6",
+      "sha256": "687c238665ccf31ede2c99ee15cc632027e0b33396a97ea04ede28efc1ed3e67"
+    },
+    {
+      "path": "HelltideRevamped-0.4/main.lua",
+      "status": "modified",
+      "original_sha256": "f628a40567ce19eda447f17cbcbc5574007e670afcbaa2e33666b66b8c413134",
+      "sha256": "c18eb82d49b9877049e374255c30f15a0cf49869239cc19df7efb415b0934929"
+    },
+    {
+      "path": "HelltideRevamped-0.4/tasks/alfred.lua",
+      "status": "modified",
+      "original_sha256": "71ee43d8faddd69a2ab8840ae8b1fd116602f9ef11a2fee144137ee9bf963ff5",
+      "sha256": "edb823414bd9da6f2711808522e760ac495dbde50df5527fb44b7c6740357d3c"
+    },
+    {
+      "path": "HelltideRevamped-0.4/tasks/helltide.lua",
+      "status": "modified",
+      "original_sha256": "22722a7c60ed7b5812b99ce57048ce17db740d0957928bed58d29911a1c1dfe6",
+      "sha256": "676ad4b7ad564e2c781ca99e2018c9b50201e3aef47768b419127a8b0bfe93c3"
+    },
+    {
+      "path": "HelltideRevamped-0.4/tasks/search_helltide.lua",
+      "status": "modified",
+      "original_sha256": "af805805dfde3920bded536e871e81d1981637e3bb3067e5d18759f3c3af1f02",
+      "sha256": "d2c9d341bfc387b6228093602751a1d6c99e1ce2eb087bd99c11802938ab787d"
+    },
+    {
+      "path": "HordeDev-1.3.9/README.md",
+      "status": "modified",
+      "original_sha256": "054b94559eaecfeba181a0d25804e94b879a87680fdc274cd322a7ef828e8c35",
+      "sha256": "b87e906a49acd1f3fc09a72d5e9faa15ddfc6398544d57ed6ef90213f617be26"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/affix_filter.lua",
+      "status": "modified",
+      "original_sha256": "0854ab77278db34f5b6785c1600adda2eca20d976efb8bafa6aa9895599803f5",
+      "sha256": "cc37fbfba5420d7d497bbb18f2a1f129426a3997bf1c33502c9d967f6066a397"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/explorer.lua",
+      "status": "modified",
+      "original_sha256": "3601b6009318a2b6e9b26e17be71d1f1b52c1f626037a654836bd28f0ca9aefb",
+      "sha256": "79a4df9d582cb1e225399b8ca16be03b005d5c251d8cf3bdccab85413b40eac0"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/movement.lua",
+      "status": "added",
+      "original_sha256": null,
+      "sha256": "1326f84b61eb8ed8d094368fd7efcbeca8985f8695731af156cee3aba5e953c8"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/settings.lua",
+      "status": "modified",
+      "original_sha256": "7bda0f62f724202dbcffb9fa98c20bb665e78f32de598567f6b1c39e4a6aa505",
+      "sha256": "6e0723e61564688483608b34f93ca03c42eb34f09e3cce110ced5b2640f6874c"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/task_manager.lua",
+      "status": "modified",
+      "original_sha256": "d01741f31475bb01926bf5a4bc81601ab25d20e083ca23f7b26ce8a14de284aa",
+      "sha256": "65ed56c5f5ecbb89802679b547a144526dbb38c6ebca580d1fea66904762a548"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/tracker.lua",
+      "status": "modified",
+      "original_sha256": "b522f787fc5e3396eda8116241f74023246fd17e6b263dd2e83607f77c8ee06e",
+      "sha256": "2149762004ea7f3398ab0c9179ed1a31300e41555777de841a0389719237c7a1"
+    },
+    {
+      "path": "HordeDev-1.3.9/core/utils.lua",
+      "status": "modified",
+      "original_sha256": "8a2bac4fd7c0ddb788d7ed5a0249cbb47035c9a81687d3eeb8aa243071b0f532",
+      "sha256": "67c09aaea146c508a6633a6245d5ab9d3b6de033464ccfad165cac738f6fa645"
+    },
+    {
+      "path": "HordeDev-1.3.9/main.lua",
+      "status": "modified",
+      "original_sha256": "6826906ded2413a137dd92648d4d9ada591cf8825a75c47e4a881d9c87f5f602",
+      "sha256": "0198af58c4c2cb2458cd24cf829ab408bfcc3250e455e381b9b65b64c25ec231"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/alfred.lua",
+      "status": "modified",
+      "original_sha256": "bf1f9842d478ca2e1ed8a0174e6d2c602c0d27a239e9fe86359dd6c9794cade7",
+      "sha256": "2c50e5089648b6f5509e133ee22233124eb9f252dda5eff16950277a3e6f2ff8"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/exit_horde.lua",
+      "status": "modified",
+      "original_sha256": "d83a410be98273a15dad3986206cff07f8b6233540f14e5f969444d5d9d7c64e",
+      "sha256": "8c78e6458f0bc1eb3fee16476e11fce43a0aea6b11691de72684d25e84131c5c"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/horde.lua",
+      "status": "modified",
+      "original_sha256": "fc18e1c7e80eae27e8bb847a458f3ebfdb69bc4c82ba90406f67d324d86df185",
+      "sha256": "898a9465dd0d9e9b8959ef0204acfc2930db645e57f97b7adaacd73b195afdad"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/open_chests.lua",
+      "status": "modified",
+      "original_sha256": "d7c185f6787eecc0e2b65e3022db42cc51fa9c9ffe3d4bb2d4eeecabcd80eab0",
+      "sha256": "adbddf90eeb299f01623e771b814184a4fcaa68c72e890228a39f706121ddb30"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/town_salvage.lua",
+      "status": "modified",
+      "original_sha256": "87d9ba78289c3367ed590d2e1491dd03d14e8871edc82ad074766e46814781cf",
+      "sha256": "62caf055261d2951a97b8c03da1d0e6f1a8706af380afb76831fb72afb87ec8a"
+    },
+    {
+      "path": "HordeDev-1.3.9/tasks/walking_to_horde.lua",
+      "status": "modified",
+      "original_sha256": "914f0690e7f9b6774d3c62d0f9e50f543f685c0590a8f46aeffeeb40a0bb65fc",
+      "sha256": "08276fba6021237c391231f0e54849b16c8894a4550448f524ab697023e76b3e"
+    },
+    {
+      "path": "README.md",
+      "status": "modified",
+      "original_sha256": "29c0711cdcd08c9ac6e7fe2d3b429503327bd2b4f4f43e3fbe2ec9bbb7fbdebf",
+      "sha256": "1a1b3f78e2b255ede7a25d598224b38358454a57dd3c9f5ec1279e1a3231102c"
+    },
+    {
+      "path": "Reaper-main/README.md",
+      "status": "modified",
+      "original_sha256": "4eff671f912a897c7448dad7db54926392e6b365ec8cf91236623d98d42ab5cc",
+      "sha256": "fed01477a7c65c20107dd817da90636d8a01aadc37cdb88c41d67269a877ab4a"
+    },
+    {
+      "path": "Reaper-main/core/boss_rotation.lua",
+      "status": "modified",
+      "original_sha256": "57035291217d4eae2ed51346464eac8c1fb7afbc36d33669c9baa6023e567a0f",
+      "sha256": "cf2119aaf908be692c56df558fa918394bee2dec10e80128260308a7e97cee66"
+    },
+    {
+      "path": "Reaper-main/core/explorerlite.lua",
+      "status": "modified",
+      "original_sha256": "77a10b4f8835dd8c9d29a13803823432c679556124c2bb564ba9898b68945d08",
+      "sha256": "a09489568543bb3d3ed9c00532543f84029ba0492fedec57eb9f956e7a7bc245"
+    },
+    {
+      "path": "Reaper-main/core/map_nav.lua",
+      "status": "modified",
+      "original_sha256": "1730ffbcc21b9b385d9df4c4032325b82c49975f449fa3c95bdb95f3d7aa9c85",
+      "sha256": "9bd5c83b0e4e3fad7aa3d4b35d0df684088437b3013433545cce4d713f0b06c3"
+    },
+    {
+      "path": "Reaper-main/core/materials.lua",
+      "status": "modified",
+      "original_sha256": "3481749d081c75fc1d9f5973d7aa4bf7ecabce832d926663f1988a08f0c55a3c",
+      "sha256": "bb16d1f65e7bf52fd2cbdd364617d286b48c39b5f0947450d4d159fbac8abbd7"
+    },
+    {
+      "path": "Reaper-main/core/navigation_owner.lua",
+      "status": "added",
+      "original_sha256": null,
+      "sha256": "67cb1301eb7265ff2ea1c4b97af5ec9db4d21bb7eb870b9440eb4604d33faa89"
+    },
+    {
+      "path": "Reaper-main/core/pathwalker.lua",
+      "status": "modified",
+      "original_sha256": "5c5633e270ddd411fd4b214c780a3b854a4af574f9effc51216f2a8f17f8aa61",
+      "sha256": "a0a0f93d8111b84b1575546edbc7640b3250e48fb7992e690127031267efe866"
+    },
+    {
+      "path": "Reaper-main/core/settings.lua",
+      "status": "modified",
+      "original_sha256": "dd351d4241355cbd6bf9f765ce0c5f5eb3a6b5b431bc1c82c6b9cc64cfa5a89a",
+      "sha256": "3f153bb13b1b1d3fe7719ca35c303349fc2b83c0411ff974fa76f980f4df8415"
+    },
+    {
+      "path": "Reaper-main/core/task_manager.lua",
+      "status": "modified",
+      "original_sha256": "e441bfc0e41580a40e01d98e591482b88de49772b021f64ea4af245d7d2c3b9d",
+      "sha256": "c719c249967aeb00a971d580a96b2ff0c3df0abdfd83ef2eb9a933c00484eee0"
+    },
+    {
+      "path": "Reaper-main/core/utils.lua",
+      "status": "modified",
+      "original_sha256": "fc69317442645ebee287d6a96bdbc3d5bcb112eb379ce54ee3d9e110a8225683",
+      "sha256": "20366ce2861b11ef476a1600f8807d7acb0f1b66729d1aad44c3eac50e9a3fbc"
+    },
+    {
+      "path": "Reaper-main/data/enums.lua",
+      "status": "modified",
+      "original_sha256": "f42d694639d28b6de1fa3fa285c3538ca8614b580f020cf6286312760e0619a5",
+      "sha256": "e42b4c02475b62457cf93437d4d9d11e9a316b5cf9c52f2ef27368af7b576dcf"
+    },
+    {
+      "path": "Reaper-main/main.lua",
+      "status": "modified",
+      "original_sha256": "20b7926905205e2e7110887af0ddffddded35bdc2da7d100b098d2d63442617c",
+      "sha256": "c36c4e62dd70b246c0ba935baf75472126d3d0c162e4d60b32d0441e0efe0d6f"
+    },
+    {
+      "path": "Reaper-main/tasks/alfred.lua",
+      "status": "modified",
+      "original_sha256": "3e5ff206022de4604ecfb8a34c585c6f23531ccf1d9692820d6c5340c9787923",
+      "sha256": "fe29e6649431c5513cf9f51c54920f3986eac623afb6e7991b6a73a1d89718f6"
+    },
+    {
+      "path": "Reaper-main/tasks/belial_chest.lua",
+      "status": "modified",
+      "original_sha256": "8c34daf39f8a8ddce214f7f274266a64c6e0e66a4db0304a8bf359cc768131b0",
+      "sha256": "f90b8c75536491813d5a10d4b7eb78a74f00dcc09e8be8134e9a192afa57091a"
+    },
+    {
+      "path": "Reaper-main/tasks/dungeon_reset.lua",
+      "status": "modified",
+      "original_sha256": "fefc4e6c4abf16db866ce6f9031051ccceab9329af470b525a301a4a91326747",
+      "sha256": "614dc34360f7bbcfb69ae75704cb7169dacbb6e1d4c0226a5373daac4777bd12"
+    },
+    {
+      "path": "Reaper-main/tasks/interact_altar.lua",
+      "status": "modified",
+      "original_sha256": "e05419122e00d3e3a3afc564fedec829ff11537e20937d217b7369aaebfe09ad",
+      "sha256": "7897365e95f16615659ff0c9a340f1c79b629a1674b4c1f0b2426a877b406bcb"
+    },
+    {
+      "path": "Reaper-main/tasks/kill_monsters.lua",
+      "status": "modified",
+      "original_sha256": "f80feadd0596dadd51b62491bda4d2a0a6d73227e3c65989163a4699bbc50c10",
+      "sha256": "a9660f564554e4d22e27078b379a5856804aff6fe9b1098fea74abc63f35b354"
+    },
+    {
+      "path": "Reaper-main/tasks/navigate_to_boss.lua",
+      "status": "modified",
+      "original_sha256": "395c5cd5f48499fbc41d4491cd429273fce4188b7648352266fcd8aad3cf2ae5",
+      "sha256": "3d10ca49cc96f8d7635f29f103ba84795d9704454d8800b42bcdf0508c3ef8f5"
+    },
+    {
+      "path": "Reaper-main/tasks/open_chest.lua",
+      "status": "modified",
+      "original_sha256": "f961a8c62f790965dd1d098065f2c5f3c13c77f894d1dfb8afe0789933d064f6",
+      "sha256": "71e672c2c80ebcc661356faf3ea0976914421a8514686517440c9b1365303130"
+    },
+    {
+      "path": "Reaper-main/tasks/revive.lua",
+      "status": "modified",
+      "original_sha256": "83f34d09d9853a87966c20438ea8be9bc2e3e548e63d1786f23f731c1c136875",
+      "sha256": "40471f5efb8cd398e41d959cad6196c05ebb8198e853d82a14c234309f542dd5"
+    },
+    {
+      "path": "Reaper-main/tasks/sigil_complete.lua",
+      "status": "modified",
+      "original_sha256": "fab8e9274c37d42a72920206c7fbbc1852fec404eb0ec782078792d86ad8e155",
+      "sha256": "a18e997fa669195b70d42b5b263f72041450d06a02298279043ad527e5eb08cb"
+    },
+    {
+      "path": "WarPigs-1.0.0/core/external.lua",
+      "status": "modified",
+      "original_sha256": "4d579c310526c30eab8f9ee9e0b74044bf20c2d9b786430d1437b3b5ec487bdd",
+      "sha256": "ba9ed365cef4650069c105ab7bc945f6847dc351fda3f4fc5a9b13f9f7b0ef6b"
+    },
+    {
+      "path": "WarPigs-1.0.0/core/orchestrator.lua",
+      "status": "modified",
+      "original_sha256": "632575236624bfc96ea03b39cb4f8860acaf355f7e04dc073fdb8ac8b4386441",
+      "sha256": "987e335d49ad48a8e1cf40f5c493a883fa54e6026f9aeccafb918037e106e18f"
+    },
+    {
+      "path": "WarPigs-1.0.0/core/tasks/turn_in_rewards.lua",
+      "status": "modified",
+      "original_sha256": "2963119c435b911a5116cc4285f455b4b97f112242de278037e7be262fe08e5b",
+      "sha256": "8c39432bbbc5a4fc6bb9a9ead2dc7fa43aeaa248d589613cc4c6c5b8a6a4ebbc"
+    },
+    {
+      "path": "WarPigs-1.0.0/main.lua",
+      "status": "modified",
+      "original_sha256": "4464985ba88f32430e7bd7f43cf008921769fa0f80ab031aef2b1981a827a894",
+      "sha256": "55b7053e4d69e4c8a2e5502c4e24f92fcc84fbebb03401ea7abc014342922670"
+    },
+    {
+      "path": "WarPug-1.0.0/core/external.lua",
+      "status": "modified",
+      "original_sha256": "c8d71a5722d275996664963c737dadd17817f17ee043759714e941f7f69148f5",
+      "sha256": "1724f9c06f625df65617eba61ca9987c295612845deeb7afb964a1c597b59653"
+    },
+    {
+      "path": "WarPug-1.0.0/core/planner.lua",
+      "status": "modified",
+      "original_sha256": "02baa0463f35b1ce590be19a208968b0f0ea101aafcfa9c752ac18729ebf7449",
+      "sha256": "a813544e2335277a9b580a92d053d2738ce96d97f3f85be12883f2a5f487ba57"
+    },
+    {
+      "path": "WarPug-1.0.0/core/settings.lua",
+      "status": "modified",
+      "original_sha256": "fa3c2915aaa30ff4b7a897711998787974b3a406b5173334989968eba78cf93e",
+      "sha256": "94124b2bc58edcf0e713d4ce97dfae67be395b1e62810cfcc01c3b321d9872e6"
+    },
+    {
+      "path": "WarPug-1.0.0/gui.lua",
+      "status": "modified",
+      "original_sha256": "2a9948fec7e508a8f5cf449004d944bc43acfa28df6c8e951874eb29e296ba33",
+      "sha256": "ba542c9d117f04f01500e4afc505f1ad17c08c036be69cffb5f451bbe345f503"
+    },
+    {
+      "path": "WarPug-1.0.0/main.lua",
+      "status": "modified",
+      "original_sha256": "18dcbd1608e4f7f5b6aa695259c974234a8a1e680da2c4f7ff63417f94143a66",
+      "sha256": "f0702aab864acbf74cbd8e2f39a54327abb817cbb9e681c461d47b819f2c6752"
+    },
+    {
+      "path": "WonderCity-main/README.md",
+      "status": "modified",
+      "original_sha256": "4818df1399a7be5112d3ca723e486f086e9f2b17a9bbeb29f18045b9d0975d94",
+      "sha256": "a0ea114f3de9c3da0913b8144cdfa7ff4f874a1488ba2360d4d6463b0d5e33d4"
+    },
+    {
+      "path": "WonderCity-main/core/external.lua",
+      "status": "modified",
+      "original_sha256": "8a7aaafaf6ac501d05bdadec95855e1f72fbb2e4fd0cd52d277c2b398c8696b6",
+      "sha256": "6d1f01aa79d394ce26911b3fb30d9bbc388577877a4bb22b6dec727e4a01b45d"
+    },
+    {
+      "path": "WonderCity-main/core/settings.lua",
+      "status": "modified",
+      "original_sha256": "5904194fb397e90d7feff246c089a2c60c1c609a6040f8fe2656deaf08eef5d1",
+      "sha256": "8b79a735c12aa9b1aec0ad442b0240bf57b4ccba88ce43a068349b878e7d5f2a"
+    },
+    {
+      "path": "WonderCity-main/core/task_manager.lua",
+      "status": "modified",
+      "original_sha256": "bdbbfd1cac698a971dab13b978788b0576393714819c4d0fe6ea7f7cdbd1c733",
+      "sha256": "9640245f9d974fb685ae3779065d89e41b23466e2fdea654ee8f04dfbf9ce5f8"
+    },
+    {
+      "path": "WonderCity-main/core/tracker.lua",
+      "status": "modified",
+      "original_sha256": "05a4e60ce03e966f5df390d10a7a0e87ee5444d92b840e8a71af49ed28eee612",
+      "sha256": "7ec0d9449ea3a434ec85ab3ade971abe6e14c93f0dc275ff1f19ab6c1fc0f739"
+    },
+    {
+      "path": "WonderCity-main/core/utils.lua",
+      "status": "modified",
+      "original_sha256": "d875896fa5982cb397675a29134215986029fcf6c47ec3a1f4944ba9c078bd6d",
+      "sha256": "0a3d1bdf32fb753a447cff02a88f66eb8ac61cb595d7d16f1c69f1a784028dfb"
+    },
+    {
+      "path": "WonderCity-main/gui.lua",
+      "status": "modified",
+      "original_sha256": "a41498b0e8b20d1b547ea418891e9159ceb5bb1b7b2b92d809e77fc6c2d1a66e",
+      "sha256": "957f321c4277042bb4cecea60863bbf009ad9dc7f5bb534f11b98ec533f94b08"
+    },
+    {
+      "path": "WonderCity-main/main.lua",
+      "status": "modified",
+      "original_sha256": "33a6948bec7b2888a269576f4a086a5bdf27d6af91bd5579e390dab0efae13ed",
+      "sha256": "89e573368b35a63076ddc3c33252e1a29b25eabd8e414ed6bbfa369bb079b138"
+    },
+    {
+      "path": "WonderCity-main/tasks/alfred.lua",
+      "status": "modified",
+      "original_sha256": "262ac9e01f3733766b09a95244a48b531fa8070fe393f50f2e299ff1fb36a9ed",
+      "sha256": "b8351a4fc7d018871e69bbf08afc0b07e40ed1322deeab234fab5387cc972fd3"
+    },
+    {
+      "path": "WonderCity-main/tasks/custom_explorer.lua",
+      "status": "modified",
+      "original_sha256": "615d741c97c90da7d34dea1fa54075ef5149153cdf1b3865bc5edccf45d21795",
+      "sha256": "d248e68220cf3a4a2a2de9017fd5608d07ec128f49deed4e3b89a7fa899c70e9"
+    },
+    {
+      "path": "WonderCity-main/tasks/enter_undercity.lua",
+      "status": "modified",
+      "original_sha256": "469dd0b3917717f847808ebbdab465576cb3f46f2e60bc5c373746c01d2a00af",
+      "sha256": "67062bb937cef175974f234295ac088429c2b2df939af13af42bca259d43e2f7"
+    },
+    {
+      "path": "WonderCity-main/tasks/exit_undercity.lua",
+      "status": "modified",
+      "original_sha256": "977e66e71d7f10452abcfbd0a28638cdbc997ec9fc59242644d23a744a596357",
+      "sha256": "994e88948b92fb4c779fc8161db349e5b7b587e255621985d53e64946efb0647"
+    },
+    {
+      "path": "WonderCity-main/tasks/explore_undercity.lua",
+      "status": "modified",
+      "original_sha256": "4d01f27bc7ef97847de9a194b571e81d6a496d5bc5e80f6ca8800bfe4c36e0c4",
+      "sha256": "abbdf553062e2876d9cae6b9ed7e5b6ee9607f2d96e7e2ba0862c7e2ea972237"
+    },
+    {
+      "path": "WonderCity-main/tasks/goto_chest.lua",
+      "status": "modified",
+      "original_sha256": "3f263f7353f283891034797b070c69d95f0b3e06833b3612489204c68ca26c6d",
+      "sha256": "a7960ffa34218332f9778d6185ebc1c15939d8414c63cbdab9e821296b615198"
+    },
+    {
+      "path": "WonderCity-main/tasks/interact_enticement.lua",
+      "status": "modified",
+      "original_sha256": "3acb55421bf6b8331eb1bab7e1055b6b29cdcd2a70de42489ae62669b993ab5d",
+      "sha256": "5ea8ccdc236e38bfa0e7f7e0954d906893b75978fbce991bde5d6e62e575cbd6"
+    },
+    {
+      "path": "WonderCity-main/tasks/kill_monster.lua",
+      "status": "modified",
+      "original_sha256": "efec468d69bcd7741cb215c9ae0469cf4f5dd8bef9fadc4329f6bd4d5eb1f59a",
+      "sha256": "75ec3c76f79f71f077039a563c36ab74bfeb37ad3dbedd991d742bfff0d5712b"
+    },
+    {
+      "path": "WonderCity-main/tasks/loot_obols.lua",
+      "status": "modified",
+      "original_sha256": "abc1bed9c02df8c7d907bdcfaac949e41a21ff03d59d758c930247a25935417d",
+      "sha256": "e6d445d32c0a86c36de0cfb27bce9467b3463366f40655e6dc38e9e0e074616a"
+    },
+    {
+      "path": "WonderCity-main/tasks/portal.lua",
+      "status": "modified",
+      "original_sha256": "1466bd100cfb0dec352b699e79520c42a26e38811e3e68ffb1be9f3f18aced3c",
+      "sha256": "4e2faa334428463451d533780bb1183311c36052380aef295f894e8102a761cd"
+    },
+    {
+      "path": "WonderCity-main/tasks/sort_tribute.lua",
+      "status": "modified",
+      "original_sha256": "21ff47dde60e25673e6997dd42b64f242efc5e54d72904c5ff02e8b42b6f8008",
+      "sha256": "7a7481f239115c10e26fbcf5753c39ea87854b36c955c0cb951a1e8e658dd07d"
+    },
+    {
+      "path": "WonderCity-main/tasks/teleport_kurast.lua",
+      "status": "modified",
+      "original_sha256": "25d47f2071a1d17906cccab8662cfa082bdbe5f4b4608b8eb9646d951c50149b",
+      "sha256": "8d51d925d8bd13324ca6b22959491b811f248c19d2be2b1d67146aa2e5736221"
+    },
+    {
+      "path": "WonderCity-main/tasks/walk_kurast.lua",
+      "status": "modified",
+      "original_sha256": "534a985fba05feb6d3f1bac79e0f33f9453bf8540790e410e1539469a3dc0433",
+      "sha256": "b48758cb21127b4b90ffc3350fd6c5bb5430f2aec44c2e9484c2b488c1cd7e12"
+    }
+  ]
+}

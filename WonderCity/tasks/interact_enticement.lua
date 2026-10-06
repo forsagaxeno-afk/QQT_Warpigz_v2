@@ -1,0 +1,159 @@
+local plugin_label = 'wonder_city' -- change to your plugin name
+
+local utils = require "core.utils"
+local settings = require 'core.settings'
+local tracker = require 'core.tracker'
+
+local status_enum = {
+    IDLE = 'idle',
+    WALKING = 'walking to enticement',
+    INTERACTING = 'interacting with enticement',
+    WAITING = 'waiting '
+}
+local task = {
+    name = 'interact_enticement', -- change to your choice of task name
+    status = status_enum['IDLE'],
+    interact_time = nil,
+    active_key = nil,
+    -- Debounce stamp for interact_object. Without this, when the game keeps
+    -- a beacon flagged as is_interactable() after attunement is already
+    -- complete (stale ally-actor state), the bot spams interact_object every
+    -- 50ms — locking the player in the ignite cast and never letting the
+    -- timeout fire. 1s gap between calls covers the beacon's ignite anim.
+    last_interact_call = nil,
+}
+local INTERACT_REFIRE_COOLDOWN = 1.0
+-- QQT_Warpigz_v3 (C6, loot_obols rule): the walk to an enticement is bounded.
+-- Batmobile rejecting it (set_target()==false) or no PROGRESS_STEP m of
+-- progress in NO_PROGRESS_SECONDS marks it unreachable for this floor.
+local NO_PROGRESS_SECONDS, PROGRESS_STEP = 12, 1
+local approach = {best = nil, time = nil, last = nil}
+local PROGRESS_GAP = 2 -- a longer gap (another task ran) starts a fresh window
+-- QQT_Warpigz_v3 (live "failed to leave floor 1"): the Grand Spirit Beacon
+-- (X1_Undercity_Enticements_SpiritBeaconSwitch) comes before the floor's
+-- warp pad, so a failed walk to it only sets it aside for a growing pause
+-- (BEACON_ASIDE_BASE, 2x, ... up to BEACON_ASIDE_MAX s) and it is tried
+-- again; a Batmobile rejection is often only its 15 s failed-goal cooldown.
+-- Optional Spirit Hearths are still skipped for the floor.
+local BEACON_ASIDE_BASE, BEACON_ASIDE_MAX = 20, 60
+local function give_up(key, name, why)
+    local is_beacon = type(name) == 'string' and name:match('SpiritBeaconSwitch') ~= nil
+    local note
+    if is_beacon then
+        tracker.beacon_aside = tracker.beacon_aside or {}
+        local entry = tracker.beacon_aside[key] or {count = 0}
+        entry.count = entry.count + 1
+        local pause = math.min(BEACON_ASIDE_BASE * 2 ^ (entry.count - 1), BEACON_ASIDE_MAX)
+        entry.until_t = get_time_since_inject() + pause
+        tracker.beacon_aside[key] = entry
+        note = string.format('exploring for %ds before trying it again (attempt %d)', pause, entry.count)
+    else
+        tracker.enticement[key] = 'unreachable' -- skipped; not counted as interacted
+        note = 'skipping it on this floor'
+    end
+    approach.best, approach.time = nil, nil
+    task.interact_time, task.last_interact_call, task.active_key = nil, nil, nil
+    console.print(string.format('[WonderCity:enticement] %s unreachable (%s) - %s',
+        tostring(name), why, note))
+    utils.stop_movement()
+    task.status = 'enticement unreachable - continuing'
+end
+
+task.shouldExecute = function ()
+    return utils.get_closest_enticement() ~= nil and
+        utils.player_in_undercity()
+end
+task.Execute = function ()
+    local local_player = get_local_player()
+    if not local_player then return end
+    BatmobilePlugin.pause(plugin_label)
+    BatmobilePlugin.update(plugin_label)
+
+    local enticement = utils.get_closest_enticement()
+    if enticement ~= nil then
+        local name = enticement:get_skin_name()
+        local key = utils.enticement_key(name, enticement:get_position())
+        if task.active_key ~= key then
+            task.active_key = key
+            task.interact_time = nil
+            task.last_interact_call = nil
+            approach.best, approach.time = nil, nil
+        end
+        local timeout = settings.enticement_timeout
+        local is_switch = name:match('SpiritHearth_Switch')
+        if not is_switch then
+            timeout = settings.beacon_timeout
+        end
+        local timed_out = task.interact_time ~= nil and
+            task.interact_time + timeout < get_time_since_inject()
+        if timed_out then
+            local enticement_pos = enticement:get_position()
+            local enticement_str = utils.enticement_key(name, enticement_pos)
+            tracker.enticement[enticement_str] = true
+            task.interact_time = nil
+            task.last_interact_call = nil
+            task.status = status_enum['IDLE']
+        elseif utils.distance(local_player, enticement) > 3 then
+            local dist, now = utils.distance(local_player, enticement), get_time_since_inject()
+            if approach.last and now - approach.last > PROGRESS_GAP then approach.best = nil end
+            approach.last = now
+            if approach.best == nil or dist < approach.best - PROGRESS_STEP then
+                approach.best, approach.time = dist, now
+            elseif now - approach.time >= NO_PROGRESS_SECONDS then
+                give_up(key, name, string.format('no progress for %ds at %.0fm', NO_PROGRESS_SECONDS, dist))
+                return
+            end
+            if BatmobilePlugin.set_target(plugin_label, enticement) == false then
+                give_up(key, name, 'Batmobile rejected the target')
+                return
+            end
+            BatmobilePlugin.move(plugin_label)
+            task.status = status_enum['WALKING']
+        else
+            approach.best, approach.time = nil, nil
+            utils.stop_movement()
+            -- Start the timeout clock as soon as we're in interact range,
+            -- not only when is_interactable() returns false. The Grand
+            -- Beacon can stay flagged interactable even after attunement is
+            -- complete, in which case the previous logic (start timer in
+            -- the `elseif` branch) never started a timer and the bot was
+            -- locked spamming interact_object on a no-op beacon.
+            if task.interact_time == nil then
+                task.interact_time = get_time_since_inject()
+            end
+            if enticement:is_interactable() then
+                settings.orb_set_clear(false)
+                -- Debounce: don't refire interact_object every tick. The
+                -- beacon ignite animation needs the previous call to
+                -- complete or the player just stutters in cast.
+                if task.last_interact_call == nil
+                    or (get_time_since_inject() - task.last_interact_call) >= INTERACT_REFIRE_COOLDOWN
+                then
+                    interact_object(enticement)
+                    task.last_interact_call = get_time_since_inject()
+                end
+                task.status = status_enum['INTERACTING']
+            else
+                settings.orb_set_clear(true)
+                local remaining = task.interact_time + timeout - get_time_since_inject()
+                local timer = string.format('%.2f', remaining) .. 's'
+                task.status = status_enum['WAITING'] .. timer
+            end
+        end
+    end
+end
+
+-- C5: time spent yielding (e.g. to Alfred) does not expire the objective.
+task.on_yield = function (seconds)
+    if task.interact_time then task.interact_time = task.interact_time + seconds end
+    if approach.time then approach.time = approach.time + seconds end
+end
+
+task.reset = function ()
+    approach.best, approach.time = nil, nil
+    task.active_key = nil
+    task.interact_time = nil
+    task.last_interact_call = nil
+end
+
+return task
