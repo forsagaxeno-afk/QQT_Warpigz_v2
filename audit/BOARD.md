@@ -159,6 +159,96 @@ Format: `- [date] [session] text (branch@sha, files, tests)`.
 
 ## Auditor / critic findings
 
+### Review of 3.3.25/3.3.26 (post-release) and the Ready branches HR 2.6.11 / Rosie 1.0.38, 2026-10-07 07:30 UTC
+Method: an auditor and a critic per area, then 2 skeptics per finding. The base is 3.3.24 (d5bed13). Reviewed: `claude/qqt-helltide@c6d6abb`, `claude/qqt-rosie@dabcc37`, release `122d03f`.
+
+What is verified:
+- **HR 2.6.8 fixes the Auditor HIGH (golden handoff).** `stand.refocus` gives the tear a fresh approach window and credits the time away. `audit/reviews/repro_hr_golden_handoff_267.lua` passes on the release under both runtimes and fails on d5bed13.
+- **HR 2.6.8 fixes the far-tear forced step (LOW).** `tear_force_key` is cleared past NEAR_IN.
+- **HR 2.6.9–2.6.11** (gate follow-ups, damage as a threat, hurt-detector thresholds and reset on death, revive, zone change and manage toggle):
+  - every new case fails on its old code;
+  - regen and healing do not trigger the detector;
+  - there are no new file-level locals in `tasks/helltide.lua`;
+  - markers and versions are present.
+- **Batmobile 2.2.7 fixes the Enigma starvation.** The throttle is armed before projection, and the legacy selector alternates.
+- **Rosie 1.0.35–1.0.38:** stash-walk recovery is bounded by the 45 s step limit and the service bound.
+
+Findings:
+- **[MED] HelltideRevamped (→ Helltide): the cinder gate is skipped during the Looter hold.**
+  - `Execute` returns on `self:loot_hold(lp)` (`helltide.lua` ~1696) before `settings.apply_cinder_orb_gate()` (~1713).
+  - While Rosie is picking up, the 2.6.8 threat check and the 2.6.10 hurt check therefore never run. Clear stays at whatever the gate last set (OFF above 150 cinders) for up to the 15 s loot cap.
+  - Rosie's `fight_wait_busy` keeps `is_actively_looting()` true exactly while enemies are near a waiting drop. That matches the owner's "stopped casting skills" case, which 2.6.10 claims to cover.
+  - Repro: an enemy 4 m away hitting the player gives clear OFF in 140 of 140 ticks. An archer 13 m away takes HP from 1000 to 600 in 10 s, with no "taking damage" log.
+  - Fix: run the gate, or at least `hurt_sample` plus clear ON when `threatened()`/`hurting()`, before the loot_hold return. Add a stalls case: gate on, Looter busy, an enemy hitting the player, clear ON within 1 s.
+- **[MED, skeptics MED/LOW] HelltideRevamped (→ Helltide): `km_gated` (2.6.9) starves farming toward the cinder goals.**
+  - With "Manage orbwalker" on and more than 150 cinders, plain monsters farther than 10 m are not engaged.
+  - The Smart farm goal (default ON, `cinder_run_at` 2000) is still saving at that point, and so are the War Plan thresholds of 250, 750 and 666.
+  - Repro: farm_goal on, 400 cinders, one plain monster 20 m away gives KILL_MONSTERS 0 times in 5 s.
+  - Fix: make the gate goal-aware. Activate it only above max(150, the active cinder target), or skip `km_gated` during the hr_cinder_run save phase. Add a Farm-mode test below the goal.
+- **[MED] Rosie 1.0.36–1.0.38 (→ Rosie): a stash opened by the interact walk is not noticed beyond 3 m.**
+  - `interact_walk` never sets `state.interacted`, and every walk tick calls `unready()`. `readiness()` is read only when the player is within 3 m of the actor.
+  - When the game's interact walk stops and opens the panel at its own radius (for example 3.6 m), Rosie holds 4 s, then detours away from the open panel and repeats the interact walk. The step fails at 45 s with nothing deposited.
+  - Repro: the harness host opens the stash within 4 m. Result: 5 interact walks at 3.6 m, then "No stash progress".
+  - Fix: after an interact walk, treat it like an interact. Set `state.interacted`, `interacted_at` and `probe_sent=false`, skip `unready()` while `w.interacting`, and read `readiness()`. Alternatively, count "near" as 4–5 m while `walk_interacts>0`. Add the 3.6 m case.
+- [LOW] Rosie: `resume_stall=w.stalls+2` gives one full detour between interact walks, not the two that the comment and NOTES say, and the one-side detour (k=2) never runs while interact walks remain. Fix: use `+3`, or correct the text.
+- [LOW] Rosie: stall and hold progress count any 0.4 m of movement, not getting closer to the chest. A foreign mover that keeps re-pathing the player near the Blacksmith means no stall is ever counted, so none of the 1.0.35–1.0.38 recovery runs, and the step fails at 45 s. Fix: count progress as at least 0.4 m closer to `w.via` or the goal.
+- [LOW] Rosie: the Trace of Echoes LOW from the 3.3.24 review is still only documented. No `check_want_item` test covers 2409389. The new comment says "refuses a Trace even onto a stack", but the catalog stack is 1.
+- [LOW] Batmobile 2.2.7 (→ Batmobile): the throttle is now armed before projection, so one refused click blocks Enigma for the whole `enigma_interval` (up to 30 s on the slider). Fix: arm only a short retry back-off (about 0.25 s) on a refusal, and the full interval on a dispatched click. Separately, in revamp mode an Enigma rule above a class rule still wins every pick unless it has a `throttle_ms`; document this in the GUI tooltip or NOTES.
+- (→ Coordinator) LIVE_CHECKLIST is still missing:
+  - Trace of Echoes: which bag it lands in, and its stack size.
+  - Temis stash walk: the "Stash actor" lines, and whether the interact walk opens the chest.
+  - Enigma bound to Mouse 3: class spells still fire during the Enigma cooldown.
+
+Verdict:
+- HR 2.6.11 and Rosie 1.0.38: OK to merge as they are, because they fix their own items. The two HR MEDs and the Rosie MED are already in the released 3.3.25/3.3.26 code; they should be fixed next.
+
+
+### Post-release review of 3.3.24 (community patch: HelltideRevamped 2.6.7, Batmobile 2.2.6, Rosie 1.0.34), 2026-10-01 01:10 UTC
+Method: an auditor and a critic per plugin, then 2 skeptics per finding. Base is 3.3.23 (cf40761); the reviewed head is d5bed13.
+
+Verified:
+- The new contrib tests fail on 3.3.23.
+- The d5bed13 fixes hold, and test_helltide_modes fails on 8d55918 (the community patch before d5bed13):
+  - a rupture found through a tear stays Unknown until its starter confirms the type, so there is no Colossal/Realmwalker wait on a golden micro-rupture;
+  - a hunt type that is switched off is not engaged through its tear.
+- Golden tears cannot loop forever: each is bounded by stand.work, and the rupture by RUPTURE_MAX_S.
+- `tasks/helltide.lua` is not touched.
+- All listed tests pass under Lua 5.4 and LuaJIT.
+
+Repro: `audit/reviews/repro_hr_golden_handoff_267.lua`. Copy it to `audit/tests/test_zz_*.lua` and run it with `--luajit off`; it fails on 3.3.24.
+
+- **[HIGH, skeptics HIGH/MED] HelltideRevamped 2.6.7 (→ Helltide): the central tear is abandoned after a golden tear takes focus.**
+  - Cause: the golden handoff in `hr_tear_event.lua` `close_tears_at` (~line 880) only calls `release_focus()`. The central `S14_Rupture_SMP_Chargeable` keeps its `sess.tear_work` record: `best_d`/`best_t` (approach clock) and `engaged_at`.
+  - Effect: when the bot comes back after the golden tear, `stand.work` skips the central tear at once, with either "no progress towards it for 15s" or "engaged 150s without closing".
+  - It is then marked spent: for 300 s (UNREACHABLE_S, with `tear_unreached` set) if the bot never stood in it, or for 900 s if it stood in it for 20 s or more. The 45 s skip TTL does not help, because `engaged_at` is never reset. The rupture ends without the central tear closed.
+  - Repro case A: the bot is walking to the central tear, a golden tear opens 5 m away, and it closes 20 s later. The log then shows "Engaging tear S14_Rupture_SMP_Chargeable (dist=15.0)", immediately followed by "Skipping tear … no progress towards it for 15s".
+  - Case B (auditor repro): 25 s inside the central tear, then two golden tears take 140 s. The central tear is then skipped with "engaged 150s".
+  - Before 2.6.7 focus was never handed off, so this is a regression.
+  - Fix: when a tear that already has a record is focused again, give it a fresh approach window (`rec.best_d=d, rec.best_t=t, rec.last_t=t`) and credit the time away to `engaged_at`, for example with `stand.refocus(sess,key,d,t)`. Add cases A and B as a regression test.
+- [LOW] HelltideRevamped: golden Mobile/Sprint tears now take the hold_circle path, and with it the 2.6.6 `force_step`. Once `tear_force_key` latches, every tick sends `force_move_raw` straight at a sprinting tear, even 30 m away, with no pathing, until the 15 s approach bound skips the tear. Fix: clear `tear_force_key` once `d > NEAR_IN` and fall back to `move_to`.
+- [LOW] Batmobile 2.2.6 (→ Batmobile): Enigma Teleport (opt-in) can starve the class movement spells.
+  - `enigma_ready()` only knows the click throttle. When a click is refused (the node is off-screen, or `w2s` returns nil/NaN), `last_click` is never set, so the legacy selector returns Enigma on every tick. Repro: 48 Enigma picks to 2 class picks in 200 ticks; the class Teleport never fires. With `spell_interval >= enigma_interval`, Enigma also wins every pick.
+  - In revamp mode in town, `engine.pick` stamps the Enigma rule's `last_fire` before the town gate returns nil.
+  - Fix: arm the throttle on any Enigma attempt that reaches the projection step, or fall back to the class chain when the dispatch refused the click.
+  - `movement_rules` name_catalog comment: Enigma now sits after the name entries, so a later name entry would shift its saved index. Keep the order append-only and update the comment.
+- [LOW] Rosie 1.0.34 (→ Rosie): Trace of Echoes (2409389) is classified `lair_key` with stack 1 and bag `consumable`, both without live data. A full consumable bag then refuses a Trace even when a stack of Traces is already in the bag. No test calls `check_want_item` for it. Live check: which bag it lands in and its stack size.
+- [LOW] all three: the community code has no `-- QQT_Warpigz_v3 …` markers, and Rosie lost the `(Q1)` marker on the `classify` line. NOTES.md has no 2.6.7 / 2.2.6 / 1.0.34 entries (except Helltide).
+- (→ Coordinator) LIVE_CHECKLIST additions:
+  - Enigma bound to Mouse 3: the click lands on the path node, class spells still fire during the Enigma cooldown, and there are no clicks in town, chat or inventory.
+  - Trace of Echoes: which bag it lands in and its stack size.
+  - Golden tear while the central tear is charging: the central tear is finished afterwards. It is not until the HIGH is fixed.
+
+
+### Rosie 1.0.33 verify (released in 3.3.23), 2026-09-30 14:45 UTC: **OK, Butler stand-in MED closed**
+- `Butler.is_busy()` now reads `life.trip_active()`: a trip tick within NAV_PULSE, at most NAV_HOLD_MAX. This is the same bound as the Navigator hold, exported from `lifecycle.lua`.
+- The publish, withdraw and yield log lines now log again on each transition.
+- The new cases fail on 3.3.22 and pass on 3.3.23:
+  - B8: a dead player, open chat or a hung load no longer keeps `is_busy` true.
+  - B9: after Worldstone is unloaded and loaded again, the stand-in lines appear again.
+- `test_rosie_butler_mimic_1031`, `test_rosie_foreign_mover` and `test_rosie_scavenger_mimic` pass under Lua 5.4 and LuaJIT.
+- Live check: with Worldstone loaded, die during a Rosie trip. Worldstone moves again within about 5 s after Rosie's trip stops ticking, and the trip is capped at 600 s in any case.
+
+
 ### SilentRaven 0.2.11 verify + WarPug 1.0.19 post-release (3.3.22), 2026-09-30 13:50 UTC
 - **SilentRaven 0.2.11** (`claude/qqt-raven-warroom@b69e89e`): **OK to merge, release it**. It fixes the Auditor LOW from the 3.3.20/3.3.21 review.
   - `hold()` now shifts `tracker.cards_empty_since` by the paused time.
