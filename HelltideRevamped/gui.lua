@@ -1,6 +1,6 @@
 local gui = {}
 local tracker = require "core.tracker" -- QQT_Warpigz_v3: tracker.hr_external (WarPigs drives: Warplan)
-local version = "v2.6.7"
+local version = "v2.6.10"
 local plugin_label = "helltide_revamped"
 
 local function create_checkbox(value, key)

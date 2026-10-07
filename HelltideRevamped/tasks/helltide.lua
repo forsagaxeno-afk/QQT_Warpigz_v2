@@ -1507,6 +1507,8 @@ local function check_events(self)
         local km_target = get_kill_target()
         -- QQT_Warpigz_v3: Farm: plain monsters are passed by while the patrol moves on (core/hr_mode.lua km_hold).
         if km_target and tracker.hr_mode.km_skip(km_target, get_time_since_inject()) then km_target = nil end
+        -- QQT_Warpigz_v3 2.6.9: above the cinder gate a far plain monster is not a fight (settings.km_gated).
+        if km_target and settings.km_gated(km_target, utils.distance_to(km_target)) then km_target = nil end
         if km_target then
             -- Arm the experimental explorer the first time we see a monster in this zone:
             -- means the patrol successfully walked us into populated terrain and grid
@@ -2692,7 +2694,7 @@ local helltide_task = {
         end
 
         if km_target then
-            settings.orb_set_clear(true)
+            settings.combat_clear() -- QQT_Warpigz_v3 2.6.8: clear ON whatever the cinder gate says
             local cur_dist = utils.distance_to(km_target)
             if cur_dist > 2 then
                 if BatmobilePlugin then
@@ -3497,7 +3499,7 @@ local helltide_task = {
         end
 
         -- Inside circle: kill monsters, or free-roam to find them
-        settings.orb_set_clear(true)
+        settings.combat_clear() -- QQT_Warpigz_v3 2.6.8: clear ON whatever the cinder gate says
         local km_target = get_kill_target()
         if km_target then
             local cur_dist = utils.distance_to(km_target)
@@ -3600,7 +3602,7 @@ local helltide_task = {
     end,
 
     kill_monsters = function(self)
-        settings.orb_set_clear(true)
+        settings.combat_clear() -- QQT_Warpigz_v3 2.6.8: clear ON whatever the cinder gate says
         local local_player = get_local_player()
         if not local_player then
             self.current_state = helltide_state.EXPLORE_HELLTIDE
@@ -3613,6 +3615,8 @@ local helltide_task = {
         if target and tracker.hr_mode.km_hold(get_time_since_inject(), get_player_position(), target) then
             target = nil
         end
+        -- QQT_Warpigz_v3 2.6.9: the fight ends where a new one would not start (settings.km_gated).
+        if target and settings.km_gated(target, utils.distance_to(target)) then target = nil end
         if not target then
             if BatmobilePlugin then BatmobilePlugin.clear_target(plugin_label) end
             console.print("[KILL MONSTERS] No targets, resuming patrol")

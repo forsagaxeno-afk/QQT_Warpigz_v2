@@ -895,6 +895,9 @@ local function close_tears_at(self, states, anchor, r, pad)
     local t = now()
     if sess.tear_focus_key ~= key then
         sess.tear_focus_key, sess.tear_focus_since, sess.tear_standing = key, t, nil
+        -- QQT_Warpigz_v3 2.6.8: back to a tear engaged before (after a golden
+        -- tear): a fresh approach window, the time away not counted.
+        stand.refocus(sess, key, t, dist(tear))
         -- The raw charge/health once per tear: the live log shows the scale.
         log(string.format("[RIFT] Engaging tear %s (dist=%.1f, charge=%s, hp=%s) — standing in it until it closes",
             skin or "?", dist(tear), tostring(actor_attr(tear, "CHARGEABLE_GIZMO_PROGRESS")), tostring(actor_hp(tear))))
@@ -941,6 +944,10 @@ local function close_tears_at(self, states, anchor, r, pad)
             -- Only once the walk stalled near the tear (no 0.3 m closer in 1 s):
             -- a Batmobile that is still closing in keeps the walk.
             local tpos = actor_pos(tear)
+            -- QQT_Warpigz_v3 2.6.8 (Auditor LOW): a tear that moved away (a
+            -- sprinting golden tear) is walked to again, not force-stepped
+            -- at in a straight line from 30 m.
+            if sess.tear_force_key == key and d > stand.C.NEAR_IN then sess.tear_force_key = nil end
             if sess.tear_force_key ~= key and d <= stand.C.NEAR_IN then
                 if not sess.tear_near_d or d < sess.tear_near_d - 0.3 or sess.tear_near_key ~= key then
                     sess.tear_near_d, sess.tear_near_t, sess.tear_near_key = d, t, key

@@ -2,6 +2,35 @@
 
 All entries are in English. QQT_Warpigz_v2 release numbering starts with **2.0.0**. Earlier component versions and the imported Git baseline are not earlier releases of this project.
 
+## [3.3.26] — 2026-10-06
+
+### Fixed
+
+- **Rosie 1.0.37: still stuck at the Blacksmith in Temis** (owner live, 3.3.25).
+  - The player's move requests did nothing: about 1 m in 22 s.
+  - After a stall Rosie now interacts with the chest when it is within 10 m (every 3 s, at most 6 times), so the game walks the player there itself.
+  - While the game walks, Rosie sends no move of its own and does not clear the path.
+  - A stalled walk is forced.
+  - The stash chest is chosen by its distance from the town's known chest, not from the player. The 3.3.25 log targeted another "Stash" actor 11 m away.
+  - Each stash actor is logged once, and the walk log adds the request and the player's move destination.
+- **HelltideRevamped 2.6.10: cinder-gate follow-ups.** These apply above 150 cinders with "Manage orbwalker" on.
+  - HR stops to fight only elites, champions, bosses, monsters within 10 m, or anything within 25 m while the player is losing health. A ranged attacker no longer hits a still player unanswered.
+  - Fighting lasts for 5 s after the last health drop.
+  - Enemies on another floor are not a threat.
+  - The gate's log line prints once per episode.
+  - A tear focus flicker of 1 s or less no longer resets the approach window.
+
+## [3.3.25] — 2026-10-06
+
+### Fixed
+
+- **HelltideRevamped 2.6.8**
+  - **The character stopped casting in fights until it died** (owner live, 3.3.24). With "Manage orbwalker" on, the cinder gate (above 150 cinders) switched the orbwalker's clear OFF on every tick, even while HR was fighting. Clear now stays ON in KILL_MONSTERS, the maiden fight, chest farming and whenever a live enemy is within 10 m, and HR logs it once: "[HR] Cinder gate: clear forced ON".
+  - **The central tear was abandoned after a golden tear** (Auditor HIGH, a 3.3.24 regression). A tear the bot comes back to gets a fresh approach window, so the central tear is closed after the golden ones instead of being skipped at once.
+  - No forced step at a sprinting golden tear that is far away.
+- **Rosie 1.0.35: stuck at the Blacksmith on the way to the stash** (owner live, Temis). The stash walk had no stuck recovery. After 4 s without progress it now walks on: it asks again, then goes to the town's reset point, then sidesteps 3 m. Its target, distance and movement status are logged.
+- **Batmobile 2.2.7: Enigma Teleport no longer starves the class movement spells** (Auditor LOW). The click throttle is armed even when a click is refused, the picks alternate with a castable class spell, and in town the Enigma rule never fires.
+
 ## [3.3.24] — 2026-09-30
 
 Community fixes by **@RadicalDadical55** (Misc Fixes). Thank you!

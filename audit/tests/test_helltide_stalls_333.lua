@@ -89,6 +89,7 @@ local function session(opts)
         is_dead = function() return s.dead end, get_item_count = function() return s.items or 0 end,
         get_consumable_items = function() return {} end, get_attribute = function() return 0 end,
         get_buffs = function() return s.in_helltide and {{name_hash = HELLTIDE_BUFF}} or {} end,
+        get_current_health = function() return s.hp or 1000 end, get_max_health = function() return 1000 end,
     }
     local world = {get_name = function() return 'Sanctuary_Eastern_Continent' end,
         get_current_zone_name = function() return s.zone end, get_world_id = function() return 1 end}
@@ -104,7 +105,15 @@ local function session(opts)
     env.on_render_menu = function() end
     env.on_update = function(fn) s.update = fn end
     env.console = {print = function(line) s.logs[#s.logs + 1] = string.format('%.1f %s', s.now, tostring(line)) end}
-    env.target_selector = {get_near_target_list = function() return s.enemies or {} end}
+    -- the enemies within r of pos (2D, like the host)
+    env.target_selector = {get_near_target_list = function(pos, r)
+        local out = {}
+        for _, e in ipairs(s.enemies or {}) do
+            local p = e:get_position()
+            if not (pos and r) or math.sqrt((p:x() - pos:x()) ^ 2 + (p:y() - pos:y()) ^ 2) <= r then out[#out + 1] = e end
+        end
+        return out
+    end}
     env.actors_manager = {get_all_actors = function() return s.actors end, get_enemy_actors = function() return {} end}
     env.loot_manager = {get_all_items_chest_sort_by_distance = function() return s.loot end,
         any_item_around = function() return false end}
@@ -673,6 +682,146 @@ case('2.6.6: Batmobile stops 3 m short of the tear: HR walks into the circle its
     eq(s.closed, 1, 'the tear was closed (the player stood in its circle)')
     ok((s.force_moves or 0) > 0, 'the last metres were a direct move')
     ok(s.inside >= 4, string.format('%.1fs inside the circle', s.inside))
+end)
+
+-- QQT_Warpigz_v3 2.6.8 (owner live, 3.3.24: "suddenly stuck and stopped
+-- casting skills ... until the character was killed"): KILL_MONSTERS for
+-- ~40 s at a target 0.7 m away, Batmobile held by HR, no casts. With 'Manage
+-- orbwalker' on, the cinder gate (cinders > 150) turned the orbwalker's
+-- clear OFF every tick, and kill_monsters' orb_set_clear(true) was gated the
+-- same way: the rotation never fired. Clear stays ON while HR fights or
+-- while enemies are on the player; the gate only keeps it OFF out of combat.
+case('2.6.8: cinder gate on, KILL_MONSTERS at a monster next to the player: the orbwalker clears (casts)', function()
+    local s = session({mode = 0, kill = true, controls = {manage_orbwalker = true}})
+    s.cinders = 400                                  -- above the 150 gate
+    local e = enemy(1.5, 0, 1000, {elite = true})
+    s.enemies = {e}
+    local fighting, cleared = 0, 0
+    s.before_tick = function()
+        e.hp = e.hp - 1
+        if state(s) == 'KILL_MONSTERS' then
+            fighting = fighting + 1
+            if s.orb.clear then cleared = cleared + 1 end
+        end
+    end
+    s.tick(20)
+    ok(fighting > 100, 'fighting the monster: ' .. fighting .. ' ticks')
+    ok(cleared >= fighting - 2, string.format('clear ON while fighting: %d/%d ticks', cleared, fighting))
+    eq(s.logged('Cinder gate: clear forced ON'), 1, 'logged once')
+end)
+
+case('2.6.8: cinder gate on, enemies on the player while it walks (kill off): clear forced ON, then the gate again', function()
+    local s = session({mode = 0, controls = {manage_orbwalker = true}})
+    s.cinders = 400
+    s.tick(3)
+    eq(s.orb.clear, false, 'out of combat above 150 cinders the gate keeps clear OFF')
+    s.enemies = {enemy(4, 0, 100)}
+    s.tick(2)
+    eq(s.orb.clear, true, 'an enemy 4 m away: clear ON')
+    s.enemies = {}
+    s.tick(3)
+    eq(s.orb.clear, false, 'no enemy near: back to the gate')
+end)
+
+-- QQT_Warpigz_v3 2.6.9 (review of 2.6.8, MED): with clear ON in every HR
+-- fight, the gate meant nothing while HR started a fight with any monster
+-- within 50 m. Above the gate a plain monster is fought only within 10 m;
+-- elites still are; below the gate, or without 'Manage orbwalker', as before.
+case('2.6.9: above the cinder gate a plain monster 30 m away is not a fight; one 5 m away is, with clear ON', function()
+    local s = session({mode = 0, kill = true, controls = {manage_orbwalker = true}})
+    s.cinders = 400
+    s.enemies = {enemy(30, 0, 1000)}
+    watch_states(s, {KILL_MONSTERS = true})
+    s.tick(5)
+    eq(s.entered, 0, 'a plain monster 30 m away above the gate: KILL_MONSTERS entries')
+    s.enemies = {enemy(5, 0, 1000)}
+    local fighting, cleared = 0, 0
+    s.before_tick = function()
+        if state(s) == 'KILL_MONSTERS' then
+            fighting = fighting + 1
+            if s.orb.clear then cleared = cleared + 1 end
+        end
+    end
+    s.tick(3)
+    ok(fighting > 10, 'a plain monster 5 m away is fought: ' .. fighting .. ' ticks')
+    ok(cleared >= fighting - 1, string.format('clear ON while fighting: %d/%d', cleared, fighting))
+end)
+
+case('2.6.9: an elite 30 m away above the gate, or a plain one below it or without manage_orbwalker, is still a fight', function()
+    for _, c in ipairs({
+        {why = 'elite above the gate', cinders = 400, manage = true, opts = {elite = true}},
+        {why = 'plain below the gate', cinders = 100, manage = true},
+        {why = 'plain, manage_orbwalker off', cinders = 400, manage = false},
+    }) do
+        local s = session({mode = 0, kill = true, controls = {manage_orbwalker = c.manage}})
+        s.cinders = c.cinders
+        s.enemies = {enemy(30, 0, 1000, c.opts)}
+        watch_states(s, {KILL_MONSTERS = true})
+        s.tick(5)
+        ok(s.entered >= 1, c.why .. ': KILL_MONSTERS entered ' .. s.entered .. 'x')
+    end
+end)
+
+case('2.6.9: the gate\'s 10 m threat check skips an enemy on another floor (> 12 m up)', function()
+    local s = session({mode = 0, controls = {manage_orbwalker = true}})
+    s.cinders = 400
+    local e = enemy(4, 0, 100)
+    e.pos = v(4, 0, 20)
+    s.enemies = {e}
+    s.tick(3)
+    eq(s.orb.clear, false, 'an enemy 20 m below/above the player does not force clear ON')
+end)
+
+case('2.6.9: the cinder-gate log prints once per gate episode, not once per fight', function()
+    local s = session({mode = 0, controls = {manage_orbwalker = true}})
+    s.cinders = 400
+    for _ = 1, 3 do
+        s.enemies = {enemy(4, 0, 100)}; s.tick(2)
+        s.enemies = {}; s.tick(2)
+    end
+    eq(s.logged('Cinder gate: clear forced ON'), 1, 'three fights in one gate episode')
+    s.cinders = 100; s.tick(1)
+    s.cinders = 400
+    s.enemies = {enemy(4, 0, 100)}; s.tick(2)
+    eq(s.logged('Cinder gate: clear forced ON'), 2, 'a new gate episode logs again')
+end)
+
+-- QQT_Warpigz_v3 2.6.10 (review of 2.6.9, MED): an archer 13 m away (beyond
+-- the 10 m threat) hits a player standing still above the gate: clear stayed
+-- OFF and KILL_MONSTERS was gated, so the player never fought back. Health
+-- dropping keeps clear ON and the archer is fought; bounded after the hits stop.
+case('2.6.10: above the cinder gate, an archer 13 m away hitting a still player: clear ON and it is fought; bounded', function()
+    local s = session({mode = 0, kill = true, controls = {manage_orbwalker = true}})
+    s.cinders, s.hp, s.frozen = 400, 1000, true
+    local archer = enemy(13, 0, 1000)
+    s.enemies = {archer}
+    local hit, cleared, fighting = 0, 0, 0
+    s.before_tick = function()
+        hit = hit + 1
+        if hit % 5 == 0 then s.hp = s.hp - 20 end -- a hit every 0.5 s
+        if s.orb.clear then cleared = cleared + 1 end
+        if state(s) == 'KILL_MONSTERS' then fighting = fighting + 1 end
+    end
+    s.tick(6)
+    ok(cleared >= 50, string.format('clear ON while hit: %d/60 ticks', cleared))
+    ok(fighting >= 30, string.format('the archer is fought: %d/60 ticks in KILL_MONSTERS', fighting))
+    eq(s.logged('the player is taking damage'), 1, 'logged once')
+    s.before_tick = nil                                -- the hits stop
+    s.tick(8)
+    eq(s.orb.clear, false, '5 s after the last hit: back to the gate')
+    ok(state(s) ~= 'KILL_MONSTERS', 'and the archer is no longer a fight: ' .. tostring(state(s)))
+end)
+
+-- QQT_Warpigz_v3 2.6.10 (review of 2.6.9, LOW): the 10 m threat check
+-- skipped an enemy KILL_MONSTERS ignores (it took no damage for 15 s): a
+-- ranged mob on a ledge 4 m away turned clear OFF. Only the floor filter.
+case('2.6.10: an enemy 4 m away that KILL_MONSTERS gave up on still keeps clear ON above the gate', function()
+    local s = session({mode = 0, kill = true, controls = {manage_orbwalker = true}})
+    s.cinders, s.frozen = 400, true
+    s.enemies = {enemy(4, 0, 1000)}                    -- never loses health
+    s.tick(25)
+    ok(s.logged('KILL MONSTERS') >= 1, 'KILL_MONSTERS ran')
+    eq(s.orb.clear, true, 'clear ON with the ignored enemy 4 m away')
 end)
 
 print(string.format('Helltide stalls: %d cases, %d checks, %d failures', cases, checks, #failures))

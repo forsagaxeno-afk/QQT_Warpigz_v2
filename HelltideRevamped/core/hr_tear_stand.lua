@@ -42,6 +42,7 @@ local C = {
     TICK_MAX_S = 0.5,         -- a longer gap (yield) never counts as inside time
     FULL_HOLD_S = 1.0,        -- a 0.99-1.0 charge must hold this long to mean "closed"
     PAUSE_REFRESH_S = 5,
+    REFOCUS_AWAY_S = 1.0,     -- QQT_Warpigz_v3 2.6.9: a shorter time away is focus flicker, not a refocus
 }
 M.C = C
 M.PAUSE_CALLER = 'HelltideRevamped'
@@ -146,6 +147,21 @@ function M.at_tear(sess, key, d)
     local near = d <= C.NEAR_IN or (sess.tear_near_key == key and d <= C.NEAR_OUT)
     sess.tear_near_key = near and key or nil
     return near
+end
+
+-- QQT_Warpigz_v3 2.6.8 (Auditor, 3.3.24): a tear focused again after
+-- another one (a golden tear took the focus) gets a fresh approach window
+-- from distance d, and the time spent away does not count toward its wall
+-- bound. Its inside-the-circle time is kept.
+function M.refocus(sess, key, t, d)
+    local rec = sess and sess.tear_work and sess.tear_work[key]
+    if not rec then return end
+    local away = t - rec.last_t
+    -- QQT_Warpigz_v3 2.6.9 (review of 2.6.8): focus flicker (away a tick or
+    -- two) must not keep resetting the approach window.
+    if away <= C.REFOCUS_AWAY_S then return end
+    if away > 0 then rec.engaged_at = rec.engaged_at + away end
+    rec.last_t, rec.best_d, rec.best_t, rec.inside = t, d, t, nil
 end
 
 function M.inside_seconds(sess, key)

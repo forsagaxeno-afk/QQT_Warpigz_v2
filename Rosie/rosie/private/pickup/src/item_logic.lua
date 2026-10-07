@@ -53,19 +53,23 @@ local patterns = {
 -- (d4data X2_HoradricCube_TuningStone_1..8) go to Materials, never to the
 -- consumable bag the generated catalog names, so no bag can confirm them
 -- and a full consumable bag never refuses them.
--- Their pickup category must also be crafting: changing only the bag leaves
--- these materials controlled by the Other Consumables checkbox.
+-- QQT_Warpigz_v3 3.3.24 (community patch, @RadicalDadical55): their pickup
+-- category must also be crafting: changing only the bag leaves these
+-- materials controlled by the Other Consumables checkbox.
 local MATERIALS={[2533710]=true,[2533715]=true,[2533718]=true,[2533720]=true,
     [2533724]=true,[2533727]=true,[2533731]=true,[2533733]=true}
 M.MATERIALS=MATERIALS
 function M.classify(info)
     local id=Utils.call(info,'get_sno_id')
     local known=Current.by_id[id]
-    if MATERIALS[id] then return 'crafting', nil, known and known.stack, 'materials' end
-    -- Trace of Echoes (X2_EA_KeyItem): the shipped catalog leaves it unknown.
-    -- Use the Lair Keys toggle and its normal bag/capacity policy.
+    if MATERIALS[id] then return 'crafting', nil, known and known.stack, 'materials' end -- QQT_Warpigz_v3 (Q1); 3.3.24: category crafting
+    -- QQT_Warpigz_v3 3.3.24 (community patch): Trace of Echoes (X2_EA_KeyItem)
+    -- is kind "unknown" in the shipped catalog; it uses the Lair Keys toggle and
+    -- its normal bag/capacity policy. QQT_Warpigz_v3 1.0.35 (Auditor, LOW): the
+    -- bag (consumable) and the stack (catalog 1) are not live-checked; a full
+    -- consumable bag refuses a Trace even onto a stack (Rosie/NOTES.md).
     if id==2409389 then return 'lair_key', nil, known and known.stack end
-    if known then return known.kind, known.slot, known.stack, known.bag end
+    if known then return known.kind, known.slot, known.stack, known.bag end -- QQT_Warpigz_v3 (Q1)
     for _,kind in ipairs({'event_items','boss_items','rare_elixirs','basic_elixirs','advanced_elixirs'}) do
         if Custom[kind][id] then return kind end
     end

@@ -6,7 +6,7 @@
 
 Community maintenance update: we're updating the suite, fixing obvious bugs, and working to improve performance and reliability. The original foundation belongs to @ZEWX. Existing contributors retain their credits.
 
-**Current release: v3.3.24.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
+**Current release: v3.3.26.** Every version is published on the [Releases page](https://github.com/forsagaxeno-afk/QQT_Warpigz_v2/releases) with an installable package. v2.2.0 and v2.2.1 were withdrawn; 2.3.0 release candidates were private test builds. **Upgrading from 2.x: plugin folders no longer carry version numbers** (for example `WarPigs-1.0.0` is now `WarPigs`); delete the old folders before copying the new ones.
 
 **New here? Read the [step-by-step user guide](docs/GUIDE_EN.md)** (install, setup, WarPigs automation or one activity by hand, troubleshooting).
 
@@ -22,14 +22,14 @@ v2.1.0 makes the suite load and plan under QQT's LuaJIT runtime, fixes the cross
 | --- | --- | --- |
 | `WarPigs` | Master orchestrator and town handoffs | 1.1.13 |
 | `WarPug` | War Plan selection and creation | 1.0.19 |
-| `Batmobile` | Shared navigation | 2.2.6 |
+| `Batmobile` | Shared navigation | 2.2.7 |
 | `ArkhamAsylum` | The Pit | 2.1.6 |
-| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.7 |
+| `HelltideRevamped` | Helltides (Warplan / Farm modes, tears) | 2.6.10 |
 | `HordeDev` | Infernal Hordes | 2.2.9 |
 | `Reaper` | Boss lairs | 1.10.8 |
 | `WonderCity` | Kurast Undercity | 2.2.9 |
 | `SilentRaven` | Whisper reward checks in Temis | 0.2.11 |
-| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.34 |
+| `Rosie` | Town services and pickup (replaces Alfred and Looter): mythic uniques, charms and seals | 1.0.37 |
 
 Nightmare Dungeons are not supported. WarPug excludes those nodes.
 
